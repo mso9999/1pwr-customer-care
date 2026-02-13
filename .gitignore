@@ -1,0 +1,11 @@
+# .gitignore
+__pycache__/
+*.pyc
+*.pyo
+node_modules/
+.env
+*.accdb
+*.mdb
+auth_info_baileys/
+*.log
+.DS_Store

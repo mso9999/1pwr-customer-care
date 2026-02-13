@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+pyodbc
+python-jose[cryptography]
+passlib[bcrypt]
+bcrypt
+openpyxl
+requests
+firebase-admin
+xhtml2pdf
+jinja2
