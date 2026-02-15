@@ -4,8 +4,8 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   Cell,
 } from 'recharts';
-import { getARPU, getSalesBySite } from '../lib/api';
-import type { ARPUResponse } from '../lib/api';
+import { getARPU, getMonthlyARPU } from '../lib/api';
+import type { ARPUResponse, MonthlyARPUResponse } from '../lib/api';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 
@@ -145,6 +145,7 @@ export default function FinancialPage() {
   const [exporting, setExporting] = useState(false);
 
   const [data, setData] = useState<ARPUResponse | null>(null);
+  const [monthlyData, setMonthlyData] = useState<MonthlyARPUResponse | null>(null);
 
   // Figure refs for PDF export
   const figRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -160,11 +161,12 @@ export default function FinancialPage() {
       setLoading(true);
       setError('');
       try {
-        const [arpu] = await Promise.all([
+        const [arpu, monthly] = await Promise.all([
           getARPU(),
-          getSalesBySite().catch(() => ({ sites: [], total_lsl: 0 })),
+          getMonthlyARPU().catch(() => null),
         ]);
         setData(arpu);
+        setMonthlyData(monthly);
       } catch (e: any) {
         setError(e.message);
       } finally {
@@ -384,10 +386,105 @@ export default function FinancialPage() {
         </ResponsiveContainer>
       </Figure>
 
-      {/* ── Figure 2: Revenue by Site (stacked) ── */}
+      {/* ── Figure 2: Monthly ARPU ── */}
+      {monthlyData && monthlyData.monthly_arpu && monthlyData.monthly_arpu.length > 0 && (() => {
+        const monthly = monthlyData.monthly_arpu;
+        // Color each bar by quarter for visual grouping
+        const quarterColors: Record<string, string> = {};
+        const uniqueQuarters = [...new Set(monthly.map((m) => m.quarter))];
+        uniqueQuarters.forEach((q, i) => {
+          quarterColors[q] = COLORS[i % COLORS.length];
+        });
+
+        return (
+          <Figure
+            id="fig-monthly-arpu"
+            title="Figure 2: Monthly ARPU"
+            subtitle="Average Revenue Per User (LSL) per month, colored by quarter"
+            figureRef={setFigRef('monthly-arpu')}
+            onExport={handleExportFigure('monthly-arpu', 'Monthly_ARPU')}
+          >
+            <ResponsiveContainer width="100%" height={380}>
+              <ComposedChart data={monthly} margin={{ top: 5, right: 20, left: 0, bottom: 60 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis
+                  dataKey="month"
+                  angle={-45}
+                  textAnchor="end"
+                  tick={{ fontSize: 9 }}
+                  interval={0}
+                />
+                <YAxis
+                  yAxisId="left"
+                  tick={{ fontSize: 11 }}
+                  label={{
+                    value: 'ARPU (LSL)',
+                    angle: -90,
+                    position: 'insideLeft',
+                    style: { fontSize: 10 },
+                  }}
+                />
+                <YAxis
+                  yAxisId="right"
+                  orientation="right"
+                  tick={{ fontSize: 11 }}
+                  tickFormatter={(v: number) => formatLSL(v)}
+                  label={{
+                    value: 'Revenue (LSL)',
+                    angle: 90,
+                    position: 'insideRight',
+                    style: { fontSize: 10 },
+                  }}
+                />
+                <Tooltip
+                  contentStyle={{ borderRadius: '8px', fontSize: '12px' }}
+                  formatter={(value: any, name: any) => {
+                    if (name === 'ARPU') return [`LSL ${Number(value).toFixed(2)}`, name];
+                    return [`LSL ${Number(value).toLocaleString()}`, name];
+                  }}
+                  labelFormatter={(label) => {
+                    const point = monthly.find((m) => m.month === label);
+                    return `${label} (${point?.quarter || ''})`;
+                  }}
+                />
+                <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '8px' }} />
+                <Bar yAxisId="right" dataKey="total_revenue" name="Revenue" fillOpacity={0.6} radius={[3, 3, 0, 0]}>
+                  {monthly.map((entry, i) => (
+                    <Cell key={i} fill={quarterColors[entry.quarter] || '#93c5fd'} fillOpacity={0.5} />
+                  ))}
+                </Bar>
+                <Line
+                  yAxisId="left"
+                  dataKey="arpu"
+                  name="ARPU"
+                  stroke="#10b981"
+                  strokeWidth={2.5}
+                  dot={{ r: 3, fill: '#10b981' }}
+                  activeDot={{ r: 6 }}
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+
+            {/* Quarter legend */}
+            <div className="flex flex-wrap gap-3 mt-3 justify-center text-xs">
+              {uniqueQuarters.map((q, i) => (
+                <span key={q} className="flex items-center gap-1.5">
+                  <span
+                    className="inline-block w-3 h-3 rounded-sm"
+                    style={{ backgroundColor: COLORS[i % COLORS.length], opacity: 0.6 }}
+                  />
+                  {q}
+                </span>
+              ))}
+            </div>
+          </Figure>
+        );
+      })()}
+
+      {/* ── Figure 3: Revenue by Site (stacked) ── */}
       <Figure
         id="fig-revenue-by-site"
-        title="Figure 2: Quarterly Revenue by Site"
+        title="Figure 3: Quarterly Revenue by Site"
         subtitle="Stacked breakdown of LSL revenue per quarter by concession"
         figureRef={setFigRef('revenue-by-site')}
         onExport={handleExportFigure('revenue-by-site', 'Revenue_By_Site')}
@@ -432,11 +529,11 @@ export default function FinancialPage() {
         </ResponsiveContainer>
       </Figure>
 
-      {/* ── Figure 3: ARPU by Site (latest quarter) ── */}
+      {/* ── Figure 4: ARPU by Site (latest quarter) ── */}
       {latestSiteArpu.length > 0 && (
         <Figure
           id="fig-arpu-by-site"
-          title={`Figure 3: ARPU by Site (${latest.quarter})`}
+          title={`Figure 4: ARPU by Site (${latest.quarter})`}
           subtitle="Average Revenue Per User by concession for the latest quarter"
           figureRef={setFigRef('arpu-by-site')}
           onExport={handleExportFigure('arpu-by-site', 'ARPU_By_Site')}
@@ -522,10 +619,10 @@ export default function FinancialPage() {
         </Figure>
       )}
 
-      {/* ── Figure 4: Full Revenue Breakdown Table ── */}
+      {/* ── Figure 5: Full Revenue Breakdown Table ── */}
       <Figure
         id="fig-revenue-table"
-        title="Figure 4: Revenue Breakdown by Site and Quarter"
+        title="Figure 5: Revenue Breakdown by Site and Quarter"
         subtitle="Detailed per-site, per-quarter revenue (LSL)"
         figureRef={setFigRef('revenue-table')}
         onExport={handleExportFigure('revenue-table', 'Revenue_Breakdown')}

@@ -845,6 +845,29 @@ export async function getARPU(): Promise<ARPUResponse> {
   return request('/om-report/arpu');
 }
 
+// ── Monthly ARPU ──
+
+export interface MonthlyARPUPoint {
+  month: string;
+  quarter: string;
+  total_revenue: number;
+  active_customers: number;
+  arpu: number;
+  per_site: Record<string, ARPUSiteDetail>;
+}
+
+export interface MonthlyARPUResponse {
+  monthly_arpu: MonthlyARPUPoint[];
+  site_codes: string[];
+  site_names: Record<string, string>;
+  source_table?: string;
+  error?: string;
+}
+
+export async function getMonthlyARPU(): Promise<MonthlyARPUResponse> {
+  return request('/om-report/monthly-arpu');
+}
+
 // Health is at root level, not under /api
 export async function getHealth() {
   const res = await fetch('/health');
