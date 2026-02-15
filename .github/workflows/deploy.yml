@@ -97,7 +97,9 @@ jobs:
         run: |
           $pip = "C:\acdb-customer-api\venv\Scripts\pip.exe"
           if (Test-Path $pip) {
-            & $pip install -r C:\acdb-customer-api\requirements.txt --quiet 2>&1
+            $ErrorActionPreference = 'SilentlyContinue'
+            & $pip install -r C:\acdb-customer-api\requirements.txt --quiet 2>$null
+            $ErrorActionPreference = 'Stop'
             Write-Host "Python dependencies updated"
             $global:LASTEXITCODE = 0
           } else {
