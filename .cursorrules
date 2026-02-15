@@ -1,0 +1,199 @@
+# 1PWR Customer Care AI Context Protocol
+
+## At Conversation Start (REQUIRED)
+
+Before responding to the user's first substantive request, you MUST:
+
+1. **Generate Session UID**: Create a unique session identifier using format `YYYYMMDDHHMM` 
+   (e.g., `202601150145` for Jan 15, 2026 at 01:45). Use the current timestamp.
+   Store this mentally and reference it in all protocol interactions.
+
+2. **Read the orientation document**:
+   ```
+   read_file("CONTEXT.md")
+   ```
+
+3. **Read recent session history**:
+   ```
+   read_file("SESSION_LOG.md")
+   ```
+   Focus on the last 2-3 session entries to understand recent work.
+
+4. **Briefly acknowledge** what you've learned (1-2 sentences) before proceeding.
+   Example: "I've oriented myself - this is the 1PWR Customer Care portal backed by the ACDB. Recent work includes the monthly ARPU financial analytics."
+
+Skip orientation ONLY if the user explicitly says "skip orientation" or the request is trivially simple (e.g., "what time is it").
+
+## During Conversation
+
+- **After completing major features**: Append an entry to SESSION_LOG.md summarizing what was done
+- **If you rediscover something you should know**: This is a senescence signal - note it
+- **If user corrects your project understanding**: Consider updating CONTEXT.md
+
+## Checkpoint Protocol (Safe Word: "watermelon")
+
+When user says **"watermelon"**, immediately:
+
+1. **Update SESSION_LOG.md** with current progress (what's been done this session)
+2. **Estimate conversation lifespan** based on exchange count:
+   - 0-15 exchanges: 0-30% (fresh)
+   - 16-30 exchanges: 30-60% (healthy)
+   - 31-45 exchanges: 60-85% (aging)
+   - 46+ exchanges: 85-100% (senescent)
+3. **Respond with status**:
+   ```
+   ═══════════════════════════════════════════════════════
+   📍 CHECKPOINT - Session [SESSION_UID]
+   ═══════════════════════════════════════════════════════
+   
+   📊 Status History:
+   [List previous checkpoints with timestamps if any]
+   → [TIMESTAMP] Current: ~[X]% ([N] exchanges)
+   
+   📈 Since Last Checkpoint:
+   - Queries addressed: [count]
+   - Tasks completed: [list]
+   - Files modified: [count/list]
+   
+   📝 SESSION_LOG.md updated with current progress.
+   ═══════════════════════════════════════════════════════
+   ```
+
+4. **At 90%+ lifespan**, trigger senescence exit:
+   ```
+   ═══════════════════════════════════════════════════════
+   🚨 SENESCENCE PROTOCOL - Session [SESSION_UID]
+   ═══════════════════════════════════════════════════════
+   
+   📊 Final Status: ~[X]% ([N] exchanges)
+   
+   📈 Session Summary:
+   - Total queries addressed: [count]
+   - Total tasks completed: [list]
+   - Total files modified: [count]
+   
+   📝 Full session handoff written to SESSION_LOG.md
+   🔄 Recommend: Start new conversation
+   
+   Godspeed. 🫡
+   ═══════════════════════════════════════════════════════
+   ```
+
+**Exchange count**: Count your own substantive responses (not just acknowledgments).
+
+## Senescence Detection (Automatic)
+
+Watch for these signs of context degradation:
+- Having to grep/search for things you set up earlier in the conversation
+- Making assumptions that contradict earlier discussion
+- Forgetting deployment method, architecture, or conventions
+- Re-asking questions you already asked
+
+When detected, say:
+> "I notice my context may be degrading - I just had to rediscover [X]. Consider starting a fresh conversation after I write a session handoff."
+
+## At Conversation End
+
+Before a long conversation ends (or when senescence is detected), write a SESSION_LOG.md entry:
+
+```markdown
+## Session YYYY-MM-DD [SESSION_UID] (Brief Title)
+
+### What Was Done
+- Major accomplishments
+
+### Key Decisions 
+- Important choices and rationale
+
+### What Next Session Should Know
+- Critical context for continuation
+
+### Senescence Notes
+- When degradation was noticed
+- Recommendations for session length
+
+### Protocol Feedback
+- Did CONTEXT.md have what was needed? What was missing?
+- Did SESSION_LOG.md provide useful continuity?
+- What would have made orientation faster/better?
+- Suggested improvements to .cursorrules or docs
+```
+
+## Protocol Self-Improvement
+
+After each session, critically assess:
+
+1. **Orientation effectiveness**: Did reading CONTEXT.md + SESSION_LOG.md give sufficient context, or did you have to search/ask for things that should have been documented?
+
+2. **Gap identification**: If you discovered important context mid-conversation that wasn't in the docs, note it for addition.
+
+3. **Update the docs**: If CONTEXT.md is missing critical info, update it directly. Don't just note the gap - fix it.
+
+4. **Protocol evolution**: If the protocol itself is flawed (wrong files to read, wrong timing, missing steps), propose changes to .cursorrules.
+
+The goal is **continuous improvement** - each conversation should leave the system slightly better for the next.
+
+## Engineering Principles
+
+### Root Cause Analysis Over Symptomatic Fixes
+- **Always perform RCA** before implementing a fix
+- Exceptions, fallbacks, and format relaxations can **mask deeper issues**:
+  - Distinct data products being conflated
+  - Conflicting processes creating inconsistent outputs
+  - Schema drift or undocumented format changes
+- Ask: "Why does this fail?" not "How do I make it not fail?"
+- A fix that "handles" unexpected data may hide that the data shouldn't be unexpected
+- **Only use exception handling when**:
+  - The exception is truly exceptional (external systems, network, user input)
+  - RCA confirms no deeper issue exists
+  - The fallback behavior is explicitly documented and justified
+- Prefer failing fast → investigating → fixing root cause over silently catching errors
+
+### Eliminate Redundancy
+- Prefer single, clear mechanisms over multiple redundant ones
+- If two UI elements do the same thing, remove one
+- DRY (Don't Repeat Yourself) applies to code, UI, and documentation
+
+### Data Integrity
+- The ACDB (Access database) is the **single source of truth** for customer and billing data
+- Never duplicate ACDB data into other stores; always query live
+- When computing derived metrics (e.g., ARPU), document the denominator definition clearly
+
+## Project Quick Reference
+
+- **Portal**: https://cc.1pwrafrica.com
+- **Auto-deploy**: Push to `main` → GitHub Actions → deploys frontend to Linux EC2, backend to Windows EC2
+- **Frontend**: React + TypeScript + Vite (`acdb-api/frontend/`)
+- **Backend**: FastAPI + pyodbc (`acdb-api/customer_api.py`)
+- **WhatsApp Bridge**: Node.js + Baileys (`whatsapp-bridge/`)
+- **Key backend files**: `customer_api.py`, `om_report.py`, `crud.py`, `auth.py`, `tariff.py`
+- **Key frontend files**: `src/App.tsx`, `src/lib/api.ts`, `src/pages/FinancialPage.tsx`
+
+## Deployment Protocol (MANDATORY)
+
+### Single Branch
+- `main` branch → auto-deploys to production (cc.1pwrafrica.com)
+- There is currently no staging environment for CC
+
+### Auto-Deploy Architecture
+- **Frontend**: GitHub-hosted `ubuntu-latest` runner builds Vite, rsyncs to Linux EC2
+- **Backend**: Self-hosted Windows runner robocopy's Python files, restarts service
+- Both jobs run in parallel on push to `main`
+
+### Before ANY Deployment
+1. Verify you're on `main` branch
+2. Run TypeScript compilation check: `cd acdb-api/frontend && npx tsc -b --noEmit`
+3. State explicitly: "This will deploy to cc.1pwrafrica.com"
+
+### CRITICAL RULES
+1. Run `npx tsc -b --noEmit` before pushing -- TypeScript errors will fail the frontend build
+2. Backend changes should not break the `/health` endpoint -- the deploy job checks it
+3. The Windows runner service account is `LocalSystem`; do not change this
+
+## Related System: uGridPlan
+
+- **Repo**: https://github.com/onepowerLS/uGridPlan
+- **Local path**: `/Users/mattmso/Dropbox/AI Projects/uGridPlan map_v3/`
+- **Portal**: https://ugp.1pwrafrica.com
+- **Integration**: CC creates O&M tickets via uGridPlan API; uGridPlan syncs customer data from ACDB API
+- **Key rule**: No shared code. All integration via HTTP API calls.
