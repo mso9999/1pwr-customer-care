@@ -1108,34 +1108,18 @@ def _date_to_month(dt) -> str:
 @router.get("/monthly-arpu")
 def monthly_arpu_time_series(user: CurrentUser = Depends(require_employee)):
     """
-    Monthly ARPU: total revenue / active customers per month, with per-site breakdown.
-    Same logic as quarterly ARPU but at monthly granularity.
+    Monthly ARPU: total revenue / distinct transacting customers per month.
+
+    Counts distinct account numbers that made at least one transaction in a
+    given month as the "active customer" denominator.  This is more robust
+    than connection/termination date matching (used by the quarterly
+    endpoint) because every account with revenue is guaranteed to be counted.
     """
     tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
 
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        # ── 1. Load customer connection/termination data ──
-        cursor.execute(
-            "SELECT [CUSTOMER ID], [Concession name], "
-            "[DATE SERVICE CONNECTED], [DATE SERVICE TERMINATED] "
-            "FROM tblcustomer "
-            "WHERE [Concession name] IS NOT NULL"
-        )
-        cust_rows = cursor.fetchall()
-
-        customers = []
-        for row in cust_rows:
-            cid = row[0]
-            concession = str(row[1] or "").strip()
-            connected = row[2]
-            terminated = row[3]
-            cm = _date_to_month(connected) if connected else ""
-            tm = _date_to_month(terminated) if terminated and str(terminated).strip() else ""
-            customers.append((cid, concession, cm, tm))
-
-        # ── 2. Get revenue per month per site from account history ──
         for table in tables_to_try:
             try:
                 date_col = _find_date_column(cursor, table)
@@ -1150,50 +1134,42 @@ def monthly_arpu_time_series(user: CurrentUser = Depends(require_employee)):
                 if not txn_rows:
                     continue
 
+                # Per-month aggregation
                 m_revenue: Dict[str, float] = defaultdict(float)
+                m_customers: Dict[str, set] = defaultdict(set)
                 m_site_revenue: Dict[str, Dict[str, float]] = defaultdict(
                     lambda: defaultdict(float)
+                )
+                m_site_customers: Dict[str, Dict[str, set]] = defaultdict(
+                    lambda: defaultdict(set)
                 )
 
                 for row in txn_rows:
                     acct = str(row[0] or "").strip()
                     m = _date_to_month(row[1])
                     lsl = float(row[2] or 0)
-                    if not m:
+                    if not m or not acct:
                         continue
                     site = _extract_site(acct)
+
                     m_revenue[m] += lsl
+                    m_customers[m].add(acct)
                     if site and len(site) >= 2:
                         m_site_revenue[m][site] += lsl
+                        m_site_customers[m][site].add(acct)
 
-                # ── 3. For each month with revenue, count active customers ──
                 all_months = sorted(m_revenue.keys())
 
                 result = []
                 for m in all_months:
-                    active_total = 0
-                    site_customers: Dict[str, int] = defaultdict(int)
-
-                    for _cid, concession, cm, tm in customers:
-                        if not cm or cm > m:
-                            continue
-                        if tm and tm <= m:
-                            continue
-                        active_total += 1
-                        site_code = ""
-                        for code, name in SITE_ABBREV.items():
-                            if name.lower() == concession.lower() or code.lower() in concession.lower():
-                                site_code = code
-                                break
-                        if site_code:
-                            site_customers[site_code] += 1
-
                     revenue = m_revenue[m]
-                    arpu = round(revenue / active_total, 2) if active_total > 0 else 0
+                    active = len(m_customers[m])
+                    arpu = round(revenue / active, 2) if active > 0 else 0
 
                     per_site = {}
-                    for site_code, site_rev in sorted(m_site_revenue[m].items()):
-                        site_custs = site_customers.get(site_code, 0)
+                    for site_code in sorted(m_site_revenue[m]):
+                        site_rev = m_site_revenue[m][site_code]
+                        site_custs = len(m_site_customers[m][site_code])
                         per_site[site_code] = {
                             "name": SITE_ABBREV.get(site_code, site_code),
                             "revenue": round(site_rev, 2),
@@ -1205,17 +1181,13 @@ def monthly_arpu_time_series(user: CurrentUser = Depends(require_employee)):
                         "month": m,
                         "quarter": _date_to_quarter_from_month(m),
                         "total_revenue": round(revenue, 2),
-                        "active_customers": active_total,
+                        "active_customers": active,
                         "arpu": arpu,
                         "per_site": per_site,
                     })
 
                 all_site_codes = sorted(
-                    set(
-                        code
-                        for entry in result
-                        for code in entry["per_site"]
-                    )
+                    set(code for entry in result for code in entry["per_site"])
                 )
 
                 return {

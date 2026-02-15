@@ -477,6 +477,38 @@ export default function FinancialPage() {
                 </span>
               ))}
             </div>
+
+            {/* Monthly data table */}
+            <div className="mt-4 overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50 border-b">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium text-gray-600">Month</th>
+                    <th className="px-3 py-2 text-left font-medium text-gray-600">Quarter</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">Revenue (LSL)</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">Customers</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">ARPU (LSL)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {monthly.map((row) => (
+                    <tr key={row.month} className="hover:bg-gray-50">
+                      <td className="px-3 py-1.5 font-medium text-gray-800">{row.month}</td>
+                      <td className="px-3 py-1.5 text-gray-500">{row.quarter}</td>
+                      <td className="px-3 py-1.5 text-right text-gray-700 tabular-nums">
+                        {Math.round(row.total_revenue).toLocaleString()}
+                      </td>
+                      <td className="px-3 py-1.5 text-right text-gray-700 tabular-nums">
+                        {row.active_customers.toLocaleString()}
+                      </td>
+                      <td className="px-3 py-1.5 text-right font-mono font-semibold text-emerald-700 tabular-nums">
+                        {row.arpu.toFixed(2)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </Figure>
         );
       })()}
