@@ -71,7 +71,7 @@ jobs:
             & $pip install -r C:\acdb-customer-api\requirements.txt --quiet
             Write-Host "Python dependencies updated"
           } else {
-            Write-Host "WARNING: pip not found at $pip — skipping dependency install"
+            Write-Host "WARNING: pip not found at $pip - skipping dependency install"
           }
 
       - name: Start ACDB service
