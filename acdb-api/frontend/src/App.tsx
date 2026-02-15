@@ -17,6 +17,7 @@ import CustomerDashboardPage from './pages/CustomerDashboardPage';
 import AdminRolesPage from './pages/AdminRolesPage';
 import MutationsPage from './pages/MutationsPage';
 import OMReportPage from './pages/OMReportPage';
+import FinancialPage from './pages/FinancialPage';
 import SyncPage from './pages/SyncPage';
 import CommissionCustomerPage from './pages/CommissionCustomerPage';
 import TariffManagementPage from './pages/TariffManagementPage';
@@ -49,6 +50,7 @@ export default function App() {
             <Route path="export" element={<ProtectedRoute requireEmployee><ExportPage /></ProtectedRoute>} />
             <Route path="mutations" element={<ProtectedRoute requireEmployee><MutationsPage /></ProtectedRoute>} />
             <Route path="om-report" element={<ProtectedRoute requireEmployee><OMReportPage /></ProtectedRoute>} />
+            <Route path="financial" element={<ProtectedRoute requireEmployee><FinancialPage /></ProtectedRoute>} />
             <Route path="sync" element={<ProtectedRoute requireEmployee><SyncPage /></ProtectedRoute>} />
             <Route path="commission" element={<ProtectedRoute requireEmployee><CommissionCustomerPage /></ProtectedRoute>} />
             <Route path="tariffs" element={<ProtectedRoute requireEmployee><TariffManagementPage /></ProtectedRoute>} />

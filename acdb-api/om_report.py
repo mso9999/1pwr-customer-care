@@ -938,3 +938,145 @@ def daily_load_profiles(
         except Exception as e:
             logger.warning("Failed to query tblmeterdata1 for load profiles: %s", e)
             return {"profiles": [], "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# 11. ARPU (Average Revenue Per User) Time Series
+# ---------------------------------------------------------------------------
+
+@router.get("/arpu")
+def arpu_time_series(user: CurrentUser = Depends(require_employee)):
+    """
+    Quarterly ARPU: total revenue / active customers per quarter, with per-site breakdown.
+
+    Combines account history revenue data with customer connection/termination dates
+    to compute a proper active-customer count for each quarter.
+    """
+    tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
+
+    with _get_connection() as conn:
+        cursor = conn.cursor()
+
+        # ── 1. Build per-quarter active customer counts (overall + per-site) ──
+        cursor.execute(
+            "SELECT [CUSTOMER ID], [Concession name], "
+            "[DATE SERVICE CONNECTED], [DATE SERVICE TERMINATED] "
+            "FROM tblcustomer "
+            "WHERE [Concession name] IS NOT NULL"
+        )
+        cust_rows = cursor.fetchall()
+
+        # Collect all connection quarters to define the timeline
+        all_connect_quarters: set = set()
+        customers = []
+        for row in cust_rows:
+            cid = row[0]
+            concession = str(row[1] or "").strip()
+            connected = row[2]
+            terminated = row[3]
+            cq = _date_to_quarter(connected) if connected else ""
+            tq = _date_to_quarter(terminated) if terminated and str(terminated).strip() else ""
+            if cq:
+                all_connect_quarters.add(cq)
+            customers.append((cid, concession, cq, tq))
+
+        # ── 2. Get revenue per quarter per site from account history ──
+        for table in tables_to_try:
+            try:
+                date_col = _find_date_column(cursor, table)
+                if not date_col:
+                    continue
+
+                cursor.execute(
+                    f"SELECT [accountnumber], [{date_col}], [transaction amount] "
+                    f"FROM [{table}]"
+                )
+                txn_rows = cursor.fetchall()
+                if not txn_rows:
+                    continue
+
+                # Quarterly revenue: overall and per-site
+                q_revenue: Dict[str, float] = defaultdict(float)
+                q_site_revenue: Dict[str, Dict[str, float]] = defaultdict(
+                    lambda: defaultdict(float)
+                )
+
+                for row in txn_rows:
+                    acct = str(row[0] or "").strip()
+                    q = _date_to_quarter(row[1])
+                    lsl = float(row[2] or 0)
+                    if not q:
+                        continue
+                    site = _extract_site(acct)
+                    q_revenue[q] += lsl
+                    if site and len(site) >= 2:
+                        q_site_revenue[q][site] += lsl
+
+                # ── 3. For each quarter with revenue, count active customers ──
+                all_quarters = sorted(q_revenue.keys())
+
+                result = []
+                for q in all_quarters:
+                    # A customer is "active" in quarter Q if:
+                    #   connected_quarter <= Q  AND  (no termination OR terminated_quarter > Q)
+                    active_total = 0
+                    site_customers: Dict[str, int] = defaultdict(int)
+
+                    for _cid, concession, cq, tq in customers:
+                        if not cq or cq > q:
+                            continue
+                        if tq and tq <= q:
+                            continue
+                        active_total += 1
+                        # Map concession name to site code
+                        site_code = ""
+                        for code, name in SITE_ABBREV.items():
+                            if name.lower() == concession.lower() or code.lower() in concession.lower():
+                                site_code = code
+                                break
+                        if site_code:
+                            site_customers[site_code] += 1
+
+                    revenue = q_revenue[q]
+                    arpu = round(revenue / active_total, 2) if active_total > 0 else 0
+
+                    # Per-site ARPU
+                    per_site = {}
+                    for site_code, site_rev in sorted(q_site_revenue[q].items()):
+                        site_custs = site_customers.get(site_code, 0)
+                        per_site[site_code] = {
+                            "name": SITE_ABBREV.get(site_code, site_code),
+                            "revenue": round(site_rev, 2),
+                            "customers": site_custs,
+                            "arpu": round(site_rev / site_custs, 2) if site_custs > 0 else 0,
+                        }
+
+                    result.append({
+                        "quarter": q,
+                        "total_revenue": round(revenue, 2),
+                        "active_customers": active_total,
+                        "arpu": arpu,
+                        "per_site": per_site,
+                    })
+
+                # Collect all site codes seen across all quarters
+                all_site_codes = sorted(
+                    set(
+                        code
+                        for entry in result
+                        for code in entry["per_site"]
+                    )
+                )
+
+                return {
+                    "arpu": result,
+                    "site_codes": all_site_codes,
+                    "site_names": {c: SITE_ABBREV.get(c, c) for c in all_site_codes},
+                    "source_table": table,
+                }
+
+            except Exception as e:
+                logger.warning("Failed to compute ARPU from %s: %s", table, e)
+                continue
+
+        return {"arpu": [], "site_codes": [], "error": "No account history data found"}

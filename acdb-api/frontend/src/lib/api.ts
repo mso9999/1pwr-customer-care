@@ -814,6 +814,37 @@ export async function getCustomerWithAccounts(customerId: string): Promise<{ cus
   return request(`/customers/by-id/${encodeURIComponent(customerId)}`);
 }
 
+// ---------------------------------------------------------------------------
+// ARPU (Average Revenue Per User)
+// ---------------------------------------------------------------------------
+
+export interface ARPUSiteDetail {
+  name: string;
+  revenue: number;
+  customers: number;
+  arpu: number;
+}
+
+export interface ARPUPoint {
+  quarter: string;
+  total_revenue: number;
+  active_customers: number;
+  arpu: number;
+  per_site: Record<string, ARPUSiteDetail>;
+}
+
+export interface ARPUResponse {
+  arpu: ARPUPoint[];
+  site_codes: string[];
+  site_names: Record<string, string>;
+  source_table?: string;
+  error?: string;
+}
+
+export async function getARPU(): Promise<ARPUResponse> {
+  return request('/om-report/arpu');
+}
+
 // Health is at root level, not under /api
 export async function getHealth() {
   const res = await fetch('/health');
