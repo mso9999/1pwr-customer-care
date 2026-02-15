@@ -65,21 +65,12 @@ jobs:
 
       - name: Stop ACDB service
         run: |
-          # Kill the Python process directly (more reliable than scheduled task commands)
-          $procs = Get-Process -Name python* -ErrorAction SilentlyContinue | Where-Object {
-            $_.MainModule.FileName -like "*acdb*" -or $_.CommandLine -like "*customer_api*"
-          }
-          if (-not $procs) {
-            # Fallback: kill any python process on port 8100
-            $procs = Get-Process -Name python* -ErrorAction SilentlyContinue
-          }
-          if ($procs) {
-            $procs | Stop-Process -Force
-            Write-Host "Stopped $($procs.Count) Python process(es)"
-            Start-Sleep -Seconds 2
-          } else {
-            Write-Host "No Python processes found to stop"
-          }
+          schtasks.exe /End /TN "ACDBCustomerAPI" 2>$null
+          $global:LASTEXITCODE = 0
+          # Also kill any lingering Python process
+          Get-Process -Name python* -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          Start-Sleep -Seconds 3
+          Write-Host "ACDB service stopped"
 
       - name: Deploy backend
         run: |
@@ -115,7 +106,6 @@ jobs:
 
       - name: Start ACDB service
         run: |
-          # Use schtasks.exe (CLI) instead of Start-ScheduledTask (cmdlet) for permissions
           schtasks.exe /Run /TN "ACDBCustomerAPI"
           $global:LASTEXITCODE = 0
           Write-Host "Started ACDBCustomerAPI task"
