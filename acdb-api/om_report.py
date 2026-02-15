@@ -947,11 +947,12 @@ def daily_load_profiles(
 @router.get("/arpu")
 def arpu_time_series(user: CurrentUser = Depends(require_employee)):
     """
-    Quarterly ARPU: total revenue / distinct transacting customers per quarter.
+    Quarterly ARPU: total revenue / cumulative customer base per quarter.
 
-    Counts distinct account numbers that made at least one transaction in a
-    given quarter as the "active customer" denominator.  This guarantees
-    non-zero ARPU whenever revenue exists.
+    "Active customers" = all distinct account numbers that have ever
+    transacted up to and including the quarter.  This produces a
+    monotonically-increasing customer count that reflects the growing
+    customer base, and divides quarterly revenue by that base.
     """
     tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
 
@@ -972,15 +973,14 @@ def arpu_time_series(user: CurrentUser = Depends(require_employee)):
                 if not txn_rows:
                     continue
 
-                # Per-quarter aggregation
+                # ── Pass 1: bucket revenue and first-seen quarter per account ──
                 q_revenue: Dict[str, float] = defaultdict(float)
-                q_customers: Dict[str, set] = defaultdict(set)
                 q_site_revenue: Dict[str, Dict[str, float]] = defaultdict(
                     lambda: defaultdict(float)
                 )
-                q_site_customers: Dict[str, Dict[str, set]] = defaultdict(
-                    lambda: defaultdict(set)
-                )
+                # Track the first quarter each account appears
+                acct_first_quarter: Dict[str, str] = {}
+                acct_site: Dict[str, str] = {}
 
                 for row in txn_rows:
                     acct = str(row[0] or "").strip()
@@ -991,23 +991,38 @@ def arpu_time_series(user: CurrentUser = Depends(require_employee)):
                     site = _extract_site(acct)
 
                     q_revenue[q] += lsl
-                    q_customers[q].add(acct)
                     if site and len(site) >= 2:
                         q_site_revenue[q][site] += lsl
-                        q_site_customers[q][site].add(acct)
 
+                    # Record earliest quarter for this account
+                    if acct not in acct_first_quarter or q < acct_first_quarter[acct]:
+                        acct_first_quarter[acct] = q
+                        if site and len(site) >= 2:
+                            acct_site[acct] = site
+
+                # ── Pass 2: build cumulative customer counts ──
                 all_quarters = sorted(q_revenue.keys())
+                cumulative_all: set = set()
+                cumulative_by_site: Dict[str, set] = defaultdict(set)
 
                 result = []
                 for q in all_quarters:
+                    # Add accounts whose first transaction was in this or earlier quarter
+                    for acct, first_q in acct_first_quarter.items():
+                        if first_q <= q:
+                            cumulative_all.add(acct)
+                            site = acct_site.get(acct, "")
+                            if site:
+                                cumulative_by_site[site].add(acct)
+
                     revenue = q_revenue[q]
-                    active = len(q_customers[q])
+                    active = len(cumulative_all)
                     arpu = round(revenue / active, 2) if active > 0 else 0
 
                     per_site = {}
                     for site_code in sorted(q_site_revenue[q]):
                         site_rev = q_site_revenue[q][site_code]
-                        site_custs = len(q_site_customers[q][site_code])
+                        site_custs = len(cumulative_by_site.get(site_code, set()))
                         per_site[site_code] = {
                             "name": SITE_ABBREV.get(site_code, site_code),
                             "revenue": round(site_rev, 2),
@@ -1067,12 +1082,12 @@ def _date_to_month(dt) -> str:
 @router.get("/monthly-arpu")
 def monthly_arpu_time_series(user: CurrentUser = Depends(require_employee)):
     """
-    Monthly ARPU: total revenue / distinct transacting customers per month.
+    Monthly ARPU: total revenue / cumulative customer base per month.
 
-    Counts distinct account numbers that made at least one transaction in a
-    given month as the "active customer" denominator.  This is more robust
-    than connection/termination date matching (used by the quarterly
-    endpoint) because every account with revenue is guaranteed to be counted.
+    "Active customers" = all distinct account numbers that have ever
+    transacted up to and including the month.  This produces a
+    monotonically-increasing customer count that reflects the growing
+    customer base, and divides monthly revenue by that base.
     """
     tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
 
@@ -1093,15 +1108,13 @@ def monthly_arpu_time_series(user: CurrentUser = Depends(require_employee)):
                 if not txn_rows:
                     continue
 
-                # Per-month aggregation
+                # ── Pass 1: bucket revenue and first-seen month per account ──
                 m_revenue: Dict[str, float] = defaultdict(float)
-                m_customers: Dict[str, set] = defaultdict(set)
                 m_site_revenue: Dict[str, Dict[str, float]] = defaultdict(
                     lambda: defaultdict(float)
                 )
-                m_site_customers: Dict[str, Dict[str, set]] = defaultdict(
-                    lambda: defaultdict(set)
-                )
+                acct_first_month: Dict[str, str] = {}
+                acct_site: Dict[str, str] = {}
 
                 for row in txn_rows:
                     acct = str(row[0] or "").strip()
@@ -1112,23 +1125,36 @@ def monthly_arpu_time_series(user: CurrentUser = Depends(require_employee)):
                     site = _extract_site(acct)
 
                     m_revenue[m] += lsl
-                    m_customers[m].add(acct)
                     if site and len(site) >= 2:
                         m_site_revenue[m][site] += lsl
-                        m_site_customers[m][site].add(acct)
 
+                    if acct not in acct_first_month or m < acct_first_month[acct]:
+                        acct_first_month[acct] = m
+                        if site and len(site) >= 2:
+                            acct_site[acct] = site
+
+                # ── Pass 2: build cumulative customer counts ──
                 all_months = sorted(m_revenue.keys())
+                cumulative_all: set = set()
+                cumulative_by_site: Dict[str, set] = defaultdict(set)
 
                 result = []
                 for m in all_months:
+                    for acct, first_m in acct_first_month.items():
+                        if first_m <= m:
+                            cumulative_all.add(acct)
+                            site = acct_site.get(acct, "")
+                            if site:
+                                cumulative_by_site[site].add(acct)
+
                     revenue = m_revenue[m]
-                    active = len(m_customers[m])
+                    active = len(cumulative_all)
                     arpu = round(revenue / active, 2) if active > 0 else 0
 
                     per_site = {}
                     for site_code in sorted(m_site_revenue[m]):
                         site_rev = m_site_revenue[m][site_code]
-                        site_custs = len(m_site_customers[m][site_code])
+                        site_custs = len(cumulative_by_site.get(site_code, set()))
                         per_site[site_code] = {
                             "name": SITE_ABBREV.get(site_code, site_code),
                             "revenue": round(site_rev, 2),
