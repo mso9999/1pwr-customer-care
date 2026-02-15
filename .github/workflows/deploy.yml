@@ -55,7 +55,7 @@ jobs:
           }
 
           # Copy backend Python files (exclude venv, env, pycache, db files, frontend node_modules)
-          robocopy $source $dest /E /XD venv logs __pycache__ .mypy_cache node_modules /XF .env *.accdb cc_auth.db *.pyc /NFL /NDL /NJH /NJS /NC /NS
+          robocopy $source $dest /E /R:3 /W:5 /XD venv logs __pycache__ .mypy_cache node_modules /XF .env *.accdb cc_auth.db *.pyc /NFL /NDL /NJH /NJS /NC /NS
           # robocopy returns 0-7 for success, 8+ for errors
           if ($LASTEXITCODE -ge 8) {
             Write-Host "ERROR: robocopy failed with exit code $LASTEXITCODE"
