@@ -1197,3 +1197,157 @@ def _date_to_quarter_from_month(month_str: str) -> str:
         return f"{y} Q{q}"
     except (ValueError, AttributeError):
         return ""
+
+
+# ---------------------------------------------------------------------------
+# 13. Meter Data Export (for CDF building)
+# ---------------------------------------------------------------------------
+
+@router.get("/meter-export")
+def meter_data_export(
+    customer_type: Optional[str] = Query(None, description="Filter by customer type (e.g. HH, SME, SCH)"),
+    site: Optional[str] = Query(None, description="Filter by site code (e.g. MAK)"),
+    start_date: Optional[str] = Query(None, description="Start date YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="End date YYYY-MM-DD"),
+    user: CurrentUser = Depends(require_employee),
+):
+    """
+    Export raw meter readings from tblmeterdata1 for CDF generation.
+
+    Returns timestamped kW readings joined with the meter registry to
+    include customer type and site.  Designed for batch consumption by
+    the uGridPlan 8760 CDF builder script.
+
+    Response: {readings: [{timestamp, kw, customer_type, site, meterid}, ...], meta: {...}}
+    """
+    with _get_connection() as conn:
+        cursor = conn.cursor()
+
+        # ── 1. Build meterid -> (customer_type, community) mapping ──
+        meter_info: Dict[str, Dict[str, str]] = {}
+        meter_source = ""
+        for meter_table in _METER_TABLES:
+            try:
+                cursor.execute(
+                    f"SELECT [meterid], [customer type], [community] FROM [{meter_table}] "
+                    f"WHERE [customer type] IS NOT NULL AND [customer type] <> ''"
+                )
+                for row in cursor.fetchall():
+                    mid = str(row[0] or "").strip()
+                    ctype = str(row[1] or "").strip().upper()
+                    community = str(row[2] or "").strip().upper()
+                    if mid and ctype:
+                        meter_info[mid] = {"type": ctype, "site": community}
+                if meter_info:
+                    meter_source = meter_table
+                    break
+            except Exception as e:
+                logger.warning("meter-export: could not read %s: %s", meter_table, e)
+                continue
+
+        if not meter_info:
+            return {"readings": [], "meta": {"error": "No meter registry data found"}}
+
+        # ── 2. Query tblmeterdata1 ──
+        sql = (
+            "SELECT [meterid], [whdatetime], [powerkW] FROM [tblmeterdata1] "
+            "WHERE [powerkW] IS NOT NULL"
+        )
+        params: List[Any] = []
+
+        if site:
+            sql += " AND [community] = ?"
+            params.append(site.upper())
+
+        try:
+            cursor.execute(sql, params) if params else cursor.execute(sql)
+        except Exception as e:
+            logger.warning("meter-export: query failed: %s", e)
+            return {"readings": [], "meta": {"error": str(e)}}
+
+        # ── 3. Stream results with Python-side filtering ──
+        readings: List[Dict[str, Any]] = []
+        skipped = 0
+
+        for row in cursor.fetchall():
+            mid = str(row[0] or "").strip()
+            info = meter_info.get(mid)
+            if not info:
+                skipped += 1
+                continue
+
+            ctype = info["type"]
+            community = info["site"]
+
+            # Customer-type filter
+            if customer_type and ctype != customer_type.upper():
+                continue
+
+            dt_val = row[1]
+            kw_val = row[2]
+            if dt_val is None or kw_val is None:
+                continue
+
+            try:
+                kw_float = float(kw_val)
+            except (ValueError, TypeError):
+                continue
+
+            # Date parsing
+            try:
+                if hasattr(dt_val, 'year'):
+                    ts = dt_val
+                elif isinstance(dt_val, str):
+                    ts = datetime.strptime(dt_val.strip()[:19], "%Y-%m-%d %H:%M:%S")
+                else:
+                    continue
+            except (ValueError, AttributeError):
+                continue
+
+            # Date range filters
+            if start_date:
+                try:
+                    sd = datetime.strptime(start_date, "%Y-%m-%d")
+                    if ts < sd:
+                        continue
+                except ValueError:
+                    pass
+            if end_date:
+                try:
+                    ed = datetime.strptime(end_date, "%Y-%m-%d")
+                    if ts > ed:
+                        continue
+                except ValueError:
+                    pass
+
+            readings.append({
+                "timestamp": ts.strftime("%Y-%m-%d %H:%M:%S"),
+                "kw": round(kw_float, 4),
+                "customer_type": ctype,
+                "site": community,
+                "meterid": mid,
+            })
+
+        # ── 4. Summary ──
+        type_counts: Dict[str, int] = defaultdict(int)
+        site_counts: Dict[str, int] = defaultdict(int)
+        for r in readings:
+            type_counts[r["customer_type"]] += 1
+            site_counts[r["site"]] += 1
+
+        return {
+            "readings": readings,
+            "meta": {
+                "total_readings": len(readings),
+                "skipped_no_type": skipped,
+                "meter_source": meter_source,
+                "customer_types": dict(type_counts),
+                "sites": dict(site_counts),
+                "filters": {
+                    "customer_type": customer_type,
+                    "site": site,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                },
+            },
+        }
