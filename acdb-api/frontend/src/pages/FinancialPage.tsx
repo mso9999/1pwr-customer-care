@@ -1,11 +1,11 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import {
-  LineChart, Line, BarChart, Bar, ComposedChart,
+  Line, BarChart, Bar, ComposedChart,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   Cell,
 } from 'recharts';
 import { getARPU, getSalesBySite } from '../lib/api';
-import type { ARPUResponse, ARPUPoint } from '../lib/api';
+import type { ARPUResponse } from '../lib/api';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 
@@ -145,7 +145,6 @@ export default function FinancialPage() {
   const [exporting, setExporting] = useState(false);
 
   const [data, setData] = useState<ARPUResponse | null>(null);
-  const [salesData, setSalesData] = useState<any>(null);
 
   // Figure refs for PDF export
   const figRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -161,12 +160,11 @@ export default function FinancialPage() {
       setLoading(true);
       setError('');
       try {
-        const [arpu, sales] = await Promise.all([
+        const [arpu] = await Promise.all([
           getARPU(),
           getSalesBySite().catch(() => ({ sites: [], total_lsl: 0 })),
         ]);
         setData(arpu);
-        setSalesData(sales);
       } catch (e: any) {
         setError(e.message);
       } finally {
