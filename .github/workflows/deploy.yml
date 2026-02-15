@@ -1,0 +1,103 @@
+name: Deploy CC Portal
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    defaults:
+      run:
+        shell: powershell
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Build frontend
+        shell: powershell
+        working-directory: acdb-api/frontend
+        run: |
+          npm ci
+          npm run build
+          Write-Host "Frontend built successfully"
+          Get-ChildItem dist -Recurse | Measure-Object | Select-Object -ExpandProperty Count | ForEach-Object { Write-Host "$_ files in dist/" }
+
+      - name: Stop ACDB service
+        shell: powershell
+        run: |
+          $task = Get-ScheduledTask -TaskName "ACDBCustomerAPI" -ErrorAction SilentlyContinue
+          if ($task -and $task.State -eq 'Running') {
+            Stop-ScheduledTask -TaskName "ACDBCustomerAPI"
+            Write-Host "Stopped ACDBCustomerAPI task"
+            Start-Sleep -Seconds 3
+          } else {
+            Write-Host "ACDBCustomerAPI task not running (state: $($task.State))"
+          }
+
+      - name: Deploy backend
+        shell: powershell
+        run: |
+          $source = "acdb-api"
+          $dest = "C:\acdb-customer-api"
+
+          # Ensure destination exists
+          if (-not (Test-Path $dest)) {
+            New-Item -ItemType Directory -Path $dest -Force
+          }
+
+          # Copy backend Python files (exclude venv, env, pycache, db files, frontend node_modules)
+          robocopy $source $dest /E /XD venv logs __pycache__ .mypy_cache node_modules /XF .env *.accdb cc_auth.db *.pyc /NFL /NDL /NJH /NJS /NC /NS
+          # robocopy returns 0-7 for success, 8+ for errors
+          if ($LASTEXITCODE -ge 8) {
+            Write-Host "ERROR: robocopy failed with exit code $LASTEXITCODE"
+            exit 1
+          }
+          Write-Host "Backend files deployed to $dest"
+
+      - name: Install Python dependencies
+        shell: powershell
+        run: |
+          $pip = "C:\acdb-customer-api\venv\Scripts\pip.exe"
+          if (Test-Path $pip) {
+            & $pip install -r C:\acdb-customer-api\requirements.txt --quiet
+            Write-Host "Python dependencies updated"
+          } else {
+            Write-Host "WARNING: pip not found at $pip — skipping dependency install"
+          }
+
+      - name: Start ACDB service
+        shell: powershell
+        run: |
+          Start-ScheduledTask -TaskName "ACDBCustomerAPI"
+          Write-Host "Started ACDBCustomerAPI task"
+
+      - name: Health check
+        shell: powershell
+        run: |
+          Write-Host "Waiting for service to start..."
+          Start-Sleep -Seconds 8
+
+          $maxRetries = 3
+          for ($i = 1; $i -le $maxRetries; $i++) {
+            try {
+              $response = Invoke-RestMethod -Uri http://localhost:8100/health -TimeoutSec 10
+              Write-Host "Health check passed: $($response | ConvertTo-Json -Compress)"
+              exit 0
+            } catch {
+              Write-Host "Health check attempt $i/$maxRetries failed: $_"
+              if ($i -lt $maxRetries) {
+                Start-Sleep -Seconds 5
+              }
+            }
+          }
+          Write-Host "WARNING: Health check failed after $maxRetries attempts"
+          exit 1
