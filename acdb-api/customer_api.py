@@ -33,8 +33,6 @@ import pyodbc
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 
 # ---------------------------------------------------------------------------
 # Configuration
@@ -522,37 +520,6 @@ def list_sites():
     except Exception as e:
         logger.error("Sites list failed: %s", e)
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
-
-
-# ---------------------------------------------------------------------------
-# Frontend SPA serving (must be AFTER all API routes)
-# ---------------------------------------------------------------------------
-# Serves the built Vite frontend from frontend/dist/ if it exists.
-# API routes defined above take priority; this only catches unmatched paths.
-
-_FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend", "dist")
-
-if os.path.isdir(_FRONTEND_DIR):
-    # Mount Vite's hashed asset bundles (JS, CSS, images)
-    _assets_dir = os.path.join(_FRONTEND_DIR, "assets")
-    if os.path.isdir(_assets_dir):
-        app.mount("/assets", StaticFiles(directory=_assets_dir), name="static-assets")
-
-    @app.get("/{full_path:path}")
-    async def serve_spa(full_path: str):
-        """Serve the SPA frontend for any path not matched by API routes."""
-        # Try to serve a static file from dist/ (e.g., favicon.ico, robots.txt)
-        if full_path:
-            file_path = os.path.join(_FRONTEND_DIR, full_path)
-            if os.path.isfile(file_path):
-                return FileResponse(file_path)
-        # Fall back to index.html for client-side routing
-        index_path = os.path.join(_FRONTEND_DIR, "index.html")
-        if os.path.isfile(index_path):
-            return FileResponse(index_path, media_type="text/html")
-        raise HTTPException(status_code=404, detail="Frontend not built")
-else:
-    logger.info("No frontend/dist/ found — SPA serving disabled")
 
 
 # ---------------------------------------------------------------------------

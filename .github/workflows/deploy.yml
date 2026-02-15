@@ -7,32 +7,63 @@ on:
   workflow_dispatch:
 
 jobs:
-  deploy:
-    runs-on: self-hosted
-    defaults:
-      run:
-        shell: powershell
-
+  # ── Job 1: Build frontend on GitHub-hosted runner, deploy to Linux EC2 ──
+  deploy-frontend:
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
 
       - name: Build frontend
-        shell: powershell
         working-directory: acdb-api/frontend
         run: |
           npm ci
           npm run build
-          Write-Host "Frontend built successfully"
-          Get-ChildItem dist -Recurse | Measure-Object | Select-Object -ExpandProperty Count | ForEach-Object { Write-Host "$_ files in dist/" }
+          echo "Frontend built: $(find dist -type f | wc -l) files"
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -T 30 -H ${{ secrets.EC2_LINUX_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Deploy frontend to Linux EC2
+        run: |
+          # Clear old files and deploy new build
+          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_LINUX_HOST }} "sudo rm -rf /opt/cc-portal/frontend/*"
+          rsync -avz --delete \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            acdb-api/frontend/dist/ \
+            ubuntu@${{ secrets.EC2_LINUX_HOST }}:/tmp/cc-frontend/
+          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_LINUX_HOST }} \
+            "sudo cp -r /tmp/cc-frontend/* /opt/cc-portal/frontend/ && sudo chown -R root:root /opt/cc-portal/frontend/ && rm -rf /tmp/cc-frontend"
+          echo "Frontend deployed to Linux EC2"
+
+      - name: Verify frontend
+        run: |
+          # Check that Caddy serves the new frontend
+          sleep 2
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://cc.1pwrafrica.com/)
+          echo "Frontend HTTP status: $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "WARNING: Frontend returned $STATUS"
+            exit 1
+          fi
+
+  # ── Job 2: Deploy backend on self-hosted Windows runner ──
+  deploy-backend:
+    runs-on: self-hosted
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Stop ACDB service
-        shell: powershell
         run: |
           $task = Get-ScheduledTask -TaskName "ACDBCustomerAPI" -ErrorAction SilentlyContinue
           if ($task -and $task.State -eq 'Running') {
@@ -44,46 +75,41 @@ jobs:
           }
 
       - name: Deploy backend
-        shell: powershell
         run: |
           $source = "acdb-api"
           $dest = "C:\acdb-customer-api"
 
-          # Ensure destination exists
           if (-not (Test-Path $dest)) {
             New-Item -ItemType Directory -Path $dest -Force
           }
 
-          # Copy backend Python files (exclude venv, env, pycache, db files, frontend node_modules)
-          robocopy $source $dest /E /R:3 /W:5 /XD venv logs __pycache__ .mypy_cache node_modules /XF .env *.accdb cc_auth.db *.pyc /NFL /NDL /NJH /NJS /NC /NS
+          # Copy Python backend only (exclude frontend, venv, env, caches, db files)
+          robocopy $source $dest /E /R:3 /W:5 /XD venv logs __pycache__ .mypy_cache node_modules frontend /XF .env *.accdb cc_auth.db *.pyc /NFL /NDL /NJH /NJS /NC /NS
           $roboExit = $LASTEXITCODE
-          # robocopy exit codes: 0=no change, 1=copied, 2=extras, 3=copied+extras (0-7 = success, 8+ = error)
           if ($roboExit -ge 8) {
             Write-Host "ERROR: robocopy failed with exit code $roboExit"
             exit 1
           }
-          Write-Host "Backend files deployed to $dest (robocopy exit: $roboExit)"
+          Write-Host "Backend deployed to $dest (robocopy exit: $roboExit)"
           $global:LASTEXITCODE = 0
 
       - name: Install Python dependencies
-        shell: powershell
         run: |
           $pip = "C:\acdb-customer-api\venv\Scripts\pip.exe"
           if (Test-Path $pip) {
-            & $pip install -r C:\acdb-customer-api\requirements.txt --quiet
+            & $pip install -r C:\acdb-customer-api\requirements.txt --quiet 2>&1
             Write-Host "Python dependencies updated"
+            $global:LASTEXITCODE = 0
           } else {
             Write-Host "WARNING: pip not found at $pip - skipping dependency install"
           }
 
       - name: Start ACDB service
-        shell: powershell
         run: |
           Start-ScheduledTask -TaskName "ACDBCustomerAPI"
           Write-Host "Started ACDBCustomerAPI task"
 
       - name: Health check
-        shell: powershell
         run: |
           Write-Host "Waiting for service to start..."
           Start-Sleep -Seconds 8
