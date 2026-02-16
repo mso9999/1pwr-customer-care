@@ -1,11 +1,11 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import {
-  Line, BarChart, Bar, ComposedChart,
+  Line, LineChart, BarChart, Bar, ComposedChart,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   Cell,
 } from 'recharts';
-import { getARPU, getMonthlyARPU } from '../lib/api';
-import type { ARPUResponse, MonthlyARPUResponse } from '../lib/api';
+import { getARPU, getMonthlyARPU, getConsumptionByTenure } from '../lib/api';
+import type { ARPUResponse, MonthlyARPUResponse, ConsumptionByTenureResponse } from '../lib/api';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 
@@ -146,6 +146,7 @@ export default function FinancialPage() {
 
   const [data, setData] = useState<ARPUResponse | null>(null);
   const [monthlyData, setMonthlyData] = useState<MonthlyARPUResponse | null>(null);
+  const [tenureData, setTenureData] = useState<ConsumptionByTenureResponse | null>(null);
 
   // Figure refs for PDF export
   const figRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -161,12 +162,14 @@ export default function FinancialPage() {
       setLoading(true);
       setError('');
       try {
-        const [arpu, monthly] = await Promise.all([
+        const [arpu, monthly, tenure] = await Promise.all([
           getARPU(),
           getMonthlyARPU().catch(() => null),
+          getConsumptionByTenure().catch(() => null),
         ]);
         setData(arpu);
         setMonthlyData(monthly);
+        setTenureData(tenure);
       } catch (e: any) {
         setError(e.message);
       } finally {
@@ -725,6 +728,104 @@ export default function FinancialPage() {
           </table>
         </div>
       </Figure>
+
+      {/* ── Figure 6: Average Consumption by Tenure ── */}
+      {tenureData && tenureData.chart_data && tenureData.chart_data.length > 0 && tenureData.customer_types.length > 0 && (
+        <Figure
+          id="fig-consumption-tenure"
+          title="Figure 6: Average Monthly Consumption by Tenure"
+          subtitle="Average kWh consumed per customer per month as a function of months since connection, by customer type"
+          figureRef={setFigRef('consumption-tenure')}
+          onExport={handleExportFigure('consumption-tenure', 'Consumption_By_Tenure')}
+        >
+          <ResponsiveContainer width="100%" height={420}>
+            <LineChart
+              data={tenureData.chart_data}
+              margin={{ top: 5, right: 30, left: 10, bottom: 40 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis
+                dataKey="tenure_month"
+                tick={{ fontSize: 11 }}
+                label={{
+                  value: 'Tenure (months since connection)',
+                  position: 'insideBottom',
+                  offset: -25,
+                  style: { fontSize: 12, fill: '#6b7280' },
+                }}
+              />
+              <YAxis
+                tick={{ fontSize: 11 }}
+                label={{
+                  value: 'Avg kWh / customer / month',
+                  angle: -90,
+                  position: 'insideLeft',
+                  style: { fontSize: 11, fill: '#6b7280' },
+                  offset: 5,
+                }}
+              />
+              <Tooltip
+                contentStyle={{ borderRadius: '8px', fontSize: '12px' }}
+                formatter={(value: any, name: any) =>
+                  value != null ? [`${Number(value).toFixed(1)} kWh`, name] : ['—', name]
+                }
+                labelFormatter={(label) => `Month ${label}`}
+              />
+              <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '12px' }} />
+              {tenureData.customer_types.map((ctype, i) => (
+                <Line
+                  key={ctype}
+                  dataKey={ctype}
+                  name={ctype}
+                  stroke={COLORS[i % COLORS.length]}
+                  strokeWidth={2.5}
+                  dot={{ r: 3, fill: COLORS[i % COLORS.length] }}
+                  activeDot={{ r: 6 }}
+                  connectNulls
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+
+          {/* Summary table */}
+          {tenureData.type_stats && tenureData.type_stats.length > 0 && (
+            <div className="mt-4 overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50 border-b">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium text-gray-600">Customer Type</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">Customers</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">Total kWh</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">Max Tenure (months)</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {tenureData.type_stats.map((s, i) => (
+                    <tr key={s.type} className="hover:bg-gray-50">
+                      <td className="px-3 py-1.5">
+                        <span
+                          className="inline-block w-3 h-3 rounded-sm mr-2"
+                          style={{ backgroundColor: COLORS[i % COLORS.length] }}
+                        />
+                        <span className="font-semibold">{s.type}</span>
+                      </td>
+                      <td className="px-3 py-1.5 text-right text-gray-700 tabular-nums">
+                        {s.customer_count.toLocaleString()}
+                      </td>
+                      <td className="px-3 py-1.5 text-right text-gray-700 tabular-nums">
+                        {Math.round(s.total_kwh).toLocaleString()}
+                      </td>
+                      <td className="px-3 py-1.5 text-right text-gray-700 tabular-nums">
+                        {s.max_tenure_months}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Figure>
+      )}
 
       {/* Footer */}
       <div className="text-center text-xs text-gray-400 py-6 border-t mt-6">

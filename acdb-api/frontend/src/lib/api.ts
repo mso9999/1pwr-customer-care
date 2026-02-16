@@ -677,6 +677,19 @@ export async function getCustomerContracts(customerId: number): Promise<{ contra
   return request(`/commission/contracts/${customerId}`);
 }
 
+export interface DecommissionResult {
+  status: string;
+  customer_id: number;
+  terminated_date: string;
+  connected_date: string;
+  meters: { source: string; meterid: string; accountnumber: string; community: string }[];
+  accounts: { accountnumber: string; meterid: string }[];
+}
+
+export async function decommissionCustomer(customerId: number): Promise<DecommissionResult> {
+  return request(`/commission/decommission/${customerId}`, { method: 'POST' });
+}
+
 // ---------------------------------------------------------------------------
 // Tariff management
 // ---------------------------------------------------------------------------
@@ -866,6 +879,33 @@ export interface MonthlyARPUResponse {
 
 export async function getMonthlyARPU(): Promise<MonthlyARPUResponse> {
   return request('/om-report/monthly-arpu');
+}
+
+// ---------------------------------------------------------------------------
+// Consumption by Tenure
+// ---------------------------------------------------------------------------
+
+export interface ConsumptionByTenureTypeStat {
+  type: string;
+  customer_count: number;
+  total_kwh: number;
+  max_tenure_months: number;
+}
+
+export interface ConsumptionByTenureResponse {
+  chart_data: Record<string, any>[];
+  customer_types: string[];
+  type_stats?: ConsumptionByTenureTypeStat[];
+  max_tenure_months?: number;
+  total_accounts_matched?: number;
+  source_table?: string;
+  meter_source?: string;
+  note?: string;
+  error?: string;
+}
+
+export async function getConsumptionByTenure(): Promise<ConsumptionByTenureResponse> {
+  return request('/om-report/consumption-by-tenure');
 }
 
 // Health is at root level, not under /api

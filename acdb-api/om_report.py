@@ -1200,7 +1200,229 @@ def _date_to_quarter_from_month(month_str: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 13. Meter Data Export (for CDF building)
+# 13. Average Consumption by Tenure (months since connection)
+# ---------------------------------------------------------------------------
+
+@router.get("/consumption-by-tenure")
+def consumption_by_tenure(
+    user: CurrentUser = Depends(require_employee),
+):
+    """
+    Average monthly kWh consumption as a function of tenure (months since
+    connection), broken out by customer type.
+
+    Joins:
+      - Meter registry (accountnumber -> customer type, customer id)
+      - tblcustomer  (customer id -> DATE SERVICE CONNECTED)
+      - tblaccounthistory1 (accountnumber, date, kwh value)
+
+    For each transaction, tenure_month = (txn_year - conn_year)*12 +
+    (txn_month - conn_month).  Returns average kWh per customer per
+    tenure month for each customer type.
+    """
+    with _get_connection() as conn:
+        cursor = conn.cursor()
+
+        # 1. Build accountnumber -> (customer_type, customer_id) from meter registry
+        acct_info: Dict[str, Dict[str, str]] = {}
+        meter_source = ""
+        for meter_table in _METER_TABLES:
+            try:
+                cursor.execute(
+                    f"SELECT [accountnumber], [customer type], [customer id] "
+                    f"FROM [{meter_table}] "
+                    f"WHERE [customer type] IS NOT NULL AND [customer type] <> ''"
+                )
+                for row in cursor.fetchall():
+                    acct = str(row[0] or "").strip()
+                    ctype = str(row[1] or "").strip()
+                    cust_id = str(row[2] or "").strip()
+                    if acct and ctype:
+                        acct_info[acct] = {"type": ctype, "cust_id": cust_id}
+                if acct_info:
+                    meter_source = meter_table
+                    break
+            except Exception as e:
+                logger.warning("consumption-by-tenure: could not read %s: %s", meter_table, e)
+                continue
+
+        if not acct_info:
+            return {
+                "chart_data": [], "customer_types": [],
+                "note": "No customer type data found in meter tables.",
+            }
+
+        # 2. Build customer_id -> connection_date from tblcustomer
+        cust_conn: Dict[str, datetime] = {}
+        cursor.execute(
+            "SELECT [CUSTOMER ID], [DATE SERVICE CONNECTED] FROM tblcustomer "
+            "WHERE [DATE SERVICE CONNECTED] IS NOT NULL"
+        )
+        for row in cursor.fetchall():
+            cid = str(row[0] or "").strip()
+            dt = row[1]
+            if not cid or dt is None:
+                continue
+            if isinstance(dt, str):
+                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"):
+                    try:
+                        dt = datetime.strptime(dt.strip(), fmt)
+                        break
+                    except (ValueError, AttributeError):
+                        continue
+                else:
+                    continue
+            try:
+                _ = dt.year
+                cust_conn[cid] = dt
+            except AttributeError:
+                continue
+
+        # 3. Build accountnumber -> (customer_type, connection_date)
+        acct_meta: Dict[str, Dict[str, Any]] = {}
+        for acct, info in acct_info.items():
+            cust_id = info["cust_id"]
+            conn_date = cust_conn.get(cust_id)
+            if conn_date is None:
+                continue
+            acct_meta[acct] = {
+                "type": info["type"],
+                "conn_date": conn_date,
+            }
+
+        if not acct_meta:
+            return {
+                "chart_data": [], "customer_types": [],
+                "note": "No customers found with both customer type and connection date.",
+            }
+
+        # 4. Query account history
+        tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
+        for table in tables_to_try:
+            try:
+                date_col = _find_date_column(cursor, table)
+                if not date_col:
+                    continue
+
+                cursor.execute(
+                    f"SELECT [accountnumber], [{date_col}], [kwh value] FROM [{table}]"
+                )
+                rows = cursor.fetchall()
+                if not rows:
+                    continue
+
+                # 5. Aggregate: type -> tenure_month -> {total_kwh, customers}
+                # Use nested dict: type -> tenure -> acct -> kwh_sum
+                type_tenure_acct: Dict[str, Dict[int, Dict[str, float]]] = defaultdict(
+                    lambda: defaultdict(lambda: defaultdict(float))
+                )
+
+                for row in rows:
+                    acct = str(row[0] or "").strip()
+                    meta = acct_meta.get(acct)
+                    if not meta:
+                        continue
+
+                    txn_dt = row[1]
+                    kwh = float(row[2] or 0)
+                    if txn_dt is None or kwh <= 0:
+                        continue
+
+                    # Parse transaction date
+                    if isinstance(txn_dt, str):
+                        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"):
+                            try:
+                                txn_dt = datetime.strptime(txn_dt.strip(), fmt)
+                                break
+                            except (ValueError, AttributeError):
+                                continue
+                        else:
+                            continue
+
+                    try:
+                        conn_date = meta["conn_date"]
+                        tenure_months = (
+                            (txn_dt.year - conn_date.year) * 12
+                            + (txn_dt.month - conn_date.month)
+                        )
+                    except (AttributeError, TypeError):
+                        continue
+
+                    if tenure_months < 0:
+                        continue
+
+                    ctype = meta["type"]
+                    type_tenure_acct[ctype][tenure_months][acct] += kwh
+
+                # 6. Compute averages
+                all_types = sorted(type_tenure_acct.keys())
+                max_tenure = 0
+                for ctype in all_types:
+                    tenures = type_tenure_acct[ctype]
+                    if tenures:
+                        max_tenure = max(max_tenure, max(tenures.keys()))
+
+                # Cap at a reasonable max to avoid sparse tails
+                # Use P90 of tenure data to avoid very sparse outliers
+                all_tenures_seen: List[int] = []
+                for ctype in all_types:
+                    all_tenures_seen.extend(type_tenure_acct[ctype].keys())
+                if all_tenures_seen:
+                    all_tenures_seen.sort()
+                    p90_idx = int(len(all_tenures_seen) * 0.95)
+                    cap = all_tenures_seen[min(p90_idx, len(all_tenures_seen) - 1)]
+                    max_tenure = min(max_tenure, max(cap, 12))
+
+                chart_data = []
+                for t in range(max_tenure + 1):
+                    point: Dict[str, Any] = {"tenure_month": t}
+                    for ctype in all_types:
+                        acct_kwh = type_tenure_acct[ctype].get(t, {})
+                        if acct_kwh:
+                            avg_kwh = sum(acct_kwh.values()) / len(acct_kwh)
+                            point[ctype] = round(avg_kwh, 2)
+                        else:
+                            point[ctype] = None
+                    chart_data.append(point)
+
+                # Summary stats per type
+                type_stats = []
+                for ctype in all_types:
+                    all_accts = set()
+                    total_kwh = 0.0
+                    for t_data in type_tenure_acct[ctype].values():
+                        all_accts.update(t_data.keys())
+                        total_kwh += sum(t_data.values())
+                    max_t = max(type_tenure_acct[ctype].keys()) if type_tenure_acct[ctype] else 0
+                    type_stats.append({
+                        "type": ctype,
+                        "customer_count": len(all_accts),
+                        "total_kwh": round(total_kwh, 2),
+                        "max_tenure_months": max_t,
+                    })
+
+                return {
+                    "chart_data": chart_data,
+                    "customer_types": all_types,
+                    "type_stats": type_stats,
+                    "max_tenure_months": max_tenure,
+                    "total_accounts_matched": len(acct_meta),
+                    "source_table": table,
+                    "meter_source": meter_source,
+                }
+
+            except Exception as e:
+                logger.warning("Failed to compute consumption-by-tenure from %s: %s", table, e)
+                continue
+
+        return {
+            "chart_data": [], "customer_types": [],
+            "error": "No account history data found",
+        }
+
+
+# ---------------------------------------------------------------------------
+# 14. Meter Data Export (for CDF building)
 # ---------------------------------------------------------------------------
 
 @router.get("/meter-export")

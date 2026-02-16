@@ -247,6 +247,104 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
 
 
 # ---------------------------------------------------------------------------
+# POST /api/commission/decommission/{customer_id}
+# ---------------------------------------------------------------------------
+
+@router.post("/api/commission/decommission/{customer_id}")
+async def decommission_customer(customer_id: int, user: CurrentUser = Depends(require_employee)):
+    """Decommission a customer (non-destructive).
+
+    Sets DATE SERVICE TERMINATED on tblcustomer.  All meter, account,
+    and transaction records are preserved intact for historical record.
+    The terminated date is what marks the customer as decommissioned
+    throughout the system.
+
+    Returns the customer's associated meters and accounts for reference.
+    """
+    from datetime import datetime
+
+    with _get_connection() as conn:
+        cursor = conn.cursor()
+
+        # Verify the customer exists and is currently commissioned
+        cursor.execute(
+            "SELECT [DATE SERVICE CONNECTED], [DATE SERVICE TERMINATED] "
+            "FROM tblcustomer WHERE [CUSTOMER ID] = ?",
+            (customer_id,),
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Customer not found")
+
+        connected = row[0]
+        terminated = row[1]
+        if not connected or (isinstance(connected, str) and not connected.strip()):
+            raise HTTPException(
+                status_code=400,
+                detail="Customer has not been commissioned (no DATE SERVICE CONNECTED).",
+            )
+        if terminated and str(terminated).strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Customer is already terminated.",
+            )
+
+        # Collect associated records for the response (read-only)
+        meters: List[Dict[str, str]] = []
+        accounts: List[Dict[str, str]] = []
+
+        for meter_table in ["tblmeter", "Copy Of tblmeter"]:
+            try:
+                cursor.execute(
+                    f"SELECT [meterid], [accountnumber], [community] "
+                    f"FROM [{meter_table}] WHERE [customer id] = ?",
+                    (customer_id,),
+                )
+                for mrow in cursor.fetchall():
+                    meters.append({
+                        "source": meter_table,
+                        "meterid": str(mrow[0] or ""),
+                        "accountnumber": str(mrow[1] or ""),
+                        "community": str(mrow[2] or ""),
+                    })
+            except Exception as e:
+                logger.warning("Could not query %s for decommission info: %s", meter_table, e)
+
+        try:
+            cursor.execute(
+                "SELECT [accountnumber], [meterid] "
+                "FROM tblaccountnumbers WHERE [customerid] = ?",
+                (customer_id,),
+            )
+            for arow in cursor.fetchall():
+                accounts.append({
+                    "accountnumber": str(arow[0] or ""),
+                    "meterid": str(arow[1] or ""),
+                })
+        except Exception as e:
+            logger.warning("Could not query tblaccountnumbers for decommission info: %s", e)
+
+        # Set DATE SERVICE TERMINATED — the only write operation
+        today = datetime.now().strftime("%Y-%m-%d")
+        cursor.execute(
+            "UPDATE tblcustomer SET [DATE SERVICE TERMINATED] = ? "
+            "WHERE [CUSTOMER ID] = ?",
+            (today, customer_id),
+        )
+        conn.commit()
+        logger.info("Decommissioned customer %d: DATE SERVICE TERMINATED = %s", customer_id, today)
+
+    return {
+        "status": "ok",
+        "customer_id": customer_id,
+        "terminated_date": today,
+        "connected_date": str(connected or ""),
+        "meters": meters,
+        "accounts": accounts,
+    }
+
+
+# ---------------------------------------------------------------------------
 # GET /api/contracts/download/{site_code}/{filename}  (PUBLIC – no auth)
 # ---------------------------------------------------------------------------
 

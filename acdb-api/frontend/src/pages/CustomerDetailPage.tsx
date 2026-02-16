@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getRecord, updateRecord, deleteRecord, getCustomerContracts, getCustomerWithAccounts, type CommissionContract } from '../lib/api';
+import { getRecord, updateRecord, deleteRecord, getCustomerContracts, getCustomerWithAccounts, decommissionCustomer, type CommissionContract } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function CustomerDetailPage() {
@@ -12,6 +12,7 @@ export default function CustomerDetailPage() {
   const [saving, setSaving] = useState(false);
   const [contracts, setContracts] = useState<CommissionContract[]>([]);
   const [accountNumbers, setAccountNumbers] = useState<string[]>([]);
+  const [decommissioning, setDecommissioning] = useState(false);
   const { canWrite, isSuperadmin, user } = useAuth();
   const navigate = useNavigate();
 
@@ -75,16 +76,58 @@ export default function CustomerDetailPage() {
     }
   };
 
+  const handleDecommission = async () => {
+    if (!id) return;
+    const msg =
+      'Decommission customer ' + id + '?\n\n' +
+      'This sets DATE SERVICE TERMINATED to today.\n' +
+      'All meter, account, and transaction history is preserved.';
+    if (!confirm(msg)) return;
+    setDecommissioning(true);
+    setError('');
+    try {
+      const result = await decommissionCustomer(parseInt(id, 10));
+      alert(`Customer ${id} decommissioned (terminated ${result.terminated_date}). All records preserved.`);
+      // Refresh customer record to reflect new terminated status
+      const { record: r } = await getRecord('tblcustomer', id);
+      setRecord(r);
+      const fd: Record<string, string> = {};
+      for (const [k, v] of Object.entries(r)) {
+        fd[k] = v != null ? String(v) : '';
+      }
+      setFormData(fd);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setDecommissioning(false);
+    }
+  };
+
   if (error && !record) return <div className="text-center py-8 text-red-500">{error}</div>;
   if (!record) return <div className="text-center py-8 text-gray-400">Loading...</div>;
 
   const fields = Object.keys(record);
 
+  // Determine commissioning status from customer record
+  const connectedVal = record['DATE SERVICE CONNECTED'];
+  const terminatedVal = record['DATE SERVICE TERMINATED'];
+  const isConnected = connectedVal != null && String(connectedVal).trim() !== '';
+  const isTerminated = terminatedVal != null && String(terminatedVal).trim() !== '';
+  const isCommissioned = isConnected && !isTerminated;
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <h1 className="text-xl sm:text-2xl font-bold text-gray-800 truncate">Customer: {id}</h1>
-        <div className="flex gap-2 shrink-0">
+        <div className="flex items-center gap-3 min-w-0">
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-800 truncate">Customer: {id}</h1>
+          {isTerminated && (
+            <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-medium rounded-full shrink-0">Terminated</span>
+          )}
+          {isCommissioned && (
+            <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs font-medium rounded-full shrink-0">Active</span>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2 shrink-0">
           {canWrite && !editing && (
             <>
               <button onClick={() => setEditing(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Edit</button>
@@ -92,8 +135,20 @@ export default function CustomerDetailPage() {
                 onClick={() => navigate(`/customer-data?account=${accountNumbers[0] || id}`)}
                 className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700"
               >View Data</button>
-              <button onClick={() => navigate(`/assign-meter?customer=${id}`)} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700">Assign Meter</button>
-              <button onClick={() => navigate(`/commission?customer=${id}`)} className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700">Commission</button>
+              {isCommissioned ? (
+                <button
+                  onClick={handleDecommission}
+                  disabled={decommissioning}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 disabled:opacity-50"
+                >
+                  {decommissioning ? 'Decommissioning...' : 'Decommission'}
+                </button>
+              ) : (
+                <>
+                  <button onClick={() => navigate(`/assign-meter?customer=${id}`)} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700">Assign Meter</button>
+                  <button onClick={() => navigate(`/commission?customer=${id}`)} className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700">Commission</button>
+                </>
+              )}
             </>
           )}
           {editing && (
