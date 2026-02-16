@@ -1383,6 +1383,21 @@ def consumption_by_tenure(
                 if not rows:
                     continue
 
+                # Debug: compare account number formats
+                history_accts = set()
+                for row in rows:
+                    ha = str(row[0] or "").strip()
+                    if ha:
+                        history_accts.add(ha)
+                matched_accts = set(acct_meta.keys())
+                overlap = matched_accts & history_accts
+                logger.info(
+                    "consumption-by-tenure: %d matched accts, %d history accts, "
+                    "%d overlap. Samples matched=%s, history=%s",
+                    len(matched_accts), len(history_accts), len(overlap),
+                    sorted(matched_accts)[:5], sorted(history_accts)[:5],
+                )
+
                 # 3. Aggregate: type -> tenure_month -> {total_kwh, customers}
                 type_tenure_acct: Dict[str, Dict[int, Dict[str, float]]] = defaultdict(
                     lambda: defaultdict(lambda: defaultdict(float))
@@ -1480,6 +1495,12 @@ def consumption_by_tenure(
                     "total_accounts_matched": len(acct_meta),
                     "source_table": table,
                     "meter_source": meter_source,
+                    "debug": {
+                        "matched_sample": sorted(acct_meta.keys())[:5],
+                        "history_sample": sorted(history_accts)[:5],
+                        "overlap_count": len(overlap),
+                        "history_total": len(history_accts),
+                    },
                 }
 
             except Exception as e:
