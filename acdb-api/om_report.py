@@ -1360,10 +1360,12 @@ def consumption_by_tenure(
                             point[ctype] = round(mean, 2)
                             point[f"{ctype}_upper"] = round(mean + sd, 2)
                             point[f"{ctype}_lower"] = round(max(mean - sd, 0), 2)
+                            point[f"{ctype}_n"] = n
                         else:
                             point[ctype] = None
                             point[f"{ctype}_upper"] = None
                             point[f"{ctype}_lower"] = None
+                            point[f"{ctype}_n"] = 0
                     chart_data.append(point)
 
                 # Summary stats per type

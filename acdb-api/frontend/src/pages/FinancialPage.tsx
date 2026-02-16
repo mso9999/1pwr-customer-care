@@ -848,6 +848,8 @@ export default function FinancialPage() {
                   const lower = payload.find((p: any) => p.dataKey === `${selectedTenureType}_lower`)?.value;
                   if (!mean || mean.value == null) return null;
                   const sigma = upper != null && lower != null ? ((upper - lower) / 2).toFixed(1) : null;
+                  const dataPoint = tenureData!.chart_data[Number(label)] || {};
+                  const n = dataPoint[`${selectedTenureType}_n`];
                   return (
                     <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px 12px', fontSize: '12px' }}>
                       <p style={{ margin: '0 0 4px', fontWeight: 600, color: '#374151' }}>Month {label}</p>
@@ -855,6 +857,11 @@ export default function FinancialPage() {
                         <span style={{ fontWeight: 500 }}>{selectedTenureType}</span>: {Number(mean.value).toFixed(1)} kWh
                         {sigma != null && <span style={{ color: '#9ca3af' }}> (±{sigma}σ)</span>}
                       </p>
+                      {n != null && n > 0 && (
+                        <p style={{ margin: '2px 0', color: '#6b7280', fontSize: '11px' }}>
+                          n = {n} customer{n !== 1 ? 's' : ''}
+                        </p>
+                      )}
                     </div>
                   );
                 }}
