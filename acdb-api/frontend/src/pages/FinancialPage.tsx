@@ -817,15 +817,27 @@ export default function FinancialPage() {
           </div>
 
           <ResponsiveContainer width="100%" height={420}>
+            {(() => {
+              const d = tenureData.chart_data;
+              let lastIdx = 0;
+              for (let i = d.length - 1; i >= 0; i--) {
+                if (d[i][selectedTenureType] != null) { lastIdx = i; break; }
+              }
+              const sliced = d.slice(0, lastIdx + 1);
+
+              // Compute Y-axis cap from P90 of upper stddev values to avoid outlier months blowing up the scale
+              const upperVals = sliced
+                .map((p) => p[`${selectedTenureType}_upper`] as number)
+                .filter((v) => v != null && isFinite(v))
+                .sort((a, b) => a - b);
+              const p90 = upperVals.length > 0
+                ? upperVals[Math.floor(upperVals.length * 0.9)]
+                : undefined;
+              const yMax = p90 != null ? Math.ceil(p90 * 1.1) : undefined;
+
+              return (
             <ComposedChart
-              data={(() => {
-                const d = tenureData.chart_data;
-                let lastIdx = 0;
-                for (let i = d.length - 1; i >= 0; i--) {
-                  if (d[i][selectedTenureType] != null) { lastIdx = i; break; }
-                }
-                return d.slice(0, lastIdx + 1);
-              })()}
+              data={sliced}
               margin={{ top: 5, right: 30, left: 10, bottom: 40 }}
             >
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
@@ -841,6 +853,7 @@ export default function FinancialPage() {
               />
               <YAxis
                 tick={{ fontSize: 11 }}
+                domain={yMax != null ? [0, yMax] : [0, 'auto']}
                 label={{
                   value: 'Avg kWh / customer / month',
                   angle: -90,
@@ -908,6 +921,8 @@ export default function FinancialPage() {
                 connectNulls
               />
             </ComposedChart>
+              );
+            })()}
           </ResponsiveContainer>
 
           {/* Summary stats for selected type */}
