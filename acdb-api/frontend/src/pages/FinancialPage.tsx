@@ -223,8 +223,11 @@ export default function FinancialPage() {
         setData(arpu);
         setMonthlyData(monthly);
         setTenureData(tenure);
-        if (tenure && tenure.customer_types.length > 0) {
-          setSelectedTenureType(tenure.customer_types[0]);
+        if (tenure) {
+          console.log('[Fig6 debug]', JSON.stringify((tenure as any).debug ?? tenure, null, 2));
+          if (tenure.customer_types.length > 0) {
+            setSelectedTenureType(tenure.customer_types[0]);
+          }
         }
       } catch (e: any) {
         setError(e.message);

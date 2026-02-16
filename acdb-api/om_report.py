@@ -1286,16 +1286,27 @@ def consumption_by_tenure(
                 acct_type: Dict[str, str] = {}
                 parsed_rows: List[tuple] = []  # (acct, ctype, txn_dt, kwh)
 
+                total_rows = len(rows)
+                rows_with_meterid = 0
+                rows_matched_type = 0
+                unmatched_samples: List[str] = []
+
                 for row in rows:
                     mid = str(row[0] or "").strip()
                     acct = str(row[1] or "").strip()
                     if not acct:
                         continue
 
+                    if mid:
+                        rows_with_meterid += 1
+
                     ctype = _lookup_type(mid)
                     if not ctype:
+                        if mid and len(unmatched_samples) < 10:
+                            unmatched_samples.append(mid)
                         continue  # skip accounts without a known type
 
+                    rows_matched_type += 1
                     txn_dt = _parse_dt(row[2])
                     if txn_dt is None:
                         continue
@@ -1308,6 +1319,14 @@ def consumption_by_tenure(
                     acct_type[acct] = ctype
                     if acct not in acct_first_txn or txn_dt < acct_first_txn[acct]:
                         acct_first_txn[acct] = txn_dt
+
+                debug_info = {
+                    "total_rows": total_rows,
+                    "rows_with_meterid": rows_with_meterid,
+                    "rows_matched_type": rows_matched_type,
+                    "unique_accounts_matched": len(acct_first_txn),
+                    "unmatched_meterid_samples": unmatched_samples,
+                }
 
                 if not acct_first_txn:
                     continue
@@ -1397,6 +1416,7 @@ def consumption_by_tenure(
                     "source_table": table,
                     "segmentation": "customer_type",
                     "mapping_size": len(meter_type_map),
+                    "debug": debug_info,
                 }
 
             except Exception as e:
