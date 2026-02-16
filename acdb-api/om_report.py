@@ -1447,7 +1447,7 @@ def consumption_by_tenure(
             "type_stats": type_stats,
             "max_tenure_months": max_tenure,
             "total_accounts_matched": len(acct_first_txn),
-            "source_tables": tables_used,
+            "source_tables": list(all_table_rows.keys()),
             "segmentation": "customer_type",
             "mapping_size": len(meter_type_map),
             "debug": debug_info,
