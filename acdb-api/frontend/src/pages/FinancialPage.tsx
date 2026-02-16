@@ -786,7 +786,7 @@ export default function FinancialPage() {
         <Figure
           id="fig-consumption-tenure"
           title="Figure 6: Average Monthly Consumption by Tenure"
-          subtitle="Average kWh consumed per customer per month as a function of months since connection, by customer type"
+          subtitle="Average kWh consumed per customer per month as a function of tenure (months since first transaction), by customer type"
           figureRef={setFigRef('consumption-tenure')}
           onExport={handleExportFigure('consumption-tenure', 'Consumption_By_Tenure')}
         >

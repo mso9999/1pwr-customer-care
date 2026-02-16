@@ -1209,15 +1209,16 @@ def consumption_by_tenure(
 ):
     """
     Average monthly kWh consumption as a function of tenure (months since
-    connection), broken out by customer type.
+    first transaction), broken out by customer type.
 
-    Primary strategy: read accountnumber, customer type, AND
-    customer connect date directly from Copy Of tblmeter (all on one row).
-    Fallback: multi-table join through tblaccountnumbers → tblcustomer.
+    Uses each account's earliest transaction date as the tenure origin,
+    since DATE SERVICE CONNECTED is only populated for ~8 of 1343 customers.
+    This produces a reliable tenure metric for all accounts with history.
 
-    For each transaction, tenure_month = (txn_year - conn_year)*12 +
-    (txn_month - conn_month).  Returns average kWh per customer per
-    tenure month for each customer type.
+    Steps:
+      1. Meter registry → accountnumber → customer type
+      2. Account history → first-pass to find earliest txn date per account
+      3. Second-pass to aggregate kWh by tenure month per type
     """
     def _parse_date(dt) -> Optional[datetime]:
         """Try to parse a date value to datetime."""
@@ -1239,28 +1240,21 @@ def consumption_by_tenure(
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        # 1. Build accountnumber -> customer_type AND collect direct
-        #    connection dates from the meter registry.
+        # 1. Build accountnumber -> customer_type from meter registry
         acct_type: Dict[str, str] = {}
-        acct_direct_date: Dict[str, datetime] = {}
         meter_source = ""
-
         for meter_table in _METER_TABLES:
             try:
                 cursor.execute(
-                    f"SELECT [accountnumber], [customer type], [customer connect date] "
+                    f"SELECT [accountnumber], [customer type] "
                     f"FROM [{meter_table}] "
                     f"WHERE [customer type] IS NOT NULL AND [customer type] <> ''"
                 )
                 for row in cursor.fetchall():
                     acct = str(row[0] or "").strip()
                     ctype = str(row[1] or "").strip()
-                    if not acct or not ctype:
-                        continue
-                    acct_type[acct] = ctype
-                    dt = _parse_date(row[2])
-                    if dt is not None:
-                        acct_direct_date[acct] = dt
+                    if acct and ctype:
+                        acct_type[acct] = ctype
                 if acct_type:
                     meter_source = meter_table
                     break
@@ -1274,79 +1268,7 @@ def consumption_by_tenure(
                 "note": "No customer type data found in meter tables.",
             }
 
-        # 2. Build accountnumber -> connection_date via indirect path:
-        #    accountnumber -> customer_id -> tblcustomer.[DATE SERVICE CONNECTED]
-        #    Merge customer id from both meter table and tblaccountnumbers.
-        acct_custid: Dict[str, str] = {}
-        for mt in _METER_TABLES:
-            try:
-                cursor.execute(
-                    f"SELECT [accountnumber], [customer id] FROM [{mt}] "
-                    f"WHERE [customer id] IS NOT NULL AND [customer id] <> 0"
-                )
-                for row in cursor.fetchall():
-                    acct = str(row[0] or "").strip()
-                    cid = str(row[1] or "").strip()
-                    if acct and cid and cid != "0":
-                        acct_custid.setdefault(acct, cid)
-                if acct_custid:
-                    break
-            except Exception:
-                continue
-
-        try:
-            cursor.execute(
-                "SELECT [accountnumber], [customerid] FROM tblaccountnumbers "
-                "WHERE [customerid] IS NOT NULL AND [customerid] <> 0"
-            )
-            for row in cursor.fetchall():
-                acct = str(row[0] or "").strip()
-                cid = str(row[1] or "").strip()
-                if acct and cid and cid != "0":
-                    acct_custid.setdefault(acct, cid)
-        except Exception as e:
-            logger.warning("consumption-by-tenure: tblaccountnumbers: %s", e)
-
-        cust_conn: Dict[str, datetime] = {}
-        try:
-            cursor.execute(
-                "SELECT [CUSTOMER ID], [DATE SERVICE CONNECTED] FROM tblcustomer "
-                "WHERE [DATE SERVICE CONNECTED] IS NOT NULL"
-            )
-            for row in cursor.fetchall():
-                cid = str(row[0] or "").strip()
-                dt = _parse_date(row[1])
-                if cid and dt is not None:
-                    cust_conn[cid] = dt
-        except Exception as e:
-            logger.warning("consumption-by-tenure: tblcustomer: %s", e)
-
-        # 3. Combine: for each typed account, find connection date from
-        #    EITHER direct meter field OR indirect customer table path.
-        acct_meta: Dict[str, Dict[str, Any]] = {}
-        for acct, ctype in acct_type.items():
-            conn_date = acct_direct_date.get(acct)
-            if conn_date is None:
-                cid = acct_custid.get(acct)
-                if cid:
-                    conn_date = cust_conn.get(cid)
-            if conn_date is not None:
-                acct_meta[acct] = {"type": ctype, "conn_date": conn_date}
-
-        if not acct_meta:
-            return {
-                "chart_data": [], "customer_types": [],
-                "note": "No customers found with both customer type and connection date.",
-                "debug": {
-                    "meter_source": meter_source,
-                    "accounts_with_type": len(acct_type),
-                    "accounts_with_direct_date": len(acct_direct_date),
-                    "accounts_with_custid": len(acct_custid),
-                    "customers_with_connection_date": len(cust_conn),
-                },
-            }
-
-        # 2. Query account history
+        # 2. Query account history and derive tenure from first transaction
         tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
         for table in tables_to_try:
             try:
@@ -1361,80 +1283,66 @@ def consumption_by_tenure(
                 if not rows:
                     continue
 
-                # Debug: compare account number formats
-                history_accts = set()
-                for row in rows:
-                    ha = str(row[0] or "").strip()
-                    if ha:
-                        history_accts.add(ha)
-                matched_accts = set(acct_meta.keys())
-                overlap = matched_accts & history_accts
-                logger.info(
-                    "consumption-by-tenure: %d matched accts, %d history accts, "
-                    "%d overlap. Samples matched=%s, history=%s",
-                    len(matched_accts), len(history_accts), len(overlap),
-                    sorted(matched_accts)[:5], sorted(history_accts)[:5],
-                )
+                # First pass: find earliest transaction date per typed account
+                acct_first_txn: Dict[str, datetime] = {}
+                parsed_rows: List[tuple] = []
 
-                # 3. Aggregate: type -> tenure_month -> {total_kwh, customers}
+                for row in rows:
+                    acct = str(row[0] or "").strip()
+                    if acct not in acct_type:
+                        continue
+                    txn_dt = _parse_date(row[1])
+                    kwh_raw = row[2]
+                    if txn_dt is None:
+                        continue
+                    try:
+                        kwh = float(kwh_raw or 0)
+                    except (ValueError, TypeError):
+                        continue
+                    parsed_rows.append((acct, txn_dt, kwh))
+                    if acct not in acct_first_txn or txn_dt < acct_first_txn[acct]:
+                        acct_first_txn[acct] = txn_dt
+
+                if not acct_first_txn:
+                    continue
+
+                # Second pass: aggregate by type -> tenure_month -> acct
                 type_tenure_acct: Dict[str, Dict[int, Dict[str, float]]] = defaultdict(
                     lambda: defaultdict(lambda: defaultdict(float))
                 )
 
-                for row in rows:
-                    acct = str(row[0] or "").strip()
-                    meta = acct_meta.get(acct)
-                    if not meta:
+                for acct, txn_dt, kwh in parsed_rows:
+                    if kwh <= 0:
                         continue
-
-                    txn_dt = row[1]
-                    kwh = float(row[2] or 0)
-                    if txn_dt is None or kwh <= 0:
-                        continue
-
-                    # Parse transaction date
-                    if isinstance(txn_dt, str):
-                        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"):
-                            try:
-                                txn_dt = datetime.strptime(txn_dt.strip(), fmt)
-                                break
-                            except (ValueError, AttributeError):
-                                continue
-                        else:
-                            continue
-
-                    try:
-                        conn_date = meta["conn_date"]
-                        tenure_months = (
-                            (txn_dt.year - conn_date.year) * 12
-                            + (txn_dt.month - conn_date.month)
-                        )
-                    except (AttributeError, TypeError):
-                        continue
-
+                    first_dt = acct_first_txn[acct]
+                    tenure_months = (
+                        (txn_dt.year - first_dt.year) * 12
+                        + (txn_dt.month - first_dt.month)
+                    )
                     if tenure_months < 0:
                         continue
-
-                    ctype = meta["type"]
+                    ctype = acct_type[acct]
                     type_tenure_acct[ctype][tenure_months][acct] += kwh
 
-                # 4. Compute averages
+                # 3. Compute averages
                 all_types = sorted(type_tenure_acct.keys())
+                if not all_types:
+                    continue
+
                 max_tenure = 0
                 for ctype in all_types:
                     tenures = type_tenure_acct[ctype]
                     if tenures:
                         max_tenure = max(max_tenure, max(tenures.keys()))
 
-                # Cap at a reasonable max to avoid sparse tails
-                # Use P90 of tenure data to avoid very sparse outliers
+                # Cap at P95 of tenure data to avoid very sparse tails
                 all_tenures_seen: List[int] = []
                 for ctype in all_types:
                     all_tenures_seen.extend(type_tenure_acct[ctype].keys())
                 if all_tenures_seen:
                     all_tenures_seen.sort()
-                    p90_idx = int(len(all_tenures_seen) * 0.95)
-                    cap = all_tenures_seen[min(p90_idx, len(all_tenures_seen) - 1)]
+                    p95_idx = int(len(all_tenures_seen) * 0.95)
+                    cap = all_tenures_seen[min(p95_idx, len(all_tenures_seen) - 1)]
                     max_tenure = min(max_tenure, max(cap, 12))
 
                 chart_data = []
@@ -1470,19 +1378,9 @@ def consumption_by_tenure(
                     "customer_types": all_types,
                     "type_stats": type_stats,
                     "max_tenure_months": max_tenure,
-                    "total_accounts_matched": len(acct_meta),
+                    "total_accounts_matched": len(acct_first_txn),
                     "source_table": table,
                     "meter_source": meter_source,
-                    "debug": {
-                        "accounts_with_type": len(acct_type),
-                        "accounts_with_direct_date": len(acct_direct_date),
-                        "accounts_with_custid": len(acct_custid),
-                        "customers_with_conn_date": len(cust_conn),
-                        "matched_sample": sorted(acct_meta.keys())[:5],
-                        "history_sample": sorted(history_accts)[:5],
-                        "overlap_count": len(overlap),
-                        "history_total": len(history_accts),
-                    },
                 }
 
             except Exception as e:
