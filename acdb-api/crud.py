@@ -282,36 +282,48 @@ def _coerce_values(cursor, table_name: str, data: Dict[str, Any]) -> Dict[str, A
     - COUNTER (AutoNumber) columns are dropped (Access auto-generates).
     - INTEGER/SMALLINT: strip non-digits, clamp to 32-bit signed range.
       For phone columns, strip country code first (inferred from COUNTRY field).
-    - DOUBLE/REAL/FLOAT: parse as float.
+    - DOUBLE/REAL/FLOAT/CURRENCY: parse as float.
     - BIT: convert to bool.
     - DATETIME: pass through (pyodbc handles ISO strings).
+
+    Column name matching is case-insensitive (Access column names are
+    case-insensitive but cursor.columns() returns stored case).
     """
-    col_types: Dict[str, str] = {}
+    # Build case-insensitive column type map:
+    #   col_types_lower  = { "current balance": "CURRENCY", ... }
+    #   col_actual_name  = { "current balance": "Current Balance", ... }
+    col_types_lower: Dict[str, str] = {}
+    col_actual_name: Dict[str, str] = {}
     try:
         for col in cursor.columns(table=table_name):
-            col_types[col.column_name] = (col.type_name or "").upper()
+            lname = col.column_name.lower().strip()
+            col_types_lower[lname] = (col.type_name or "").upper()
+            col_actual_name[lname] = col.column_name
     except Exception:
         return data  # If introspection fails, pass through unchanged
 
     # Resolve country from the payload (for phone number handling)
-    country = str(data.get("COUNTRY", "") or "").strip()
+    country = str(data.get("COUNTRY", data.get("country", "")) or "").strip()
 
     coerced: Dict[str, Any] = {}
     for key, val in data.items():
-        col_type = col_types.get(key, "VARCHAR")
+        lkey = key.lower().strip()
+        col_type = col_types_lower.get(lkey, "VARCHAR")
+        # Use the ACCDB's actual column name so the SQL matches exactly
+        actual_key = col_actual_name.get(lkey, key)
 
         # Skip AutoNumber columns — Access generates these
         if col_type == "COUNTER":
             continue
 
         if val is None or (isinstance(val, str) and not val.strip()):
-            coerced[key] = None
+            coerced[actual_key] = None
             continue
 
         str_val = str(val).strip()
 
         if col_type in ("INTEGER", "SMALLINT", "SHORT"):
-            is_phone = key.lower().strip() in _PHONE_COLUMNS
+            is_phone = lkey in _PHONE_COLUMNS
 
             if is_phone and country:
                 # Strip country code so local number fits in INTEGER
@@ -321,35 +333,35 @@ def _coerce_values(cursor, table_name: str, data: Dict[str, Any]) -> Dict[str, A
                 digits = "".join(c for c in str_val if c.isdigit() or c == "-")
 
             if not digits or digits == "-":
-                coerced[key] = None
+                coerced[actual_key] = None
                 continue
             try:
                 num = int(digits)
                 # Access INTEGER is 32-bit signed: -2,147,483,648 to 2,147,483,647
                 if -2_147_483_648 <= num <= 2_147_483_647:
-                    coerced[key] = num
+                    coerced[actual_key] = num
                 else:
                     logger.warning(
                         "Skipping column [%s]: value %s overflows INTEGER even after "
                         "country-code stripping (country=%s)",
-                        key, num, country or "unknown",
+                        actual_key, num, country or "unknown",
                     )
                     continue
             except ValueError:
-                coerced[key] = None
+                coerced[actual_key] = None
 
-        elif col_type in ("DOUBLE", "REAL", "FLOAT", "NUMERIC", "DECIMAL"):
+        elif col_type in ("DOUBLE", "REAL", "FLOAT", "NUMERIC", "DECIMAL", "CURRENCY"):
             try:
-                coerced[key] = float(str_val)
+                coerced[actual_key] = float(str_val)
             except ValueError:
-                coerced[key] = None
+                coerced[actual_key] = None
 
         elif col_type == "BIT":
-            coerced[key] = str_val.lower() in ("1", "true", "yes")
+            coerced[actual_key] = str_val.lower() in ("1", "true", "yes")
 
         else:
             # VARCHAR, LONGCHAR, DATETIME, etc. — pass as string
-            coerced[key] = str_val
+            coerced[actual_key] = str_val
 
     return coerced
 
@@ -387,11 +399,17 @@ def create_record(
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Insert failed: {e}")
 
-        # Determine record ID for the log (use PK value if available)
+        # Determine record ID for the log (use PK value, case-insensitive)
         pk = _get_primary_key(conn, table_name)
-        rid = req.data.get(pk, "unknown") if pk else "unknown"
+        rid = "unknown"
+        if pk:
+            pk_lower = pk.lower()
+            for k, v in req.data.items():
+                if k.lower() == pk_lower:
+                    rid = str(v)
+                    break
 
-        log_mutation(user, "create", table_name, str(rid), new_values=req.data)
+        log_mutation(user, "create", table_name, rid, new_values=coerced)
 
         return {"message": "Record created", "table": table_name}
 
@@ -444,9 +462,9 @@ def update_record(
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Update failed: {e}")
 
-        # Build new_values by merging old with changed fields
+        # Build new_values by merging old with actually-written fields
         new_values = dict(old_values) if old_values else {}
-        new_values.update(req.data)
+        new_values.update(coerced)
         log_mutation(user, "update", table_name, record_id, old_values=old_values, new_values=new_values)
 
         return {"message": "Record updated", "table": table_name, "id": record_id}
