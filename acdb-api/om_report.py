@@ -1265,108 +1265,89 @@ def consumption_by_tenure(
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        # ── Pass 1: Build account → customer_type mapping ──
-        # Use SMRSD meter IDs from tblaccounthistory1 to learn which
-        # account numbers belong to which customer type.  This mapping
-        # then lets us tag rows in tblaccounthistoryOriginal (which uses
-        # legacy meter IDs that don't match the SMRSD lookup).
-        acct_type: Dict[str, str] = {}
+        # ── Load all table data into memory (single query per table) ──
         tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
-
+        all_table_rows: Dict[str, list] = {}
         for table in tables_to_try:
             try:
                 date_col = _find_date_column(cursor, table)
                 if not date_col:
                     continue
-                cursor.execute(
-                    f"SELECT [meterid], [accountnumber] FROM [{table}]"
-                )
-                for row in cursor.fetchall():
-                    mid = str(row[0] or "").strip()
-                    acct = str(row[1] or "").strip()
-                    if not acct or acct in acct_type:
-                        continue
-                    ctype = _lookup_type(mid)
-                    if ctype:
-                        acct_type[acct] = ctype
-            except Exception:
-                continue
-
-        # Also try case-insensitive matching (some accounts are lowercase)
-        acct_type_lower: Dict[str, str] = {k.lower(): v for k, v in acct_type.items()}
-
-        # ── Pass 2: Read all rows, resolve type via meter ID OR account ──
-        acct_first_txn: Dict[str, datetime] = {}
-        parsed_rows: List[tuple] = []  # (acct, ctype, txn_dt, kwh)
-
-        per_table_debug: Dict[str, Any] = {}
-        total_rows = 0
-
-        for table in tables_to_try:
-            try:
-                date_col = _find_date_column(cursor, table)
-                if not date_col:
-                    continue
-
                 cursor.execute(
                     f"SELECT [meterid], [accountnumber], [{date_col}], [kwh value] "
                     f"FROM [{table}]"
                 )
-                rows = cursor.fetchall()
-                if not rows:
-                    continue
-
-                total_rows += len(rows)
-                tbl_matched = 0
-                tbl_by_meter = 0
-                tbl_by_acct = 0
-                tbl_unmatched = 0
-
-                for row in rows:
-                    mid = str(row[0] or "").strip()
-                    acct = str(row[1] or "").strip()
-                    if not acct:
-                        continue
-
-                    # Try meter ID first, then fall back to account number
-                    ctype = _lookup_type(mid) if mid else None
-                    match_method = "meter"
-                    if not ctype:
-                        ctype = acct_type.get(acct) or acct_type_lower.get(acct.lower())
-                        match_method = "account"
-                    if not ctype:
-                        tbl_unmatched += 1
-                        continue
-
-                    if match_method == "meter":
-                        tbl_by_meter += 1
-                    else:
-                        tbl_by_acct += 1
-                    tbl_matched += 1
-
-                    txn_dt = _parse_dt(row[2])
-                    if txn_dt is None:
-                        continue
-                    try:
-                        kwh = float(row[3] or 0)
-                    except (ValueError, TypeError):
-                        continue
-
-                    parsed_rows.append((acct, ctype, txn_dt, kwh))
-                    if acct not in acct_first_txn or txn_dt < acct_first_txn[acct]:
-                        acct_first_txn[acct] = txn_dt
-
-                per_table_debug[table] = {
-                    "rows": len(rows),
-                    "matched": tbl_matched,
-                    "by_meter": tbl_by_meter,
-                    "by_account": tbl_by_acct,
-                    "unmatched": tbl_unmatched,
-                }
-
+                all_table_rows[table] = cursor.fetchall()
             except Exception as e:
                 logger.warning("Failed to read %s for tenure: %s", table, e)
-                continue
+
+        # ── Pass 1: Build account → customer_type from SMRSD meter IDs ──
+        acct_type: Dict[str, str] = {}
+        for _table, rows in all_table_rows.items():
+            for row in rows:
+                mid = str(row[0] or "").strip()
+                acct = str(row[1] or "").strip()
+                if not acct or acct in acct_type:
+                    continue
+                ctype = _lookup_type(mid)
+                if ctype:
+                    acct_type[acct] = ctype
+
+        acct_type_lower: Dict[str, str] = {k.lower(): v for k, v in acct_type.items()}
+
+        # ── Pass 2: Resolve type via meter ID OR account number fallback ──
+        acct_first_txn: Dict[str, datetime] = {}
+        parsed_rows: List[tuple] = []
+        per_table_debug: Dict[str, Any] = {}
+        total_rows = 0
+
+        for table, rows in all_table_rows.items():
+            total_rows += len(rows)
+            tbl_matched = 0
+            tbl_by_meter = 0
+            tbl_by_acct = 0
+            tbl_unmatched = 0
+
+            for row in rows:
+                mid = str(row[0] or "").strip()
+                acct = str(row[1] or "").strip()
+                if not acct:
+                    continue
+
+                ctype = _lookup_type(mid) if mid else None
+                match_method = "meter"
+                if not ctype:
+                    ctype = acct_type.get(acct) or acct_type_lower.get(acct.lower())
+                    match_method = "account"
+                if not ctype:
+                    tbl_unmatched += 1
+                    continue
+
+                if match_method == "meter":
+                    tbl_by_meter += 1
+                else:
+                    tbl_by_acct += 1
+                tbl_matched += 1
+
+                txn_dt = _parse_dt(row[2])
+                if txn_dt is None:
+                    continue
+                try:
+                    kwh = float(row[3] or 0)
+                except (ValueError, TypeError):
+                    continue
+
+                parsed_rows.append((acct, ctype, txn_dt, kwh))
+                if acct not in acct_first_txn or txn_dt < acct_first_txn[acct]:
+                    acct_first_txn[acct] = txn_dt
+
+            per_table_debug[table] = {
+                "rows": len(rows),
+                "matched": tbl_matched,
+                "by_meter": tbl_by_meter,
+                "by_account": tbl_by_acct,
+                "unmatched": tbl_unmatched,
+            }
 
         debug_info = {
             "acct_type_map_size": len(acct_type),
