@@ -17,16 +17,68 @@ const COLORS = [
 ];
 
 // ---------------------------------------------------------------------------
+// oklch → hex resolver (html2canvas cannot parse oklch color functions)
+// ---------------------------------------------------------------------------
+
+const _colorCtx = document.createElement('canvas').getContext('2d')!;
+
+function resolveColor(raw: string): string {
+  if (!raw || raw === 'transparent' || raw === 'rgba(0, 0, 0, 0)') return raw;
+  if (!raw.includes('oklch') && !raw.includes('color(')) return raw;
+  _colorCtx.fillStyle = '#000000';
+  _colorCtx.fillStyle = raw;
+  return _colorCtx.fillStyle;
+}
+
+const COLOR_PROPS: (keyof CSSStyleDeclaration)[] = [
+  'color', 'backgroundColor', 'borderColor',
+  'borderTopColor', 'borderRightColor', 'borderBottomColor', 'borderLeftColor',
+  'outlineColor',
+] as any;
+
+function fixOklchColors(root: HTMLElement): Array<{ el: HTMLElement; prop: string; original: string }> {
+  const overrides: Array<{ el: HTMLElement; prop: string; original: string }> = [];
+  const all = [root, ...Array.from(root.querySelectorAll('*'))] as HTMLElement[];
+  for (const el of all) {
+    const cs = window.getComputedStyle(el);
+    for (const prop of COLOR_PROPS) {
+      const val = cs[prop] as string;
+      if (val && (val.includes('oklch') || val.includes('color('))) {
+        const resolved = resolveColor(val);
+        overrides.push({ el, prop: prop as string, original: el.style.getPropertyValue(prop as string) });
+        (el.style as any)[prop] = resolved;
+      }
+    }
+  }
+  return overrides;
+}
+
+function restoreStyles(overrides: Array<{ el: HTMLElement; prop: string; original: string }>) {
+  for (const { el, prop, original } of overrides) {
+    if (original) {
+      (el.style as any)[prop] = original;
+    } else {
+      el.style.removeProperty(prop.replace(/[A-Z]/g, m => '-' + m.toLowerCase()));
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // PDF Export Utilities (reused pattern from OMReportPage)
 // ---------------------------------------------------------------------------
 
 async function captureElement(el: HTMLElement): Promise<HTMLCanvasElement> {
-  return html2canvas(el, {
-    scale: 2,
-    useCORS: true,
-    backgroundColor: '#ffffff',
-    logging: false,
-  });
+  const overrides = fixOklchColors(el);
+  try {
+    return await html2canvas(el, {
+      scale: 2,
+      useCORS: true,
+      backgroundColor: '#ffffff',
+      logging: false,
+    });
+  } finally {
+    restoreStyles(overrides);
+  }
 }
 
 async function exportSingleFigure(el: HTMLElement, title: string) {
@@ -165,7 +217,7 @@ export default function FinancialPage() {
         const [arpu, monthly, tenure] = await Promise.all([
           getARPU(),
           getMonthlyARPU().catch(() => null),
-          getConsumptionByTenure().catch(() => null),
+          getConsumptionByTenure().catch((e) => { console.warn('Consumption-by-tenure failed:', e); return null; }),
         ]);
         setData(arpu);
         setMonthlyData(monthly);
