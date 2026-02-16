@@ -1443,9 +1443,12 @@ def consumption_by_tenure(
         # n(t) = customers with tenure >= t  (monotonically decreasing).
         # Average & stddev use ONLY customers with actual consumption data
         # at month t (no zero-fill -- absence of a reading ≠ zero consumption).
+        # Stop the x-axis at the last month with valid data (>= 3 customers).
         chart_data = []
+        last_valid_t = 0
         for t in range(max_tenure + 1):
             point: Dict[str, Any] = {"tenure_month": t}
+            has_any_data = False
             for ctype in all_types:
                 n_eligible = sum(
                     1 for ten in type_acct_tenure.get(ctype, {}).values()
@@ -1459,6 +1462,7 @@ def consumption_by_tenure(
                     point[f"{ctype}_lower"] = None
                     point[f"{ctype}_n"] = n_eligible
                 else:
+                    has_any_data = True
                     n_data = len(values)
                     mean = sum(values) / n_data
                     if n_data > 1:
@@ -1471,6 +1475,12 @@ def consumption_by_tenure(
                     point[f"{ctype}_lower"] = round(max(mean - sd, 0), 2)
                     point[f"{ctype}_n"] = n_eligible
             chart_data.append(point)
+            if has_any_data:
+                last_valid_t = t
+
+        # Trim chart to last month with valid data
+        chart_data = chart_data[: last_valid_t + 1]
+        max_tenure = last_valid_t
 
         # Summary stats per type
         type_stats = []
