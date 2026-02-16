@@ -199,6 +199,7 @@ export default function FinancialPage() {
   const [data, setData] = useState<ARPUResponse | null>(null);
   const [monthlyData, setMonthlyData] = useState<MonthlyARPUResponse | null>(null);
   const [tenureData, setTenureData] = useState<ConsumptionByTenureResponse | null>(null);
+  const [selectedTenureType, setSelectedTenureType] = useState<string>('');
 
   // Figure refs for PDF export
   const figRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -222,6 +223,9 @@ export default function FinancialPage() {
         setData(arpu);
         setMonthlyData(monthly);
         setTenureData(tenure);
+        if (tenure && tenure.customer_types.length > 0) {
+          setSelectedTenureType(tenure.customer_types[0]);
+        }
       } catch (e: any) {
         setError(e.message);
       } finally {
@@ -782,14 +786,33 @@ export default function FinancialPage() {
       </Figure>
 
       {/* ── Figure 6: Average Consumption by Tenure ── */}
-      {tenureData && tenureData.chart_data && tenureData.chart_data.length > 0 && tenureData.customer_types.length > 0 && (
+      {tenureData && tenureData.chart_data && tenureData.chart_data.length > 0 && tenureData.customer_types.length > 0 && selectedTenureType && (
         <Figure
           id="fig-consumption-tenure"
           title="Figure 6: Average Monthly Consumption by Tenure"
-          subtitle="Average kWh consumed per customer per month as a function of tenure (months since first transaction), by customer type. Dashed lines show ±1 standard deviation."
+          subtitle="Average kWh consumed per customer per month as a function of tenure (months since first transaction). Dashed lines show ±1 standard deviation."
           figureRef={setFigRef('consumption-tenure')}
           onExport={handleExportFigure('consumption-tenure', 'Consumption_By_Tenure')}
         >
+          {/* Customer type selector */}
+          <div className="flex items-center gap-3 mb-4">
+            <label className="text-sm font-medium text-gray-600">Customer Type:</label>
+            <select
+              value={selectedTenureType}
+              onChange={(e) => setSelectedTenureType(e.target.value)}
+              className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none"
+            >
+              {tenureData.customer_types.map((ctype) => {
+                const stat = tenureData.type_stats?.find((s) => s.type === ctype);
+                return (
+                  <option key={ctype} value={ctype}>
+                    {ctype}{stat ? ` (${stat.customer_count} customers)` : ''}
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+
           <ResponsiveContainer width="100%" height={420}>
             <ComposedChart
               data={tenureData.chart_data}
@@ -820,105 +843,77 @@ export default function FinancialPage() {
                 contentStyle={{ borderRadius: '8px', fontSize: '12px' }}
                 content={({ active, payload, label }: any) => {
                   if (!active || !payload || !payload.length) return null;
-                  const meanEntries = payload.filter(
-                    (p: any) => !String(p.dataKey).endsWith('_upper') && !String(p.dataKey).endsWith('_lower')
-                  );
+                  const mean = payload.find((p: any) => p.dataKey === selectedTenureType);
+                  const upper = payload.find((p: any) => p.dataKey === `${selectedTenureType}_upper`)?.value;
+                  const lower = payload.find((p: any) => p.dataKey === `${selectedTenureType}_lower`)?.value;
+                  if (!mean || mean.value == null) return null;
+                  const sigma = upper != null && lower != null ? ((upper - lower) / 2).toFixed(1) : null;
                   return (
                     <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px 12px', fontSize: '12px' }}>
                       <p style={{ margin: '0 0 4px', fontWeight: 600, color: '#374151' }}>Month {label}</p>
-                      {meanEntries.map((entry: any) => {
-                        if (entry.value == null) return null;
-                        const upper = payload.find((p: any) => p.dataKey === `${entry.dataKey}_upper`)?.value;
-                        const lower = payload.find((p: any) => p.dataKey === `${entry.dataKey}_lower`)?.value;
-                        const sigma = upper != null && lower != null ? ((upper - lower) / 2).toFixed(1) : null;
-                        return (
-                          <p key={entry.dataKey} style={{ margin: '2px 0', color: entry.stroke }}>
-                            <span style={{ fontWeight: 500 }}>{entry.name}</span>: {Number(entry.value).toFixed(1)} kWh
-                            {sigma != null && <span style={{ color: '#9ca3af' }}> (±{sigma}σ)</span>}
-                          </p>
-                        );
-                      })}
+                      <p style={{ margin: '2px 0', color: COLORS[0] }}>
+                        <span style={{ fontWeight: 500 }}>{selectedTenureType}</span>: {Number(mean.value).toFixed(1)} kWh
+                        {sigma != null && <span style={{ color: '#9ca3af' }}> (±{sigma}σ)</span>}
+                      </p>
                     </div>
                   );
                 }}
               />
-              <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '12px' }} />
-              {tenureData.customer_types.flatMap((ctype, i) => [
-                <Line
-                  key={`${ctype}_upper`}
-                  dataKey={`${ctype}_upper`}
-                  stroke={COLORS[i % COLORS.length]}
-                  strokeWidth={1}
-                  strokeDasharray="4 3"
-                  strokeOpacity={0.35}
-                  dot={false}
-                  activeDot={false}
-                  legendType="none"
-                  connectNulls
-                />,
-                <Line
-                  key={`${ctype}_lower`}
-                  dataKey={`${ctype}_lower`}
-                  stroke={COLORS[i % COLORS.length]}
-                  strokeWidth={1}
-                  strokeDasharray="4 3"
-                  strokeOpacity={0.35}
-                  dot={false}
-                  activeDot={false}
-                  legendType="none"
-                  connectNulls
-                />,
-                <Line
-                  key={ctype}
-                  dataKey={ctype}
-                  name={ctype}
-                  stroke={COLORS[i % COLORS.length]}
-                  strokeWidth={2.5}
-                  dot={{ r: 3, fill: COLORS[i % COLORS.length] }}
-                  activeDot={{ r: 6 }}
-                  connectNulls
-                />,
-              ])}
+              <Line
+                dataKey={`${selectedTenureType}_upper`}
+                stroke={COLORS[0]}
+                strokeWidth={1}
+                strokeDasharray="4 3"
+                strokeOpacity={0.35}
+                dot={false}
+                activeDot={false}
+                legendType="none"
+                connectNulls
+              />
+              <Line
+                dataKey={`${selectedTenureType}_lower`}
+                stroke={COLORS[0]}
+                strokeWidth={1}
+                strokeDasharray="4 3"
+                strokeOpacity={0.35}
+                dot={false}
+                activeDot={false}
+                legendType="none"
+                connectNulls
+              />
+              <Line
+                dataKey={selectedTenureType}
+                name={selectedTenureType}
+                stroke={COLORS[0]}
+                strokeWidth={2.5}
+                dot={{ r: 3, fill: COLORS[0] }}
+                activeDot={{ r: 6 }}
+                connectNulls
+              />
             </ComposedChart>
           </ResponsiveContainer>
 
-          {/* Summary table */}
-          {tenureData.type_stats && tenureData.type_stats.length > 0 && (
-            <div className="mt-4 overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead className="bg-gray-50 border-b">
-                  <tr>
-                    <th className="px-3 py-2 text-left font-medium text-gray-600">Customer Type</th>
-                    <th className="px-3 py-2 text-right font-medium text-gray-600">Customers</th>
-                    <th className="px-3 py-2 text-right font-medium text-gray-600">Total kWh</th>
-                    <th className="px-3 py-2 text-right font-medium text-gray-600">Max Tenure (months)</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {tenureData.type_stats.map((s, i) => (
-                    <tr key={s.type} className="hover:bg-gray-50">
-                      <td className="px-3 py-1.5">
-                        <span
-                          className="inline-block w-3 h-3 rounded-sm mr-2"
-                          style={{ backgroundColor: COLORS[i % COLORS.length] }}
-                        />
-                        <span className="font-semibold">{s.type}</span>
-                      </td>
-                      <td className="px-3 py-1.5 text-right text-gray-700 tabular-nums">
-                        {s.customer_count.toLocaleString()}
-                      </td>
-                      <td className="px-3 py-1.5 text-right text-gray-700 tabular-nums">
-                        {Math.round(s.total_kwh).toLocaleString()}
-                      </td>
-                      <td className="px-3 py-1.5 text-right text-gray-700 tabular-nums">
-                        {s.max_tenure_months}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          {/* Summary stats for selected type */}
+          {tenureData.type_stats && (() => {
+            const stat = tenureData.type_stats!.find((s) => s.type === selectedTenureType);
+            if (!stat) return null;
+            return (
+              <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
+                <div className="bg-gray-50 rounded-lg p-3 text-center">
+                  <p className="text-xs font-medium text-gray-500 uppercase">Customers</p>
+                  <p className="text-lg font-bold text-gray-800 tabular-nums">{stat.customer_count.toLocaleString()}</p>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-3 text-center">
+                  <p className="text-xs font-medium text-gray-500 uppercase">Total kWh</p>
+                  <p className="text-lg font-bold text-gray-800 tabular-nums">{Math.round(stat.total_kwh).toLocaleString()}</p>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-3 text-center">
+                  <p className="text-xs font-medium text-gray-500 uppercase">Max Tenure</p>
+                  <p className="text-lg font-bold text-gray-800 tabular-nums">{stat.max_tenure_months} months</p>
+                </div>
+              </div>
+            );
+          })()}
         </Figure>
       )}
 
