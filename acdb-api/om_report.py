@@ -1334,19 +1334,13 @@ def consumption_by_tenure(
                 if not all_types:
                     continue
 
-                # Compute max tenure, capped at P95
+                # Compute max tenure across all types (no artificial cap --
+                # the frontend shows one type at a time via dropdown)
                 max_tenure = 0
-                all_tenures_seen: List[int] = []
                 for ctype in all_types:
                     tenures = type_tenure_acct[ctype]
                     if tenures:
                         max_tenure = max(max_tenure, max(tenures.keys()))
-                        all_tenures_seen.extend(tenures.keys())
-                if all_tenures_seen:
-                    all_tenures_seen.sort()
-                    p95_idx = int(len(all_tenures_seen) * 0.95)
-                    cap = all_tenures_seen[min(p95_idx, len(all_tenures_seen) - 1)]
-                    max_tenure = min(max_tenure, max(cap, 12))
 
                 # Build chart_data with mean, upper, lower for each type
                 chart_data = []
