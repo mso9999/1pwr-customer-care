@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import {
-  Line, LineChart, BarChart, Bar, ComposedChart,
+  Line, BarChart, Bar, ComposedChart,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
   Cell,
 } from 'recharts';
@@ -786,12 +786,12 @@ export default function FinancialPage() {
         <Figure
           id="fig-consumption-tenure"
           title="Figure 6: Average Monthly Consumption by Tenure"
-          subtitle="Average kWh consumed per customer per month as a function of tenure (months since first transaction), by concession site"
+          subtitle="Average kWh consumed per customer per month as a function of tenure (months since first transaction), by customer type. Dashed lines show ±1 standard deviation."
           figureRef={setFigRef('consumption-tenure')}
           onExport={handleExportFigure('consumption-tenure', 'Consumption_By_Tenure')}
         >
           <ResponsiveContainer width="100%" height={420}>
-            <LineChart
+            <ComposedChart
               data={tenureData.chart_data}
               margin={{ top: 5, right: 30, left: 10, bottom: 40 }}
             >
@@ -800,7 +800,7 @@ export default function FinancialPage() {
                 dataKey="tenure_month"
                 tick={{ fontSize: 11 }}
                 label={{
-                  value: 'Tenure (months since connection)',
+                  value: 'Tenure (months since first transaction)',
                   position: 'insideBottom',
                   offset: -25,
                   style: { fontSize: 12, fill: '#6b7280' },
@@ -818,13 +818,56 @@ export default function FinancialPage() {
               />
               <Tooltip
                 contentStyle={{ borderRadius: '8px', fontSize: '12px' }}
-                formatter={(value: any, name: any) =>
-                  value != null ? [`${Number(value).toFixed(1)} kWh`, name] : ['—', name]
-                }
-                labelFormatter={(label) => `Month ${label}`}
+                content={({ active, payload, label }: any) => {
+                  if (!active || !payload || !payload.length) return null;
+                  const meanEntries = payload.filter(
+                    (p: any) => !String(p.dataKey).endsWith('_upper') && !String(p.dataKey).endsWith('_lower')
+                  );
+                  return (
+                    <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px 12px', fontSize: '12px' }}>
+                      <p style={{ margin: '0 0 4px', fontWeight: 600, color: '#374151' }}>Month {label}</p>
+                      {meanEntries.map((entry: any) => {
+                        if (entry.value == null) return null;
+                        const upper = payload.find((p: any) => p.dataKey === `${entry.dataKey}_upper`)?.value;
+                        const lower = payload.find((p: any) => p.dataKey === `${entry.dataKey}_lower`)?.value;
+                        const sigma = upper != null && lower != null ? ((upper - lower) / 2).toFixed(1) : null;
+                        return (
+                          <p key={entry.dataKey} style={{ margin: '2px 0', color: entry.stroke }}>
+                            <span style={{ fontWeight: 500 }}>{entry.name}</span>: {Number(entry.value).toFixed(1)} kWh
+                            {sigma != null && <span style={{ color: '#9ca3af' }}> (±{sigma}σ)</span>}
+                          </p>
+                        );
+                      })}
+                    </div>
+                  );
+                }}
               />
               <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '12px' }} />
-              {tenureData.customer_types.map((ctype, i) => (
+              {tenureData.customer_types.flatMap((ctype, i) => [
+                <Line
+                  key={`${ctype}_upper`}
+                  dataKey={`${ctype}_upper`}
+                  stroke={COLORS[i % COLORS.length]}
+                  strokeWidth={1}
+                  strokeDasharray="4 3"
+                  strokeOpacity={0.35}
+                  dot={false}
+                  activeDot={false}
+                  legendType="none"
+                  connectNulls
+                />,
+                <Line
+                  key={`${ctype}_lower`}
+                  dataKey={`${ctype}_lower`}
+                  stroke={COLORS[i % COLORS.length]}
+                  strokeWidth={1}
+                  strokeDasharray="4 3"
+                  strokeOpacity={0.35}
+                  dot={false}
+                  activeDot={false}
+                  legendType="none"
+                  connectNulls
+                />,
                 <Line
                   key={ctype}
                   dataKey={ctype}
@@ -834,9 +877,9 @@ export default function FinancialPage() {
                   dot={{ r: 3, fill: COLORS[i % COLORS.length] }}
                   activeDot={{ r: 6 }}
                   connectNulls
-                />
-              ))}
-            </LineChart>
+                />,
+              ])}
+            </ComposedChart>
           </ResponsiveContainer>
 
           {/* Summary table */}

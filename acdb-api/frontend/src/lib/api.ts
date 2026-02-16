@@ -893,14 +893,15 @@ export interface ConsumptionByTenureTypeStat {
 }
 
 export interface ConsumptionByTenureResponse {
+  /** Each point has tenure_month plus, for each type T: T (mean), T_upper (mean+sd), T_lower (mean-sd) */
   chart_data: Record<string, any>[];
   customer_types: string[];
   type_stats?: ConsumptionByTenureTypeStat[];
   max_tenure_months?: number;
   total_accounts_matched?: number;
   source_table?: string;
-  meter_source?: string;
-  note?: string;
+  segmentation?: string;
+  mapping_size?: number;
   error?: string;
 }
 
