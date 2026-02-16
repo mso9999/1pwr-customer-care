@@ -1388,18 +1388,22 @@ def consumption_by_tenure(
                 "debug": debug_info,
             }
 
-        # Compute each account's max observed tenure month (per type)
-        # so n(t) = accounts with max_tenure >= t (monotonically decreasing)
-        type_acct_max_tenure: Dict[str, Dict[str, int]] = defaultdict(dict)
+        # Compute each account's tenure as months from first txn to NOW.
+        # Tenure is time since connection, not time since last transaction.
+        # n(t) = accounts with tenure >= t (monotonically decreasing).
+        now = datetime.now()
+        type_acct_tenure: Dict[str, Dict[str, int]] = defaultdict(dict)
         max_tenure = 0
-        for ctype in all_types:
-            for t_month, acct_dict in type_tenure_acct[ctype].items():
-                for acct in acct_dict:
-                    prev = type_acct_max_tenure[ctype].get(acct, -1)
-                    if t_month > prev:
-                        type_acct_max_tenure[ctype][acct] = t_month
-                if t_month > max_tenure:
-                    max_tenure = t_month
+        for acct, ctype in acct_type.items():
+            if acct not in acct_first_txn:
+                continue
+            first_dt = acct_first_txn[acct]
+            tenure = (now.year - first_dt.year) * 12 + (now.month - first_dt.month)
+            if tenure < 0:
+                continue
+            type_acct_tenure[ctype][acct] = tenure
+            if tenure > max_tenure:
+                max_tenure = tenure
 
         # Build chart_data with monotonically decreasing n
         chart_data = []
@@ -1407,8 +1411,8 @@ def consumption_by_tenure(
             point: Dict[str, Any] = {"tenure_month": t}
             for ctype in all_types:
                 eligible = [
-                    acct for acct, mt in type_acct_max_tenure[ctype].items()
-                    if mt >= t
+                    acct for acct, ten in type_acct_tenure.get(ctype, {}).items()
+                    if ten >= t
                 ]
                 n = len(eligible)
                 if n == 0:
