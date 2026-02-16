@@ -818,7 +818,14 @@ export default function FinancialPage() {
 
           <ResponsiveContainer width="100%" height={420}>
             <ComposedChart
-              data={tenureData.chart_data}
+              data={(() => {
+                const d = tenureData.chart_data;
+                let lastIdx = 0;
+                for (let i = d.length - 1; i >= 0; i--) {
+                  if (d[i][selectedTenureType] != null) { lastIdx = i; break; }
+                }
+                return d.slice(0, lastIdx + 1);
+              })()}
               margin={{ top: 5, right: 30, left: 10, bottom: 40 }}
             >
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
