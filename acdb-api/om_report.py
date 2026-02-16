@@ -1453,7 +1453,7 @@ def consumption_by_tenure(
                 )
                 acct_kwh = type_tenure_acct[ctype].get(t, {})
                 values = list(acct_kwh.values())
-                if not values:
+                if len(values) < 3:
                     point[ctype] = None
                     point[f"{ctype}_upper"] = None
                     point[f"{ctype}_lower"] = None
