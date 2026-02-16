@@ -1219,12 +1219,30 @@ def consumption_by_tenure(
     (txn_month - conn_month).  Returns average kWh per customer per
     tenure month for each customer type.
     """
+    def _parse_date(dt) -> Optional[datetime]:
+        """Try to parse a date value to datetime."""
+        if dt is None:
+            return None
+        if isinstance(dt, str):
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"):
+                try:
+                    return datetime.strptime(dt.strip(), fmt)
+                except (ValueError, AttributeError):
+                    continue
+            return None
+        try:
+            _ = dt.year
+            return dt
+        except (AttributeError, TypeError):
+            return None
+
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        # 1. Build accountnumber -> (customer_type, connection_date) directly
-        #    from the meter registry which has all three fields on one row.
-        acct_meta: Dict[str, Dict[str, Any]] = {}
+        # 1. Build accountnumber -> customer_type AND collect direct
+        #    connection dates from the meter registry.
+        acct_type: Dict[str, str] = {}
+        acct_direct_date: Dict[str, datetime] = {}
         meter_source = ""
 
         for meter_table in _METER_TABLES:
@@ -1237,126 +1255,82 @@ def consumption_by_tenure(
                 for row in cursor.fetchall():
                     acct = str(row[0] or "").strip()
                     ctype = str(row[1] or "").strip()
-                    dt = row[2]
                     if not acct or not ctype:
                         continue
-
+                    acct_type[acct] = ctype
+                    dt = _parse_date(row[2])
                     if dt is not None:
-                        if isinstance(dt, str):
-                            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"):
-                                try:
-                                    dt = datetime.strptime(dt.strip(), fmt)
-                                    break
-                                except (ValueError, AttributeError):
-                                    continue
-                            else:
-                                dt = None
-                        try:
-                            _ = dt.year  # type: ignore[union-attr]
-                        except (AttributeError, TypeError):
-                            dt = None
-
-                    if dt is not None:
-                        acct_meta[acct] = {"type": ctype, "conn_date": dt}
-
-                if acct_meta:
+                        acct_direct_date[acct] = dt
+                if acct_type:
                     meter_source = meter_table
                     break
             except Exception as e:
-                logger.warning("consumption-by-tenure: direct read from %s failed: %s", meter_table, e)
+                logger.warning("consumption-by-tenure: meter table %s: %s", meter_table, e)
                 continue
 
-        # Fallback: multi-table join if direct approach yielded nothing
-        if not acct_meta:
-            acct_type: Dict[str, str] = {}
-            for meter_table in _METER_TABLES:
-                try:
-                    cursor.execute(
-                        f"SELECT [accountnumber], [customer type] "
-                        f"FROM [{meter_table}] "
-                        f"WHERE [customer type] IS NOT NULL AND [customer type] <> ''"
-                    )
-                    for row in cursor.fetchall():
-                        acct = str(row[0] or "").strip()
-                        ctype = str(row[1] or "").strip()
-                        if acct and ctype:
-                            acct_type[acct] = ctype
-                    if acct_type:
-                        meter_source = meter_table
-                        break
-                except Exception:
-                    continue
+        if not acct_type:
+            return {
+                "chart_data": [], "customer_types": [],
+                "note": "No customer type data found in meter tables.",
+            }
 
-            if not acct_type:
-                return {
-                    "chart_data": [], "customer_types": [],
-                    "note": "No customer type data found in meter tables.",
-                }
-
-            # Merge accountnumber → customerid from BOTH sources
-            acct_custid: Dict[str, str] = {}
-            for mt in _METER_TABLES:
-                try:
-                    cursor.execute(
-                        f"SELECT [accountnumber], [customer id] FROM [{mt}] "
-                        f"WHERE [customer id] IS NOT NULL AND [customer id] <> 0"
-                    )
-                    for row in cursor.fetchall():
-                        acct = str(row[0] or "").strip()
-                        cid = str(row[1] or "").strip()
-                        if acct and cid and cid != "0":
-                            acct_custid.setdefault(acct, cid)
-                    if acct_custid:
-                        break
-                except Exception:
-                    continue
-
+        # 2. Build accountnumber -> connection_date via indirect path:
+        #    accountnumber -> customer_id -> tblcustomer.[DATE SERVICE CONNECTED]
+        #    Merge customer id from both meter table and tblaccountnumbers.
+        acct_custid: Dict[str, str] = {}
+        for mt in _METER_TABLES:
             try:
                 cursor.execute(
-                    "SELECT [accountnumber], [customerid] FROM tblaccountnumbers "
-                    "WHERE [customerid] IS NOT NULL AND [customerid] <> 0"
+                    f"SELECT [accountnumber], [customer id] FROM [{mt}] "
+                    f"WHERE [customer id] IS NOT NULL AND [customer id] <> 0"
                 )
                 for row in cursor.fetchall():
                     acct = str(row[0] or "").strip()
                     cid = str(row[1] or "").strip()
                     if acct and cid and cid != "0":
                         acct_custid.setdefault(acct, cid)
-            except Exception as e:
-                logger.warning("consumption-by-tenure: tblaccountnumbers: %s", e)
+                if acct_custid:
+                    break
+            except Exception:
+                continue
 
-            # customer_id → connection_date from tblcustomer
-            cust_conn: Dict[str, datetime] = {}
+        try:
+            cursor.execute(
+                "SELECT [accountnumber], [customerid] FROM tblaccountnumbers "
+                "WHERE [customerid] IS NOT NULL AND [customerid] <> 0"
+            )
+            for row in cursor.fetchall():
+                acct = str(row[0] or "").strip()
+                cid = str(row[1] or "").strip()
+                if acct and cid and cid != "0":
+                    acct_custid.setdefault(acct, cid)
+        except Exception as e:
+            logger.warning("consumption-by-tenure: tblaccountnumbers: %s", e)
+
+        cust_conn: Dict[str, datetime] = {}
+        try:
             cursor.execute(
                 "SELECT [CUSTOMER ID], [DATE SERVICE CONNECTED] FROM tblcustomer "
                 "WHERE [DATE SERVICE CONNECTED] IS NOT NULL"
             )
             for row in cursor.fetchall():
                 cid = str(row[0] or "").strip()
-                dt = row[1]
-                if not cid or dt is None:
-                    continue
-                if isinstance(dt, str):
-                    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"):
-                        try:
-                            dt = datetime.strptime(dt.strip(), fmt)
-                            break
-                        except (ValueError, AttributeError):
-                            continue
-                    else:
-                        continue
-                try:
-                    _ = dt.year
+                dt = _parse_date(row[1])
+                if cid and dt is not None:
                     cust_conn[cid] = dt
-                except AttributeError:
-                    continue
+        except Exception as e:
+            logger.warning("consumption-by-tenure: tblcustomer: %s", e)
 
-            for acct, ctype in acct_type.items():
+        # 3. Combine: for each typed account, find connection date from
+        #    EITHER direct meter field OR indirect customer table path.
+        acct_meta: Dict[str, Dict[str, Any]] = {}
+        for acct, ctype in acct_type.items():
+            conn_date = acct_direct_date.get(acct)
+            if conn_date is None:
                 cid = acct_custid.get(acct)
-                if not cid:
-                    continue
-                conn_date = cust_conn.get(cid)
-                if conn_date is None:
-                    continue
+                if cid:
+                    conn_date = cust_conn.get(cid)
+            if conn_date is not None:
                 acct_meta[acct] = {"type": ctype, "conn_date": conn_date}
 
         if not acct_meta:
@@ -1365,6 +1339,10 @@ def consumption_by_tenure(
                 "note": "No customers found with both customer type and connection date.",
                 "debug": {
                     "meter_source": meter_source,
+                    "accounts_with_type": len(acct_type),
+                    "accounts_with_direct_date": len(acct_direct_date),
+                    "accounts_with_custid": len(acct_custid),
+                    "customers_with_connection_date": len(cust_conn),
                 },
             }
 
@@ -1496,6 +1474,10 @@ def consumption_by_tenure(
                     "source_table": table,
                     "meter_source": meter_source,
                     "debug": {
+                        "accounts_with_type": len(acct_type),
+                        "accounts_with_direct_date": len(acct_direct_date),
+                        "accounts_with_custid": len(acct_custid),
+                        "customers_with_conn_date": len(cust_conn),
                         "matched_sample": sorted(acct_meta.keys())[:5],
                         "history_sample": sorted(history_accts)[:5],
                         "overlap_count": len(overlap),
