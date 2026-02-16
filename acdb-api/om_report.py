@@ -1405,34 +1405,37 @@ def consumption_by_tenure(
             if tenure > max_tenure:
                 max_tenure = tenure
 
-        # Build chart_data with monotonically decreasing n
+        # Build chart_data.
+        # n(t) = customers with tenure >= t  (monotonically decreasing).
+        # Average & stddev use ONLY customers with actual consumption data
+        # at month t (no zero-fill -- absence of a reading ≠ zero consumption).
         chart_data = []
         for t in range(max_tenure + 1):
             point: Dict[str, Any] = {"tenure_month": t}
             for ctype in all_types:
-                eligible = [
-                    acct for acct, ten in type_acct_tenure.get(ctype, {}).items()
+                n_eligible = sum(
+                    1 for ten in type_acct_tenure.get(ctype, {}).values()
                     if ten >= t
-                ]
-                n = len(eligible)
-                if n == 0:
+                )
+                acct_kwh = type_tenure_acct[ctype].get(t, {})
+                values = list(acct_kwh.values())
+                if not values:
                     point[ctype] = None
                     point[f"{ctype}_upper"] = None
                     point[f"{ctype}_lower"] = None
-                    point[f"{ctype}_n"] = 0
+                    point[f"{ctype}_n"] = n_eligible
                 else:
-                    acct_kwh = type_tenure_acct[ctype].get(t, {})
-                    values = [acct_kwh.get(acct, 0.0) for acct in eligible]
-                    mean = sum(values) / n
-                    if n > 1:
-                        variance = sum((v - mean) ** 2 for v in values) / n
+                    n_data = len(values)
+                    mean = sum(values) / n_data
+                    if n_data > 1:
+                        variance = sum((v - mean) ** 2 for v in values) / n_data
                         sd = math.sqrt(variance)
                     else:
                         sd = 0.0
                     point[ctype] = round(mean, 2)
                     point[f"{ctype}_upper"] = round(mean + sd, 2)
                     point[f"{ctype}_lower"] = round(max(mean - sd, 0), 2)
-                    point[f"{ctype}_n"] = n
+                    point[f"{ctype}_n"] = n_eligible
             chart_data.append(point)
 
         # Summary stats per type
