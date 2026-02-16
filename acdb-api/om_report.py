@@ -1388,22 +1388,37 @@ def consumption_by_tenure(
                 "debug": debug_info,
             }
 
-        # Compute max tenure across all types
+        # Compute each account's max observed tenure month (per type)
+        # so n(t) = accounts with max_tenure >= t (monotonically decreasing)
+        type_acct_max_tenure: Dict[str, Dict[str, int]] = defaultdict(dict)
         max_tenure = 0
         for ctype in all_types:
-            tenures = type_tenure_acct[ctype]
-            if tenures:
-                max_tenure = max(max_tenure, max(tenures.keys()))
+            for t_month, acct_dict in type_tenure_acct[ctype].items():
+                for acct in acct_dict:
+                    prev = type_acct_max_tenure[ctype].get(acct, -1)
+                    if t_month > prev:
+                        type_acct_max_tenure[ctype][acct] = t_month
+                if t_month > max_tenure:
+                    max_tenure = t_month
 
-        # Build chart_data with mean, upper, lower, n for each type
+        # Build chart_data with monotonically decreasing n
         chart_data = []
         for t in range(max_tenure + 1):
             point: Dict[str, Any] = {"tenure_month": t}
             for ctype in all_types:
-                acct_kwh = type_tenure_acct[ctype].get(t, {})
-                if acct_kwh:
-                    values = list(acct_kwh.values())
-                    n = len(values)
+                eligible = [
+                    acct for acct, mt in type_acct_max_tenure[ctype].items()
+                    if mt >= t
+                ]
+                n = len(eligible)
+                if n == 0:
+                    point[ctype] = None
+                    point[f"{ctype}_upper"] = None
+                    point[f"{ctype}_lower"] = None
+                    point[f"{ctype}_n"] = 0
+                else:
+                    acct_kwh = type_tenure_acct[ctype].get(t, {})
+                    values = [acct_kwh.get(acct, 0.0) for acct in eligible]
                     mean = sum(values) / n
                     if n > 1:
                         variance = sum((v - mean) ** 2 for v in values) / n
@@ -1414,11 +1429,6 @@ def consumption_by_tenure(
                     point[f"{ctype}_upper"] = round(mean + sd, 2)
                     point[f"{ctype}_lower"] = round(max(mean - sd, 0), 2)
                     point[f"{ctype}_n"] = n
-                else:
-                    point[ctype] = None
-                    point[f"{ctype}_upper"] = None
-                    point[f"{ctype}_lower"] = None
-                    point[f"{ctype}_n"] = 0
             chart_data.append(point)
 
         # Summary stats per type
