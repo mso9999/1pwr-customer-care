@@ -1273,7 +1273,7 @@ def consumption_by_tenure(
         total_rows = 0
         rows_with_meterid = 0
         rows_matched_type = 0
-        unmatched_samples: List[str] = []
+        per_table_debug: Dict[str, Any] = {}
         tables_used: List[str] = []
 
         tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
@@ -1293,6 +1293,10 @@ def consumption_by_tenure(
 
                 tables_used.append(f"{table}({len(rows)})")
                 total_rows += len(rows)
+                tbl_matched = 0
+                tbl_with_mid = 0
+                tbl_unmatched: List[str] = []
+                tbl_acct_samples: List[str] = []
 
                 for row in rows:
                     mid = str(row[0] or "").strip()
@@ -1301,14 +1305,18 @@ def consumption_by_tenure(
                         continue
 
                     if mid:
+                        tbl_with_mid += 1
                         rows_with_meterid += 1
 
                     ctype = _lookup_type(mid)
                     if not ctype:
-                        if mid and len(unmatched_samples) < 10:
-                            unmatched_samples.append(mid)
+                        if mid and len(tbl_unmatched) < 5:
+                            tbl_unmatched.append(mid)
+                        if not mid and len(tbl_acct_samples) < 5:
+                            tbl_acct_samples.append(acct)
                         continue
 
+                    tbl_matched += 1
                     rows_matched_type += 1
                     txn_dt = _parse_dt(row[2])
                     if txn_dt is None:
@@ -1323,17 +1331,24 @@ def consumption_by_tenure(
                     if acct not in acct_first_txn or txn_dt < acct_first_txn[acct]:
                         acct_first_txn[acct] = txn_dt
 
+                per_table_debug[table] = {
+                    "rows": len(rows),
+                    "with_meterid": tbl_with_mid,
+                    "matched": tbl_matched,
+                    "unmatched_mid_samples": tbl_unmatched,
+                    "no_mid_acct_samples": tbl_acct_samples,
+                }
+
             except Exception as e:
                 logger.warning("Failed to read %s for tenure: %s", table, e)
                 continue
 
         debug_info = {
-            "tables_used": tables_used,
+            "tables": per_table_debug,
             "total_rows": total_rows,
             "rows_with_meterid": rows_with_meterid,
             "rows_matched_type": rows_matched_type,
             "unique_accounts_matched": len(acct_first_txn),
-            "unmatched_meterid_samples": unmatched_samples,
         }
 
         if not acct_first_txn:
