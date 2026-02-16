@@ -1281,8 +1281,42 @@ def consumption_by_tenure(
             except Exception as e:
                 logger.warning("Failed to read %s for tenure: %s", table, e)
 
-        # ── Pass 1: Build account → customer_type from SMRSD meter IDs ──
+        # ── Build account → customer_type mapping (multiple sources) ──
         acct_type: Dict[str, str] = {}
+
+        # Source 1: ACCDB meter tables (direct accountnumber → customer type)
+        for meter_table in _METER_TABLES:
+            try:
+                cursor.execute(
+                    f"SELECT [accountnumber], [customer type] FROM [{meter_table}] "
+                    f"WHERE [customer type] IS NOT NULL AND [customer type] <> ''"
+                )
+                for row in cursor.fetchall():
+                    acct = str(row[0] or "").strip()
+                    ctype = str(row[1] or "").strip()
+                    if acct and ctype and acct not in acct_type:
+                        acct_type[acct] = ctype
+            except Exception:
+                continue
+
+        # Source 2: ACCDB meter tables (meterid → accountnumber, cross-ref JSON)
+        for meter_table in _METER_TABLES:
+            try:
+                cursor.execute(
+                    f"SELECT [meterid], [accountnumber] FROM [{meter_table}]"
+                )
+                for row in cursor.fetchall():
+                    mid = str(row[0] or "").strip()
+                    acct = str(row[1] or "").strip()
+                    if not acct or acct in acct_type:
+                        continue
+                    ctype = _lookup_type(mid)
+                    if ctype:
+                        acct_type[acct] = ctype
+            except Exception:
+                continue
+
+        # Source 3: History table rows (meter ID → account, for any stragglers)
         for _table, rows in all_table_rows.items():
             for row in rows:
                 mid = str(row[0] or "").strip()
