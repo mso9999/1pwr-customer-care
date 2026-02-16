@@ -1200,7 +1200,7 @@ def _date_to_quarter_from_month(month_str: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 13. Average Consumption by Tenure (months since connection)
+# 13. Average Consumption by Tenure (months since first transaction)
 # ---------------------------------------------------------------------------
 
 @router.get("/consumption-by-tenure")
@@ -1209,19 +1209,17 @@ def consumption_by_tenure(
 ):
     """
     Average monthly kWh consumption as a function of tenure (months since
-    first transaction), broken out by customer type.
+    first transaction), segmented by concession site.
 
-    Uses each account's earliest transaction date as the tenure origin,
-    since DATE SERVICE CONNECTED is only populated for ~8 of 1343 customers.
-    This produces a reliable tenure metric for all accounts with history.
+    Customer type (HH, SME, etc.) exists only in the legacy meter registry
+    which covers pilot sites that don't overlap with current SMP transaction
+    data.  tblcustomer has no customer type column.  We segment by site
+    (last 3 chars of accountnumber) which is available for every transaction.
 
-    Steps:
-      1. Meter registry → accountnumber → customer type
-      2. Account history → first-pass to find earliest txn date per account
-      3. Second-pass to aggregate kWh by tenure month per type
+    Tenure origin: each account's earliest transaction date (since
+    DATE SERVICE CONNECTED is only populated for ~8 of 1343 customers).
     """
-    def _parse_date(dt) -> Optional[datetime]:
-        """Try to parse a date value to datetime."""
+    def _parse_dt(dt) -> Optional[datetime]:
         if dt is None:
             return None
         if isinstance(dt, str):
@@ -1240,35 +1238,6 @@ def consumption_by_tenure(
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        # 1. Build accountnumber -> customer_type from meter registry
-        acct_type: Dict[str, str] = {}
-        meter_source = ""
-        for meter_table in _METER_TABLES:
-            try:
-                cursor.execute(
-                    f"SELECT [accountnumber], [customer type] "
-                    f"FROM [{meter_table}] "
-                    f"WHERE [customer type] IS NOT NULL AND [customer type] <> ''"
-                )
-                for row in cursor.fetchall():
-                    acct = str(row[0] or "").strip()
-                    ctype = str(row[1] or "").strip()
-                    if acct and ctype:
-                        acct_type[acct] = ctype
-                if acct_type:
-                    meter_source = meter_table
-                    break
-            except Exception as e:
-                logger.warning("consumption-by-tenure: meter table %s: %s", meter_table, e)
-                continue
-
-        if not acct_type:
-            return {
-                "chart_data": [], "customer_types": [],
-                "note": "No customer type data found in meter tables.",
-            }
-
-        # 2. Query account history and derive tenure from first transaction
         tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
         for table in tables_to_try:
             try:
@@ -1283,35 +1252,39 @@ def consumption_by_tenure(
                 if not rows:
                     continue
 
-                # First pass: find earliest transaction date per typed account
+                # First pass: parse rows, derive site, find earliest txn
                 acct_first_txn: Dict[str, datetime] = {}
+                acct_site: Dict[str, str] = {}
                 parsed_rows: List[tuple] = []
 
                 for row in rows:
                     acct = str(row[0] or "").strip()
-                    if acct not in acct_type:
+                    if not acct:
                         continue
-                    txn_dt = _parse_date(row[1])
-                    kwh_raw = row[2]
+                    site = _extract_site(acct)
+                    if not site or len(site) < 2:
+                        continue
+                    txn_dt = _parse_dt(row[1])
                     if txn_dt is None:
                         continue
                     try:
-                        kwh = float(kwh_raw or 0)
+                        kwh = float(row[2] or 0)
                     except (ValueError, TypeError):
                         continue
-                    parsed_rows.append((acct, txn_dt, kwh))
+                    parsed_rows.append((acct, site, txn_dt, kwh))
+                    acct_site[acct] = site
                     if acct not in acct_first_txn or txn_dt < acct_first_txn[acct]:
                         acct_first_txn[acct] = txn_dt
 
                 if not acct_first_txn:
                     continue
 
-                # Second pass: aggregate by type -> tenure_month -> acct
-                type_tenure_acct: Dict[str, Dict[int, Dict[str, float]]] = defaultdict(
+                # Second pass: aggregate by site -> tenure_month -> acct
+                site_tenure_acct: Dict[str, Dict[int, Dict[str, float]]] = defaultdict(
                     lambda: defaultdict(lambda: defaultdict(float))
                 )
 
-                for acct, txn_dt, kwh in parsed_rows:
+                for acct, site, txn_dt, kwh in parsed_rows:
                     if kwh <= 0:
                         continue
                     first_dt = acct_first_txn[acct]
@@ -1321,53 +1294,54 @@ def consumption_by_tenure(
                     )
                     if tenure_months < 0:
                         continue
-                    ctype = acct_type[acct]
-                    type_tenure_acct[ctype][tenure_months][acct] += kwh
+                    site_tenure_acct[site][tenure_months][acct] += kwh
 
-                # 3. Compute averages
-                all_types = sorted(type_tenure_acct.keys())
-                if not all_types:
+                all_sites = sorted(site_tenure_acct.keys())
+                if not all_sites:
                     continue
 
+                # Compute max tenure, capped at P95
                 max_tenure = 0
-                for ctype in all_types:
-                    tenures = type_tenure_acct[ctype]
+                all_tenures_seen: List[int] = []
+                for site in all_sites:
+                    tenures = site_tenure_acct[site]
                     if tenures:
                         max_tenure = max(max_tenure, max(tenures.keys()))
-
-                # Cap at P95 of tenure data to avoid very sparse tails
-                all_tenures_seen: List[int] = []
-                for ctype in all_types:
-                    all_tenures_seen.extend(type_tenure_acct[ctype].keys())
+                        all_tenures_seen.extend(tenures.keys())
                 if all_tenures_seen:
                     all_tenures_seen.sort()
                     p95_idx = int(len(all_tenures_seen) * 0.95)
                     cap = all_tenures_seen[min(p95_idx, len(all_tenures_seen) - 1)]
                     max_tenure = min(max_tenure, max(cap, 12))
 
+                site_label = {s: SITE_ABBREV.get(s, s) for s in all_sites}
+                labels = [site_label[s] for s in all_sites]
+
                 chart_data = []
                 for t in range(max_tenure + 1):
                     point: Dict[str, Any] = {"tenure_month": t}
-                    for ctype in all_types:
-                        acct_kwh = type_tenure_acct[ctype].get(t, {})
+                    for site in all_sites:
+                        lbl = site_label[site]
+                        acct_kwh = site_tenure_acct[site].get(t, {})
                         if acct_kwh:
-                            avg_kwh = sum(acct_kwh.values()) / len(acct_kwh)
-                            point[ctype] = round(avg_kwh, 2)
+                            point[lbl] = round(
+                                sum(acct_kwh.values()) / len(acct_kwh), 2
+                            )
                         else:
-                            point[ctype] = None
+                            point[lbl] = None
                     chart_data.append(point)
 
-                # Summary stats per type
                 type_stats = []
-                for ctype in all_types:
-                    all_accts = set()
+                for site in all_sites:
+                    lbl = site_label[site]
+                    all_accts: set = set()
                     total_kwh = 0.0
-                    for t_data in type_tenure_acct[ctype].values():
+                    for t_data in site_tenure_acct[site].values():
                         all_accts.update(t_data.keys())
                         total_kwh += sum(t_data.values())
-                    max_t = max(type_tenure_acct[ctype].keys()) if type_tenure_acct[ctype] else 0
+                    max_t = max(site_tenure_acct[site].keys()) if site_tenure_acct[site] else 0
                     type_stats.append({
-                        "type": ctype,
+                        "type": lbl,
                         "customer_count": len(all_accts),
                         "total_kwh": round(total_kwh, 2),
                         "max_tenure_months": max_t,
@@ -1375,12 +1349,12 @@ def consumption_by_tenure(
 
                 return {
                     "chart_data": chart_data,
-                    "customer_types": all_types,
+                    "customer_types": labels,
                     "type_stats": type_stats,
                     "max_tenure_months": max_tenure,
                     "total_accounts_matched": len(acct_first_txn),
                     "source_table": table,
-                    "meter_source": meter_source,
+                    "segmentation": "site",
                 }
 
             except Exception as e:
