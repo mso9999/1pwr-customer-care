@@ -1265,6 +1265,17 @@ def consumption_by_tenure(
     with _get_connection() as conn:
         cursor = conn.cursor()
 
+        # ── Merge rows from ALL history tables ──
+        acct_first_txn: Dict[str, datetime] = {}
+        acct_type: Dict[str, str] = {}
+        parsed_rows: List[tuple] = []  # (acct, ctype, txn_dt, kwh)
+
+        total_rows = 0
+        rows_with_meterid = 0
+        rows_matched_type = 0
+        unmatched_samples: List[str] = []
+        tables_used: List[str] = []
+
         tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
         for table in tables_to_try:
             try:
@@ -1272,7 +1283,6 @@ def consumption_by_tenure(
                 if not date_col:
                     continue
 
-                # Include meterid for customer-type join
                 cursor.execute(
                     f"SELECT [meterid], [accountnumber], [{date_col}], [kwh value] "
                     f"FROM [{table}]"
@@ -1281,15 +1291,8 @@ def consumption_by_tenure(
                 if not rows:
                     continue
 
-                # First pass: parse rows, resolve type, find earliest txn per account
-                acct_first_txn: Dict[str, datetime] = {}
-                acct_type: Dict[str, str] = {}
-                parsed_rows: List[tuple] = []  # (acct, ctype, txn_dt, kwh)
-
-                total_rows = len(rows)
-                rows_with_meterid = 0
-                rows_matched_type = 0
-                unmatched_samples: List[str] = []
+                tables_used.append(f"{table}({len(rows)})")
+                total_rows += len(rows)
 
                 for row in rows:
                     mid = str(row[0] or "").strip()
@@ -1304,7 +1307,7 @@ def consumption_by_tenure(
                     if not ctype:
                         if mid and len(unmatched_samples) < 10:
                             unmatched_samples.append(mid)
-                        continue  # skip accounts without a known type
+                        continue
 
                     rows_matched_type += 1
                     txn_dt = _parse_dt(row[2])
@@ -1320,112 +1323,114 @@ def consumption_by_tenure(
                     if acct not in acct_first_txn or txn_dt < acct_first_txn[acct]:
                         acct_first_txn[acct] = txn_dt
 
-                debug_info = {
-                    "total_rows": total_rows,
-                    "rows_with_meterid": rows_with_meterid,
-                    "rows_matched_type": rows_matched_type,
-                    "unique_accounts_matched": len(acct_first_txn),
-                    "unmatched_meterid_samples": unmatched_samples,
-                }
-
-                if not acct_first_txn:
-                    continue
-
-                # Second pass: aggregate by type -> tenure_month -> acct
-                # Each leaf holds total kWh for that account in that tenure month
-                type_tenure_acct: Dict[str, Dict[int, Dict[str, float]]] = defaultdict(
-                    lambda: defaultdict(lambda: defaultdict(float))
-                )
-
-                for acct, ctype, txn_dt, kwh in parsed_rows:
-                    if kwh <= 0:
-                        continue
-                    first_dt = acct_first_txn[acct]
-                    tenure_months = (
-                        (txn_dt.year - first_dt.year) * 12
-                        + (txn_dt.month - first_dt.month)
-                    )
-                    if tenure_months < 0:
-                        continue
-                    type_tenure_acct[ctype][tenure_months][acct] += kwh
-
-                all_types = sorted(type_tenure_acct.keys())
-                if not all_types:
-                    continue
-
-                # Compute max tenure across all types (no artificial cap --
-                # the frontend shows one type at a time via dropdown)
-                max_tenure = 0
-                for ctype in all_types:
-                    tenures = type_tenure_acct[ctype]
-                    if tenures:
-                        max_tenure = max(max_tenure, max(tenures.keys()))
-
-                # Build chart_data with mean, upper, lower for each type
-                chart_data = []
-                for t in range(max_tenure + 1):
-                    point: Dict[str, Any] = {"tenure_month": t}
-                    for ctype in all_types:
-                        acct_kwh = type_tenure_acct[ctype].get(t, {})
-                        if acct_kwh:
-                            values = list(acct_kwh.values())
-                            n = len(values)
-                            mean = sum(values) / n
-                            if n > 1:
-                                variance = sum((v - mean) ** 2 for v in values) / n
-                                sd = math.sqrt(variance)
-                            else:
-                                sd = 0.0
-                            point[ctype] = round(mean, 2)
-                            point[f"{ctype}_upper"] = round(mean + sd, 2)
-                            point[f"{ctype}_lower"] = round(max(mean - sd, 0), 2)
-                            point[f"{ctype}_n"] = n
-                        else:
-                            point[ctype] = None
-                            point[f"{ctype}_upper"] = None
-                            point[f"{ctype}_lower"] = None
-                            point[f"{ctype}_n"] = 0
-                    chart_data.append(point)
-
-                # Summary stats per type
-                type_stats = []
-                for ctype in all_types:
-                    all_accts: set = set()
-                    total_kwh = 0.0
-                    for t_data in type_tenure_acct[ctype].values():
-                        all_accts.update(t_data.keys())
-                        total_kwh += sum(t_data.values())
-                    max_t = (
-                        max(type_tenure_acct[ctype].keys())
-                        if type_tenure_acct[ctype]
-                        else 0
-                    )
-                    type_stats.append({
-                        "type": ctype,
-                        "customer_count": len(all_accts),
-                        "total_kwh": round(total_kwh, 2),
-                        "max_tenure_months": max_t,
-                    })
-
-                return {
-                    "chart_data": chart_data,
-                    "customer_types": all_types,
-                    "type_stats": type_stats,
-                    "max_tenure_months": max_tenure,
-                    "total_accounts_matched": len(acct_first_txn),
-                    "source_table": table,
-                    "segmentation": "customer_type",
-                    "mapping_size": len(meter_type_map),
-                    "debug": debug_info,
-                }
-
             except Exception as e:
-                logger.warning("Failed to compute consumption-by-tenure from %s: %s", table, e)
+                logger.warning("Failed to read %s for tenure: %s", table, e)
                 continue
 
+        debug_info = {
+            "tables_used": tables_used,
+            "total_rows": total_rows,
+            "rows_with_meterid": rows_with_meterid,
+            "rows_matched_type": rows_matched_type,
+            "unique_accounts_matched": len(acct_first_txn),
+            "unmatched_meterid_samples": unmatched_samples,
+        }
+
+        if not acct_first_txn:
+            return {
+                "chart_data": [], "customer_types": [],
+                "error": "No account history data found",
+                "debug": debug_info,
+            }
+
+        # ── Aggregate by type -> tenure_month -> acct ──
+        type_tenure_acct: Dict[str, Dict[int, Dict[str, float]]] = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(float))
+        )
+
+        for acct, ctype, txn_dt, kwh in parsed_rows:
+            if kwh <= 0:
+                continue
+            first_dt = acct_first_txn[acct]
+            tenure_months = (
+                (txn_dt.year - first_dt.year) * 12
+                + (txn_dt.month - first_dt.month)
+            )
+            if tenure_months < 0:
+                continue
+            type_tenure_acct[ctype][tenure_months][acct] += kwh
+
+        all_types = sorted(type_tenure_acct.keys())
+        if not all_types:
+            return {
+                "chart_data": [], "customer_types": [],
+                "error": "No typed tenure data after aggregation",
+                "debug": debug_info,
+            }
+
+        # Compute max tenure across all types
+        max_tenure = 0
+        for ctype in all_types:
+            tenures = type_tenure_acct[ctype]
+            if tenures:
+                max_tenure = max(max_tenure, max(tenures.keys()))
+
+        # Build chart_data with mean, upper, lower, n for each type
+        chart_data = []
+        for t in range(max_tenure + 1):
+            point: Dict[str, Any] = {"tenure_month": t}
+            for ctype in all_types:
+                acct_kwh = type_tenure_acct[ctype].get(t, {})
+                if acct_kwh:
+                    values = list(acct_kwh.values())
+                    n = len(values)
+                    mean = sum(values) / n
+                    if n > 1:
+                        variance = sum((v - mean) ** 2 for v in values) / n
+                        sd = math.sqrt(variance)
+                    else:
+                        sd = 0.0
+                    point[ctype] = round(mean, 2)
+                    point[f"{ctype}_upper"] = round(mean + sd, 2)
+                    point[f"{ctype}_lower"] = round(max(mean - sd, 0), 2)
+                    point[f"{ctype}_n"] = n
+                else:
+                    point[ctype] = None
+                    point[f"{ctype}_upper"] = None
+                    point[f"{ctype}_lower"] = None
+                    point[f"{ctype}_n"] = 0
+            chart_data.append(point)
+
+        # Summary stats per type
+        type_stats = []
+        for ctype in all_types:
+            all_accts: set = set()
+            total_kwh = 0.0
+            for t_data in type_tenure_acct[ctype].values():
+                all_accts.update(t_data.keys())
+                total_kwh += sum(t_data.values())
+            max_t = (
+                max(type_tenure_acct[ctype].keys())
+                if type_tenure_acct[ctype]
+                else 0
+            )
+            type_stats.append({
+                "type": ctype,
+                "customer_count": len(all_accts),
+                "total_kwh": round(total_kwh, 2),
+                "max_tenure_months": max_t,
+            })
+
         return {
-            "chart_data": [], "customer_types": [],
-            "error": "No account history data found",
+            "chart_data": chart_data,
+            "customer_types": all_types,
+            "type_stats": type_stats,
+            "max_tenure_months": max_tenure,
+            "total_accounts_matched": len(acct_first_txn),
+            "source_tables": tables_used,
+            "segmentation": "customer_type",
+            "mapping_size": len(meter_type_map),
+            "debug": debug_info,
         }
 
 
