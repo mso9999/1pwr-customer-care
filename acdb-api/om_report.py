@@ -19,7 +19,7 @@ import math
 import os
 from collections import defaultdict
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from fastapi import APIRouter, Depends, Query
 
@@ -1498,12 +1498,40 @@ def consumption_by_tenure(
                 return ct
             return _lookup_type(acct)
 
-        # ── Try primary source: tblmonthlyconsumption (actual meter readings) ──
-        data_source = "vended"
+        # ── Merge ALL data sources for comprehensive tenure analysis ──
+        # History tables are the comprehensive base (1000+ customers, 4+ years).
+        # Consumption data (tblmonthlyconsumption) overlays actual meter readings
+        # for account-months where it exists.  Consumption takes priority over
+        # vended kWh for overlapping (account, month) pairs.
         existing_tables = {
             t.table_name.lower()
             for t in cursor.tables(tableType="TABLE")
         }
+
+        # Build meter_serial → accountnumber map to normalise consumption IDs
+        # so that the same physical customer uses a single key across sources.
+        meter_to_acct: Dict[str, str] = {}
+        for meter_table in _METER_TABLES:
+            try:
+                cursor.execute(
+                    f"SELECT [meterid], [accountnumber] FROM [{meter_table}]"
+                )
+                for row in cursor.fetchall():
+                    mid = str(row[0] or "").strip()
+                    a = str(row[1] or "").strip()
+                    if mid and a:
+                        meter_to_acct[mid] = a
+                        meter_to_acct[mid.upper()] = a
+            except Exception:
+                continue
+
+        parsed_rows: List[tuple] = []
+        acct_first_txn: Dict[str, datetime] = {}
+        debug_info: Dict[str, Any] = {"acct_type_map_size": len(acct_type)}
+
+        # ── Source 1: tblmonthlyconsumption (actual meter readings) ──
+        # Loaded first so consumption takes priority for overlapping data.
+        consumption_acct_months: Set[Tuple[str, str]] = set()
         consumption_rows: List[tuple] = []
 
         if "tblmonthlyconsumption" in existing_tables:
@@ -1516,184 +1544,138 @@ def consumption_by_tenure(
             except Exception as e:
                 logger.warning("Failed to query tblmonthlyconsumption: %s", e)
 
-        if consumption_rows:
-            # ── Primary path: actual meter consumption data ──
-            data_source = "consumption"
-            acct_first_reading: Dict[str, datetime] = {}
-            parsed_rows: List[tuple] = []
-            matched = 0
-            unmatched = 0
+        cons_matched = 0
+        cons_unmatched = 0
+        cons_added = 0
 
-            for row in consumption_rows:
-                acct = str(row[0] or "").strip()
-                ym = str(row[1] or "").strip()
-                try:
-                    kwh = float(row[2] or 0)
-                except (ValueError, TypeError):
-                    continue
-                meterid = str(row[3] or "").strip() if len(row) > 3 else ""
-                if not acct or not ym or kwh <= 0:
-                    continue
-
-                ctype = _resolve_type(acct, meterid)
-                if not ctype:
-                    unmatched += 1
-                    continue
-                matched += 1
-
-                try:
-                    y, m = int(ym[:4]), int(ym[5:7])
-                    dt = datetime(y, m, 1)
-                except (ValueError, IndexError):
-                    continue
-
-                parsed_rows.append((acct, ctype, dt, kwh))
-                if acct not in acct_first_reading or dt < acct_first_reading[acct]:
-                    acct_first_reading[acct] = dt
-
-            debug_info: Dict[str, Any] = {
-                "data_source": "tblmonthlyconsumption",
-                "total_rows": len(consumption_rows),
-                "matched": matched,
-                "unmatched": unmatched,
-                "unique_accounts": len(acct_first_reading),
-                "acct_type_map_size": len(acct_type),
-            }
-
-            acct_first_txn = acct_first_reading
-
-        # ── Try secondary source: tblmonthlytransactions (Koios payment data) ──
-        txn_rows: List[tuple] = []
-        if not consumption_rows and "tblmonthlytransactions" in existing_tables:
+        for row in consumption_rows:
+            raw_acct = str(row[0] or "").strip()
+            ym = str(row[1] or "").strip()
             try:
+                kwh = float(row[2] or 0)
+            except (ValueError, TypeError):
+                continue
+            meterid = str(row[3] or "").strip() if len(row) > 3 else ""
+            if not raw_acct or not ym or kwh <= 0:
+                continue
+
+            # Normalise: if raw_acct is a meter serial, map to ACCDB account number
+            acct = (meter_to_acct.get(raw_acct)
+                    or meter_to_acct.get(raw_acct.upper())
+                    or raw_acct)
+            ctype = _resolve_type(acct, meterid or raw_acct)
+            if not ctype:
+                cons_unmatched += 1
+                continue
+            cons_matched += 1
+
+            try:
+                y, m = int(ym[:4]), int(ym[5:7])
+                dt = datetime(y, m, 1)
+            except (ValueError, IndexError):
+                continue
+
+            ym_key = f"{dt.year:04d}-{dt.month:02d}"
+            consumption_acct_months.add((acct, ym_key))
+            parsed_rows.append((acct, ctype, dt, kwh))
+            cons_added += 1
+            if acct not in acct_first_txn or dt < acct_first_txn[acct]:
+                acct_first_txn[acct] = dt
+
+        debug_info["consumption"] = {
+            "total_rows": len(consumption_rows),
+            "matched": cons_matched,
+            "unmatched": cons_unmatched,
+            "added": cons_added,
+        }
+
+        # ── Source 2: History tables (comprehensive vended kWh) ──
+        tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
+        all_table_rows: Dict[str, list] = {}
+        for table in tables_to_try:
+            try:
+                date_col = _find_date_column(cursor, table)
+                if not date_col:
+                    continue
                 cursor.execute(
-                    "SELECT [accountnumber], [yearmonth], [kwh_vended], [meterid] "
-                    "FROM [tblmonthlytransactions]"
+                    f"SELECT [meterid], [accountnumber], [{date_col}], [kwh value] "
+                    f"FROM [{table}]"
                 )
-                txn_rows = cursor.fetchall()
+                all_table_rows[table] = cursor.fetchall()
             except Exception as e:
-                logger.warning("Failed to query tblmonthlytransactions: %s", e)
+                logger.warning("Failed to read %s for tenure: %s", table, e)
 
-        if not consumption_rows and txn_rows:
-            data_source = "vended"
-            acct_first_reading: Dict[str, datetime] = {}
-            parsed_rows = []
-            matched = 0
-            unmatched = 0
+        # Extend type mapping from history rows (always, not just fallback)
+        for _table, rows in all_table_rows.items():
+            for row in rows:
+                mid = str(row[0] or "").strip()
+                acct = str(row[1] or "").strip()
+                if not acct or acct in acct_type:
+                    continue
+                ctype = _lookup_type(mid)
+                if ctype:
+                    acct_type[acct] = ctype
+        # Refresh the lower-case index (same dict object so _resolve_type sees it)
+        acct_type_lower.update({k.lower(): v for k, v in acct_type.items()})
 
-            for row in txn_rows:
-                acct = str(row[0] or "").strip()
-                ym = str(row[1] or "").strip()
+        per_table_debug: Dict[str, Any] = {}
+        total_hist_rows = 0
+        hist_added = 0
+        hist_skipped_overlap = 0
+
+        for table, rows in all_table_rows.items():
+            total_hist_rows += len(rows)
+            tbl_matched = 0
+            tbl_unmatched = 0
+
+            for row in rows:
+                mid = str(row[0] or "").strip()
+                acct = str(row[1] or "").strip()
+                if not acct:
+                    continue
+
+                ctype = _resolve_type(acct, mid)
+                if not ctype:
+                    tbl_unmatched += 1
+                    continue
+                tbl_matched += 1
+
+                txn_dt = _parse_dt(row[2])
+                if txn_dt is None:
+                    continue
                 try:
-                    kwh = float(row[2] or 0)
+                    kwh = float(row[3] or 0)
                 except (ValueError, TypeError):
                     continue
-                meterid_txn = str(row[3] or "").strip() if len(row) > 3 else ""
-                if not acct or not ym or kwh <= 0:
+
+                # Skip if consumption already covers this account-month
+                ym_key = f"{txn_dt.year:04d}-{txn_dt.month:02d}"
+                if (acct, ym_key) in consumption_acct_months:
+                    hist_skipped_overlap += 1
                     continue
 
-                ctype = _resolve_type(acct, meterid_txn)
-                if not ctype:
-                    unmatched += 1
-                    continue
-                matched += 1
+                parsed_rows.append((acct, ctype, txn_dt, kwh))
+                hist_added += 1
+                if acct not in acct_first_txn or txn_dt < acct_first_txn[acct]:
+                    acct_first_txn[acct] = txn_dt
 
-                try:
-                    y, m = int(ym[:4]), int(ym[5:7])
-                    dt = datetime(y, m, 1)
-                except (ValueError, IndexError):
-                    continue
-
-                parsed_rows.append((acct, ctype, dt, kwh))
-                if acct not in acct_first_reading or dt < acct_first_reading[acct]:
-                    acct_first_reading[acct] = dt
-
-            debug_info = {
-                "data_source": "tblmonthlytransactions",
-                "total_rows": len(txn_rows),
-                "matched": matched,
-                "unmatched": unmatched,
-                "unique_accounts": len(acct_first_reading),
-                "acct_type_map_size": len(acct_type),
+            per_table_debug[table] = {
+                "rows": len(rows),
+                "matched": tbl_matched,
+                "unmatched": tbl_unmatched,
             }
-            acct_first_txn = acct_first_reading
 
-        elif not consumption_rows:
-            # ── Fallback: transaction tables (kWh vended) ──
-            tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
-            all_table_rows: Dict[str, list] = {}
-            for table in tables_to_try:
-                try:
-                    date_col = _find_date_column(cursor, table)
-                    if not date_col:
-                        continue
-                    cursor.execute(
-                        f"SELECT [meterid], [accountnumber], [{date_col}], [kwh value] "
-                        f"FROM [{table}]"
-                    )
-                    all_table_rows[table] = cursor.fetchall()
-                except Exception as e:
-                    logger.warning("Failed to read %s for tenure: %s", table, e)
+        debug_info["history_tables"] = per_table_debug
+        debug_info["history_total_rows"] = total_hist_rows
+        debug_info["history_added"] = hist_added
+        debug_info["history_skipped_overlap"] = hist_skipped_overlap
+        debug_info["total_unique_accounts"] = len(acct_first_txn)
 
-            # Extend type mapping from history rows
-            for _table, rows in all_table_rows.items():
-                for row in rows:
-                    mid = str(row[0] or "").strip()
-                    acct = str(row[1] or "").strip()
-                    if not acct or acct in acct_type:
-                        continue
-                    ctype = _lookup_type(mid)
-                    if ctype:
-                        acct_type[acct] = ctype
-            acct_type_lower = {k.lower(): v for k, v in acct_type.items()}
-
-            acct_first_txn: Dict[str, datetime] = {}
-            parsed_rows: List[tuple] = []
-            per_table_debug: Dict[str, Any] = {}
-            total_rows = 0
-
-            for table, rows in all_table_rows.items():
-                total_rows += len(rows)
-                tbl_matched = 0
-                tbl_unmatched = 0
-
-                for row in rows:
-                    mid = str(row[0] or "").strip()
-                    acct = str(row[1] or "").strip()
-                    if not acct:
-                        continue
-
-                    ctype = _resolve_type(acct, mid)
-                    if not ctype:
-                        tbl_unmatched += 1
-                        continue
-                    tbl_matched += 1
-
-                    txn_dt = _parse_dt(row[2])
-                    if txn_dt is None:
-                        continue
-                    try:
-                        kwh = float(row[3] or 0)
-                    except (ValueError, TypeError):
-                        continue
-
-                    parsed_rows.append((acct, ctype, txn_dt, kwh))
-                    if acct not in acct_first_txn or txn_dt < acct_first_txn[acct]:
-                        acct_first_txn[acct] = txn_dt
-
-                per_table_debug[table] = {
-                    "rows": len(rows),
-                    "matched": tbl_matched,
-                    "unmatched": tbl_unmatched,
-                }
-
-            debug_info = {
-                "data_source": "transaction_tables",
-                "tables": per_table_debug,
-                "total_rows": total_rows,
-                "unique_accounts_matched": len(acct_first_txn),
-                "acct_type_map_size": len(acct_type),
-            }
+        data_source = (
+            "merged (consumption + vended)"
+            if cons_added > 0
+            else "vended"
+        )
 
         if not acct_first_txn:
             return {

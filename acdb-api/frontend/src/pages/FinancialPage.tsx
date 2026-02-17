@@ -792,12 +792,10 @@ export default function FinancialPage() {
       {tenureData && tenureData.chart_data && tenureData.chart_data.length > 0 && tenureData.customer_types.length > 0 && selectedTenureType && (
         <Figure
           id="fig-consumption-tenure"
-          title={tenureData.data_source === 'consumption'
-            ? "Figure 6: Average Monthly kWh Consumed by Tenure"
-            : "Figure 6: Average Monthly kWh Vended by Tenure"}
-          subtitle={tenureData.data_source === 'consumption'
-            ? "Average kWh consumed per customer per month as a function of tenure (months since first reading). Dashed lines show ±1 standard deviation."
-            : "Average kWh vended per customer per month as a function of tenure (months since first transaction). Dashed lines show ±1 standard deviation."}
+          title="Figure 6: Average Monthly kWh by Tenure"
+          subtitle={`Average kWh per customer per month as a function of tenure (months since first ${
+            tenureData.data_source?.includes('consumption') ? 'reading' : 'transaction'
+          }). Dashed lines show ±1 standard deviation. Source: ${tenureData.data_source ?? 'vended'}.`}
           figureRef={setFigRef('consumption-tenure')}
           onExport={handleExportFigure('consumption-tenure', 'Consumption_By_Tenure')}
         >
@@ -849,7 +847,7 @@ export default function FinancialPage() {
                 dataKey="tenure_month"
                 tick={{ fontSize: 11 }}
                 label={{
-                  value: 'Tenure (months since first transaction)',
+                  value: 'Tenure (months since first data point)',
                   position: 'insideBottom',
                   offset: -25,
                   style: { fontSize: 12, fill: '#6b7280' },
@@ -859,9 +857,7 @@ export default function FinancialPage() {
                 tick={{ fontSize: 11 }}
                 domain={yMax != null ? [0, yMax] : [0, 'auto']}
                 label={{
-                  value: tenureData.data_source === 'consumption'
-                    ? 'Avg kWh consumed / customer / month'
-                    : 'Avg kWh vended / customer / month',
+                  value: 'Avg kWh / customer / month',
                   angle: -90,
                   position: 'insideLeft',
                   style: { fontSize: 11, fill: '#6b7280' },
