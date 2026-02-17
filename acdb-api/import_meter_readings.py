@@ -3,8 +3,9 @@ Import monthly consumption data into tblmonthlyconsumption in the ACCDB.
 
 Three data sources, processed in order:
 
-  1. LOCAL ACCDB — Aggregate existing 10-min interval readings from
-     tblmeterdata, tblmeterdata1, tblmeterdatadump into monthly kWh.
+  1. LOCAL ACCDB — Stream powerkW readings from tblmeterdata,
+     tblmeterdata1, tblmeterdatadump; bin to hourly avg kW; sum to
+     monthly kWh. Processing done in Python (not Jet SQL) for speed.
   2. Koios (SparkMeter Cloud) — 9 sites: KET, LSB, MAS, MAT, SEH, SHG, TLH, RIB, TOS
   3. ThunderCloud (SparkMeter Parquet) — 1 site: MAK
 
@@ -232,9 +233,10 @@ def check_accdb_tables(conn: pyodbc.Connection) -> None:
 def import_accdb_local(conn: pyodbc.Connection) -> int:
     """Aggregate existing ACCDB meter data tables into tblmonthlyconsumption.
 
-    Reads 10-min powerkW readings from tblmeterdata, tblmeterdata1,
-    tblmeterdatadump, converts to monthly kWh per meter, maps meter IDs
-    to account numbers via the meter registry, and inserts.
+    Streams raw (meterid, whdatetime, powerkW) rows through Python,
+    bins to hourly average kW, then sums hours to monthly kWh.
+    Processing is done in Python to avoid overloading the Jet engine
+    with nested GROUP BY on 1M+ rows.
 
     Uses "first table wins" for duplicate (meterid, yearmonth) pairs
     across tables (tblmeterdata1 processed first as the largest).
@@ -258,60 +260,88 @@ def import_accdb_local(conn: pyodbc.Connection) -> int:
             continue
     logger.info("Meter → account mapping: %d entries", len(meter_to_acct))
 
-    # Aggregate from each table. Key: (meterid, yearmonth) → kwh
-    # "First table wins" — skip duplicates from later tables.
-    monthly: Dict[Tuple[str, str], float] = {}
+    # ── Pass 1: Stream rows, bin to hourly ──
+    # Key: (meterid, "yyyy-mm-dd-HH") → [sum_kw, count]
+    # We accumulate sum and count to compute average later.
+    hourly: Dict[Tuple[str, str], List[float]] = {}
     tables_stats: Dict[str, Any] = {}
 
     for table in ACCDB_METER_TABLES:
         try:
-            logger.info("Querying %s (hourly bin → monthly aggregation)...", table)
-            # Inner query: average kW per meter per hour (robust to any interval).
-            # Outer query: sum hourly averages → monthly kWh
-            #   (avg kW in an hour × 1 h = kWh for that hour).
+            logger.info("Reading %s ...", table)
             cursor.execute(
-                f"SELECT hourly.meterid, hourly.ym, Sum(hourly.avg_kw) AS kwh "
-                f"FROM ("
-                f"  SELECT [meterid], "
-                f"    Format([whdatetime], 'yyyy-mm') AS ym, "
-                f"    Format([whdatetime], 'yyyy-mm-dd hh') AS hour_bin, "
-                f"    Avg([powerkW]) AS avg_kw "
-                f"  FROM [{table}] "
-                f"  WHERE [powerkW] IS NOT NULL "
-                f"  GROUP BY [meterid], "
-                f"    Format([whdatetime], 'yyyy-mm'), "
-                f"    Format([whdatetime], 'yyyy-mm-dd hh')"
-                f") AS hourly "
-                f"GROUP BY hourly.meterid, hourly.ym"
+                f"SELECT [meterid], [whdatetime], [powerkW] "
+                f"FROM [{table}] WHERE [powerkW] IS NOT NULL"
             )
-            new_count = 0
-            dup_count = 0
-            unique_meters: set = set()
-            for row in cursor.fetchall():
-                mid = str(row[0] or "").strip()
-                ym = str(row[1] or "").strip()
-                kwh = float(row[2] or 0)
-                if not mid or not ym or kwh <= 0:
-                    continue
-                unique_meters.add(mid)
-                key = (mid, ym)
-                if key not in monthly:
-                    monthly[key] = kwh
-                    new_count += 1
-                else:
-                    dup_count += 1
+            row_count = 0
+            table_meters: set = set()
+            batch = cursor.fetchmany(5000)
+            while batch:
+                for row in batch:
+                    mid = str(row[0] or "").strip()
+                    dt = row[1]
+                    kw = row[2]
+                    if not mid or dt is None or kw is None:
+                        continue
+                    try:
+                        kw = float(kw)
+                    except (ValueError, TypeError):
+                        continue
+                    if kw <= 0:
+                        continue
+
+                    # Extract hour bin: "yyyy-mm-dd-HH"
+                    try:
+                        if isinstance(dt, str):
+                            dt = datetime.strptime(dt[:16], "%Y-%m-%d %H:%M")
+                        hour_key = f"{dt.year:04d}-{dt.month:02d}-{dt.day:02d}-{dt.hour:02d}"
+                    except (ValueError, AttributeError):
+                        continue
+
+                    table_meters.add(mid)
+                    hk = (mid, hour_key)
+                    if hk in hourly:
+                        hourly[hk][0] += kw
+                        hourly[hk][1] += 1
+                    else:
+                        hourly[hk] = [kw, 1]
+
+                row_count += len(batch)
+                if row_count % 100000 == 0:
+                    logger.info("  %s: %d rows processed...", table, row_count)
+                batch = cursor.fetchmany(5000)
+
             tables_stats[table] = {
-                "new": new_count,
-                "dup": dup_count,
-                "meters": len(unique_meters),
+                "rows": row_count,
+                "meters": len(table_meters),
             }
             logger.info(
-                "  %s: %d new records, %d duplicates skipped, %d unique meters",
-                table, new_count, dup_count, len(unique_meters),
+                "  %s: %d rows, %d unique meters", table, row_count, len(table_meters),
             )
         except Exception as e:
-            logger.error("  %s: query failed — %s", table, e)
+            logger.error("  %s: read failed — %s", table, e)
             tables_stats[table] = {"error": str(e)}
+
+    if not hourly:
+        logger.warning("No meter readings found in any ACCDB table")
+        return 0
+
+    logger.info("Hourly bins: %d (aggregating to monthly...)", len(hourly))
+
+    # ── Pass 2: Collapse hourly → monthly ──
+    # avg kW for each hour × 1 h = kWh; sum across hours in month.
+    # Key: (meterid, "yyyy-mm") → kwh
+    monthly: Dict[Tuple[str, str], float] = {}
+    for (mid, hour_key), (sum_kw, count) in hourly.items():
+        avg_kw = sum_kw / count
+        ym = hour_key[:7]  # "yyyy-mm"
+        mk = (mid, ym)
+        monthly[mk] = monthly.get(mk, 0.0) + avg_kw
+
+    # Free memory
+    del hourly
+
+    logger.info("Monthly records: %d", len(monthly))
 
     if not monthly:
         logger.warning("No meter readings found in any ACCDB table")
