@@ -67,8 +67,14 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+import pickle
+import subprocess
+
 import pyodbc
 import requests
+
+# Disable ODBC connection pooling — prevents stale handles after large reads
+pyodbc.pooling = False
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -777,46 +783,7 @@ def import_accdb_local(conn: pyodbc.Connection, db_path: str = "") -> int:
 
     logger.info("Hourly bins: %d", len(hourly))
 
-    # Close read connection entirely — Access ODBC can corrupt after
-    # streaming 1M+ rows, causing "Cannot open database '|'" on writes.
-    cursor.close()
-    conn.close()
-    logger.info("Read connection closed. Opening fresh write connection...")
-
-    if not db_path:
-        db_path = _find_accdb()
-    write_conn = get_accdb_connection(db_path)
-    wcur = write_conn.cursor()
-
-    # ── Pass 2a: Write hourly data to tblhourlyconsumption ──
-    wcur.execute(
-        f"DELETE FROM [{HOURLY_TABLE_NAME}] WHERE source = ?", ("accdb",)
-    )
-    hourly_inserted = 0
-    for (mid, hour_key), (sum_kw, count) in hourly.items():
-        avg_kw = sum_kw / count  # hourly kWh = avg_kw × 1h
-        acct, community = meter_to_acct.get(mid, ("", ""))
-        if not acct:
-            acct = mid
-        # Parse "yyyy-mm-dd-HH" → datetime
-        try:
-            dt = datetime.strptime(hour_key, "%Y-%m-%d-%H")
-        except ValueError:
-            continue
-        wcur.execute(
-            f"INSERT INTO [{HOURLY_TABLE_NAME}] "
-            "(accountnumber, meterid, reading_datetime, kwh, community, source) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (acct, mid, dt, round(avg_kw, 4), community, "accdb"),
-        )
-        hourly_inserted += 1
-        if hourly_inserted % 50000 == 0:
-            logger.info("  Hourly insert progress: %d / %d", hourly_inserted, len(hourly))
-
-    logger.info("ACCDB local: %d hourly rows written", hourly_inserted)
-
-    # ── Pass 2b: Collapse hourly → monthly for tblmonthlyconsumption ──
-    logger.info("Aggregating hourly → monthly...")
+    # ── Collapse hourly → monthly (in memory, before writing) ──
     monthly: Dict[Tuple[str, str], float] = {}
     for (mid, hour_key), (sum_kw, count) in hourly.items():
         avg_kw = sum_kw / count
@@ -824,35 +791,132 @@ def import_accdb_local(conn: pyodbc.Connection, db_path: str = "") -> int:
         mk = (mid, ym)
         monthly[mk] = monthly.get(mk, 0.0) + avg_kw
 
-    del hourly
-
     logger.info("Monthly records: %d", len(monthly))
 
-    if not monthly:
-        wcur.close()
-        write_conn.close()
-        logger.warning("No meter readings found in any ACCDB table")
-        return 0
+    # Close read connection — the Access ODBC driver corrupts per-process
+    # state after streaming 1M+ rows, making ANY subsequent writes fail
+    # (even on a new connection) with "Cannot open database '|'".
+    # Solution: serialize data to disk and write in a clean subprocess.
+    cursor.close()
+    conn.close()
 
-    wcur.execute(f"DELETE FROM [{TABLE_NAME}] WHERE source = ?", ("accdb",))
+    if not db_path:
+        db_path = _find_accdb()
 
-    inserted = 0
+    # Prepare write payload: convert hourly bins to writable rows
+    hourly_rows = []
+    for (mid, hour_key), (sum_kw, count) in hourly.items():
+        avg_kw = sum_kw / count
+        acct, community = meter_to_acct.get(mid, ("", ""))
+        if not acct:
+            acct = mid
+        hourly_rows.append((acct, mid, hour_key, round(avg_kw, 4), community))
+
+    monthly_rows = []
     all_meters: set = set()
     for (mid, ym), kwh in monthly.items():
         acct, community = meter_to_acct.get(mid, ("", ""))
         if not acct:
             acct = mid
         all_meters.add(mid)
-        wcur.execute(
-            f"INSERT INTO [{TABLE_NAME}] "
-            "(accountnumber, meterid, yearmonth, kwh, community, source) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (acct, mid, ym, kwh, community, "accdb"),
-        )
-        inserted += 1
+        monthly_rows.append((acct, mid, ym, kwh, community))
 
-    wcur.close()
-    write_conn.close()
+    del hourly
+
+    if not monthly_rows:
+        logger.warning("No meter readings found in any ACCDB table")
+        return 0
+
+    # Serialize to temp file for the subprocess
+    temp_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_accdb_write.pkl")
+    with open(temp_path, "wb") as f:
+        pickle.dump({"hourly": hourly_rows, "monthly": monthly_rows, "db_path": db_path}, f)
+
+    logger.info(
+        "Serialized %d hourly + %d monthly rows. Launching write subprocess...",
+        len(hourly_rows), len(monthly_rows),
+    )
+
+    # Subprocess script that does the actual ACCDB writes in a clean process
+    write_script = r'''
+import pickle, sys, pyodbc, os
+from datetime import datetime
+
+pyodbc.pooling = False
+
+with open(sys.argv[1], "rb") as f:
+    data = pickle.load(f)
+
+db_path = data["db_path"]
+conn_str = (
+    r"DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};"
+    f"DBQ={db_path};"
+)
+conn = pyodbc.connect(conn_str, autocommit=True)
+c = conn.cursor()
+
+# Hourly
+c.execute("DELETE FROM [tblhourlyconsumption] WHERE source = ?", ("accdb",))
+hi = 0
+for acct, mid, hour_key, kwh, community in data["hourly"]:
+    try:
+        dt = datetime.strptime(hour_key, "%Y-%m-%d-%H")
+    except ValueError:
+        continue
+    c.execute(
+        "INSERT INTO [tblhourlyconsumption] "
+        "(accountnumber, meterid, reading_datetime, kwh, community, source) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (acct, mid, dt, kwh, community, "accdb"),
+    )
+    hi += 1
+    if hi % 50000 == 0:
+        print(f"  Hourly progress: {hi}/{len(data['hourly'])}", flush=True)
+
+# Monthly
+c.execute("DELETE FROM [tblmonthlyconsumption] WHERE source = ?", ("accdb",))
+mi = 0
+for acct, mid, ym, kwh, community in data["monthly"]:
+    c.execute(
+        "INSERT INTO [tblmonthlyconsumption] "
+        "(accountnumber, meterid, yearmonth, kwh, community, source) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        (acct, mid, ym, kwh, community, "accdb"),
+    )
+    mi += 1
+
+c.close()
+conn.close()
+print(f"DONE hourly={hi} monthly={mi}")
+'''
+
+    script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_accdb_writer.py")
+    with open(script_path, "w") as f:
+        f.write(write_script)
+
+    try:
+        result = subprocess.run(
+            [sys.executable, script_path, temp_path],
+            capture_output=True, text=True, timeout=600,
+        )
+        for line in (result.stdout or "").strip().split("\n"):
+            if line.strip():
+                logger.info("  [writer] %s", line.strip())
+        if result.returncode != 0:
+            logger.error("Write subprocess failed (exit %d): %s", result.returncode, result.stderr)
+            return 0
+    except subprocess.TimeoutExpired:
+        logger.error("Write subprocess timed out after 600s")
+        return 0
+    finally:
+        for p in (temp_path, script_path):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+
+    hourly_inserted = len(hourly_rows)
+    inserted = len(monthly_rows)
     logger.info(
         "ACCDB local total: %d monthly + %d hourly records from %d unique meters",
         inserted, hourly_inserted, len(all_meters),
