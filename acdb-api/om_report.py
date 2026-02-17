@@ -43,12 +43,16 @@ SITE_ABBREV = {
     "SEB": "Sebapala",
     "RIB": "Ribaneng",
     "KET": "Ketane",
+    "LSB": "Lets'eng-la-Baroa",
     # PIH clinics
     "NKU": "Ha Nkau",
     "MET": "Methalaneng",
     "BOB": "Bobete",
     "MAN": "Manamaneng",
 }
+
+# Valid site codes -- used to filter out garbage from meter serial suffixes
+KNOWN_SITES = set(SITE_ABBREV.keys())
 
 SITE_DISTRICTS = {
     "MAK": "Maseru", "MAS": "Thaba-Tseka", "SHG": "Thaba-Tseka",
@@ -66,10 +70,17 @@ def _get_connection():
 
 
 def _extract_site(account_number: str) -> str:
-    """Extract site code from the last 3 chars of account number."""
+    """Extract site code from the last 3 chars of account number.
+
+    Only returns a value if it matches a known site code, to prevent
+    meter serial suffixes (e.g., '7E7', '3F0') from polluting charts.
+    """
     if not account_number:
         return ""
-    return account_number.strip()[-3:].upper()
+    candidate = account_number.strip()[-3:].upper()
+    if candidate in KNOWN_SITES:
+        return candidate
+    return ""
 
 
 def _date_to_quarter(dt) -> str:
@@ -1461,7 +1472,7 @@ def consumption_by_tenure(
         if "tblmonthlyconsumption" in existing_tables:
             try:
                 cursor.execute(
-                    "SELECT [accountnumber], [yearmonth], [kwh] "
+                    "SELECT [accountnumber], [yearmonth], [kwh], [meterid] "
                     "FROM [tblmonthlyconsumption]"
                 )
                 consumption_rows = cursor.fetchall()
@@ -1483,10 +1494,17 @@ def consumption_by_tenure(
                     kwh = float(row[2] or 0)
                 except (ValueError, TypeError):
                     continue
+                meterid = str(row[3] or "").strip() if len(row) > 3 else ""
                 if not acct or not ym or kwh <= 0:
                     continue
 
+                # Try account number first, then meter ID for type lookup
                 ctype = acct_type.get(acct) or acct_type_lower.get(acct.lower())
+                if not ctype and meterid:
+                    ctype = _lookup_type(meterid)
+                if not ctype and acct:
+                    # The accountnumber might actually be a meter ID
+                    ctype = _lookup_type(acct)
                 if not ctype:
                     unmatched += 1
                     continue
