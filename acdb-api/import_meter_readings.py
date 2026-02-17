@@ -774,6 +774,10 @@ def import_accdb_local(conn: pyodbc.Connection) -> int:
 
     logger.info("Hourly bins: %d", len(hourly))
 
+    # Reset cursor — Access ODBC can get into a bad state after streaming 1M+ rows
+    cursor.close()
+    cursor = conn.cursor()
+
     # ── Pass 2a: Write hourly data to tblhourlyconsumption ──
     cursor.execute(
         f"DELETE FROM [{HOURLY_TABLE_NAME}] WHERE source = ?", ("accdb",)
@@ -818,6 +822,9 @@ def import_accdb_local(conn: pyodbc.Connection) -> int:
         logger.warning("No meter readings found in any ACCDB table")
         return 0
 
+    # Fresh cursor for monthly write phase
+    cursor.close()
+    cursor = conn.cursor()
     cursor.execute(f"DELETE FROM [{TABLE_NAME}] WHERE source = ?", ("accdb",))
 
     inserted = 0
