@@ -1461,6 +1461,7 @@ def consumption_by_tenure(
                     point[f"{ctype}_upper"] = None
                     point[f"{ctype}_lower"] = None
                     point[f"{ctype}_n"] = n_eligible
+                    point[f"{ctype}_nd"] = len(values)
                 else:
                     has_any_data = True
                     n_data = len(values)
@@ -1474,6 +1475,9 @@ def consumption_by_tenure(
                     point[f"{ctype}_upper"] = round(mean + sd, 2)
                     point[f"{ctype}_lower"] = round(max(mean - sd, 0), 2)
                     point[f"{ctype}_n"] = n_eligible
+                    point[f"{ctype}_nd"] = n_data
+                    point[f"{ctype}_min"] = round(min(values), 2)
+                    point[f"{ctype}_max"] = round(max(values), 2)
             chart_data.append(point)
             if has_any_data:
                 last_valid_t = t

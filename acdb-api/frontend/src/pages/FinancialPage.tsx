@@ -873,6 +873,9 @@ export default function FinancialPage() {
                   const sigma = upper != null && lower != null ? ((upper - lower) / 2).toFixed(1) : null;
                   const dataPoint = tenureData!.chart_data[Number(label)] || {};
                   const n = dataPoint[`${selectedTenureType}_n`];
+                  const nd = dataPoint[`${selectedTenureType}_nd`];
+                  const vMin = dataPoint[`${selectedTenureType}_min`];
+                  const vMax = dataPoint[`${selectedTenureType}_max`];
                   return (
                     <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px 12px', fontSize: '12px' }}>
                       <p style={{ margin: '0 0 4px', fontWeight: 600, color: '#374151' }}>Month {label}</p>
@@ -882,7 +885,12 @@ export default function FinancialPage() {
                       </p>
                       {n != null && n > 0 && (
                         <p style={{ margin: '2px 0', color: '#6b7280', fontSize: '11px' }}>
-                          n = {n} customer{n !== 1 ? 's' : ''}
+                          n = {n} eligible &middot; {nd ?? 0} with data
+                        </p>
+                      )}
+                      {vMin != null && vMax != null && (
+                        <p style={{ margin: '2px 0', color: '#6b7280', fontSize: '11px' }}>
+                          range: {vMin.toFixed(1)} – {vMax.toFixed(1)} kWh
                         </p>
                       )}
                     </div>
