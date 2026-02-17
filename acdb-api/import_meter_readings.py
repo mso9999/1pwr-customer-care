@@ -176,9 +176,11 @@ def check_accdb_tables(conn: pyodbc.Connection) -> None:
             )
             non_null = cursor.fetchone()[0]
 
+            # Access doesn't support COUNT(DISTINCT), so use a subquery
             cursor.execute(
-                f"SELECT COUNT(DISTINCT [meterid]) FROM [{table}] "
-                f"WHERE [powerkW] IS NOT NULL"
+                f"SELECT COUNT(*) FROM "
+                f"(SELECT DISTINCT [meterid] FROM [{table}] "
+                f"WHERE [powerkW] IS NOT NULL)"
             )
             unique_meters = cursor.fetchone()[0]
 
