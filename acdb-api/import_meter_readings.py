@@ -676,16 +676,19 @@ def check_accdb_tables(conn: pyodbc.Connection) -> None:
         logger.info("TARGET TABLE: %s — does not exist yet", TXN_TABLE_NAME)
 
 
-def import_accdb_local(conn: pyodbc.Connection) -> int:
-    """Aggregate existing ACCDB meter data tables into tblmonthlyconsumption.
+def import_accdb_local(conn: pyodbc.Connection, db_path: str = "") -> int:
+    """Aggregate existing ACCDB meter data tables into tblhourlyconsumption + tblmonthlyconsumption.
 
     Streams raw (meterid, whdatetime, powerkW) rows through Python,
-    bins to hourly average kW, then sums hours to monthly kWh.
-    Processing is done in Python to avoid overloading the Jet engine
-    with nested GROUP BY on 1M+ rows.
+    bins to hourly average kW, writes hourly rows, then sums hours to
+    monthly kWh.  Processing is done in Python to avoid overloading the
+    Jet engine with nested GROUP BY on 1M+ rows.
 
     Uses "first table wins" for duplicate (meterid, yearmonth) pairs
     across tables (tblmeterdata1 processed first as the largest).
+
+    db_path is needed to open a fresh connection for the write phase
+    (Access ODBC can corrupt after streaming 1M+ rows on a single conn).
     """
     cursor = conn.cursor()
 
@@ -774,12 +777,19 @@ def import_accdb_local(conn: pyodbc.Connection) -> int:
 
     logger.info("Hourly bins: %d", len(hourly))
 
-    # Reset cursor — Access ODBC can get into a bad state after streaming 1M+ rows
+    # Close read connection entirely — Access ODBC can corrupt after
+    # streaming 1M+ rows, causing "Cannot open database '|'" on writes.
     cursor.close()
-    cursor = conn.cursor()
+    conn.close()
+    logger.info("Read connection closed. Opening fresh write connection...")
+
+    if not db_path:
+        db_path = _find_accdb()
+    write_conn = get_accdb_connection(db_path)
+    wcur = write_conn.cursor()
 
     # ── Pass 2a: Write hourly data to tblhourlyconsumption ──
-    cursor.execute(
+    wcur.execute(
         f"DELETE FROM [{HOURLY_TABLE_NAME}] WHERE source = ?", ("accdb",)
     )
     hourly_inserted = 0
@@ -793,7 +803,7 @@ def import_accdb_local(conn: pyodbc.Connection) -> int:
             dt = datetime.strptime(hour_key, "%Y-%m-%d-%H")
         except ValueError:
             continue
-        cursor.execute(
+        wcur.execute(
             f"INSERT INTO [{HOURLY_TABLE_NAME}] "
             "(accountnumber, meterid, reading_datetime, kwh, community, source) "
             "VALUES (?, ?, ?, ?, ?, ?)",
@@ -819,13 +829,12 @@ def import_accdb_local(conn: pyodbc.Connection) -> int:
     logger.info("Monthly records: %d", len(monthly))
 
     if not monthly:
+        wcur.close()
+        write_conn.close()
         logger.warning("No meter readings found in any ACCDB table")
         return 0
 
-    # Fresh cursor for monthly write phase
-    cursor.close()
-    cursor = conn.cursor()
-    cursor.execute(f"DELETE FROM [{TABLE_NAME}] WHERE source = ?", ("accdb",))
+    wcur.execute(f"DELETE FROM [{TABLE_NAME}] WHERE source = ?", ("accdb",))
 
     inserted = 0
     all_meters: set = set()
@@ -834,7 +843,7 @@ def import_accdb_local(conn: pyodbc.Connection) -> int:
         if not acct:
             acct = mid
         all_meters.add(mid)
-        cursor.execute(
+        wcur.execute(
             f"INSERT INTO [{TABLE_NAME}] "
             "(accountnumber, meterid, yearmonth, kwh, community, source) "
             "VALUES (?, ?, ?, ?, ?, ?)",
@@ -842,6 +851,8 @@ def import_accdb_local(conn: pyodbc.Connection) -> int:
         )
         inserted += 1
 
+    wcur.close()
+    write_conn.close()
     logger.info(
         "ACCDB local total: %d monthly + %d hourly records from %d unique meters",
         inserted, hourly_inserted, len(all_meters),
@@ -2262,11 +2273,13 @@ def main():
         logger.info("STEP 1: Aggregating ACCDB meter data tables")
         logger.info("=" * 60)
         try:
-            n = import_accdb_local(conn)
+            n = import_accdb_local(conn, db_path=db_path)
             total_inserted += n
         except Exception as e:
             logger.error("ACCDB local aggregation failed: %s", e)
             total_errors += 1
+        # import_accdb_local closes its connections; reopen for subsequent steps
+        conn = get_accdb_connection(db_path)
 
     if args.local_only:
         conn.close()
