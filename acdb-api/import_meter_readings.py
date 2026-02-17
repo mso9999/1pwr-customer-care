@@ -682,7 +682,7 @@ def check_accdb_tables(conn: pyodbc.Connection) -> None:
         logger.info("TARGET TABLE: %s — does not exist yet", TXN_TABLE_NAME)
 
 
-def import_accdb_local(conn: pyodbc.Connection, db_path: str = "") -> int:
+def import_accdb_local(conn: pyodbc.Connection, db_path: str = "", write_db_path: str = "") -> int:
     """Aggregate existing ACCDB meter data tables into tblhourlyconsumption + tblmonthlyconsumption.
 
     Streams raw (meterid, whdatetime, powerkW) rows through Python,
@@ -830,10 +830,12 @@ def import_accdb_local(conn: pyodbc.Connection, db_path: str = "") -> int:
     # Serialize to temp file for the subprocess
     temp_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_accdb_write.pkl")
     with open(temp_path, "wb") as f:
+        # Write to derived DB (separate from the 2 GB source ACCDB)
+        target_db = write_db_path if write_db_path else db_path
         pickle.dump({
             "hourly": hourly_rows,
             "monthly": monthly_rows,
-            "db_path": db_path,
+            "db_path": target_db,
             "do_hourly": bool(hourly_rows),
         }, f)
 
@@ -2346,12 +2348,16 @@ def main():
     )
     parser.add_argument("--dry-run", action="store_true", help="Print plan without importing")
     parser.add_argument("--verbose", "-v", action="store_true")
+    parser.add_argument(
+        "--derived-db", dest="derived_db", default="",
+        help="Path to derived_data.accdb for writing (default: beside ACCDB)"
+    )
     args = parser.parse_args()
 
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    # Connect to ACCDB
+    # Connect to main ACCDB (read-only for source meter data)
     db_path = _find_accdb()
     if not db_path:
         logger.error(
@@ -2359,7 +2365,29 @@ def main():
             "Searched: %s", "\n  ".join(DEFAULT_SEARCH_PATHS)
         )
         sys.exit(1)
-    logger.info("ACCDB: %s", db_path)
+    logger.info("Source ACCDB: %s", db_path)
+
+    # Derived DB for writes (tblmonthlyconsumption, tblmonthlytransactions, tblhourlyconsumption)
+    derived_db = args.derived_db or os.environ.get("DERIVED_DB_PATH", "")
+    if not derived_db:
+        derived_db = os.path.join(os.path.dirname(db_path), "derived_data.accdb")
+
+    # Create derived DB via ADOX if it doesn't exist
+    if not os.path.isfile(derived_db):
+        logger.info("Creating derived database: %s", derived_db)
+        try:
+            import win32com.client
+            cat = win32com.client.Dispatch("ADOX.Catalog")
+            cat.Create(
+                f"Provider=Microsoft.ACE.OLEDB.12.0;Data Source={derived_db}"
+            )
+            cat.ActiveConnection.Close()
+            logger.info("Created derived database via ADOX")
+        except Exception as e:
+            logger.error("Cannot create derived DB: %s", e)
+            logger.error("Create it manually or install pywin32 + ACE OLEDB")
+            sys.exit(1)
+    logger.info("Derived DB: %s", derived_db)
 
     conn = get_accdb_connection(db_path)
 
@@ -2374,9 +2402,10 @@ def main():
     # corrupts the Jet engine's file metadata for those tables, making them
     # permanently unwritable.  Table creation is deferred to the subprocess
     # that handles ACCDB local writes (import_accdb_local).
-    # Only ensure the txn table here — it's used by later steps that don't
-    # trigger the large-read corruption.
-    ensure_txn_table(conn)
+    # Ensure txn table in the DERIVED DB (not the main ACCDB)
+    derived_conn = get_accdb_connection(derived_db)
+    ensure_txn_table(derived_conn)
+    derived_conn.close()
 
     # Determine date range for external APIs
     if args.end is None:
@@ -2443,21 +2472,22 @@ def main():
         logger.info("STEP 1: Aggregating ACCDB meter data tables")
         logger.info("=" * 60)
         try:
-            n = import_accdb_local(conn, db_path=db_path)
+            n = import_accdb_local(conn, db_path=db_path, write_db_path=derived_db)
             total_inserted += n
         except Exception as e:
             logger.error("ACCDB local aggregation failed: %s", e)
             total_errors += 1
-        # import_accdb_local closes its connections; reopen for subsequent steps
+        # import_accdb_local closes its read connection; reopen for subsequent steps
         conn = get_accdb_connection(db_path)
 
-    # Now that the ACCDB local step (and its large reads) are done, ensure
-    # tables exist for subsequent Koios / ThunderCloud steps.  The ACCDB local
-    # subprocess already created them, so these will be no-ops in the normal
-    # case — but they're needed if --remote-only skipped step 1.
-    ensure_table(conn)
+    # Ensure derived tables exist for subsequent Koios / ThunderCloud steps.
+    # The ACCDB local subprocess already created them in derived_db, so these
+    # will be no-ops in the normal case.
+    derived_conn = get_accdb_connection(derived_db)
+    ensure_table(derived_conn)
     if not args.no_hourly:
-        ensure_hourly_table(conn)
+        ensure_hourly_table(derived_conn)
+    derived_conn.close()
 
     if args.local_only:
         conn.close()
@@ -2466,6 +2496,9 @@ def main():
         logger.info("  Consumption rows inserted: %d", total_inserted)
         logger.info("=" * 60)
         return
+
+    # Open a persistent connection to the derived DB for all write steps
+    write_conn = get_accdb_connection(derived_db)
 
     # Short-circuit: portfolio-only mode skips all API calls
     if portfolio_only:
@@ -2496,7 +2529,7 @@ def main():
             for ym in months:
                 try:
                     n = import_koios_month(
-                        koios_session, conn, site_code, site_id, ym,
+                        koios_session, write_conn, site_code, site_id, ym,
                         koios_customer_map=koios_cust_map,
                     )
                     if n > 0:
@@ -2533,7 +2566,7 @@ def main():
             for ym in months:
                 try:
                     n = import_koios_hourly_month(
-                        koios_session, conn, site_code, site_id, ym,
+                        koios_session, write_conn, site_code, site_id, ym,
                         koios_customer_map=koios_cust_map,
                     )
                     if n > 0:
@@ -2571,7 +2604,7 @@ def main():
         tc_started = False
         for ym in months:
             try:
-                n = import_thundercloud_month(tc, conn, ym)
+                n = import_thundercloud_month(tc, write_conn, ym)
                 if n > 0:
                     logger.info("ThunderCloud MAK %s: %d meters imported", ym, n)
                     tc_started = True
@@ -2595,7 +2628,7 @@ def main():
         tc_h_started = False
         for ym in months:
             try:
-                n = import_thundercloud_hourly_month(tc, conn, ym)
+                n = import_thundercloud_hourly_month(tc, write_conn, ym)
                 if n > 0:
                     logger.info("ThunderCloud MAK hourly %s: %d rows imported", ym, n)
                     tc_h_started = True
@@ -2621,7 +2654,7 @@ def main():
         if csv_files:
             try:
                 n = import_portfolio_csvs(
-                    conn, csv_files,
+                    write_conn, csv_files,
                     start_ym=args.start, end_ym=args.end,
                 )
                 txn_inserted += n
@@ -2661,7 +2694,7 @@ def main():
 
                 try:
                     n = import_koios_transactions_month(
-                        koios_session, conn, site_code, site_id, ym,
+                        koios_session, write_conn, site_code, site_id, ym,
                         koios_customer_map=koios_cust_map,
                     )
                     if n > 0:
@@ -2702,7 +2735,7 @@ def main():
                 continue  # Already have authoritative data from CSV
 
             try:
-                n = import_thundercloud_transactions_month(tc, conn, ym)
+                n = import_thundercloud_transactions_month(tc, write_conn, ym)
                 if n > 0:
                     logger.info(
                         "ThunderCloud MAK txn %s: %d records imported", ym, n,
@@ -2720,6 +2753,7 @@ def main():
                 consecutive_empty = 0
 
     conn.close()
+    write_conn.close()
 
     logger.info("=" * 60)
     logger.info("IMPORT COMPLETE")

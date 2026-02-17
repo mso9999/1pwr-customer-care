@@ -12,6 +12,7 @@ Runs on the ACDB Windows EC2 at 0.0.0.0:8100.
 
 Environment variables:
   ACDB_PATH          - Path to .accdb file  (default: auto-detect)
+  DERIVED_DB_PATH    - Path to derived data .accdb (default: derived_data.accdb beside ACDB)
   ACDB_PORT          - Port to bind         (default: 8100)
   CC_JWT_SECRET      - JWT signing secret   (default: dev secret)
   CC_JWT_EXPIRY_HOURS - Token lifetime      (default: 8)
@@ -78,6 +79,13 @@ def _find_accdb() -> str:
 DB_PATH = _find_accdb()
 DRIVER = "{Microsoft Access Driver (*.mdb, *.accdb)}"
 
+# Derived data DB (tblmonthlyconsumption, tblmonthlytransactions, tblhourlyconsumption).
+# Kept separate from the main ACCDB because the 2 GB main file has no room for
+# new tables and suffers corruption when written to concurrently.
+DERIVED_DB_PATH = os.environ.get("DERIVED_DB_PATH", "")
+if not DERIVED_DB_PATH and DB_PATH:
+    DERIVED_DB_PATH = os.path.join(os.path.dirname(DB_PATH), "derived_data.accdb")
+
 # ---------------------------------------------------------------------------
 # Database helpers
 # ---------------------------------------------------------------------------
@@ -89,10 +97,31 @@ def _connection_string() -> str:
     return f"Driver={DRIVER};DBQ={DB_PATH}"
 
 
+def _derived_connection_string() -> str:
+    if not DERIVED_DB_PATH:
+        raise RuntimeError("DERIVED_DB_PATH not configured")
+    return f"Driver={DRIVER};DBQ={DERIVED_DB_PATH}"
+
+
 @contextmanager
 def get_connection():
-    """Context manager for ACDB connections."""
+    """Context manager for main ACDB connections (source data, read-only)."""
     conn = pyodbc.connect(_connection_string(), autocommit=True)
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+@contextmanager
+def get_derived_connection():
+    """Context manager for derived data DB (monthly consumption, transactions, hourly)."""
+    if not DERIVED_DB_PATH or not os.path.isfile(DERIVED_DB_PATH):
+        raise RuntimeError(
+            f"Derived DB not found at {DERIVED_DB_PATH}. "
+            "Run import_meter_readings.py to create it."
+        )
+    conn = pyodbc.connect(_derived_connection_string(), autocommit=True)
     try:
         yield conn
     finally:
@@ -287,6 +316,19 @@ def health():
     except Exception as e:
         status["status"] = "db_error"
         status["error"] = str(e)
+
+    # Derived DB health
+    status["derived_db_path"] = DERIVED_DB_PATH
+    if DERIVED_DB_PATH and os.path.isfile(DERIVED_DB_PATH):
+        try:
+            with get_derived_connection() as dconn:
+                dc = dconn.cursor()
+                existing = {t.table_name.lower() for t in dc.tables(tableType="TABLE")}
+                status["derived_tables"] = sorted(existing)
+        except Exception as e:
+            status["derived_db_error"] = str(e)
+    else:
+        status["derived_db_status"] = "not_found"
 
     return status
 
@@ -534,6 +576,7 @@ if __name__ == "__main__":
     logger.info("=" * 60)
     logger.info("1PWR Customer Care Portal API v2.0")
     logger.info("DB Path: %s", DB_PATH or "(not found)")
+    logger.info("Derived DB: %s", DERIVED_DB_PATH or "(not configured)")
     logger.info("Port: %d", PORT)
     logger.info("=" * 60)
 

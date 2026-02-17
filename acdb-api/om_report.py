@@ -69,6 +69,11 @@ def _get_connection():
     return get_connection()
 
 
+def _get_derived_connection():
+    from customer_api import get_derived_connection
+    return get_derived_connection()
+
+
 def _extract_site(account_number: str) -> str:
     """Extract site code from the last 3 chars of account number.
 
@@ -127,18 +132,30 @@ def _find_date_column(cursor, table_name: str) -> Optional[str]:
 
 # ---------------------------------------------------------------------------
 # Helper: check for tblmonthlytransactions (SparkMeter payment data)
+# Now lives in derived_data.accdb, not the main ACCDB.
 # ---------------------------------------------------------------------------
 
 def _has_txn_table(cursor) -> bool:
-    """Check if tblmonthlytransactions exists and has data."""
+    """Check if tblmonthlytransactions exists and has data in the derived DB."""
     try:
-        existing = {t.table_name.lower() for t in cursor.tables(tableType="TABLE")}
-        if "tblmonthlytransactions" not in existing:
-            return False
-        cursor.execute("SELECT COUNT(*) FROM [tblmonthlytransactions]")
-        return cursor.fetchone()[0] > 0
+        with _get_derived_connection() as dconn:
+            dc = dconn.cursor()
+            existing = {t.table_name.lower() for t in dc.tables(tableType="TABLE")}
+            if "tblmonthlytransactions" not in existing:
+                return False
+            dc.execute("SELECT COUNT(*) FROM [tblmonthlytransactions]")
+            return dc.fetchone()[0] > 0
     except Exception:
         return False
+
+
+def _get_derived_cursor_if_available():
+    """Return (connection, cursor) for derived DB, or (None, None) if unavailable."""
+    try:
+        dconn = _get_derived_connection().__enter__()
+        return dconn, dconn.cursor()
+    except Exception:
+        return None, None
 
 
 # ---------------------------------------------------------------------------
@@ -175,33 +192,39 @@ def report_overview(user: CurrentUser = Depends(require_employee)):
         sites = [str(r[0]).strip() for r in cursor.fetchall() if r[0]]
 
         # Total consumption and sales
-        # Prefer tblmonthlytransactions (SparkMeter: includes manual corrections)
+        # Prefer tblmonthlytransactions / tblmonthlyconsumption from derived DB
         total_kwh = 0.0
         total_lsl = 0.0
         txn_source = "accdb_history"
 
-        if _has_txn_table(cursor):
-            try:
-                cursor.execute(
-                    "SELECT SUM([amount_lsl]) FROM [tblmonthlytransactions]"
-                )
-                row = cursor.fetchone()
-                if row and row[0] is not None:
-                    total_lsl = float(row[0] or 0)
-                    txn_source = "tblmonthlytransactions"
-            except Exception:
-                pass
+        try:
+            with _get_derived_connection() as dconn:
+                dcursor = dconn.cursor()
 
-        # kWh: prefer tblmonthlyconsumption (actual readings), else history
-        existing_tables = {t.table_name.lower() for t in cursor.tables(tableType="TABLE")}
-        if "tblmonthlyconsumption" in existing_tables:
-            try:
-                cursor.execute("SELECT SUM([kwh]) FROM [tblmonthlyconsumption]")
-                row = cursor.fetchone()
-                if row and row[0] is not None:
-                    total_kwh = float(row[0] or 0)
-            except Exception:
-                pass
+                if _has_txn_table(cursor):
+                    try:
+                        dcursor.execute(
+                            "SELECT SUM([amount_lsl]) FROM [tblmonthlytransactions]"
+                        )
+                        row = dcursor.fetchone()
+                        if row and row[0] is not None:
+                            total_lsl = float(row[0] or 0)
+                            txn_source = "tblmonthlytransactions"
+                    except Exception:
+                        pass
+
+                # kWh: prefer tblmonthlyconsumption (actual readings), else history
+                derived_tables = {t.table_name.lower() for t in dcursor.tables(tableType="TABLE")}
+                if "tblmonthlyconsumption" in derived_tables:
+                    try:
+                        dcursor.execute("SELECT SUM([kwh]) FROM [tblmonthlyconsumption]")
+                        row = dcursor.fetchone()
+                        if row and row[0] is not None:
+                            total_kwh = float(row[0] or 0)
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.warning("Derived DB unavailable for overview totals: %s", e)
 
         # Fallback: history tables for anything still zero
         if total_kwh == 0 or (total_lsl == 0 and txn_source == "accdb_history"):
@@ -434,29 +457,31 @@ def sales_by_site(
         rows = []
         source_table = ""
 
-        # Prefer tblmonthlytransactions
+        # Prefer tblmonthlytransactions from derived DB
         if _has_txn_table(cursor):
             try:
-                cursor.execute(
-                    "SELECT [accountnumber], [yearmonth], [amount_lsl], [community] "
-                    "FROM [tblmonthlytransactions]"
-                )
-                raw = cursor.fetchall()
-                if raw:
-                    for r in raw:
-                        acct = str(r[0] or "").strip()
-                        ym = str(r[1] or "").strip()
-                        lsl = float(r[2] or 0)
-                        community = str(r[3] or "").strip()
-                        if acct and ym and lsl > 0:
-                            try:
-                                y, m = int(ym[:4]), int(ym[5:7])
-                                dt = datetime(y, m, 15)
-                            except (ValueError, IndexError):
-                                continue
-                            rows.append((acct, dt, lsl, community))
-                    if rows:
-                        source_table = "tblmonthlytransactions"
+                with _get_derived_connection() as dconn:
+                    dcursor = dconn.cursor()
+                    dcursor.execute(
+                        "SELECT [accountnumber], [yearmonth], [amount_lsl], [community] "
+                        "FROM [tblmonthlytransactions]"
+                    )
+                    raw = dcursor.fetchall()
+                    if raw:
+                        for r in raw:
+                            acct = str(r[0] or "").strip()
+                            ym = str(r[1] or "").strip()
+                            lsl = float(r[2] or 0)
+                            community = str(r[3] or "").strip()
+                            if acct and ym and lsl > 0:
+                                try:
+                                    y, m = int(ym[:4]), int(ym[5:7])
+                                    dt = datetime(y, m, 15)
+                                except (ValueError, IndexError):
+                                    continue
+                                rows.append((acct, dt, lsl, community))
+                        if rows:
+                            source_table = "tblmonthlytransactions"
             except Exception as e:
                 logger.warning("tblmonthlytransactions query failed: %s", e)
 
@@ -1070,30 +1095,32 @@ def arpu_time_series(user: CurrentUser = Depends(require_employee)):
         txn_rows = []
         source_table = ""
 
-        # Prefer tblmonthlytransactions (SparkMeter authoritative data)
+        # Prefer tblmonthlytransactions from derived DB
         if _has_txn_table(cursor):
             try:
-                cursor.execute(
-                    "SELECT [accountnumber], [yearmonth], [amount_lsl], [community] "
-                    "FROM [tblmonthlytransactions]"
-                )
-                raw = cursor.fetchall()
-                if raw:
-                    for row in raw:
-                        acct = str(row[0] or "").strip()
-                        ym = str(row[1] or "").strip()
-                        lsl = float(row[2] or 0)
-                        community = str(row[3] or "").strip()
-                        if not acct or not ym or lsl <= 0:
-                            continue
-                        try:
-                            y, m = int(ym[:4]), int(ym[5:7])
-                            dt = datetime(y, m, 15)
-                        except (ValueError, IndexError):
-                            continue
-                        txn_rows.append((acct, dt, lsl, community))
-                    if txn_rows:
-                        source_table = "tblmonthlytransactions"
+                with _get_derived_connection() as dconn:
+                    dcursor = dconn.cursor()
+                    dcursor.execute(
+                        "SELECT [accountnumber], [yearmonth], [amount_lsl], [community] "
+                        "FROM [tblmonthlytransactions]"
+                    )
+                    raw = dcursor.fetchall()
+                    if raw:
+                        for row in raw:
+                            acct = str(row[0] or "").strip()
+                            ym = str(row[1] or "").strip()
+                            lsl = float(row[2] or 0)
+                            community = str(row[3] or "").strip()
+                            if not acct or not ym or lsl <= 0:
+                                continue
+                            try:
+                                y, m = int(ym[:4]), int(ym[5:7])
+                                dt = datetime(y, m, 15)
+                            except (ValueError, IndexError):
+                                continue
+                            txn_rows.append((acct, dt, lsl, community))
+                        if txn_rows:
+                            source_table = "tblmonthlytransactions"
             except Exception as e:
                 logger.warning("Failed to query tblmonthlytransactions for ARPU: %s", e)
 
@@ -1236,24 +1263,26 @@ def monthly_arpu_time_series(user: CurrentUser = Depends(require_employee)):
         txn_rows = []
         source_table = ""
 
-        # Prefer tblmonthlytransactions
+        # Prefer tblmonthlytransactions from derived DB
         if _has_txn_table(cursor):
             try:
-                cursor.execute(
-                    "SELECT [accountnumber], [yearmonth], [amount_lsl], [community] "
-                    "FROM [tblmonthlytransactions]"
-                )
-                raw = cursor.fetchall()
-                if raw:
-                    for row in raw:
-                        acct = str(row[0] or "").strip()
-                        ym = str(row[1] or "").strip()
-                        lsl = float(row[2] or 0)
-                        community = str(row[3] or "").strip()
-                        if acct and ym and lsl > 0:
-                            txn_rows.append((acct, ym, lsl, community))
-                    if txn_rows:
-                        source_table = "tblmonthlytransactions"
+                with _get_derived_connection() as dconn:
+                    dcursor = dconn.cursor()
+                    dcursor.execute(
+                        "SELECT [accountnumber], [yearmonth], [amount_lsl], [community] "
+                        "FROM [tblmonthlytransactions]"
+                    )
+                    raw = dcursor.fetchall()
+                    if raw:
+                        for row in raw:
+                            acct = str(row[0] or "").strip()
+                            ym = str(row[1] or "").strip()
+                            lsl = float(row[2] or 0)
+                            community = str(row[3] or "").strip()
+                            if acct and ym and lsl > 0:
+                                txn_rows.append((acct, ym, lsl, community))
+                        if txn_rows:
+                            source_table = "tblmonthlytransactions"
             except Exception as e:
                 logger.warning("tblmonthlytransactions query failed: %s", e)
 
@@ -1503,10 +1532,6 @@ def consumption_by_tenure(
         # Consumption data (tblmonthlyconsumption) overlays actual meter readings
         # for account-months where it exists.  Consumption takes priority over
         # vended kWh for overlapping (account, month) pairs.
-        existing_tables = {
-            t.table_name.lower()
-            for t in cursor.tables(tableType="TABLE")
-        }
 
         # Build meter_serial → accountnumber map to normalise consumption IDs
         # so that the same physical customer uses a single key across sources.
@@ -1534,15 +1559,18 @@ def consumption_by_tenure(
         consumption_acct_months: Set[Tuple[str, str]] = set()
         consumption_rows: List[tuple] = []
 
-        if "tblmonthlyconsumption" in existing_tables:
-            try:
-                cursor.execute(
-                    "SELECT [accountnumber], [yearmonth], [kwh], [meterid] "
-                    "FROM [tblmonthlyconsumption]"
-                )
-                consumption_rows = cursor.fetchall()
-            except Exception as e:
-                logger.warning("Failed to query tblmonthlyconsumption: %s", e)
+        try:
+            with _get_derived_connection() as dconn:
+                dcursor = dconn.cursor()
+                derived_tables = {t.table_name.lower() for t in dcursor.tables(tableType="TABLE")}
+                if "tblmonthlyconsumption" in derived_tables:
+                    dcursor.execute(
+                        "SELECT [accountnumber], [yearmonth], [kwh], [meterid] "
+                        "FROM [tblmonthlyconsumption]"
+                    )
+                    consumption_rows = dcursor.fetchall()
+        except Exception as e:
+            logger.warning("Derived DB unavailable for tblmonthlyconsumption: %s", e)
 
         cons_matched = 0
         cons_unmatched = 0

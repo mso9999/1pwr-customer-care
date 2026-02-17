@@ -35,6 +35,11 @@ def _get_connection():
     return get_connection()
 
 
+def _get_derived_connection():
+    from customer_api import get_derived_connection
+    return get_derived_connection()
+
+
 def _row_to_dict(cursor, row) -> Dict[str, Any]:
     columns = [desc[0] for desc in cursor.description]
     d = {}
@@ -700,33 +705,35 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
                     latest_hist_dt = r["date"]
 
         try:
-            existing_tbl = {
-                t.table_name.lower()
-                for t in cursor.tables(tableType="TABLE")
-            }
-            if "tblmonthlytransactions" in existing_tbl:
-                acct_key = accounts[0]
-                cursor.execute(
-                    "SELECT [yearmonth], [amount_lsl], [kwh_vended] "
-                    "FROM [tblmonthlytransactions] "
-                    "WHERE [accountnumber] = ? "
-                    "ORDER BY [yearmonth] DESC",
-                    (acct_key,),
-                )
-                for r2 in cursor.fetchall():
-                    ym = str(r2[0] or "").strip()
-                    if not ym:
-                        continue
-                    try:
-                        y2, m2 = int(ym[:4]), int(ym[5:7])
-                        row_dt2 = datetime(y2, m2, 15)
-                    except (ValueError, IndexError):
-                        continue
-                    if latest_hist_dt and row_dt2 <= latest_hist_dt:
-                        continue
-                    lsl2 = float(r2[1] or 0)
-                    kwh2 = float(r2[2] or 0)
-                    history_rows.append({"kwh": kwh2, "lsl": lsl2, "date": row_dt2})
+            with _get_derived_connection() as dconn:
+                dcursor = dconn.cursor()
+                existing_tbl = {
+                    t.table_name.lower()
+                    for t in dcursor.tables(tableType="TABLE")
+                }
+                if "tblmonthlytransactions" in existing_tbl:
+                    acct_key = accounts[0]
+                    dcursor.execute(
+                        "SELECT [yearmonth], [amount_lsl], [kwh_vended] "
+                        "FROM [tblmonthlytransactions] "
+                        "WHERE [accountnumber] = ? "
+                        "ORDER BY [yearmonth] DESC",
+                        (acct_key,),
+                    )
+                    for r2 in dcursor.fetchall():
+                        ym = str(r2[0] or "").strip()
+                        if not ym:
+                            continue
+                        try:
+                            y2, m2 = int(ym[:4]), int(ym[5:7])
+                            row_dt2 = datetime(y2, m2, 15)
+                        except (ValueError, IndexError):
+                            continue
+                        if latest_hist_dt and row_dt2 <= latest_hist_dt:
+                            continue
+                        lsl2 = float(r2[1] or 0)
+                        kwh2 = float(r2[2] or 0)
+                        history_rows.append({"kwh": kwh2, "lsl": lsl2, "date": row_dt2})
         except Exception as e:
             logger.warning("Dashboard: failed to supplement from tblmonthlytransactions: %s", e)
 
@@ -1007,51 +1014,53 @@ def employee_customer_data(
                     pass
 
         try:
-            existing_tables = {
-                tbl.table_name.lower()
-                for tbl in cursor.tables(tableType="TABLE")
-            }
-            if "tblmonthlytransactions" in existing_tables:
-                cursor.execute(
-                    "SELECT [yearmonth], [amount_lsl], [kwh_vended], "
-                    "[n_transactions], [meterid], [community] "
-                    "FROM [tblmonthlytransactions] "
-                    "WHERE [accountnumber] = ? "
-                    "ORDER BY [yearmonth] DESC",
-                    (acct,),
-                )
-                for r in cursor.fetchall():
-                    ym = str(r[0] or "").strip()
-                    if not ym:
-                        continue
-                    try:
-                        y, m = int(ym[:4]), int(ym[5:7])
-                        row_dt = datetime(y, m, 15)  # mid-month placeholder
-                    except (ValueError, IndexError):
-                        continue
+            with _get_derived_connection() as dconn:
+                dcursor = dconn.cursor()
+                existing_tables = {
+                    tbl.table_name.lower()
+                    for tbl in dcursor.tables(tableType="TABLE")
+                }
+                if "tblmonthlytransactions" in existing_tables:
+                    dcursor.execute(
+                        "SELECT [yearmonth], [amount_lsl], [kwh_vended], "
+                        "[n_transactions], [meterid], [community] "
+                        "FROM [tblmonthlytransactions] "
+                        "WHERE [accountnumber] = ? "
+                        "ORDER BY [yearmonth] DESC",
+                        (acct,),
+                    )
+                    for r in dcursor.fetchall():
+                        ym = str(r[0] or "").strip()
+                        if not ym:
+                            continue
+                        try:
+                            y, m = int(ym[:4]), int(ym[5:7])
+                            row_dt = datetime(y, m, 15)  # mid-month placeholder
+                        except (ValueError, IndexError):
+                            continue
 
-                    # Only add if this month is AFTER the latest history record
-                    if latest_hist_date and row_dt <= latest_hist_date:
-                        continue
+                        # Only add if this month is AFTER the latest history record
+                        if latest_hist_date and row_dt <= latest_hist_date:
+                            continue
 
-                    lsl = round(float(r[1] or 0), 2)
-                    kwh = round(float(r[2] or 0), 2)
-                    n_txn = int(r[3] or 0)
-                    mid = str(r[4] or "").strip()
+                        lsl = round(float(r[1] or 0), 2)
+                        kwh = round(float(r[2] or 0), 2)
+                        n_txn = int(r[3] or 0)
+                        mid = str(r[4] or "").strip()
 
-                    transactions.append({
-                        "id": None,
-                        "account": acct,
-                        "meter": mid,
-                        "date": row_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                        "amount_lsl": lsl,
-                        "rate": 0,
-                        "kwh": kwh,
-                        "is_payment": lsl > 0,
-                        "source": "sparkmeter_monthly",
-                        "n_transactions": n_txn,
-                        "yearmonth": ym,
-                    })
+                        transactions.append({
+                            "id": None,
+                            "account": acct,
+                            "meter": mid,
+                            "date": row_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                            "amount_lsl": lsl,
+                            "rate": 0,
+                            "kwh": kwh,
+                            "is_payment": lsl > 0,
+                            "source": "sparkmeter_monthly",
+                            "n_transactions": n_txn,
+                            "yearmonth": ym,
+                        })
         except Exception as e:
             logger.warning("customer-data: failed to supplement from tblmonthlytransactions: %s", e)
 
