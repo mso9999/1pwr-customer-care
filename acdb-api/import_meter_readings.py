@@ -1,8 +1,9 @@
 """
-Import monthly consumption AND transaction data into the ACCDB.
+Import hourly + monthly consumption AND transaction data into the ACCDB.
 
-Populates two tables:
+Populates three tables:
 
+  tblhourlyconsumption   — per-meter HOURLY kWh consumed (meter readings)
   tblmonthlyconsumption  — per-meter monthly kWh consumed (meter readings)
   tblmonthlytransactions — per-meter monthly kWh vended + LSL paid (payment records)
 
@@ -94,6 +95,7 @@ DEFAULT_SEARCH_PATHS = [
 
 TABLE_NAME = "tblmonthlyconsumption"
 TXN_TABLE_NAME = "tblmonthlytransactions"
+HOURLY_TABLE_NAME = "tblhourlyconsumption"
 
 # Portfolio payment CSV paths (SparkMeter exports on Dropbox)
 # These are the authoritative transaction records, including manual corrections
@@ -285,6 +287,41 @@ def ensure_txn_table(conn: pyodbc.Connection) -> None:
         f"CREATE INDEX idx_mt_community_ym ON [{TXN_TABLE_NAME}] (community, yearmonth)"
     )
     logger.info("Table [%s] created with indexes", TXN_TABLE_NAME)
+
+
+def ensure_hourly_table(conn: pyodbc.Connection) -> None:
+    """Create tblhourlyconsumption if it doesn't already exist."""
+    cursor = conn.cursor()
+    existing = {
+        t.table_name.lower()
+        for t in cursor.tables(tableType="TABLE")
+    }
+    if HOURLY_TABLE_NAME.lower() in existing:
+        logger.info("Table [%s] already exists", HOURLY_TABLE_NAME)
+        return
+
+    logger.info("Creating table [%s]", HOURLY_TABLE_NAME)
+    cursor.execute(f"""
+        CREATE TABLE [{HOURLY_TABLE_NAME}] (
+            id AUTOINCREMENT PRIMARY KEY,
+            accountnumber TEXT(20),
+            meterid TEXT(80),
+            reading_datetime DATETIME,
+            kwh DOUBLE,
+            community TEXT(10),
+            source TEXT(20)
+        )
+    """)
+    cursor.execute(
+        f"CREATE INDEX idx_hc_meter_dt ON [{HOURLY_TABLE_NAME}] (meterid, reading_datetime)"
+    )
+    cursor.execute(
+        f"CREATE INDEX idx_hc_acct_dt ON [{HOURLY_TABLE_NAME}] (accountnumber, reading_datetime)"
+    )
+    cursor.execute(
+        f"CREATE INDEX idx_hc_community_dt ON [{HOURLY_TABLE_NAME}] (community, reading_datetime)"
+    )
+    logger.info("Table [%s] created with indexes", HOURLY_TABLE_NAME)
 
 
 # ---------------------------------------------------------------------------
@@ -735,11 +772,37 @@ def import_accdb_local(conn: pyodbc.Connection) -> int:
         logger.warning("No meter readings found in any ACCDB table")
         return 0
 
-    logger.info("Hourly bins: %d (aggregating to monthly...)", len(hourly))
+    logger.info("Hourly bins: %d", len(hourly))
 
-    # ── Pass 2: Collapse hourly → monthly ──
-    # avg kW for each hour × 1 h = kWh; sum across hours in month.
-    # Key: (meterid, "yyyy-mm") → kwh
+    # ── Pass 2a: Write hourly data to tblhourlyconsumption ──
+    cursor.execute(
+        f"DELETE FROM [{HOURLY_TABLE_NAME}] WHERE source = ?", ("accdb",)
+    )
+    hourly_inserted = 0
+    for (mid, hour_key), (sum_kw, count) in hourly.items():
+        avg_kw = sum_kw / count  # hourly kWh = avg_kw × 1h
+        acct, community = meter_to_acct.get(mid, ("", ""))
+        if not acct:
+            acct = mid
+        # Parse "yyyy-mm-dd-HH" → datetime
+        try:
+            dt = datetime.strptime(hour_key, "%Y-%m-%d-%H")
+        except ValueError:
+            continue
+        cursor.execute(
+            f"INSERT INTO [{HOURLY_TABLE_NAME}] "
+            "(accountnumber, meterid, reading_datetime, kwh, community, source) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (acct, mid, dt, round(avg_kw, 4), community, "accdb"),
+        )
+        hourly_inserted += 1
+        if hourly_inserted % 50000 == 0:
+            logger.info("  Hourly insert progress: %d / %d", hourly_inserted, len(hourly))
+
+    logger.info("ACCDB local: %d hourly rows written", hourly_inserted)
+
+    # ── Pass 2b: Collapse hourly → monthly for tblmonthlyconsumption ──
+    logger.info("Aggregating hourly → monthly...")
     monthly: Dict[Tuple[str, str], float] = {}
     for (mid, hour_key), (sum_kw, count) in hourly.items():
         avg_kw = sum_kw / count
@@ -747,7 +810,6 @@ def import_accdb_local(conn: pyodbc.Connection) -> int:
         mk = (mid, ym)
         monthly[mk] = monthly.get(mk, 0.0) + avg_kw
 
-    # Free memory
     del hourly
 
     logger.info("Monthly records: %d", len(monthly))
@@ -756,7 +818,6 @@ def import_accdb_local(conn: pyodbc.Connection) -> int:
         logger.warning("No meter readings found in any ACCDB table")
         return 0
 
-    # Delete existing ACCDB-sourced rows and insert merged results
     cursor.execute(f"DELETE FROM [{TABLE_NAME}] WHERE source = ?", ("accdb",))
 
     inserted = 0
@@ -775,8 +836,8 @@ def import_accdb_local(conn: pyodbc.Connection) -> int:
         inserted += 1
 
     logger.info(
-        "ACCDB local total: %d monthly records from %d unique meters",
-        inserted, len(all_meters),
+        "ACCDB local total: %d monthly + %d hourly records from %d unique meters",
+        inserted, hourly_inserted, len(all_meters),
     )
     return inserted
 
@@ -969,6 +1030,122 @@ def fetch_koios_historical_month(
     return results
 
 
+def fetch_koios_hourly_readings(
+    session: requests.Session,
+    site_id: str,
+    yearmonth: str,
+) -> List[Dict[str, Any]]:
+    """Fetch individual readings from Koios and bin to hourly per meter.
+
+    Returns list of dicts: {meter, customer_code, hour_dt, kwh}
+    where hour_dt is a datetime truncated to the hour.
+    """
+    parts = yearmonth.split("-")
+    year, month = int(parts[0]), int(parts[1])
+    last_day = calendar.monthrange(year, month)[1]
+    date_from = f"{yearmonth}-01"
+    date_to = f"{yearmonth}-{last_day:02d}"
+
+    all_data: List[Dict[str, Any]] = []
+    cursor_token: Optional[str] = None
+
+    while True:
+        body: Dict[str, Any] = {
+            "filters": {
+                "sites": [site_id],
+                "date_range": {"from": date_from, "to": date_to},
+            },
+            "per_page": 5000,
+        }
+        if cursor_token:
+            body["cursor"] = cursor_token
+
+        r = session.post(
+            f"{KOIOS_BASE_URL}/api/v2/organizations/{KOIOS_ORG_ID}/data/historical",
+            json=body,
+            headers={"Content-Type": "application/json"},
+            timeout=90,
+        )
+        r.raise_for_status()
+        resp = r.json()
+        batch = resp.get("data", [])
+        all_data.extend(batch)
+
+        pagination = resp.get("pagination", {})
+        cursor_token = pagination.get("cursor")
+        has_more = pagination.get("has_more", False)
+
+        if not has_more or not cursor_token or not batch:
+            break
+        time.sleep(0.2)
+
+    if not all_data:
+        return []
+
+    # Bin readings by (meter, hour)
+    # Key: (meter_serial, "yyyy-mm-dd-HH") → {kwh, customer_code}
+    hourly_bins: Dict[Tuple[str, str], float] = {}
+    meter_customer: Dict[str, str] = {}
+
+    for rec in all_data:
+        meter = str(
+            rec.get("meter", rec.get("meter_serial", rec.get("meter_id", "")))
+        ).strip()
+        if not meter:
+            continue
+
+        kwh = 0.0
+        for field in ("kilowatt_hours", "kwh", "energy", "total_energy"):
+            if field in rec:
+                try:
+                    kwh = float(rec[field])
+                except (ValueError, TypeError):
+                    pass
+                break
+        if kwh <= 0:
+            continue
+
+        # Extract timestamp and truncate to hour
+        ts_raw = rec.get("timestamp", rec.get("reading_time", rec.get("date", "")))
+        if not ts_raw:
+            continue
+        try:
+            ts_str = str(ts_raw)[:13]  # "yyyy-mm-ddTHH" or "yyyy-mm-dd HH"
+            ts_str = ts_str.replace("T", " ")
+            if len(ts_str) >= 13:
+                hour_key = f"{ts_str[:10]}-{ts_str[11:13]}"
+            else:
+                # No hour info — put all in 00
+                hour_key = f"{ts_str[:10]}-00"
+        except (ValueError, IndexError):
+            continue
+
+        hk = (meter, hour_key)
+        hourly_bins[hk] = hourly_bins.get(hk, 0.0) + kwh
+
+        if meter not in meter_customer:
+            for field in ("customer_code", "code", "customer_id", "customer"):
+                val = rec.get(field)
+                if val:
+                    meter_customer[meter] = str(val).strip()
+                    break
+
+    results: List[Dict[str, Any]] = []
+    for (meter, hour_key), kwh in hourly_bins.items():
+        try:
+            hour_dt = datetime.strptime(hour_key, "%Y-%m-%d-%H")
+        except ValueError:
+            continue
+        results.append({
+            "meter": meter,
+            "customer_code": meter_customer.get(meter, ""),
+            "hour_dt": hour_dt,
+            "kwh": kwh,
+        })
+
+    return results
+
+
 def fetch_koios_customer_map(
     session: requests.Session,
 ) -> Dict[str, str]:
@@ -1093,6 +1270,76 @@ def import_koios_month(
         logger.info(
             "Koios %s %s: %d meters imported (via historical API, %d readings)",
             site_code, yearmonth, inserted, len(meters),
+        )
+
+    return inserted
+
+
+def import_koios_hourly_month(
+    session: requests.Session,
+    conn: pyodbc.Connection,
+    site_code: str,
+    site_id: str,
+    yearmonth: str,
+    koios_customer_map: Optional[Dict[str, str]] = None,
+) -> int:
+    """Import one month of Koios hourly readings for one site into tblhourlyconsumption.
+
+    Uses the historical API (individual readings) and bins to hourly.
+    Returns hourly rows inserted.
+    """
+    try:
+        hourly_readings = fetch_koios_hourly_readings(session, site_id, yearmonth)
+    except requests.HTTPError as e:
+        if e.response is not None and e.response.status_code == 404:
+            return 0
+        logger.warning("Koios hourly %s %s: HTTP %s", site_code, yearmonth, e)
+        return 0
+    except Exception as e:
+        logger.warning("Koios hourly %s %s: error: %s", site_code, yearmonth, e)
+        return 0
+
+    if not hourly_readings:
+        return 0
+
+    cursor = conn.cursor()
+
+    # Parse yearmonth to build date bounds for idempotent delete
+    parts = yearmonth.split("-")
+    year, month_num = int(parts[0]), int(parts[1])
+    dt_from = datetime(year, month_num, 1)
+    last_day = calendar.monthrange(year, month_num)[1]
+    dt_to = datetime(year, month_num, last_day, 23, 59, 59)
+
+    cursor.execute(
+        f"DELETE FROM [{HOURLY_TABLE_NAME}] "
+        "WHERE community = ? AND source = ? "
+        "AND reading_datetime >= ? AND reading_datetime <= ?",
+        (site_code, "koios", dt_from, dt_to),
+    )
+
+    inserted = 0
+    for hr in hourly_readings:
+        meter_serial = hr["meter"]
+        acct = hr.get("customer_code", "").strip()
+
+        if not acct and meter_serial and koios_customer_map:
+            acct = koios_customer_map.get(meter_serial, "")
+        if not acct:
+            acct = meter_serial
+
+        cursor.execute(
+            f"INSERT INTO [{HOURLY_TABLE_NAME}] "
+            "(accountnumber, meterid, reading_datetime, kwh, community, source) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (acct, meter_serial, hr["hour_dt"], round(hr["kwh"], 4), site_code, "koios"),
+        )
+        inserted += 1
+
+    if inserted > 0:
+        logger.info(
+            "Koios hourly %s %s: %d hourly rows inserted",
+            site_code, yearmonth, inserted,
         )
 
     return inserted
@@ -1240,6 +1487,139 @@ class ThunderCloudClient:
             })
 
         return results
+
+    def get_hourly_per_meter(
+        self, year: int, month: int
+    ) -> List[Dict[str, Any]]:
+        """Download daily Parquet files for a month, aggregate per (meter, hour).
+
+        Returns list of dicts with keys: meter, customer_code, hour_dt, kwh.
+        Requires pandas + pyarrow.
+        """
+        try:
+            import pandas as pd
+        except ImportError:
+            logger.error(
+                "pandas is required for ThunderCloud import. "
+                "Install with: pip install pandas pyarrow"
+            )
+            return []
+
+        last_day = calendar.monthrange(year, month)[1]
+        all_frames = []
+
+        for day in range(1, last_day + 1):
+            raw = self.download_day_raw(year, month, day)
+            if raw is None:
+                continue
+            try:
+                df = pd.read_parquet(io.BytesIO(raw))
+                all_frames.append(df)
+            except Exception as e:
+                logger.warning("ThunderCloud %d-%02d-%02d parse error: %s", year, month, day, e)
+
+        if not all_frames:
+            return []
+
+        combined = pd.concat(all_frames, ignore_index=True)
+
+        # Find timestamp column
+        ts_col = None
+        for candidate in ("timestamp", "reading_time", "datetime", "date"):
+            if candidate in combined.columns:
+                ts_col = candidate
+                break
+        if ts_col is None:
+            logger.warning(
+                "ThunderCloud: no timestamp column found. Columns: %s",
+                list(combined.columns),
+            )
+            return []
+
+        combined[ts_col] = pd.to_datetime(combined[ts_col], errors="coerce")
+        combined = combined.dropna(subset=[ts_col])
+        combined["hour"] = combined[ts_col].dt.floor("h")
+
+        # Determine customer_code column
+        code_col = None
+        for col in ("snapshot_customer_code", "snapshot_customer_id"):
+            if col in combined.columns:
+                code_col = col
+                break
+
+        # Aggregate kWh per (meter, hour)
+        grouped = combined.groupby(["meter", "hour"]).agg(
+            kwh=("kilowatt_hours", "sum"),
+        ).reset_index()
+
+        # Build meter → customer_code lookup
+        meter_cust: Dict[str, str] = {}
+        if code_col:
+            for meter_val in combined["meter"].unique():
+                mask = combined["meter"] == meter_val
+                codes = combined.loc[mask, code_col].dropna().unique()
+                if len(codes) > 0:
+                    meter_cust[str(meter_val)] = str(codes[0])
+
+        results = []
+        for _, row in grouped.iterrows():
+            meter_id = str(row["meter"])
+            results.append({
+                "meter": meter_id,
+                "customer_code": meter_cust.get(meter_id, ""),
+                "hour_dt": row["hour"].to_pydatetime(),
+                "kwh": float(row["kwh"]),
+            })
+
+        logger.info(
+            "ThunderCloud %d-%02d: %d hourly bins from %d readings",
+            year, month, len(results), len(combined),
+        )
+        return results
+
+
+def import_thundercloud_hourly_month(
+    tc: ThunderCloudClient,
+    conn: pyodbc.Connection,
+    yearmonth: str,
+) -> int:
+    """Import one month of ThunderCloud (MAK) hourly data. Returns rows inserted."""
+    parts = yearmonth.split("-")
+    year, month_num = int(parts[0]), int(parts[1])
+
+    hourly_data = tc.get_hourly_per_meter(year, month_num)
+    if not hourly_data:
+        return 0
+
+    cursor = conn.cursor()
+
+    dt_from = datetime(year, month_num, 1)
+    last_day = calendar.monthrange(year, month_num)[1]
+    dt_to = datetime(year, month_num, last_day, 23, 59, 59)
+
+    cursor.execute(
+        f"DELETE FROM [{HOURLY_TABLE_NAME}] "
+        "WHERE community = ? AND source = ? "
+        "AND reading_datetime >= ? AND reading_datetime <= ?",
+        ("MAK", "thundercloud", dt_from, dt_to),
+    )
+
+    inserted = 0
+    for hr in hourly_data:
+        acct = hr.get("customer_code", "").strip()
+        meter_serial = hr["meter"]
+        if not acct:
+            acct = meter_serial
+
+        cursor.execute(
+            f"INSERT INTO [{HOURLY_TABLE_NAME}] "
+            "(accountnumber, meterid, reading_datetime, kwh, community, source) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (acct, meter_serial, hr["hour_dt"], round(hr["kwh"], 4), "MAK", "thundercloud"),
+        )
+        inserted += 1
+
+    return inserted
 
 
 def import_thundercloud_month(
@@ -1735,7 +2115,7 @@ def month_range(start: str, end: str) -> List[str]:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Import monthly meter readings into ACCDB"
+        description="Import hourly + monthly consumption and transaction data into ACCDB"
     )
     parser.add_argument(
         "--from", dest="start", default="2019-01",
@@ -1776,6 +2156,10 @@ def main():
         "--no-transactions", action="store_true",
         help="Skip transaction import (consumption only, original behavior)",
     )
+    parser.add_argument(
+        "--no-hourly", action="store_true",
+        help="Skip hourly granularity import (only monthly + transactions)",
+    )
     parser.add_argument("--dry-run", action="store_true", help="Print plan without importing")
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args()
@@ -1803,6 +2187,8 @@ def main():
 
     ensure_table(conn)
     ensure_txn_table(conn)
+    if not args.no_hourly:
+        ensure_hourly_table(conn)
 
     # Determine date range for external APIs
     if args.end is None:
@@ -1860,6 +2246,8 @@ def main():
     total_inserted = 0
     total_errors = 0
     txn_inserted = 0
+    hourly_inserted = 0
+    do_hourly = not args.no_hourly and do_consumption
 
     # ── Step 1: Aggregate existing ACCDB meter data tables ──
     if do_consumption and not args.remote_only and not args.koios_only and not args.thundercloud_only:
@@ -1935,6 +2323,43 @@ def main():
                 time.sleep(0.3)
             logger.info("Koios %s: %d total rows imported", site_code, site_total)
 
+    # ── Step 2b: Koios HOURLY consumption import ──
+    if do_hourly and not args.thundercloud_only and koios_session:
+        logger.info("=" * 60)
+        logger.info("STEP 2b: Koios HOURLY consumption import")
+        logger.info("=" * 60)
+        for site_code, site_id in KOIOS_SITES.items():
+            consecutive_empty = 0
+            site_started = False
+            site_total = 0
+            for ym in months:
+                try:
+                    n = import_koios_hourly_month(
+                        koios_session, conn, site_code, site_id, ym,
+                        koios_customer_map=koios_cust_map,
+                    )
+                    if n > 0:
+                        site_started = True
+                        consecutive_empty = 0
+                        site_total += n
+                    else:
+                        consecutive_empty += 1
+                    hourly_inserted += n
+                except Exception as e:
+                    logger.error("Koios hourly %s %s failed: %s", site_code, ym, e)
+                    total_errors += 1
+                    consecutive_empty += 1
+
+                if not site_started and consecutive_empty >= 6:
+                    logger.info(
+                        "Koios hourly %s: no data in first %d months, fast-forwarding",
+                        site_code, consecutive_empty,
+                    )
+                    consecutive_empty = 0
+                time.sleep(0.3)
+            if site_total > 0:
+                logger.info("Koios hourly %s: %d total rows imported", site_code, site_total)
+
     # ── Step 3: ThunderCloud consumption import ──
     tc = None
     if (do_consumption or do_transactions) and not args.koios_only:
@@ -1961,6 +2386,30 @@ def main():
                 total_errors += 1
                 consecutive_empty += 1
             if not tc_started and consecutive_empty >= 6:
+                consecutive_empty = 0
+
+    # ── Step 3b: ThunderCloud HOURLY consumption import ──
+    if do_hourly and tc and not args.koios_only:
+        logger.info("=" * 60)
+        logger.info("STEP 3b: ThunderCloud HOURLY consumption import (MAK)")
+        logger.info("=" * 60)
+        consecutive_empty = 0
+        tc_h_started = False
+        for ym in months:
+            try:
+                n = import_thundercloud_hourly_month(tc, conn, ym)
+                if n > 0:
+                    logger.info("ThunderCloud MAK hourly %s: %d rows imported", ym, n)
+                    tc_h_started = True
+                    consecutive_empty = 0
+                else:
+                    consecutive_empty += 1
+                hourly_inserted += n
+            except Exception as e:
+                logger.error("ThunderCloud MAK hourly %s failed: %s", ym, e)
+                total_errors += 1
+                consecutive_empty += 1
+            if not tc_h_started and consecutive_empty >= 6:
                 consecutive_empty = 0
 
     # ── Step 4: Portfolio CSV transaction import (primary, authoritative) ──
@@ -2076,8 +2525,9 @@ def main():
 
     logger.info("=" * 60)
     logger.info("IMPORT COMPLETE")
-    logger.info("  Consumption rows inserted: %d", total_inserted)
-    logger.info("  Transaction rows inserted: %d", txn_inserted)
+    logger.info("  Monthly consumption rows inserted: %d", total_inserted)
+    logger.info("  Hourly consumption rows inserted:  %d", hourly_inserted)
+    logger.info("  Transaction rows inserted:         %d", txn_inserted)
     logger.info("  Errors: %d", total_errors)
     logger.info("=" * 60)
 
