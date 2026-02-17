@@ -1202,7 +1202,7 @@ def _date_to_quarter_from_month(month_str: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 13. Average Consumption by Tenure (months since first transaction)
+# 13. Average Consumption by Tenure (months since first reading)
 # ---------------------------------------------------------------------------
 
 @router.get("/consumption-by-tenure")
@@ -1210,240 +1210,157 @@ def consumption_by_tenure(
     user: CurrentUser = Depends(require_employee),
 ):
     """
-    Average monthly kWh consumption as a function of tenure (months since
-    first transaction), segmented by customer type (HH, SME, etc.) with
+    Average monthly kWh *consumption* as a function of tenure (months since
+    first meter reading), segmented by customer type (HH, SME, etc.) with
     +/- 1 standard deviation bands.
 
-    Customer type is loaded from a static JSON mapping (meter_customer_types.json)
-    extracted from the O&M team's Customer Onboarding spreadsheet.  The mapping
-    joins on meterid (SMRSD serial) to tblaccounthistory1.
+    Uses tblmeterdata1 (10-minute interval powerkW readings) for actual
+    consumption, NOT transaction/vending tables.  Monthly kWh per meter =
+    sum(powerkW * 10/60) over all readings in that calendar month.
 
-    Tenure origin: each account's earliest transaction date (since
-    DATE SERVICE CONNECTED is only populated for ~8 of 1343 customers).
+    Meter → customer type comes from Copy Of tblmeter / tblmeter.
+    Tenure origin = each meter's earliest reading in tblmeterdata1.
     """
-
-    # ── Load meter → customer-type mapping ──
-    _data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
-    _type_map_path = os.path.join(_data_dir, "meter_customer_types.json")
-    try:
-        with open(_type_map_path, "r") as f:
-            meter_type_map: Dict[str, str] = json.load(f)
-    except Exception as e:
-        logger.error("Cannot load meter_customer_types.json: %s", e)
-        return {
-            "chart_data": [], "customer_types": [],
-            "error": f"Cannot load customer type mapping: {e}",
-        }
-
-    # Build a normalised lookup (uppercase, hyphens) for fuzzy matching
-    norm_map: Dict[str, str] = {}
-    for mid, ctype in meter_type_map.items():
-        norm_map[mid.upper().replace("_", "-")] = ctype
-
-    def _parse_dt(dt) -> Optional[datetime]:
-        if dt is None:
-            return None
-        if isinstance(dt, str):
-            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"):
-                try:
-                    return datetime.strptime(dt.strip(), fmt)
-                except (ValueError, AttributeError):
-                    continue
-            return None
-        try:
-            _ = dt.year
-            return dt
-        except (AttributeError, TypeError):
-            return None
-
-    def _lookup_type(meter_id: str) -> Optional[str]:
-        if not meter_id:
-            return None
-        key = meter_id.strip().upper().replace("_", "-")
-        return norm_map.get(key)
 
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        # ── Load all table data into memory (single query per table) ──
-        tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
-        all_table_rows: Dict[str, list] = {}
-        for table in tables_to_try:
-            try:
-                date_col = _find_date_column(cursor, table)
-                if not date_col:
-                    continue
-                cursor.execute(
-                    f"SELECT [meterid], [accountnumber], [{date_col}], [kwh value] "
-                    f"FROM [{table}]"
-                )
-                all_table_rows[table] = cursor.fetchall()
-            except Exception as e:
-                logger.warning("Failed to read %s for tenure: %s", table, e)
-
-        # ── Build account → customer_type mapping (multiple sources) ──
-        acct_type: Dict[str, str] = {}
-
-        # Source 1: ACCDB meter tables (direct accountnumber → customer type)
+        # ── 1. Build meterid → customer_type from ACCDB meter tables ──
+        meter_type: Dict[str, str] = {}
         for meter_table in _METER_TABLES:
             try:
                 cursor.execute(
-                    f"SELECT [accountnumber], [customer type] FROM [{meter_table}] "
+                    f"SELECT [meterid], [customer type] FROM [{meter_table}] "
                     f"WHERE [customer type] IS NOT NULL AND [customer type] <> ''"
                 )
                 for row in cursor.fetchall():
-                    acct = str(row[0] or "").strip()
-                    ctype = str(row[1] or "").strip()
-                    if acct and ctype and acct not in acct_type:
-                        acct_type[acct] = ctype
-            except Exception:
-                continue
-
-        # Source 2: ACCDB meter tables (meterid → accountnumber, cross-ref JSON)
-        for meter_table in _METER_TABLES:
-            try:
-                cursor.execute(
-                    f"SELECT [meterid], [accountnumber] FROM [{meter_table}]"
-                )
-                for row in cursor.fetchall():
                     mid = str(row[0] or "").strip()
-                    acct = str(row[1] or "").strip()
-                    if not acct or acct in acct_type:
-                        continue
-                    ctype = _lookup_type(mid)
-                    if ctype:
-                        acct_type[acct] = ctype
+                    ctype = str(row[1] or "").strip()
+                    if mid and ctype and mid not in meter_type:
+                        meter_type[mid] = ctype
+                if meter_type:
+                    break
             except Exception:
                 continue
 
-        # Source 3: History table rows (meter ID → account, for any stragglers)
-        for _table, rows in all_table_rows.items():
-            for row in rows:
-                mid = str(row[0] or "").strip()
-                acct = str(row[1] or "").strip()
-                if not acct or acct in acct_type:
-                    continue
-                ctype = _lookup_type(mid)
-                if ctype:
-                    acct_type[acct] = ctype
-
-        acct_type_lower: Dict[str, str] = {k.lower(): v for k, v in acct_type.items()}
-
-        # ── Pass 2: Resolve type via meter ID OR account number fallback ──
-        acct_first_txn: Dict[str, datetime] = {}
-        parsed_rows: List[tuple] = []
-        per_table_debug: Dict[str, Any] = {}
-        total_rows = 0
-
-        for table, rows in all_table_rows.items():
-            total_rows += len(rows)
-            tbl_matched = 0
-            tbl_by_meter = 0
-            tbl_by_acct = 0
-            tbl_unmatched = 0
-
-            for row in rows:
-                mid = str(row[0] or "").strip()
-                acct = str(row[1] or "").strip()
-                if not acct:
-                    continue
-
-                ctype = _lookup_type(mid) if mid else None
-                match_method = "meter"
-                if not ctype:
-                    ctype = acct_type.get(acct) or acct_type_lower.get(acct.lower())
-                    match_method = "account"
-                if not ctype:
-                    tbl_unmatched += 1
-                    continue
-
-                if match_method == "meter":
-                    tbl_by_meter += 1
-                else:
-                    tbl_by_acct += 1
-                tbl_matched += 1
-
-                txn_dt = _parse_dt(row[2])
-                if txn_dt is None:
-                    continue
-                try:
-                    kwh = float(row[3] or 0)
-                except (ValueError, TypeError):
-                    continue
-
-                parsed_rows.append((acct, ctype, txn_dt, kwh))
-                if acct not in acct_first_txn or txn_dt < acct_first_txn[acct]:
-                    acct_first_txn[acct] = txn_dt
-
-            per_table_debug[table] = {
-                "rows": len(rows),
-                "matched": tbl_matched,
-                "by_meter": tbl_by_meter,
-                "by_account": tbl_by_acct,
-                "unmatched": tbl_unmatched,
-            }
-
-        debug_info = {
-            "acct_type_map_size": len(acct_type),
-            "tables": per_table_debug,
-            "total_rows": total_rows,
-            "unique_accounts_matched": len(acct_first_txn),
-        }
-
-        if not acct_first_txn:
+        if not meter_type:
             return {
                 "chart_data": [], "customer_types": [],
-                "error": "No account history data found",
-                "debug": debug_info,
+                "error": "No customer type data found in meter tables.",
             }
 
-        # ── Aggregate by type -> tenure_month -> acct ──
-        type_tenure_acct: Dict[str, Dict[int, Dict[str, float]]] = defaultdict(
+        # ── 2. Query tblmeterdata1 for actual consumption readings ──
+        try:
+            cursor.execute(
+                "SELECT [meterid], [whdatetime], [powerkW] FROM [tblmeterdata1] "
+                "WHERE [powerkW] IS NOT NULL"
+            )
+            readings = cursor.fetchall()
+        except Exception as e:
+            logger.error("Failed to query tblmeterdata1: %s", e)
+            return {
+                "chart_data": [], "customer_types": [],
+                "error": f"Failed to read meter data: {e}",
+            }
+
+        # ── 3. Aggregate into monthly kWh per meter ──
+        # key: (meterid, year, month) → sum of kWh (powerkW * 10/60 per reading)
+        meter_month_kwh: Dict[str, Dict[str, float]] = defaultdict(
+            lambda: defaultdict(float)
+        )
+        meter_first_dt: Dict[str, datetime] = {}
+        total_readings = 0
+        matched_readings = 0
+
+        for row in readings:
+            mid = str(row[0] or "").strip()
+            if mid not in meter_type:
+                continue
+
+            dt = row[1]
+            kw = row[2]
+            if dt is None or kw is None:
+                continue
+            try:
+                kw_val = float(kw)
+            except (ValueError, TypeError):
+                continue
+            if kw_val < 0:
+                continue
+
+            # Parse datetime
+            if hasattr(dt, 'year'):
+                yr, mo = dt.year, dt.month
+            elif isinstance(dt, str):
+                parsed = None
+                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y"):
+                    try:
+                        parsed = datetime.strptime(dt.strip(), fmt)
+                        break
+                    except (ValueError, AttributeError):
+                        continue
+                if not parsed:
+                    continue
+                yr, mo = parsed.year, parsed.month
+                dt = parsed
+            else:
+                continue
+
+            total_readings += 1
+            matched_readings += 1
+            kwh = kw_val * (10.0 / 60.0)  # 10-min reading → kWh
+            ym_key = f"{yr}-{mo:02d}"
+            meter_month_kwh[mid][ym_key] += kwh
+
+            if mid not in meter_first_dt or dt < meter_first_dt[mid]:
+                meter_first_dt[mid] = dt
+
+        if not meter_month_kwh:
+            return {
+                "chart_data": [], "customer_types": [],
+                "error": "No matched meter readings found.",
+                "debug": {
+                    "meter_type_count": len(meter_type),
+                    "total_readings": len(readings),
+                },
+            }
+
+        # ── 4. Compute tenure and aggregate by type → tenure_month → meter ──
+        now = datetime.now()
+        type_tenure_meter: Dict[str, Dict[int, Dict[str, float]]] = defaultdict(
             lambda: defaultdict(lambda: defaultdict(float))
         )
+        type_meter_tenure: Dict[str, Dict[str, int]] = defaultdict(dict)
 
-        for acct, ctype, txn_dt, kwh in parsed_rows:
-            if kwh <= 0:
+        for mid, monthly in meter_month_kwh.items():
+            ctype = meter_type[mid]
+            first_dt = meter_first_dt[mid]
+            tenure_total = (now.year - first_dt.year) * 12 + (now.month - first_dt.month)
+            if tenure_total < 0:
                 continue
-            first_dt = acct_first_txn[acct]
-            tenure_months = (
-                (txn_dt.year - first_dt.year) * 12
-                + (txn_dt.month - first_dt.month)
-            )
-            if tenure_months < 0:
-                continue
-            type_tenure_acct[ctype][tenure_months][acct] += kwh
+            type_meter_tenure[ctype][mid] = tenure_total
 
-        all_types = sorted(type_tenure_acct.keys())
+            for ym_key, kwh in monthly.items():
+                yr, mo = int(ym_key[:4]), int(ym_key[5:])
+                tenure_months = (yr - first_dt.year) * 12 + (mo - first_dt.month)
+                if tenure_months < 0:
+                    continue
+                type_tenure_meter[ctype][tenure_months][mid] = kwh
+
+        all_types = sorted(type_tenure_meter.keys())
         if not all_types:
             return {
                 "chart_data": [], "customer_types": [],
-                "error": "No typed tenure data after aggregation",
-                "debug": debug_info,
+                "error": "No typed tenure data after aggregation.",
             }
 
-        # Compute each account's tenure as months from first txn to NOW.
-        # Tenure is time since connection, not time since last transaction.
-        # n(t) = accounts with tenure >= t (monotonically decreasing).
-        now = datetime.now()
-        type_acct_tenure: Dict[str, Dict[str, int]] = defaultdict(dict)
+        # ── 5. Build chart_data with IQR outlier filtering ──
         max_tenure = 0
-        for acct, ctype in acct_type.items():
-            if acct not in acct_first_txn:
-                continue
-            first_dt = acct_first_txn[acct]
-            tenure = (now.year - first_dt.year) * 12 + (now.month - first_dt.month)
-            if tenure < 0:
-                continue
-            type_acct_tenure[ctype][acct] = tenure
-            if tenure > max_tenure:
-                max_tenure = tenure
+        for ctype in all_types:
+            for mid, ten in type_meter_tenure[ctype].items():
+                if ten > max_tenure:
+                    max_tenure = ten
 
-        # Build chart_data.
-        # n(t) = customers with tenure >= t  (monotonically decreasing).
-        # Average & stddev use ONLY customers with actual consumption data
-        # at month t (no zero-fill -- absence of a reading ≠ zero consumption).
-        # Stop the x-axis at the last month with valid data (>= 3 customers).
         chart_data = []
         last_valid_t = 0
         for t in range(max_tenure + 1):
@@ -1451,17 +1368,15 @@ def consumption_by_tenure(
             has_any_data = False
             for ctype in all_types:
                 n_eligible = sum(
-                    1 for ten in type_acct_tenure.get(ctype, {}).values()
+                    1 for ten in type_meter_tenure.get(ctype, {}).values()
                     if ten >= t
                 )
-                acct_kwh = type_tenure_acct[ctype].get(t, {})
-                raw_values = sorted(acct_kwh.values())
+                meter_kwh = type_tenure_meter[ctype].get(t, {})
+                raw_values = sorted(meter_kwh.values())
                 # IQR-based outlier removal
                 if len(raw_values) >= 4:
-                    q1_idx = len(raw_values) // 4
-                    q3_idx = 3 * len(raw_values) // 4
-                    q1 = raw_values[q1_idx]
-                    q3 = raw_values[q3_idx]
+                    q1 = raw_values[len(raw_values) // 4]
+                    q3 = raw_values[3 * len(raw_values) // 4]
                     iqr = q3 - q1
                     lo = q1 - 1.5 * iqr
                     hi = q3 + 1.5 * iqr
@@ -1487,7 +1402,7 @@ def consumption_by_tenure(
                     point[f"{ctype}_upper"] = round(mean + sd, 2)
                     point[f"{ctype}_lower"] = round(max(mean - sd, 0), 2)
                     point[f"{ctype}_n"] = n_eligible
-                    point[f"{ctype}_nd"] = len(raw_values)
+                    point[f"{ctype}_nd"] = n_data
                     point[f"{ctype}_nf"] = len(raw_values) - n_data
                     point[f"{ctype}_min"] = round(min(values), 2)
                     point[f"{ctype}_max"] = round(max(values), 2)
@@ -1495,26 +1410,25 @@ def consumption_by_tenure(
             if has_any_data:
                 last_valid_t = t
 
-        # Trim chart to last month with valid data
         chart_data = chart_data[: last_valid_t + 1]
         max_tenure = last_valid_t
 
         # Summary stats per type
         type_stats = []
         for ctype in all_types:
-            all_accts: set = set()
+            all_meters: set = set()
             total_kwh = 0.0
-            for t_data in type_tenure_acct[ctype].values():
-                all_accts.update(t_data.keys())
+            for t_data in type_tenure_meter[ctype].values():
+                all_meters.update(t_data.keys())
                 total_kwh += sum(t_data.values())
             max_t = (
-                max(type_tenure_acct[ctype].keys())
-                if type_tenure_acct[ctype]
+                max(type_tenure_meter[ctype].keys())
+                if type_tenure_meter[ctype]
                 else 0
             )
             type_stats.append({
                 "type": ctype,
-                "customer_count": len(all_accts),
+                "customer_count": len(all_meters),
                 "total_kwh": round(total_kwh, 2),
                 "max_tenure_months": max_t,
             })
@@ -1524,11 +1438,15 @@ def consumption_by_tenure(
             "customer_types": all_types,
             "type_stats": type_stats,
             "max_tenure_months": max_tenure,
-            "total_accounts_matched": len(acct_first_txn),
-            "source_tables": list(all_table_rows.keys()),
+            "total_accounts_matched": len(meter_month_kwh),
+            "source_tables": ["tblmeterdata1"],
             "segmentation": "customer_type",
-            "mapping_size": len(meter_type_map),
-            "debug": debug_info,
+            "debug": {
+                "meter_type_count": len(meter_type),
+                "total_readings": len(readings),
+                "matched_readings": matched_readings,
+                "unique_meters_with_data": len(meter_month_kwh),
+            },
         }
 
 
