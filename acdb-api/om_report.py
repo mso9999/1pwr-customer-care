@@ -1455,13 +1455,25 @@ def consumption_by_tenure(
                     if ten >= t
                 )
                 acct_kwh = type_tenure_acct[ctype].get(t, {})
-                values = list(acct_kwh.values())
+                raw_values = sorted(acct_kwh.values())
+                # IQR-based outlier removal
+                if len(raw_values) >= 4:
+                    q1_idx = len(raw_values) // 4
+                    q3_idx = 3 * len(raw_values) // 4
+                    q1 = raw_values[q1_idx]
+                    q3 = raw_values[q3_idx]
+                    iqr = q3 - q1
+                    lo = q1 - 1.5 * iqr
+                    hi = q3 + 1.5 * iqr
+                    values = [v for v in raw_values if lo <= v <= hi]
+                else:
+                    values = raw_values
                 if len(values) < 3:
                     point[ctype] = None
                     point[f"{ctype}_upper"] = None
                     point[f"{ctype}_lower"] = None
                     point[f"{ctype}_n"] = n_eligible
-                    point[f"{ctype}_nd"] = len(values)
+                    point[f"{ctype}_nd"] = len(raw_values)
                 else:
                     has_any_data = True
                     n_data = len(values)
@@ -1475,7 +1487,8 @@ def consumption_by_tenure(
                     point[f"{ctype}_upper"] = round(mean + sd, 2)
                     point[f"{ctype}_lower"] = round(max(mean - sd, 0), 2)
                     point[f"{ctype}_n"] = n_eligible
-                    point[f"{ctype}_nd"] = n_data
+                    point[f"{ctype}_nd"] = len(raw_values)
+                    point[f"{ctype}_nf"] = len(raw_values) - n_data
                     point[f"{ctype}_min"] = round(min(values), 2)
                     point[f"{ctype}_max"] = round(max(values), 2)
             chart_data.append(point)

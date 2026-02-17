@@ -883,11 +883,14 @@ export default function FinancialPage() {
                         <span style={{ fontWeight: 500 }}>{selectedTenureType}</span>: {Number(mean.value).toFixed(1)} kWh
                         {sigma != null && <span style={{ color: '#9ca3af' }}> (±{sigma}σ)</span>}
                       </p>
-                      {n != null && n > 0 && (
-                        <p style={{ margin: '2px 0', color: '#6b7280', fontSize: '11px' }}>
-                          n = {n} eligible &middot; {nd ?? 0} with data
-                        </p>
-                      )}
+                      {n != null && n > 0 && (() => {
+                        const nf = dataPoint[`${selectedTenureType}_nf`] ?? 0;
+                        return (
+                          <p style={{ margin: '2px 0', color: '#6b7280', fontSize: '11px' }}>
+                            n = {n} eligible · {nd ?? 0} with data{nf > 0 ? ` · ${nf} outliers removed` : ''}
+                          </p>
+                        );
+                      })()}
                       {vMin != null && vMax != null && (
                         <p style={{ margin: '2px 0', color: '#6b7280', fontSize: '11px' }}>
                           range: {vMin.toFixed(1)} – {vMax.toFixed(1)} kWh
