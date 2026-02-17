@@ -69,22 +69,14 @@ jobs:
           $global:LASTEXITCODE = 0
           # Also kill any lingering Python process
           Get-Process -Name python* -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-          Start-Sleep -Seconds 3
-          # Remove stale ACCDB lock files that prevent reopening
+          Start-Sleep -Seconds 5
+          # Remove stale ACCDB lock files (best-effort, non-fatal)
           $dbDir = "C:\Users\Administrator\Desktop\AccessDB_Clone"
           Get-ChildItem -Path $dbDir -Filter "*.ldb" -ErrorAction SilentlyContinue | ForEach-Object {
             Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
             Write-Host "Removed stale lock file: $($_.Name)"
           }
-          # If ACCDB is in a locked internal state, copy-and-replace to clear it
-          $accdb = Get-ChildItem -Path $dbDir -Filter "*.accdb" -ErrorAction SilentlyContinue | Select-Object -First 1
-          if ($accdb) {
-            $tmp = Join-Path $dbDir "temp_unlock.accdb"
-            Copy-Item $accdb.FullName $tmp -Force
-            Remove-Item $accdb.FullName -Force
-            Rename-Item $tmp $accdb.Name
-            Write-Host "Refreshed ACCDB file to clear internal lock: $($accdb.Name)"
-          }
+          $global:LASTEXITCODE = 0
           Write-Host "ACDB service stopped"
 
       - name: Deploy backend
