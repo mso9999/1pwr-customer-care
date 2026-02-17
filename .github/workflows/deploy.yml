@@ -71,9 +71,19 @@ jobs:
           Get-Process -Name python* -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
           Start-Sleep -Seconds 3
           # Remove stale ACCDB lock files that prevent reopening
-          Get-ChildItem -Path "C:\Users\Administrator\Desktop\AccessDB_Clone" -Filter "*.ldb" -ErrorAction SilentlyContinue | ForEach-Object {
+          $dbDir = "C:\Users\Administrator\Desktop\AccessDB_Clone"
+          Get-ChildItem -Path $dbDir -Filter "*.ldb" -ErrorAction SilentlyContinue | ForEach-Object {
             Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
             Write-Host "Removed stale lock file: $($_.Name)"
+          }
+          # If ACCDB is in a locked internal state, copy-and-replace to clear it
+          $accdb = Get-ChildItem -Path $dbDir -Filter "*.accdb" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($accdb) {
+            $tmp = Join-Path $dbDir "temp_unlock.accdb"
+            Copy-Item $accdb.FullName $tmp -Force
+            Remove-Item $accdb.FullName -Force
+            Rename-Item $tmp $accdb.Name
+            Write-Host "Refreshed ACCDB file to clear internal lock: $($accdb.Name)"
           }
           Write-Host "ACDB service stopped"
 
