@@ -1730,11 +1730,13 @@ def consumption_by_tenure(
             }
 
         # Compute each account's tenure as months from first reading/txn to NOW.
+        # Only include accounts that are IN the data source (not the full type map),
+        # so n_eligible reflects actual data coverage, not all known customers.
         now = datetime.now()
         type_acct_tenure: Dict[str, Dict[str, int]] = defaultdict(dict)
         max_tenure = 0
-        for acct, ctype in acct_type.items():
-            if acct not in acct_first_txn:
+        for acct, ctype, _dt, _kwh in parsed_rows:
+            if acct in type_acct_tenure.get(ctype, {}):
                 continue
             first_dt = acct_first_txn[acct]
             tenure = (now.year - first_dt.year) * 12 + (now.month - first_dt.month)
@@ -1819,6 +1821,10 @@ def consumption_by_tenure(
                 "total_kwh": round(total_kwh, 2),
                 "max_tenure_months": max_t,
             })
+
+        debug_info["type_acct_tenure_counts"] = {
+            ct: len(accts) for ct, accts in type_acct_tenure.items()
+        }
 
         return {
             "chart_data": chart_data,
