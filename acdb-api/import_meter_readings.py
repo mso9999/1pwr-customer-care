@@ -457,29 +457,197 @@ def parse_koios_meter_details(csv_text: str) -> List[Dict[str, str]]:
     return rows
 
 
+def fetch_koios_historical_month(
+    session: requests.Session,
+    site_id: str,
+    yearmonth: str,
+) -> List[Dict[str, str]]:
+    """Fetch historical readings from Koios v2 API for one site+month.
+
+    Falls back to this when the CSV report endpoint returns 404.
+    Returns list of dicts with keys: customer_code, meter_serial, total_energy.
+    """
+    parts = yearmonth.split("-")
+    year, month = int(parts[0]), int(parts[1])
+    last_day = calendar.monthrange(year, month)[1]
+    date_from = f"{yearmonth}-01"
+    date_to = f"{yearmonth}-{last_day:02d}"
+
+    all_data: List[Dict[str, Any]] = []
+    cursor_token: Optional[str] = None
+
+    while True:
+        body: Dict[str, Any] = {
+            "filters": {
+                "sites": [site_id],
+                "date_range": {"from": date_from, "to": date_to},
+            },
+            "per_page": 5000,
+        }
+        if cursor_token:
+            body["cursor"] = cursor_token
+
+        r = session.post(
+            f"{KOIOS_BASE_URL}/api/v2/organizations/{KOIOS_ORG_ID}/data/historical",
+            json=body,
+            headers={"Content-Type": "application/json"},
+            timeout=90,
+        )
+        r.raise_for_status()
+        resp = r.json()
+        batch = resp.get("data", [])
+        all_data.extend(batch)
+
+        pagination = resp.get("pagination", {})
+        cursor_token = pagination.get("cursor")
+        has_more = pagination.get("has_more", False)
+
+        if not has_more or not cursor_token or not batch:
+            break
+        time.sleep(0.2)
+
+    if not all_data:
+        return []
+
+    # Log field names from the first record (diagnostic, first call only)
+    if all_data:
+        record = all_data[0]
+        logger.debug(
+            "Koios historical record keys: %s", list(record.keys())
+        )
+
+    # Aggregate kWh per meter.
+    # Try multiple field names for meter ID and customer code.
+    meter_kwh: Dict[str, float] = {}
+    meter_customer: Dict[str, str] = {}
+
+    for rec in all_data:
+        # Meter identifier
+        meter = str(
+            rec.get("meter", rec.get("meter_serial", rec.get("meter_id", "")))
+        ).strip()
+        if not meter:
+            continue
+
+        # Energy
+        kwh = 0.0
+        for field in ("kilowatt_hours", "kwh", "energy", "total_energy"):
+            if field in rec:
+                try:
+                    kwh = float(rec[field])
+                except (ValueError, TypeError):
+                    pass
+                break
+        meter_kwh[meter] = meter_kwh.get(meter, 0.0) + kwh
+
+        # Customer code (may or may not be in the response)
+        if meter not in meter_customer:
+            for field in ("customer_code", "code", "customer_id", "customer"):
+                val = rec.get(field)
+                if val:
+                    meter_customer[meter] = str(val).strip()
+                    break
+
+    # Convert to the same format as parse_koios_meter_details
+    results: List[Dict[str, str]] = []
+    for meter, kwh in meter_kwh.items():
+        if kwh <= 0:
+            continue
+        results.append({
+            "customer_code": meter_customer.get(meter, ""),
+            "meter_serial": meter,
+            "total_energy": str(kwh),
+        })
+
+    return results
+
+
+def fetch_koios_customer_map(
+    session: requests.Session,
+) -> Dict[str, str]:
+    """Build meter_serial → customer_code mapping from Koios v1 customers API.
+
+    Called once at the start of Koios import to supplement historical records
+    that may not include customer_code.
+    """
+    meter_to_code: Dict[str, str] = {}
+    cursor_token: Optional[str] = None
+
+    while True:
+        params: Dict[str, Any] = {"per_page": 50}
+        if cursor_token:
+            params["cursor"] = cursor_token
+
+        try:
+            r = session.get(
+                f"{KOIOS_BASE_URL}/api/v1/customers",
+                params=params,
+                timeout=60,
+            )
+            r.raise_for_status()
+        except requests.RequestException as e:
+            logger.warning("Koios customer list failed: %s", e)
+            break
+
+        data = r.json()
+        batch = data.get("data", [])
+        for c in batch:
+            code = str(c.get("code", "")).strip()
+            # The customer may have a meter field or meters list
+            meter = str(c.get("meter", c.get("meter_serial", ""))).strip()
+            if code and meter:
+                meter_to_code[meter] = code
+
+        cursor_token = data.get("cursor")
+        if not cursor_token or not batch:
+            break
+        time.sleep(0.2)
+
+    logger.info("Koios customer map: %d meter→code entries", len(meter_to_code))
+    return meter_to_code
+
+
 def import_koios_month(
     session: requests.Session,
     conn: pyodbc.Connection,
     site_code: str,
     site_id: str,
     yearmonth: str,
+    koios_customer_map: Optional[Dict[str, str]] = None,
 ) -> int:
-    """Import one month of Koios data for one site. Returns rows inserted."""
+    """Import one month of Koios data for one site.
+
+    Tries CSV report first; falls back to historical API if 404.
+    Returns rows inserted.
+    """
     date_str = f"{yearmonth}-01"
+    meters: List[Dict[str, str]] = []
+    source_method = "csv"
+
+    # Try CSV report first (fast, pre-aggregated)
     try:
         csv_text = fetch_koios_monthly_csv(session, site_id, date_str)
+        meters = parse_koios_meter_details(csv_text)
     except requests.HTTPError as e:
-        logger.warning("Koios %s %s: HTTP %s", site_code, yearmonth, e)
-        return 0
+        if e.response is not None and e.response.status_code == 404:
+            # CSV not available — fall back to historical API
+            try:
+                meters = fetch_koios_historical_month(session, site_id, yearmonth)
+                source_method = "historical"
+            except requests.HTTPError as e2:
+                logger.warning("Koios %s %s: historical API also failed: %s", site_code, yearmonth, e2)
+                return 0
+            except Exception as e2:
+                logger.warning("Koios %s %s: historical API error: %s", site_code, yearmonth, e2)
+                return 0
+        else:
+            logger.warning("Koios %s %s: HTTP %s", site_code, yearmonth, e)
+            return 0
 
-    meters = parse_koios_meter_details(csv_text)
     if not meters:
-        logger.debug("Koios %s %s: no meter details in CSV", site_code, yearmonth)
         return 0
 
     cursor = conn.cursor()
-
-    # Delete existing rows for this site+month+source to ensure idempotency
     cursor.execute(
         f"DELETE FROM [{TABLE_NAME}] WHERE community = ? AND yearmonth = ? AND source = ?",
         (site_code, yearmonth, "koios"),
@@ -489,13 +657,22 @@ def import_koios_month(
     for m in meters:
         acct = m.get("customer_code", "").strip()
         meter_serial = m.get("meter_serial", "").strip()
+
+        # If customer_code missing, try the customer map
+        if not acct and meter_serial and koios_customer_map:
+            acct = koios_customer_map.get(meter_serial, "")
+
         try:
             kwh = float(m.get("total_energy", "0") or "0")
         except (ValueError, TypeError):
             continue
 
-        if not acct or kwh <= 0:
+        if kwh <= 0:
             continue
+
+        # Use meter_serial as accountnumber fallback if no customer code
+        if not acct:
+            acct = meter_serial
 
         cursor.execute(
             f"INSERT INTO [{TABLE_NAME}] "
@@ -504,6 +681,12 @@ def import_koios_month(
             (acct, meter_serial, yearmonth, kwh, site_code, "koios"),
         )
         inserted += 1
+
+    if inserted > 0 and source_method == "historical":
+        logger.info(
+            "Koios %s %s: %d meters imported (via historical API, %d readings)",
+            site_code, yearmonth, inserted, len(meters),
+        )
 
     return inserted
 
@@ -818,13 +1001,18 @@ def main():
         logger.info("STEP 2: Koios import")
         logger.info("=" * 60)
         koios_session = _koios_session()
+        logger.info("Building Koios customer map (meter → account)...")
+        koios_cust_map = fetch_koios_customer_map(koios_session)
         for site_code, site_id in KOIOS_SITES.items():
             consecutive_empty = 0
             site_started = False
             site_total = 0
             for ym in months:
                 try:
-                    n = import_koios_month(koios_session, conn, site_code, site_id, ym)
+                    n = import_koios_month(
+                        koios_session, conn, site_code, site_id, ym,
+                        koios_customer_map=koios_cust_map,
+                    )
                     if n > 0:
                         logger.info("Koios %s %s: %d meters imported", site_code, ym, n)
                         site_started = True
