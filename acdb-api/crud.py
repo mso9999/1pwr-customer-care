@@ -692,6 +692,44 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
                 logger.warning("Dashboard: failed to read %s: %s", table, e)
                 continue
 
+        # 2b. Supplement with tblmonthlytransactions for months beyond history
+        latest_hist_dt: Optional[datetime] = None
+        for r in history_rows:
+            if r["date"] and isinstance(r["date"], datetime):
+                if latest_hist_dt is None or r["date"] > latest_hist_dt:
+                    latest_hist_dt = r["date"]
+
+        try:
+            existing_tbl = {
+                t.table_name.lower()
+                for t in cursor.tables(tableType="TABLE")
+            }
+            if "tblmonthlytransactions" in existing_tbl:
+                acct_key = accounts[0]
+                cursor.execute(
+                    "SELECT [yearmonth], [amount_lsl], [kwh_vended] "
+                    "FROM [tblmonthlytransactions] "
+                    "WHERE [accountnumber] = ? "
+                    "ORDER BY [yearmonth] DESC",
+                    (acct_key,),
+                )
+                for r2 in cursor.fetchall():
+                    ym = str(r2[0] or "").strip()
+                    if not ym:
+                        continue
+                    try:
+                        y2, m2 = int(ym[:4]), int(ym[5:7])
+                        row_dt2 = datetime(y2, m2, 15)
+                    except (ValueError, IndexError):
+                        continue
+                    if latest_hist_dt and row_dt2 <= latest_hist_dt:
+                        continue
+                    lsl2 = float(r2[1] or 0)
+                    kwh2 = float(r2[2] or 0)
+                    history_rows.append({"kwh": kwh2, "lsl": lsl2, "date": row_dt2})
+        except Exception as e:
+            logger.warning("Dashboard: failed to supplement from tblmonthlytransactions: %s", e)
+
         # 3. Compute aggregates
         now = datetime.utcnow()
         total_kwh = sum(r["kwh"] for r in history_rows)
@@ -954,6 +992,76 @@ def employee_customer_data(
             except Exception as e:
                 logger.warning("customer-data: failed to read %s: %s", table, e)
                 continue
+
+        # --- Supplement with tblmonthlytransactions for months beyond history ---
+        # The history tables may be stale (cloned ACCDB).  tblmonthlytransactions
+        # has SparkMeter portfolio data that may cover more recent months.
+        latest_hist_date: Optional[datetime] = None
+        for t in transactions:
+            if t["date"]:
+                try:
+                    dt_p = datetime.strptime(t["date"][:19], "%Y-%m-%d %H:%M:%S")
+                    if latest_hist_date is None or dt_p > latest_hist_date:
+                        latest_hist_date = dt_p
+                except ValueError:
+                    pass
+
+        try:
+            existing_tables = {
+                tbl.table_name.lower()
+                for tbl in cursor.tables(tableType="TABLE")
+            }
+            if "tblmonthlytransactions" in existing_tables:
+                cursor.execute(
+                    "SELECT [yearmonth], [amount_lsl], [kwh_vended], "
+                    "[n_transactions], [meterid], [community] "
+                    "FROM [tblmonthlytransactions] "
+                    "WHERE [accountnumber] = ? "
+                    "ORDER BY [yearmonth] DESC",
+                    (acct,),
+                )
+                for r in cursor.fetchall():
+                    ym = str(r[0] or "").strip()
+                    if not ym:
+                        continue
+                    try:
+                        y, m = int(ym[:4]), int(ym[5:7])
+                        row_dt = datetime(y, m, 15)  # mid-month placeholder
+                    except (ValueError, IndexError):
+                        continue
+
+                    # Only add if this month is AFTER the latest history record
+                    if latest_hist_date and row_dt <= latest_hist_date:
+                        continue
+
+                    lsl = round(float(r[1] or 0), 2)
+                    kwh = round(float(r[2] or 0), 2)
+                    n_txn = int(r[3] or 0)
+                    mid = str(r[4] or "").strip()
+
+                    transactions.append({
+                        "id": None,
+                        "account": acct,
+                        "meter": mid,
+                        "date": row_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                        "amount_lsl": lsl,
+                        "rate": 0,
+                        "kwh": kwh,
+                        "is_payment": lsl > 0,
+                        "source": "sparkmeter_monthly",
+                        "n_transactions": n_txn,
+                        "yearmonth": ym,
+                    })
+        except Exception as e:
+            logger.warning("customer-data: failed to supplement from tblmonthlytransactions: %s", e)
+
+        # Re-sort by date descending after supplementing
+        def _txn_sort_key(t):
+            try:
+                return datetime.strptime(t["date"][:19], "%Y-%m-%d %H:%M:%S")
+            except (ValueError, TypeError, AttributeError):
+                return datetime.min
+        transactions.sort(key=_txn_sort_key, reverse=True)
 
         # --- Compute dashboard aggregates from transactions ---
         now = datetime.utcnow()
