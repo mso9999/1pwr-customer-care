@@ -830,14 +830,22 @@ def import_accdb_local(conn: pyodbc.Connection, db_path: str = "") -> int:
     # Serialize to temp file for the subprocess
     temp_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_accdb_write.pkl")
     with open(temp_path, "wb") as f:
-        pickle.dump({"hourly": hourly_rows, "monthly": monthly_rows, "db_path": db_path}, f)
+        pickle.dump({
+            "hourly": hourly_rows,
+            "monthly": monthly_rows,
+            "db_path": db_path,
+            "do_hourly": bool(hourly_rows),
+        }, f)
 
     logger.info(
         "Serialized %d hourly + %d monthly rows. Launching write subprocess...",
         len(hourly_rows), len(monthly_rows),
     )
 
-    # Subprocess script that does the actual ACCDB writes in a clean process
+    # Subprocess script that does the actual ACCDB writes in a clean process.
+    # This process has NEVER read from the ACCDB, so the Jet engine state is
+    # pristine.  It drops and recreates the tables to avoid any corruption
+    # left over from a previous run where tables were created before large reads.
     write_script = r'''
 import pickle, sys, pyodbc, os
 from datetime import datetime
@@ -848,6 +856,7 @@ with open(sys.argv[1], "rb") as f:
     data = pickle.load(f)
 
 db_path = data["db_path"]
+do_hourly = data.get("do_hourly", True)
 conn_str = (
     r"DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};"
     f"DBQ={db_path};"
@@ -855,26 +864,82 @@ conn_str = (
 conn = pyodbc.connect(conn_str, autocommit=True)
 c = conn.cursor()
 
-# Hourly
-c.execute("DELETE FROM [tblhourlyconsumption] WHERE source = ?", ("accdb",))
-hi = 0
-for acct, mid, hour_key, kwh, community in data["hourly"]:
-    try:
-        dt = datetime.strptime(hour_key, "%Y-%m-%d-%H")
-    except ValueError:
-        continue
-    c.execute(
-        "INSERT INTO [tblhourlyconsumption] "
-        "(accountnumber, meterid, reading_datetime, kwh, community, source) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (acct, mid, dt, kwh, community, "accdb"),
-    )
-    hi += 1
-    if hi % 50000 == 0:
-        print(f"  Hourly progress: {hi}/{len(data['hourly'])}", flush=True)
+# Verify clean connection with a write test
+c.execute("CREATE TABLE [_wtest] (id AUTOINCREMENT PRIMARY KEY, v TEXT(5))")
+c.execute("INSERT INTO [_wtest] (v) VALUES (?)", ("ok",))
+c.execute("DROP TABLE [_wtest]")
+print("Write test passed", flush=True)
 
-# Monthly
-c.execute("DELETE FROM [tblmonthlyconsumption] WHERE source = ?", ("accdb",))
+# Helper: get existing table names
+existing = {t.table_name.lower() for t in c.tables(tableType="TABLE")}
+
+# --- Ensure tblmonthlyconsumption ---
+tbl_mc = "tblmonthlyconsumption"
+if tbl_mc in existing:
+    try:
+        c.execute(f"DROP TABLE [{tbl_mc}]")
+        print(f"Dropped {tbl_mc}", flush=True)
+    except Exception as e:
+        print(f"Warning: drop {tbl_mc}: {e}", flush=True)
+c.execute(f"""
+    CREATE TABLE [{tbl_mc}] (
+        id AUTOINCREMENT PRIMARY KEY,
+        accountnumber TEXT(20),
+        meterid TEXT(80),
+        yearmonth TEXT(7),
+        kwh DOUBLE,
+        community TEXT(10),
+        source TEXT(20)
+    )
+""")
+c.execute(f"CREATE INDEX idx_mc_acct_ym ON [{tbl_mc}] (accountnumber, yearmonth)")
+c.execute(f"CREATE INDEX idx_mc_community_ym ON [{tbl_mc}] (community, yearmonth)")
+print(f"Created {tbl_mc}", flush=True)
+
+# --- Ensure tblhourlyconsumption ---
+if do_hourly:
+    tbl_hc = "tblhourlyconsumption"
+    if tbl_hc in existing:
+        try:
+            c.execute(f"DROP TABLE [{tbl_hc}]")
+            print(f"Dropped {tbl_hc}", flush=True)
+        except Exception as e:
+            print(f"Warning: drop {tbl_hc}: {e}", flush=True)
+    c.execute(f"""
+        CREATE TABLE [{tbl_hc}] (
+            id AUTOINCREMENT PRIMARY KEY,
+            accountnumber TEXT(20),
+            meterid TEXT(80),
+            reading_datetime DATETIME,
+            kwh DOUBLE,
+            community TEXT(10),
+            source TEXT(20)
+        )
+    """)
+    c.execute(f"CREATE INDEX idx_hc_meter_dt ON [{tbl_hc}] (meterid, reading_datetime)")
+    c.execute(f"CREATE INDEX idx_hc_acct_dt ON [{tbl_hc}] (accountnumber, reading_datetime)")
+    c.execute(f"CREATE INDEX idx_hc_community_dt ON [{tbl_hc}] (community, reading_datetime)")
+    print(f"Created {tbl_hc}", flush=True)
+
+# --- Insert hourly data ---
+hi = 0
+if do_hourly and data.get("hourly"):
+    for acct, mid, hour_key, kwh, community in data["hourly"]:
+        try:
+            dt = datetime.strptime(hour_key, "%Y-%m-%d-%H")
+        except ValueError:
+            continue
+        c.execute(
+            "INSERT INTO [tblhourlyconsumption] "
+            "(accountnumber, meterid, reading_datetime, kwh, community, source) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (acct, mid, dt, kwh, community, "accdb"),
+        )
+        hi += 1
+        if hi % 50000 == 0:
+            print(f"  Hourly progress: {hi}/{len(data['hourly'])}", flush=True)
+
+# --- Insert monthly data ---
 mi = 0
 for acct, mid, ym, kwh, community in data["monthly"]:
     c.execute(
@@ -2267,10 +2332,14 @@ def main():
         conn.close()
         return
 
-    ensure_table(conn)
+    # NOTE: do NOT call ensure_table / ensure_hourly_table here.
+    # Creating empty tables then reading 1M+ rows through the same connection
+    # corrupts the Jet engine's file metadata for those tables, making them
+    # permanently unwritable.  Table creation is deferred to the subprocess
+    # that handles ACCDB local writes (import_accdb_local).
+    # Only ensure the txn table here — it's used by later steps that don't
+    # trigger the large-read corruption.
     ensure_txn_table(conn)
-    if not args.no_hourly:
-        ensure_hourly_table(conn)
 
     # Determine date range for external APIs
     if args.end is None:
@@ -2344,6 +2413,14 @@ def main():
             total_errors += 1
         # import_accdb_local closes its connections; reopen for subsequent steps
         conn = get_accdb_connection(db_path)
+
+    # Now that the ACCDB local step (and its large reads) are done, ensure
+    # tables exist for subsequent Koios / ThunderCloud steps.  The ACCDB local
+    # subprocess already created them, so these will be no-ops in the normal
+    # case — but they're needed if --remote-only skipped step 1.
+    ensure_table(conn)
+    if not args.no_hourly:
+        ensure_hourly_table(conn)
 
     if args.local_only:
         conn.close()
