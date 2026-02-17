@@ -103,6 +103,103 @@ PORTFOLIO_CSV_SEARCH_PATHS = [
     ),
 ]
 
+# Dropbox API for remote CSV download (when local Dropbox sync is unavailable)
+DROPBOX_PORTFOLIO_PATH = (
+    "/1PWR/1PWR OM TEAM/22. Raw Data/1. Mini Grids/UNCLEANED/PURCHASES"
+)
+DROPBOX_LOCAL_CACHE = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), ".dropbox_cache", "portfolio_csvs",
+)
+
+
+def fetch_portfolio_csvs_from_dropbox(token: str) -> List[str]:
+    """Download portfolio payment CSVs from Dropbox API to local cache.
+
+    Uses Dropbox HTTP API v2 (no SDK required). Returns list of local file paths.
+    """
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    # Recursively list the PURCHASES folder for portfolio_*.csv files
+    logger.info("Listing Dropbox folder: %s", DROPBOX_PORTFOLIO_PATH)
+    csv_entries: List[dict] = []
+    body: dict = {"path": DROPBOX_PORTFOLIO_PATH, "recursive": True, "limit": 2000}
+    url = "https://api.dropboxapi.com/2/files/list_folder"
+
+    while True:
+        resp = requests.post(url, headers=headers, json=body, timeout=30)
+        if resp.status_code == 401:
+            logger.error("Dropbox auth failed (401). Token may be expired.")
+            return []
+        resp.raise_for_status()
+        data = resp.json()
+
+        for entry in data.get("entries", []):
+            name = entry.get("name", "")
+            if (
+                entry.get(".tag") == "file"
+                and name.startswith("portfolio_")
+                and name.endswith(".csv")
+            ):
+                csv_entries.append(entry)
+
+        if not data.get("has_more"):
+            break
+        url = "https://api.dropboxapi.com/2/files/list_folder/continue"
+        body = {"cursor": data["cursor"]}
+
+    logger.info("Found %d portfolio CSVs on Dropbox", len(csv_entries))
+    if not csv_entries:
+        return []
+
+    # Download each CSV to local cache
+    os.makedirs(DROPBOX_LOCAL_CACHE, exist_ok=True)
+    local_files: List[str] = []
+    download_headers = {"Authorization": f"Bearer {token}"}
+
+    for entry in csv_entries:
+        dbx_path = entry["path_lower"]
+        name = entry["name"]
+        size = entry.get("size", 0)
+
+        # Preserve year subfolder structure
+        parts = dbx_path.split("/")
+        # Find the year folder (e.g., "2023", "2024", "2025")
+        year_folder = ""
+        for p in parts:
+            if re.match(r"^\d{4}$", p):
+                year_folder = p
+                break
+
+        if year_folder:
+            dest_dir = os.path.join(DROPBOX_LOCAL_CACHE, year_folder)
+        else:
+            dest_dir = DROPBOX_LOCAL_CACHE
+        os.makedirs(dest_dir, exist_ok=True)
+        dest_path = os.path.join(dest_dir, name)
+
+        # Skip if already cached and same size
+        if os.path.isfile(dest_path) and os.path.getsize(dest_path) == size:
+            local_files.append(dest_path)
+            continue
+
+        # Download
+        logger.info("  Downloading %s (%d bytes)...", name, size)
+        dl_resp = requests.post(
+            "https://content.dropboxapi.com/2/files/download",
+            headers={
+                **download_headers,
+                "Dropbox-API-Arg": json.dumps({"path": dbx_path}),
+            },
+            timeout=60,
+        )
+        dl_resp.raise_for_status()
+        with open(dest_path, "wb") as f:
+            f.write(dl_resp.content)
+        local_files.append(dest_path)
+
+    logger.info("Downloaded %d CSVs to %s", len(local_files), DROPBOX_LOCAL_CACHE)
+    return sorted(local_files)
+
 
 def _find_accdb() -> str:
     env_path = os.environ.get("ACDB_PATH", "")
@@ -202,16 +299,23 @@ def ensure_txn_table(conn: pyodbc.Connection) -> None:
 
 
 def find_portfolio_csvs() -> List[str]:
-    """Discover all portfolio payment CSVs on the filesystem."""
+    """Discover all portfolio payment CSVs on the filesystem.
+
+    Checks both the native Dropbox sync paths and the API download cache.
+    """
     csv_files: List[str] = []
-    for base_path in PORTFOLIO_CSV_SEARCH_PATHS:
+    search_paths = list(PORTFOLIO_CSV_SEARCH_PATHS)
+    if os.path.isdir(DROPBOX_LOCAL_CACHE):
+        search_paths.append(DROPBOX_LOCAL_CACHE)
+
+    for base_path in search_paths:
         if not os.path.isdir(base_path):
             continue
         for root, _dirs, files in os.walk(base_path):
             for f in files:
                 if f.startswith("portfolio_") and f.endswith(".csv"):
                     csv_files.append(os.path.join(root, f))
-    return sorted(csv_files)
+    return sorted(set(csv_files))
 
 
 def parse_portfolio_csv(
@@ -1663,6 +1767,11 @@ def main():
         help="Only import SparkMeter portfolio CSVs from Dropbox (fastest)",
     )
     parser.add_argument(
+        "--fetch-dropbox", action="store_true",
+        help="Download portfolio CSVs from Dropbox API before importing "
+             "(requires DROPBOX_TOKEN env var)",
+    )
+    parser.add_argument(
         "--no-transactions", action="store_true",
         help="Skip transaction import (consumption only, original behavior)",
     )
@@ -1706,6 +1815,29 @@ def main():
 
     # --portfolio-only is a shortcut: skip consumption, skip API-based txn, only do CSVs
     portfolio_only = args.portfolio_only
+
+    # Fetch portfolio CSVs from Dropbox API if requested
+    if args.fetch_dropbox or portfolio_only:
+        dbx_token = os.environ.get("DROPBOX_TOKEN", "").strip()
+        if dbx_token:
+            try:
+                fetched = fetch_portfolio_csvs_from_dropbox(dbx_token)
+                logger.info("Dropbox fetch complete: %d files cached", len(fetched))
+            except Exception as e:
+                logger.error("Dropbox fetch failed: %s", e)
+                if portfolio_only:
+                    logger.info("Falling back to any locally cached CSVs...")
+        elif args.fetch_dropbox:
+            logger.error("--fetch-dropbox requires DROPBOX_TOKEN environment variable")
+            return
+        else:
+            # portfolio_only without explicit --fetch-dropbox: check local first
+            local_count = len(find_portfolio_csvs())
+            if local_count == 0 and not dbx_token:
+                logger.warning(
+                    "No portfolio CSVs found locally and no DROPBOX_TOKEN set. "
+                    "Set DROPBOX_TOKEN env var or use --fetch-dropbox."
+                )
 
     if args.dry_run:
         logger.info("Import range: %s to %s (%d months)", args.start, args.end, len(months))
