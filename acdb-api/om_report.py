@@ -115,6 +115,22 @@ def _find_date_column(cursor, table_name: str) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
+# Helper: check for tblmonthlytransactions (SparkMeter payment data)
+# ---------------------------------------------------------------------------
+
+def _has_txn_table(cursor) -> bool:
+    """Check if tblmonthlytransactions exists and has data."""
+    try:
+        existing = {t.table_name.lower() for t in cursor.tables(tableType="TABLE")}
+        if "tblmonthlytransactions" not in existing:
+            return False
+        cursor.execute("SELECT COUNT(*) FROM [tblmonthlytransactions]")
+        return cursor.fetchone()[0] > 0
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
 # 1. Portfolio Overview
 # ---------------------------------------------------------------------------
 
@@ -148,19 +164,51 @@ def report_overview(user: CurrentUser = Depends(require_employee)):
         sites = [str(r[0]).strip() for r in cursor.fetchall() if r[0]]
 
         # Total consumption and sales
-        tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
+        # Prefer tblmonthlytransactions (SparkMeter: includes manual corrections)
         total_kwh = 0.0
         total_lsl = 0.0
-        for table in tables_to_try:
+        txn_source = "accdb_history"
+
+        if _has_txn_table(cursor):
             try:
-                cursor.execute(f"SELECT SUM([kwh value]), SUM([transaction amount]) FROM [{table}]")
+                cursor.execute(
+                    "SELECT SUM([amount_lsl]) FROM [tblmonthlytransactions]"
+                )
+                row = cursor.fetchone()
+                if row and row[0] is not None:
+                    total_lsl = float(row[0] or 0)
+                    txn_source = "tblmonthlytransactions"
+            except Exception:
+                pass
+
+        # kWh: prefer tblmonthlyconsumption (actual readings), else history
+        existing_tables = {t.table_name.lower() for t in cursor.tables(tableType="TABLE")}
+        if "tblmonthlyconsumption" in existing_tables:
+            try:
+                cursor.execute("SELECT SUM([kwh]) FROM [tblmonthlyconsumption]")
                 row = cursor.fetchone()
                 if row and row[0] is not None:
                     total_kwh = float(row[0] or 0)
-                    total_lsl = float(row[1] or 0)
-                    break
             except Exception:
-                continue
+                pass
+
+        # Fallback: history tables for anything still zero
+        if total_kwh == 0 or (total_lsl == 0 and txn_source == "accdb_history"):
+            tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
+            for table in tables_to_try:
+                try:
+                    cursor.execute(
+                        f"SELECT SUM([kwh value]), SUM([transaction amount]) FROM [{table}]"
+                    )
+                    row = cursor.fetchone()
+                    if row and row[0] is not None:
+                        if total_kwh == 0:
+                            total_kwh = float(row[0] or 0)
+                        if total_lsl == 0:
+                            total_lsl = float(row[1] or 0)
+                        break
+                except Exception:
+                    continue
 
         return {
             "total_customers": total_customers,
@@ -170,6 +218,9 @@ def report_overview(user: CurrentUser = Depends(require_employee)):
             "sites": sites,
             "total_mwh": round(total_kwh / 1000, 2),
             "total_lsl_thousands": round(total_lsl / 1000, 2),
+            "data_sources": {
+                "revenue": txn_source,
+            },
         }
 
 
@@ -360,69 +411,110 @@ def sales_by_site(
     quarter: Optional[str] = Query(None),
     user: CurrentUser = Depends(require_employee),
 ):
-    """LSL revenue per site, optionally filtered by quarter."""
-    tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
+    """LSL revenue per site, optionally filtered by quarter.
 
+    Data source priority:
+      1. tblmonthlytransactions (SparkMeter, includes corrections)
+      2. tblaccounthistory1 / tblaccounthistoryOriginal (ACCDB, gateway-only)
+    """
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        for table in tables_to_try:
+        rows = []
+        source_table = ""
+
+        # Prefer tblmonthlytransactions
+        if _has_txn_table(cursor):
             try:
-                date_col = _find_date_column(cursor, table)
+                cursor.execute(
+                    "SELECT [accountnumber], [yearmonth], [amount_lsl], [community] "
+                    "FROM [tblmonthlytransactions]"
+                )
+                raw = cursor.fetchall()
+                if raw:
+                    for r in raw:
+                        acct = str(r[0] or "").strip()
+                        ym = str(r[1] or "").strip()
+                        lsl = float(r[2] or 0)
+                        community = str(r[3] or "").strip()
+                        if acct and ym and lsl > 0:
+                            try:
+                                y, m = int(ym[:4]), int(ym[5:7])
+                                dt = datetime(y, m, 15)
+                            except (ValueError, IndexError):
+                                continue
+                            rows.append((acct, dt, lsl, community))
+                    if rows:
+                        source_table = "tblmonthlytransactions"
+            except Exception as e:
+                logger.warning("tblmonthlytransactions query failed: %s", e)
 
-                if date_col:
-                    cursor.execute(
-                        f"SELECT [accountnumber], [{date_col}], [transaction amount] FROM [{table}]"
-                    )
-                else:
-                    cursor.execute(
-                        f"SELECT [accountnumber], NULL, [transaction amount] FROM [{table}]"
-                    )
-
-                rows = cursor.fetchall()
-                if not rows:
+        # Fallback: history tables
+        if not rows:
+            tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
+            for table in tables_to_try:
+                try:
+                    date_col = _find_date_column(cursor, table)
+                    if date_col:
+                        cursor.execute(
+                            f"SELECT [accountnumber], [{date_col}], [transaction amount] "
+                            f"FROM [{table}]"
+                        )
+                    else:
+                        cursor.execute(
+                            f"SELECT [accountnumber], NULL, [transaction amount] "
+                            f"FROM [{table}]"
+                        )
+                    raw = cursor.fetchall()
+                    if raw:
+                        for r in raw:
+                            acct = str(r[0] or "").strip()
+                            lsl = float(r[2] or 0)
+                            rows.append((acct, r[1], lsl, ""))
+                        if rows:
+                            source_table = table
+                            break
+                except Exception as e:
+                    logger.warning("Failed to query %s for sales: %s", table, e)
                     continue
 
-                site_quarter: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
-                site_totals: Dict[str, float] = defaultdict(float)
+        if not rows:
+            return {"sites": [], "total_lsl": 0, "error": "No transaction data found"}
 
-                for row in rows:
-                    acct = str(row[0] or "").strip()
-                    site = _extract_site(acct)
-                    if not site or len(site) < 2:
-                        continue
+        site_quarter: Dict[str, Dict[str, float]] = defaultdict(
+            lambda: defaultdict(float)
+        )
+        site_totals: Dict[str, float] = defaultdict(float)
 
-                    lsl = float(row[2] or 0)
-                    q = _date_to_quarter(row[1]) if row[1] else "Unknown"
-
-                    if quarter and q != quarter:
-                        continue
-
-                    site_quarter[site][q] += lsl
-                    site_totals[site] += lsl
-
-                per_site = []
-                for site_code in sorted(site_totals.keys()):
-                    quarters_data = {q: round(v, 2) for q, v in sorted(site_quarter[site_code].items())}
-                    per_site.append({
-                        "site": site_code,
-                        "name": SITE_ABBREV.get(site_code, site_code),
-                        "total_lsl": round(site_totals[site_code], 2),
-                        "quarters": quarters_data,
-                    })
-
-                return {
-                    "sites": per_site,
-                    "total_lsl": round(sum(site_totals.values()), 2),
-                    "source_table": table,
-                    "quarter_filter": quarter,
-                }
-
-            except Exception as e:
-                logger.warning("Failed to query %s for sales: %s", table, e)
+        for acct, dt_or_ym, lsl, community in rows:
+            site = community if community else _extract_site(acct)
+            if not site or len(site) < 2:
                 continue
+            q = _date_to_quarter(dt_or_ym) if dt_or_ym else "Unknown"
+            if quarter and q != quarter:
+                continue
+            site_quarter[site][q] += lsl
+            site_totals[site] += lsl
 
-        return {"sites": [], "total_lsl": 0, "error": "No account history data found"}
+        per_site = []
+        for site_code in sorted(site_totals.keys()):
+            quarters_data = {
+                q: round(v, 2)
+                for q, v in sorted(site_quarter[site_code].items())
+            }
+            per_site.append({
+                "site": site_code,
+                "name": SITE_ABBREV.get(site_code, site_code),
+                "total_lsl": round(site_totals[site_code], 2),
+                "quarters": quarters_data,
+            })
+
+        return {
+            "sites": per_site,
+            "total_lsl": round(sum(site_totals.values()), 2),
+            "source_table": source_table,
+            "quarter_filter": quarter,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -955,105 +1047,139 @@ def arpu_time_series(user: CurrentUser = Depends(require_employee)):
     transacted up to and including the quarter.  This produces a
     monotonically-increasing customer count that reflects the growing
     customer base, and divides quarterly revenue by that base.
+
+    Data source priority:
+      1. tblmonthlytransactions (SparkMeter portfolio data, includes manual corrections)
+      2. tblaccounthistory1 / tblaccounthistoryOriginal (ACCDB, gateway-only)
     """
-    tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
 
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        for table in tables_to_try:
+        txn_rows = []
+        source_table = ""
+
+        # Prefer tblmonthlytransactions (SparkMeter authoritative data)
+        if _has_txn_table(cursor):
             try:
-                date_col = _find_date_column(cursor, table)
-                if not date_col:
-                    continue
-
                 cursor.execute(
-                    f"SELECT [accountnumber], [{date_col}], [transaction amount] "
-                    f"FROM [{table}]"
+                    "SELECT [accountnumber], [yearmonth], [amount_lsl], [community] "
+                    "FROM [tblmonthlytransactions]"
                 )
-                txn_rows = cursor.fetchall()
-                if not txn_rows:
+                raw = cursor.fetchall()
+                if raw:
+                    # Convert yearmonth (YYYY-MM) rows to (acct, date, amount) tuples
+                    # that match the history-table format downstream
+                    for row in raw:
+                        acct = str(row[0] or "").strip()
+                        ym = str(row[1] or "").strip()
+                        lsl = float(row[2] or 0)
+                        if not acct or not ym or lsl <= 0:
+                            continue
+                        try:
+                            y, m = int(ym[:4]), int(ym[5:7])
+                            dt = datetime(y, m, 15)  # mid-month placeholder
+                        except (ValueError, IndexError):
+                            continue
+                        txn_rows.append((acct, dt, lsl))
+                    if txn_rows:
+                        source_table = "tblmonthlytransactions"
+            except Exception as e:
+                logger.warning("Failed to query tblmonthlytransactions for ARPU: %s", e)
+
+        # Fallback: history tables
+        if not txn_rows:
+            tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
+            for table in tables_to_try:
+                try:
+                    date_col = _find_date_column(cursor, table)
+                    if not date_col:
+                        continue
+                    cursor.execute(
+                        f"SELECT [accountnumber], [{date_col}], [transaction amount] "
+                        f"FROM [{table}]"
+                    )
+                    raw = cursor.fetchall()
+                    if raw:
+                        txn_rows = [(str(r[0] or "").strip(), r[1], float(r[2] or 0)) for r in raw]
+                        source_table = table
+                        break
+                except Exception:
                     continue
 
-                # ── Pass 1: bucket revenue and first-seen quarter per account ──
-                q_revenue: Dict[str, float] = defaultdict(float)
-                q_site_revenue: Dict[str, Dict[str, float]] = defaultdict(
-                    lambda: defaultdict(float)
-                )
-                # Track the first quarter each account appears
-                acct_first_quarter: Dict[str, str] = {}
-                acct_site: Dict[str, str] = {}
+        if txn_rows:
+            # ── Pass 1: bucket revenue and first-seen quarter per account ──
+            q_revenue: Dict[str, float] = defaultdict(float)
+            q_site_revenue: Dict[str, Dict[str, float]] = defaultdict(
+                lambda: defaultdict(float)
+            )
+            acct_first_quarter: Dict[str, str] = {}
+            acct_site: Dict[str, str] = {}
 
-                for row in txn_rows:
-                    acct = str(row[0] or "").strip()
-                    q = _date_to_quarter(row[1])
-                    lsl = float(row[2] or 0)
-                    if not q or not acct:
-                        continue
-                    site = _extract_site(acct)
+            for row in txn_rows:
+                acct = str(row[0] or "").strip()
+                q = _date_to_quarter(row[1])
+                lsl = float(row[2] or 0)
+                if not q or not acct:
+                    continue
+                site = _extract_site(acct)
 
-                    q_revenue[q] += lsl
+                q_revenue[q] += lsl
+                if site and len(site) >= 2:
+                    q_site_revenue[q][site] += lsl
+
+                if acct not in acct_first_quarter or q < acct_first_quarter[acct]:
+                    acct_first_quarter[acct] = q
                     if site and len(site) >= 2:
-                        q_site_revenue[q][site] += lsl
+                        acct_site[acct] = site
 
-                    # Record earliest quarter for this account
-                    if acct not in acct_first_quarter or q < acct_first_quarter[acct]:
-                        acct_first_quarter[acct] = q
-                        if site and len(site) >= 2:
-                            acct_site[acct] = site
+            # ── Pass 2: build cumulative customer counts ──
+            all_quarters = sorted(q_revenue.keys())
+            cumulative_all: set = set()
+            cumulative_by_site: Dict[str, set] = defaultdict(set)
 
-                # ── Pass 2: build cumulative customer counts ──
-                all_quarters = sorted(q_revenue.keys())
-                cumulative_all: set = set()
-                cumulative_by_site: Dict[str, set] = defaultdict(set)
+            result = []
+            for q in all_quarters:
+                for acct, first_q in acct_first_quarter.items():
+                    if first_q <= q:
+                        cumulative_all.add(acct)
+                        site = acct_site.get(acct, "")
+                        if site:
+                            cumulative_by_site[site].add(acct)
 
-                result = []
-                for q in all_quarters:
-                    # Add accounts whose first transaction was in this or earlier quarter
-                    for acct, first_q in acct_first_quarter.items():
-                        if first_q <= q:
-                            cumulative_all.add(acct)
-                            site = acct_site.get(acct, "")
-                            if site:
-                                cumulative_by_site[site].add(acct)
+                revenue = q_revenue[q]
+                active = len(cumulative_all)
+                arpu = round(revenue / active, 2) if active > 0 else 0
 
-                    revenue = q_revenue[q]
-                    active = len(cumulative_all)
-                    arpu = round(revenue / active, 2) if active > 0 else 0
+                per_site = {}
+                for site_code in sorted(q_site_revenue[q]):
+                    site_rev = q_site_revenue[q][site_code]
+                    site_custs = len(cumulative_by_site.get(site_code, set()))
+                    per_site[site_code] = {
+                        "name": SITE_ABBREV.get(site_code, site_code),
+                        "revenue": round(site_rev, 2),
+                        "customers": site_custs,
+                        "arpu": round(site_rev / site_custs, 2) if site_custs > 0 else 0,
+                    }
 
-                    per_site = {}
-                    for site_code in sorted(q_site_revenue[q]):
-                        site_rev = q_site_revenue[q][site_code]
-                        site_custs = len(cumulative_by_site.get(site_code, set()))
-                        per_site[site_code] = {
-                            "name": SITE_ABBREV.get(site_code, site_code),
-                            "revenue": round(site_rev, 2),
-                            "customers": site_custs,
-                            "arpu": round(site_rev / site_custs, 2) if site_custs > 0 else 0,
-                        }
+                result.append({
+                    "quarter": q,
+                    "total_revenue": round(revenue, 2),
+                    "active_customers": active,
+                    "arpu": arpu,
+                    "per_site": per_site,
+                })
 
-                    result.append({
-                        "quarter": q,
-                        "total_revenue": round(revenue, 2),
-                        "active_customers": active,
-                        "arpu": arpu,
-                        "per_site": per_site,
-                    })
+            all_site_codes = sorted(
+                set(code for entry in result for code in entry["per_site"])
+            )
 
-                all_site_codes = sorted(
-                    set(code for entry in result for code in entry["per_site"])
-                )
-
-                return {
-                    "arpu": result,
-                    "site_codes": all_site_codes,
-                    "site_names": {c: SITE_ABBREV.get(c, c) for c in all_site_codes},
-                    "source_table": table,
-                }
-
-            except Exception as e:
-                logger.warning("Failed to compute ARPU from %s: %s", table, e)
-                continue
+            return {
+                "arpu": result,
+                "site_codes": all_site_codes,
+                "site_names": {c: SITE_ABBREV.get(c, c) for c in all_site_codes},
+                "source_table": source_table,
+            }
 
         return {"arpu": [], "site_codes": [], "error": "No account history data found"}
 
@@ -1086,109 +1212,131 @@ def monthly_arpu_time_series(user: CurrentUser = Depends(require_employee)):
     """
     Monthly ARPU: total revenue / cumulative customer base per month.
 
-    "Active customers" = all distinct account numbers that have ever
-    transacted up to and including the month.  This produces a
-    monotonically-increasing customer count that reflects the growing
-    customer base, and divides monthly revenue by that base.
+    Data source priority:
+      1. tblmonthlytransactions (SparkMeter portfolio, includes corrections)
+      2. tblaccounthistory1 / tblaccounthistoryOriginal (ACCDB, gateway-only)
     """
-    tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
-
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        for table in tables_to_try:
+        txn_rows = []
+        source_table = ""
+
+        # Prefer tblmonthlytransactions
+        if _has_txn_table(cursor):
             try:
-                date_col = _find_date_column(cursor, table)
-                if not date_col:
-                    continue
-
                 cursor.execute(
-                    f"SELECT [accountnumber], [{date_col}], [transaction amount] "
-                    f"FROM [{table}]"
+                    "SELECT [accountnumber], [yearmonth], [amount_lsl] "
+                    "FROM [tblmonthlytransactions]"
                 )
-                txn_rows = cursor.fetchall()
-                if not txn_rows:
+                raw = cursor.fetchall()
+                if raw:
+                    for row in raw:
+                        acct = str(row[0] or "").strip()
+                        ym = str(row[1] or "").strip()
+                        lsl = float(row[2] or 0)
+                        if acct and ym and lsl > 0:
+                            txn_rows.append((acct, ym, lsl))
+                    if txn_rows:
+                        source_table = "tblmonthlytransactions"
+            except Exception as e:
+                logger.warning("tblmonthlytransactions query failed: %s", e)
+
+        # Fallback: history tables
+        if not txn_rows:
+            tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
+            for table in tables_to_try:
+                try:
+                    date_col = _find_date_column(cursor, table)
+                    if not date_col:
+                        continue
+                    cursor.execute(
+                        f"SELECT [accountnumber], [{date_col}], [transaction amount] "
+                        f"FROM [{table}]"
+                    )
+                    raw = cursor.fetchall()
+                    if raw:
+                        for r in raw:
+                            acct = str(r[0] or "").strip()
+                            m = _date_to_month(r[1])
+                            lsl = float(r[2] or 0)
+                            if acct and m:
+                                txn_rows.append((acct, m, lsl))
+                        if txn_rows:
+                            source_table = table
+                            break
+                except Exception:
                     continue
 
-                # ── Pass 1: bucket revenue and first-seen month per account ──
-                m_revenue: Dict[str, float] = defaultdict(float)
-                m_site_revenue: Dict[str, Dict[str, float]] = defaultdict(
-                    lambda: defaultdict(float)
-                )
-                acct_first_month: Dict[str, str] = {}
-                acct_site: Dict[str, str] = {}
+        if not txn_rows:
+            return {"monthly_arpu": [], "site_codes": [], "error": "No transaction data found"}
 
-                for row in txn_rows:
-                    acct = str(row[0] or "").strip()
-                    m = _date_to_month(row[1])
-                    lsl = float(row[2] or 0)
-                    if not m or not acct:
-                        continue
-                    site = _extract_site(acct)
+        # ── Pass 1: bucket revenue and first-seen month per account ──
+        m_revenue: Dict[str, float] = defaultdict(float)
+        m_site_revenue: Dict[str, Dict[str, float]] = defaultdict(
+            lambda: defaultdict(float)
+        )
+        acct_first_month: Dict[str, str] = {}
+        acct_site: Dict[str, str] = {}
 
-                    m_revenue[m] += lsl
-                    if site and len(site) >= 2:
-                        m_site_revenue[m][site] += lsl
+        for acct, m, lsl in txn_rows:
+            site = _extract_site(acct)
+            m_revenue[m] += lsl
+            if site and len(site) >= 2:
+                m_site_revenue[m][site] += lsl
+            if acct not in acct_first_month or m < acct_first_month[acct]:
+                acct_first_month[acct] = m
+                if site and len(site) >= 2:
+                    acct_site[acct] = site
 
-                    if acct not in acct_first_month or m < acct_first_month[acct]:
-                        acct_first_month[acct] = m
-                        if site and len(site) >= 2:
-                            acct_site[acct] = site
+        # ── Pass 2: build cumulative customer counts ──
+        all_months = sorted(m_revenue.keys())
+        cumulative_all: set = set()
+        cumulative_by_site: Dict[str, set] = defaultdict(set)
 
-                # ── Pass 2: build cumulative customer counts ──
-                all_months = sorted(m_revenue.keys())
-                cumulative_all: set = set()
-                cumulative_by_site: Dict[str, set] = defaultdict(set)
+        result = []
+        for m in all_months:
+            for acct, first_m in acct_first_month.items():
+                if first_m <= m:
+                    cumulative_all.add(acct)
+                    site = acct_site.get(acct, "")
+                    if site:
+                        cumulative_by_site[site].add(acct)
 
-                result = []
-                for m in all_months:
-                    for acct, first_m in acct_first_month.items():
-                        if first_m <= m:
-                            cumulative_all.add(acct)
-                            site = acct_site.get(acct, "")
-                            if site:
-                                cumulative_by_site[site].add(acct)
+            revenue = m_revenue[m]
+            active = len(cumulative_all)
+            arpu = round(revenue / active, 2) if active > 0 else 0
 
-                    revenue = m_revenue[m]
-                    active = len(cumulative_all)
-                    arpu = round(revenue / active, 2) if active > 0 else 0
-
-                    per_site = {}
-                    for site_code in sorted(m_site_revenue[m]):
-                        site_rev = m_site_revenue[m][site_code]
-                        site_custs = len(cumulative_by_site.get(site_code, set()))
-                        per_site[site_code] = {
-                            "name": SITE_ABBREV.get(site_code, site_code),
-                            "revenue": round(site_rev, 2),
-                            "customers": site_custs,
-                            "arpu": round(site_rev / site_custs, 2) if site_custs > 0 else 0,
-                        }
-
-                    result.append({
-                        "month": m,
-                        "quarter": _date_to_quarter_from_month(m),
-                        "total_revenue": round(revenue, 2),
-                        "active_customers": active,
-                        "arpu": arpu,
-                        "per_site": per_site,
-                    })
-
-                all_site_codes = sorted(
-                    set(code for entry in result for code in entry["per_site"])
-                )
-
-                return {
-                    "monthly_arpu": result,
-                    "site_codes": all_site_codes,
-                    "site_names": {c: SITE_ABBREV.get(c, c) for c in all_site_codes},
-                    "source_table": table,
+            per_site = {}
+            for site_code in sorted(m_site_revenue[m]):
+                site_rev = m_site_revenue[m][site_code]
+                site_custs = len(cumulative_by_site.get(site_code, set()))
+                per_site[site_code] = {
+                    "name": SITE_ABBREV.get(site_code, site_code),
+                    "revenue": round(site_rev, 2),
+                    "customers": site_custs,
+                    "arpu": round(site_rev / site_custs, 2) if site_custs > 0 else 0,
                 }
 
-            except Exception as e:
-                logger.warning("Failed to compute monthly ARPU from %s: %s", table, e)
-                continue
+            result.append({
+                "month": m,
+                "quarter": _date_to_quarter_from_month(m),
+                "total_revenue": round(revenue, 2),
+                "active_customers": active,
+                "arpu": arpu,
+                "per_site": per_site,
+            })
 
-        return {"monthly_arpu": [], "site_codes": [], "error": "No account history data found"}
+        all_site_codes = sorted(
+            set(code for entry in result for code in entry["per_site"])
+        )
+
+        return {
+            "monthly_arpu": result,
+            "site_codes": all_site_codes,
+            "site_names": {c: SITE_ABBREV.get(c, c) for c in all_site_codes},
+            "source_table": source_table,
+        }
 
 
 def _date_to_quarter_from_month(month_str: str) -> str:
@@ -1361,7 +1509,62 @@ def consumption_by_tenure(
 
             acct_first_txn = acct_first_reading
 
-        else:
+        # ── Try secondary source: tblmonthlytransactions (Koios payment data) ──
+        txn_rows: List[tuple] = []
+        if not consumption_rows and "tblmonthlytransactions" in existing_tables:
+            try:
+                cursor.execute(
+                    "SELECT [accountnumber], [yearmonth], [kwh_vended] "
+                    "FROM [tblmonthlytransactions]"
+                )
+                txn_rows = cursor.fetchall()
+            except Exception as e:
+                logger.warning("Failed to query tblmonthlytransactions: %s", e)
+
+        if not consumption_rows and txn_rows:
+            data_source = "vended"
+            acct_first_reading: Dict[str, datetime] = {}
+            parsed_rows = []
+            matched = 0
+            unmatched = 0
+
+            for row in txn_rows:
+                acct = str(row[0] or "").strip()
+                ym = str(row[1] or "").strip()
+                try:
+                    kwh = float(row[2] or 0)
+                except (ValueError, TypeError):
+                    continue
+                if not acct or not ym or kwh <= 0:
+                    continue
+
+                ctype = acct_type.get(acct) or acct_type_lower.get(acct.lower())
+                if not ctype:
+                    unmatched += 1
+                    continue
+                matched += 1
+
+                try:
+                    y, m = int(ym[:4]), int(ym[5:7])
+                    dt = datetime(y, m, 1)
+                except (ValueError, IndexError):
+                    continue
+
+                parsed_rows.append((acct, ctype, dt, kwh))
+                if acct not in acct_first_reading or dt < acct_first_reading[acct]:
+                    acct_first_reading[acct] = dt
+
+            debug_info = {
+                "data_source": "tblmonthlytransactions",
+                "total_rows": len(txn_rows),
+                "matched": matched,
+                "unmatched": unmatched,
+                "unique_accounts": len(acct_first_reading),
+                "acct_type_map_size": len(acct_type),
+            }
+            acct_first_txn = acct_first_reading
+
+        elif not consumption_rows:
             # ── Fallback: transaction tables (kWh vended) ──
             tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
             all_table_rows: Dict[str, list] = {}
