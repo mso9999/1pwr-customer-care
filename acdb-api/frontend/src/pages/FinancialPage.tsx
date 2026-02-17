@@ -792,8 +792,12 @@ export default function FinancialPage() {
       {tenureData && tenureData.chart_data && tenureData.chart_data.length > 0 && tenureData.customer_types.length > 0 && selectedTenureType && (
         <Figure
           id="fig-consumption-tenure"
-          title="Figure 6: Average Monthly kWh Vended by Tenure"
-          subtitle="Average kWh consumed per customer per month as a function of tenure (months since first transaction). Dashed lines show ±1 standard deviation."
+          title={tenureData.data_source === 'consumption'
+            ? "Figure 6: Average Monthly kWh Consumed by Tenure"
+            : "Figure 6: Average Monthly kWh Vended by Tenure"}
+          subtitle={tenureData.data_source === 'consumption'
+            ? "Average kWh consumed per customer per month as a function of tenure (months since first reading). Dashed lines show ±1 standard deviation."
+            : "Average kWh vended per customer per month as a function of tenure (months since first transaction). Dashed lines show ±1 standard deviation."}
           figureRef={setFigRef('consumption-tenure')}
           onExport={handleExportFigure('consumption-tenure', 'Consumption_By_Tenure')}
         >
@@ -855,7 +859,9 @@ export default function FinancialPage() {
                 tick={{ fontSize: 11 }}
                 domain={yMax != null ? [0, yMax] : [0, 'auto']}
                 label={{
-                  value: 'Avg kWh vended / customer / month',
+                  value: tenureData.data_source === 'consumption'
+                    ? 'Avg kWh consumed / customer / month'
+                    : 'Avg kWh vended / customer / month',
                   angle: -90,
                   position: 'insideLeft',
                   style: { fontSize: 11, fill: '#6b7280' },

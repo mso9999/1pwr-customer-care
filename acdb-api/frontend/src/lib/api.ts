@@ -899,10 +899,12 @@ export interface ConsumptionByTenureResponse {
   type_stats?: ConsumptionByTenureTypeStat[];
   max_tenure_months?: number;
   total_accounts_matched?: number;
-  source_table?: string;
+  /** 'consumption' = actual meter readings (tblmonthlyconsumption), 'vended' = transaction kWh (fallback) */
+  data_source?: 'consumption' | 'vended';
   segmentation?: string;
   mapping_size?: number;
   error?: string;
+  debug?: Record<string, any>;
 }
 
 export async function getConsumptionByTenure(): Promise<ConsumptionByTenureResponse> {
