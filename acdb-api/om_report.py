@@ -1068,20 +1068,19 @@ def arpu_time_series(user: CurrentUser = Depends(require_employee)):
                 )
                 raw = cursor.fetchall()
                 if raw:
-                    # Convert yearmonth (YYYY-MM) rows to (acct, date, amount) tuples
-                    # that match the history-table format downstream
                     for row in raw:
                         acct = str(row[0] or "").strip()
                         ym = str(row[1] or "").strip()
                         lsl = float(row[2] or 0)
+                        community = str(row[3] or "").strip()
                         if not acct or not ym or lsl <= 0:
                             continue
                         try:
                             y, m = int(ym[:4]), int(ym[5:7])
-                            dt = datetime(y, m, 15)  # mid-month placeholder
+                            dt = datetime(y, m, 15)
                         except (ValueError, IndexError):
                             continue
-                        txn_rows.append((acct, dt, lsl))
+                        txn_rows.append((acct, dt, lsl, community))
                     if txn_rows:
                         source_table = "tblmonthlytransactions"
             except Exception as e:
@@ -1101,7 +1100,10 @@ def arpu_time_series(user: CurrentUser = Depends(require_employee)):
                     )
                     raw = cursor.fetchall()
                     if raw:
-                        txn_rows = [(str(r[0] or "").strip(), r[1], float(r[2] or 0)) for r in raw]
+                        txn_rows = [
+                            (str(r[0] or "").strip(), r[1], float(r[2] or 0), "")
+                            for r in raw
+                        ]
                         source_table = table
                         break
                 except Exception:
@@ -1120,9 +1122,10 @@ def arpu_time_series(user: CurrentUser = Depends(require_employee)):
                 acct = str(row[0] or "").strip()
                 q = _date_to_quarter(row[1])
                 lsl = float(row[2] or 0)
+                community = row[3] if len(row) > 3 else ""
                 if not q or not acct:
                     continue
-                site = _extract_site(acct)
+                site = community if community else _extract_site(acct)
 
                 q_revenue[q] += lsl
                 if site and len(site) >= 2:
@@ -1226,7 +1229,7 @@ def monthly_arpu_time_series(user: CurrentUser = Depends(require_employee)):
         if _has_txn_table(cursor):
             try:
                 cursor.execute(
-                    "SELECT [accountnumber], [yearmonth], [amount_lsl] "
+                    "SELECT [accountnumber], [yearmonth], [amount_lsl], [community] "
                     "FROM [tblmonthlytransactions]"
                 )
                 raw = cursor.fetchall()
@@ -1235,8 +1238,9 @@ def monthly_arpu_time_series(user: CurrentUser = Depends(require_employee)):
                         acct = str(row[0] or "").strip()
                         ym = str(row[1] or "").strip()
                         lsl = float(row[2] or 0)
+                        community = str(row[3] or "").strip()
                         if acct and ym and lsl > 0:
-                            txn_rows.append((acct, ym, lsl))
+                            txn_rows.append((acct, ym, lsl, community))
                     if txn_rows:
                         source_table = "tblmonthlytransactions"
             except Exception as e:
@@ -1261,7 +1265,7 @@ def monthly_arpu_time_series(user: CurrentUser = Depends(require_employee)):
                             m = _date_to_month(r[1])
                             lsl = float(r[2] or 0)
                             if acct and m:
-                                txn_rows.append((acct, m, lsl))
+                                txn_rows.append((acct, m, lsl, ""))
                         if txn_rows:
                             source_table = table
                             break
@@ -1279,8 +1283,8 @@ def monthly_arpu_time_series(user: CurrentUser = Depends(require_employee)):
         acct_first_month: Dict[str, str] = {}
         acct_site: Dict[str, str] = {}
 
-        for acct, m, lsl in txn_rows:
-            site = _extract_site(acct)
+        for acct, m, lsl, community in txn_rows:
+            site = community if community else _extract_site(acct)
             m_revenue[m] += lsl
             if site and len(site) >= 2:
                 m_site_revenue[m][site] += lsl
