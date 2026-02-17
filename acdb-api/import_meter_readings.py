@@ -843,11 +843,12 @@ def import_accdb_local(conn: pyodbc.Connection, db_path: str = "") -> int:
     )
 
     # Subprocess script that does the actual ACCDB writes in a clean process.
-    # This process has NEVER read from the ACCDB, so the Jet engine state is
-    # pristine.  It drops and recreates the tables to avoid any corruption
-    # left over from a previous run where tables were created before large reads.
+    # Strategy: create tables WITHOUT indexes, bulk insert, THEN add indexes.
+    # This avoids Jet engine corruption from index updates on a potentially
+    # damaged internal page allocation table (from prior concurrent access).
+    # Also: compact/repair the database first if possible.
     write_script = r'''
-import pickle, sys, pyodbc, os
+import pickle, sys, pyodbc, os, traceback
 from datetime import datetime
 
 pyodbc.pooling = False
@@ -857,6 +858,25 @@ with open(sys.argv[1], "rb") as f:
 
 db_path = data["db_path"]
 do_hourly = data.get("do_hourly", True)
+
+# --- Step 0: Try to compact/repair the ACCDB first ---
+compacted = False
+try:
+    import win32com.client
+    temp_path = db_path + ".compact_tmp"
+    if os.path.exists(temp_path):
+        os.remove(temp_path)
+    engine = win32com.client.Dispatch("JRO.JetEngine")
+    src = f"Provider=Microsoft.ACE.OLEDB.12.0;Data Source={db_path}"
+    dst = f"Provider=Microsoft.ACE.OLEDB.12.0;Data Source={temp_path}"
+    engine.CompactDatabase(src, dst)
+    # Replace original with compacted version
+    os.replace(temp_path, db_path)
+    print("Compact/repair succeeded", flush=True)
+    compacted = True
+except Exception as e:
+    print(f"Compact/repair skipped: {e}", flush=True)
+
 conn_str = (
     r"DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};"
     f"DBQ={db_path};"
@@ -873,7 +893,7 @@ print("Write test passed", flush=True)
 # Helper: get existing table names
 existing = {t.table_name.lower() for t in c.tables(tableType="TABLE")}
 
-# --- Ensure tblmonthlyconsumption ---
+# --- Create tblmonthlyconsumption (NO indexes yet) ---
 tbl_mc = "tblmonthlyconsumption"
 if tbl_mc in existing:
     try:
@@ -892,11 +912,13 @@ c.execute(f"""
         source TEXT(20)
     )
 """)
-c.execute(f"CREATE INDEX idx_mc_acct_ym ON [{tbl_mc}] (accountnumber, yearmonth)")
-c.execute(f"CREATE INDEX idx_mc_community_ym ON [{tbl_mc}] (community, yearmonth)")
-print(f"Created {tbl_mc}", flush=True)
+# Test insert immediately after creation
+c.execute(f"INSERT INTO [{tbl_mc}] (accountnumber,meterid,yearmonth,kwh,community,source) VALUES (?,?,?,?,?,?)",
+          ('_T','_T','2099-01',0.0,'_T','_test'))
+c.execute(f"DELETE FROM [{tbl_mc}] WHERE source='_test'")
+print(f"Created {tbl_mc} (verified writable)", flush=True)
 
-# --- Ensure tblhourlyconsumption ---
+# --- Create tblhourlyconsumption (NO indexes yet) ---
 if do_hourly:
     tbl_hc = "tblhourlyconsumption"
     if tbl_hc in existing:
@@ -916,14 +938,17 @@ if do_hourly:
             source TEXT(20)
         )
     """)
-    c.execute(f"CREATE INDEX idx_hc_meter_dt ON [{tbl_hc}] (meterid, reading_datetime)")
-    c.execute(f"CREATE INDEX idx_hc_acct_dt ON [{tbl_hc}] (accountnumber, reading_datetime)")
-    c.execute(f"CREATE INDEX idx_hc_community_dt ON [{tbl_hc}] (community, reading_datetime)")
-    print(f"Created {tbl_hc}", flush=True)
+    # Test insert immediately after creation
+    c.execute(f"INSERT INTO [{tbl_hc}] (accountnumber,meterid,reading_datetime,kwh,community,source) VALUES (?,?,?,?,?,?)",
+              ('_T','_T',datetime(2024,1,1,0,0),0.0,'_T','_test'))
+    c.execute(f"DELETE FROM [{tbl_hc}] WHERE source='_test'")
+    print(f"Created {tbl_hc} (verified writable)", flush=True)
 
-# --- Insert hourly data ---
+# --- Insert hourly data (no indexes = fast bulk insert) ---
 hi = 0
 if do_hourly and data.get("hourly"):
+    first = data["hourly"][0]
+    print(f"First hourly row: acct={first[0]!r} mid={first[1]!r} hour={first[2]!r} kwh={first[3]} community={first[4]!r}", flush=True)
     for acct, mid, hour_key, kwh, community in data["hourly"]:
         try:
             dt = datetime.strptime(hour_key, "%Y-%m-%d-%H")
@@ -938,6 +963,7 @@ if do_hourly and data.get("hourly"):
         hi += 1
         if hi % 50000 == 0:
             print(f"  Hourly progress: {hi}/{len(data['hourly'])}", flush=True)
+    print(f"Hourly insert done: {hi} rows", flush=True)
 
 # --- Insert monthly data ---
 mi = 0
@@ -949,6 +975,17 @@ for acct, mid, ym, kwh, community in data["monthly"]:
         (acct, mid, ym, kwh, community, "accdb"),
     )
     mi += 1
+print(f"Monthly insert done: {mi} rows", flush=True)
+
+# --- NOW add indexes (after all data is loaded) ---
+print("Adding indexes...", flush=True)
+c.execute(f"CREATE INDEX idx_mc_acct_ym ON [{tbl_mc}] (accountnumber, yearmonth)")
+c.execute(f"CREATE INDEX idx_mc_community_ym ON [{tbl_mc}] (community, yearmonth)")
+if do_hourly:
+    c.execute(f"CREATE INDEX idx_hc_meter_dt ON [tblhourlyconsumption] (meterid, reading_datetime)")
+    c.execute(f"CREATE INDEX idx_hc_acct_dt ON [tblhourlyconsumption] (accountnumber, reading_datetime)")
+    c.execute(f"CREATE INDEX idx_hc_community_dt ON [tblhourlyconsumption] (community, reading_datetime)")
+print("Indexes created", flush=True)
 
 c.close()
 conn.close()
