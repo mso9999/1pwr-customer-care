@@ -1443,6 +1443,25 @@ def consumption_by_tenure(
             except Exception:
                 continue
 
+        # Build meterid → customer_type from ACCDB meter tables directly
+        # (covers rows where Koios stored meter serial as accountnumber)
+        meter_type_map: Dict[str, str] = {}
+        for meter_table in _METER_TABLES:
+            try:
+                cursor.execute(
+                    f"SELECT [meterid], [customer type] FROM [{meter_table}] "
+                    f"WHERE [customer type] IS NOT NULL AND [customer type] <> ''"
+                )
+                for row in cursor.fetchall():
+                    mid = str(row[0] or "").strip()
+                    ctype = str(row[1] or "").strip()
+                    if mid and ctype:
+                        meter_type_map[mid] = ctype
+                        meter_type_map[mid.upper()] = ctype
+            except Exception:
+                continue
+
+        # Also enrich acct_type using JSON map for meters without ACCDB type
         for meter_table in _METER_TABLES:
             try:
                 cursor.execute(
@@ -1460,6 +1479,24 @@ def consumption_by_tenure(
                 continue
 
         acct_type_lower: Dict[str, str] = {k.lower(): v for k, v in acct_type.items()}
+
+        def _resolve_type(acct: str, meterid: str = "") -> Optional[str]:
+            """Multi-strategy customer type resolution."""
+            ct = acct_type.get(acct) or acct_type_lower.get(acct.lower())
+            if ct:
+                return ct
+            if meterid:
+                ct = meter_type_map.get(meterid) or meter_type_map.get(meterid.upper())
+                if ct:
+                    return ct
+                ct = _lookup_type(meterid)
+                if ct:
+                    return ct
+            # accountnumber might actually be a meter serial (Koios fallback)
+            ct = meter_type_map.get(acct) or meter_type_map.get(acct.upper())
+            if ct:
+                return ct
+            return _lookup_type(acct)
 
         # ── Try primary source: tblmonthlyconsumption (actual meter readings) ──
         data_source = "vended"
@@ -1498,13 +1535,7 @@ def consumption_by_tenure(
                 if not acct or not ym or kwh <= 0:
                     continue
 
-                # Try account number first, then meter ID for type lookup
-                ctype = acct_type.get(acct) or acct_type_lower.get(acct.lower())
-                if not ctype and meterid:
-                    ctype = _lookup_type(meterid)
-                if not ctype and acct:
-                    # The accountnumber might actually be a meter ID
-                    ctype = _lookup_type(acct)
+                ctype = _resolve_type(acct, meterid)
                 if not ctype:
                     unmatched += 1
                     continue
@@ -1536,7 +1567,7 @@ def consumption_by_tenure(
         if not consumption_rows and "tblmonthlytransactions" in existing_tables:
             try:
                 cursor.execute(
-                    "SELECT [accountnumber], [yearmonth], [kwh_vended] "
+                    "SELECT [accountnumber], [yearmonth], [kwh_vended], [meterid] "
                     "FROM [tblmonthlytransactions]"
                 )
                 txn_rows = cursor.fetchall()
@@ -1557,10 +1588,11 @@ def consumption_by_tenure(
                     kwh = float(row[2] or 0)
                 except (ValueError, TypeError):
                     continue
+                meterid_txn = str(row[3] or "").strip() if len(row) > 3 else ""
                 if not acct or not ym or kwh <= 0:
                     continue
 
-                ctype = acct_type.get(acct) or acct_type_lower.get(acct.lower())
+                ctype = _resolve_type(acct, meterid_txn)
                 if not ctype:
                     unmatched += 1
                     continue
@@ -1631,9 +1663,7 @@ def consumption_by_tenure(
                     if not acct:
                         continue
 
-                    ctype = _lookup_type(mid) if mid else None
-                    if not ctype:
-                        ctype = acct_type.get(acct) or acct_type_lower.get(acct.lower())
+                    ctype = _resolve_type(acct, mid)
                     if not ctype:
                         tbl_unmatched += 1
                         continue
