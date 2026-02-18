@@ -178,6 +178,18 @@ export interface DashboardMonthPoint {
   kwh: number;
 }
 
+export interface MeterInfo {
+  meter_id: string;
+  platform: string;
+  role: string;
+  status: string;
+}
+
+export interface MeterComparisonPoint {
+  date: string;
+  [source: string]: string | number;
+}
+
 export interface CustomerDashboard {
   balance_kwh: number;
   last_payment: DashboardPayment | null;
@@ -188,6 +200,8 @@ export interface CustomerDashboard {
   daily_7d: DashboardChartPoint[];
   daily_30d: DashboardChartPoint[];
   monthly_12m: DashboardMonthPoint[];
+  meters?: MeterInfo[];
+  meter_comparison?: MeterComparisonPoint[];
 }
 
 export async function getMyDashboard(): Promise<CustomerDashboard> {

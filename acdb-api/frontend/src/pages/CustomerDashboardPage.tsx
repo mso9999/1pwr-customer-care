@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  BarChart, Bar, LineChart, Line,
+  BarChart, Bar, LineChart, Line, Legend,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts';
-import { getMyDashboard, getMyProfile, type CustomerDashboard } from '../lib/api';
+import { getMyDashboard, getMyProfile, type CustomerDashboard, type MeterInfo } from '../lib/api';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -166,12 +166,69 @@ function StatCard({ label, value, sub, warn }: {
 const CHART_BLUE = '#3b82f6';
 const CHART_GREEN = '#10b981';
 const CHART_AMBER = '#f59e0b';
+const CHART_PURPLE = '#8b5cf6';
+
 
 function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
       <h3 className="text-sm font-semibold text-gray-700 mb-3">{title}</h3>
       {children}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Meter Info
+// ---------------------------------------------------------------------------
+
+const PLATFORM_LABELS: Record<string, string> = {
+  sparkmeter: 'SparkMeter',
+  prototype: '1Meter Prototype',
+  legacy: 'Legacy',
+};
+const ROLE_BADGES: Record<string, { label: string; color: string }> = {
+  primary: { label: 'Primary', color: 'bg-green-100 text-green-700' },
+  check:   { label: 'Check', color: 'bg-purple-100 text-purple-700' },
+  backup:  { label: 'Backup', color: 'bg-gray-100 text-gray-600' },
+};
+
+function MeterInfoCard({ meters }: { meters: MeterInfo[] }) {
+  if (!meters.length) return null;
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+      <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
+        Meters on This Account
+      </h3>
+      <div className="space-y-2">
+        {meters.map((m) => {
+          const badge = ROLE_BADGES[m.role] ?? ROLE_BADGES.primary;
+          return (
+            <div
+              key={m.meter_id}
+              className="flex items-center justify-between rounded-lg bg-gray-50 px-3 py-2"
+            >
+              <div>
+                <span className="font-mono text-sm font-medium text-gray-800">
+                  {m.meter_id}
+                </span>
+                <span className="ml-2 text-xs text-gray-400">
+                  {PLATFORM_LABELS[m.platform] ?? m.platform}
+                </span>
+              </div>
+              <span className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full ${badge.color}`}>
+                {badge.label}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+      {meters.some((m) => m.role === 'check') && (
+        <p className="text-[11px] text-gray-400 mt-2">
+          Check meters are installed for verification alongside the primary meter.
+          Dashboard totals use only the primary meter.
+        </p>
+      )}
     </div>
   );
 }
@@ -260,6 +317,11 @@ export default function CustomerDashboardPage() {
         </div>
       )}
 
+      {/* Meter Info */}
+      {data.meters && data.meters.length > 0 && (
+        <MeterInfoCard meters={data.meters} />
+      )}
+
       {/* Key Stats Grid */}
       <div className="grid grid-cols-2 gap-3">
         <StatCard
@@ -312,6 +374,45 @@ export default function CustomerDashboardPage() {
           </BarChart>
         </ResponsiveContainer>
       </ChartCard>
+
+      {/* Meter Comparison (shown when check meter is present) */}
+      {data.meter_comparison && data.meter_comparison.length > 0 && (
+        <ChartCard title="Meter Comparison — Last 7 Days (kWh / day)">
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={data.meter_comparison} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+              <XAxis
+                dataKey="date"
+                tickFormatter={shortDay}
+                tick={{ fontSize: 11, fill: '#9ca3af' }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                tick={{ fontSize: 11, fill: '#9ca3af' }}
+                axisLine={false}
+                tickLine={false}
+                width={40}
+              />
+              <Tooltip
+                formatter={(v: any, name: any) => [`${Number(v).toFixed(3)} kWh`, name]}
+                labelFormatter={(label: any) => fmtDate(String(label))}
+                contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', fontSize: 12 }}
+              />
+              <Legend
+                wrapperStyle={{ fontSize: 11 }}
+                iconType="circle"
+                iconSize={8}
+              />
+              <Bar dataKey="SparkMeter" fill={CHART_BLUE} radius={[4, 4, 0, 0]} maxBarSize={28} />
+              <Bar dataKey="1Meter Prototype" fill={CHART_PURPLE} radius={[4, 4, 0, 0]} maxBarSize={28} />
+            </BarChart>
+          </ResponsiveContainer>
+          <p className="text-[11px] text-gray-400 mt-2 text-center">
+            Both meters measure the same load. Close agreement confirms accuracy.
+          </p>
+        </ChartCard>
+      )}
 
       {/* 30-Day Line Chart */}
       <ChartCard title="Last 30 Days (kWh / day)">

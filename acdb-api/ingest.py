@@ -1,14 +1,20 @@
 """
-Real-time data ingestion endpoints for 1PDB.
+Real-time data ingestion and meter management endpoints for 1PDB.
 
 Provides:
-  - POST /api/meters/reading    — receive prototype meter readings from ingestion_gate Lambda
-  - POST /api/sms/incoming      — receive mirrored SMS from sms.1pwrafrica.com, parse M-PESA
+  - POST  /api/meters/reading                — prototype meter readings (from ingestion_gate Lambda)
+  - GET   /api/meters/account/{account}      — list meters + roles for an account
+  - PATCH /api/meters/{meter_id}/role        — change meter role (primary/check/backup)
+  - POST  /api/sms/incoming                  — mirrored SMS from sms.1pwrafrica.com
 
-The ingestion_gate Lambda (IoT Core → Lambda) forwards each reading here.
-The SMS Gateway app (Medic Mobile fork) on the merchant phone sends SMS to
-sms.1pwrafrica.com/receive.php (SMSComms repo), which mirrors payloads here
-after its own processing — 1PDB is a passive secondary receiver.
+Meter roles:
+  - primary: billing/production meter, used in consumption aggregation
+  - check:   verification meter in series with primary, data stored but excluded from aggregates
+  - backup:  standby meter, not currently active
+
+During 1Meter testing, prototype meters are registered as 'check' alongside
+the existing SparkMeter (primary).  When a 1Meter graduates to production,
+use PATCH .../role to promote it — the old primary is auto-demoted.
 """
 
 import json
@@ -29,25 +35,27 @@ router = APIRouter(tags=["ingest"])
 
 IOT_KEY = os.environ.get("IOT_INGEST_KEY", "1pwr-iot-ingest-2026")
 
-PROTOTYPE_METERS = {
-    "23022673": "0045MAK",
-    "23022628": "0005MAK",
-    "23022696": "0025MAK",
-}
-
-
-def _resolve_meter(raw_id: str) -> tuple[str, str | None]:
-    """Resolve a meter ID (padded or unpadded) to (canonical_id, account).
+def _resolve_meter(conn, raw_id: str) -> tuple[str, str | None, str | None]:
+    """Resolve a meter ID to (canonical_id, account_number, community).
 
     IoT Core sends 12-digit padded IDs (e.g. '000023022673') while the
-    config uses short IDs ('23022673').  Accept either form.
+    meters table uses short IDs ('23022673').  Try both forms.
+    Returns (meter_id, account_number, community) — account/community are None
+    if not found.
     """
-    if raw_id in PROTOTYPE_METERS:
-        return raw_id, PROTOTYPE_METERS[raw_id]
+    cur = conn.cursor()
     stripped = raw_id.lstrip("0") or raw_id
-    if stripped in PROTOTYPE_METERS:
-        return stripped, PROTOTYPE_METERS[stripped]
-    return raw_id, None
+    candidates = list({raw_id, stripped})
+
+    cur.execute(
+        "SELECT meter_id, account_number, community FROM meters "
+        "WHERE meter_id = ANY(%s) AND platform = 'prototype' LIMIT 1",
+        (candidates,),
+    )
+    row = cur.fetchone()
+    if row:
+        return row[0], row[1], row[2]
+    return raw_id, None, None
 
 
 # ---------------------------------------------------------------------------
@@ -70,10 +78,6 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
     if x_iot_key != IOT_KEY:
         raise HTTPException(status_code=403, detail="Invalid IoT key")
 
-    meter_id, account = _resolve_meter(reading.meter_id)
-    if not account:
-        raise HTTPException(status_code=404, detail=f"Unknown prototype meter: {reading.meter_id}")
-
     try:
         ts = datetime.strptime(reading.timestamp, "%Y%m%d%H%M").replace(tzinfo=timezone.utc)
     except ValueError:
@@ -82,6 +86,13 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
     try:
         with get_connection() as conn:
             cur = conn.cursor()
+
+            meter_id, account, community = _resolve_meter(conn, reading.meter_id)
+            if not account:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Unknown prototype meter: {reading.meter_id}",
+                )
 
             cur.execute(
                 "SELECT last_energy_kwh FROM prototype_meter_state WHERE meter_id = %s",
@@ -98,11 +109,11 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
                 INSERT INTO meter_readings
                     (meter_id, account_number, reading_time,
                      wh_reading, power_kw, community, source)
-                VALUES (%s, %s, %s, %s, %s, 'MAK', 'iot')
+                VALUES (%s, %s, %s, %s, %s, %s, 'iot')
                 ON CONFLICT DO NOTHING
             """, (
                 meter_id, account, ts,
-                reading.energy_active * 1000, reading.power_active,
+                reading.energy_active * 1000, reading.power_active, community,
             ))
 
             hour_key = ts.strftime("%Y-%m-%d %H:00:00+00")
@@ -110,10 +121,10 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
                 cur.execute("""
                     INSERT INTO hourly_consumption
                         (account_number, meter_id, reading_hour, kwh, community, source)
-                    VALUES (%s, %s, %s, %s, 'MAK', 'iot')
+                    VALUES (%s, %s, %s, %s, %s, 'iot')
                     ON CONFLICT (meter_id, reading_hour) DO UPDATE
                         SET kwh = hourly_consumption.kwh + EXCLUDED.kwh
-                """, (account, meter_id, hour_key, round(delta_kwh, 4)))
+                """, (account, meter_id, hour_key, round(delta_kwh, 4), community))
 
             cur.execute("""
                 INSERT INTO prototype_meter_state
@@ -147,6 +158,94 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
         raise
     except Exception as e:
         logger.error("Meter reading ingest failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Meter role management (check ↔ primary transitions)
+# ---------------------------------------------------------------------------
+
+VALID_ROLES = {"primary", "check", "backup"}
+
+
+@router.get("/api/meters/account/{account_number}")
+def get_meters_for_account(account_number: str):
+    """List all meters for an account with their roles and platform."""
+    try:
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT meter_id, platform, role, status FROM meters "
+                "WHERE account_number = %s ORDER BY role, meter_id",
+                (account_number,),
+            )
+            return [
+                {"meter_id": r[0], "platform": r[1], "role": r[2], "status": r[3]}
+                for r in cur.fetchall()
+            ]
+    except Exception as e:
+        logger.error("Meter lookup failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class MeterRoleUpdate(BaseModel):
+    meter_id: str
+    role: str
+
+
+@router.patch("/api/meters/{meter_id}/role")
+def update_meter_role(meter_id: str, body: MeterRoleUpdate):
+    """Change a meter's role. When promoting a check meter to primary on an
+    account that already has a primary, the old primary is demoted to 'check'
+    automatically — there can only be one primary per account."""
+    if body.role not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail=f"Invalid role: {body.role}. Must be one of {VALID_ROLES}")
+
+    try:
+        with get_connection() as conn:
+            cur = conn.cursor()
+
+            cur.execute(
+                "SELECT account_number, role FROM meters WHERE meter_id = %s",
+                (meter_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail=f"Meter not found: {meter_id}")
+
+            account, old_role = row[0], row[1]
+
+            if body.role == "primary" and old_role != "primary":
+                cur.execute(
+                    "UPDATE meters SET role = 'check', updated_at = NOW() "
+                    "WHERE account_number = %s AND role = 'primary' AND meter_id != %s",
+                    (account, meter_id),
+                )
+                demoted = cur.rowcount
+            else:
+                demoted = 0
+
+            cur.execute(
+                "UPDATE meters SET role = %s, updated_at = NOW() WHERE meter_id = %s",
+                (body.role, meter_id),
+            )
+            conn.commit()
+
+            logger.info("Meter %s role: %s → %s (account %s, demoted %d)",
+                        meter_id, old_role, body.role, account, demoted)
+
+            return {
+                "meter_id": meter_id,
+                "account": account,
+                "old_role": old_role,
+                "new_role": body.role,
+                "demoted_count": demoted,
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Meter role update failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -250,7 +349,7 @@ async def sms_incoming(request: Request):
         msg_id = msg.get("id", "")
         content = msg.get("content", "")
         sender = msg.get("from", "")
-        sms_sent = msg.get("sms_sent", 0)
+        sms_received = msg.get("sms_received", 0) or msg.get("sms_sent", 0)
 
         logger.info("SMS from=%s id=%s content=%.60s…", sender, msg_id, content)
 
@@ -292,7 +391,11 @@ async def sms_incoming(request: Request):
                 new_balance = round(prev_balance + amount, 4)
 
                 try:
-                    ts = datetime.fromtimestamp(int(sms_sent) / 1000, tz=timezone.utc)
+                    ts_ms = int(sms_received)
+                    if ts_ms > 0:
+                        ts = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+                    else:
+                        ts = datetime.now(timezone.utc)
                 except (ValueError, TypeError, OSError):
                     ts = datetime.now(timezone.utc)
 

@@ -620,18 +620,40 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
 
         acct = user.user_id
 
+        empty_dash = {
+            "balance_kwh": 0,
+            "last_payment": None,
+            "avg_kwh_per_day": 0,
+            "estimated_recharge_seconds": 0,
+            "total_kwh_all_time": 0,
+            "total_lsl_all_time": 0,
+            "daily_7d": [],
+            "daily_30d": [],
+            "monthly_12m": [],
+            "meters": [],
+            "meter_comparison": [],
+        }
+
         if not acct:
-            return {
-                "balance_kwh": 0,
-                "last_payment": None,
-                "avg_kwh_per_day": 0,
-                "estimated_recharge_seconds": 0,
-                "total_kwh_all_time": 0,
-                "total_lsl_all_time": 0,
-                "daily_7d": [],
-                "daily_30d": [],
-                "monthly_12m": [],
-            }
+            return empty_dash
+
+        # Fetch all meters for this account
+        meter_list = []
+        try:
+            cursor.execute(
+                "SELECT meter_id, platform, role, status FROM meters "
+                "WHERE account_number = %s ORDER BY role, meter_id",
+                (acct,),
+            )
+            for mr in cursor.fetchall():
+                meter_list.append({
+                    "meter_id": mr[0],
+                    "platform": mr[1],
+                    "role": mr[2],
+                    "status": mr[3],
+                })
+        except Exception:
+            pass
 
         history_rows = []
         latest_balance = None
@@ -720,27 +742,38 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
                 day_key = r["date"].strftime("%Y-%m-%d")
                 daily[day_key] += r["kwh"]
 
-        # Supplement with metered consumption (IoT, Koios, ThunderCloud)
+        # Supplement with metered consumption, excluding check meters from totals
         consumption_daily = defaultdict(float)
         consumption_monthly = defaultdict(float)
+        # Per-source daily breakdown for meter comparison (includes check meters)
+        source_daily: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
         try:
             cursor.execute(
-                "SELECT reading_hour, kwh FROM hourly_consumption "
-                "WHERE account_number = %s AND reading_hour >= %s "
-                "ORDER BY reading_hour",
+                "SELECT h.reading_hour, h.kwh, h.source, "
+                "       COALESCE(m.role, 'primary') AS role "
+                "FROM hourly_consumption h "
+                "LEFT JOIN meters m ON m.meter_id = h.meter_id "
+                "WHERE h.account_number = %s AND h.reading_hour >= %s "
+                "ORDER BY h.reading_hour",
                 (acct, now - timedelta(days=365)),
             )
             for row in cursor.fetchall():
                 dt_h = row[0]
                 kwh_h = float(row[1] or 0)
+                src = row[2] or "unknown"
+                role = row[3] or "primary"
                 if kwh_h > 0 and dt_h is not None:
                     if isinstance(dt_h, str):
                         try:
                             dt_h = datetime.fromisoformat(dt_h)
                         except ValueError:
                             continue
-                    consumption_daily[dt_h.strftime("%Y-%m-%d")] += kwh_h
-                    consumption_monthly[dt_h.strftime("%Y-%m")] += kwh_h
+                    dt_h = _ensure_naive(dt_h)
+                    day_str = dt_h.strftime("%Y-%m-%d")
+                    source_daily[src][day_str] += kwh_h
+                    if role != "check":
+                        consumption_daily[day_str] += kwh_h
+                        consumption_monthly[dt_h.strftime("%Y-%m")] += kwh_h
         except Exception as e:
             logger.debug("Dashboard: hourly_consumption query failed: %s", e)
 
@@ -798,6 +831,22 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
             mo = d.strftime("%Y-%m")
             monthly_12m.append({"month": mo, "kwh": round(monthly.get(mo, 0), 1)})
 
+        # Build meter comparison: last 7 days per source (for overlay chart)
+        meter_comparison = []
+        if len(source_daily) > 1:
+            source_labels = {
+                "thundercloud": "SparkMeter",
+                "koios": "SparkMeter",
+                "iot": "1Meter Prototype",
+            }
+            for i in range(6, -1, -1):
+                d = (now - timedelta(days=i)).strftime("%Y-%m-%d")
+                point: dict = {"date": d}
+                for src, daily_map in source_daily.items():
+                    label = source_labels.get(src, src)
+                    point[label] = round(daily_map.get(d, 0), 3)
+                meter_comparison.append(point)
+
         return {
             "balance_kwh": round(balance_kwh, 2),
             "last_payment": last_payment,
@@ -808,6 +857,8 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
             "daily_7d": daily_7d,
             "daily_30d": daily_30d,
             "monthly_12m": monthly_12m,
+            "meters": meter_list,
+            "meter_comparison": meter_comparison,
         }
 
 
