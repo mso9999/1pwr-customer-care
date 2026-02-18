@@ -241,6 +241,8 @@ from sync_ugridplan import router as sync_router
 from commission import router as commission_router
 from tariff import router as tariff_router
 from registration import router as registration_router
+from payments import router as payments_router
+from ingest import router as ingest_router
 
 app.include_router(auth_router)
 app.include_router(schema_router)
@@ -256,6 +258,8 @@ app.include_router(commission_router)
 app.include_router(tariff_router)
 app.include_router(customer_data_router)
 app.include_router(registration_router)
+app.include_router(payments_router)
+app.include_router(ingest_router)
 
 
 # ---- Health ----

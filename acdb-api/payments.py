@@ -1,0 +1,230 @@
+"""
+Payment processing endpoints for 1PDB.
+
+Provides:
+  - POST /api/payments/webhook — receive payment notifications from SMS Gateway
+  - POST /api/payments/record  — manual payment recording (authenticated)
+  - GET  /api/payments/{account_number} — payment history
+
+The SMS Gateway App (onepowerLS/SMS-Gateway-APP) parses M-PESA/EcoCash
+confirmation SMSes and POSTs them here. This endpoint is unauthenticated
+but validated by a shared secret in the X-Gateway-Key header.
+"""
+
+import logging
+import os
+from datetime import datetime, timezone
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from pydantic import BaseModel
+
+from customer_api import get_connection
+
+logger = logging.getLogger("cc-api.payments")
+
+router = APIRouter(prefix="/api/payments", tags=["payments"])
+
+GATEWAY_KEY = os.environ.get("SMS_GATEWAY_KEY", "1pwr-sms-gateway-2026")
+
+
+class PaymentWebhook(BaseModel):
+    account_number: str
+    amount: float
+    meter_id: Optional[str] = None
+    reference: Optional[str] = None
+    phone: Optional[str] = None
+    provider: Optional[str] = None  # mpesa, ecocash, manual
+    timestamp: Optional[str] = None
+
+
+class ManualPayment(BaseModel):
+    account_number: str
+    amount: float
+    meter_id: Optional[str] = None
+    kwh: Optional[float] = None
+    note: Optional[str] = None
+
+
+def _verify_gateway_key(x_gateway_key: str = Header(None)):
+    if x_gateway_key != GATEWAY_KEY:
+        raise HTTPException(status_code=403, detail="Invalid gateway key")
+
+
+def _resolve_meter(conn, account_number: str, meter_id: Optional[str] = None) -> str:
+    """Resolve meter_id for an account. Returns provided meter_id or looks up from DB."""
+    if meter_id:
+        return meter_id
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT meter_id FROM meters WHERE account_number = %s AND status = 'active' LIMIT 1",
+        (account_number,),
+    )
+    row = cur.fetchone()
+    return row[0] if row else ""
+
+
+def _get_tariff_rate(conn, account_number: str) -> float:
+    """Get the applicable tariff rate (LSL/kWh) for an account."""
+    cur = conn.cursor()
+    cur.execute("SELECT value FROM system_config WHERE key = 'tariff_rate' LIMIT 1")
+    row = cur.fetchone()
+    return float(row[0]) if row else 5.0
+
+
+@router.post("/webhook")
+def payment_webhook(payload: PaymentWebhook, _=Depends(_verify_gateway_key)):
+    """Receive payment notification from the SMS Gateway.
+
+    Records the transaction, computes kWh vended at current tariff rate,
+    and returns the new balance + kWh for the SMS confirmation reply.
+    """
+    if payload.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+    if not payload.account_number:
+        raise HTTPException(status_code=400, detail="Account number required")
+
+    ts = datetime.now(timezone.utc)
+    if payload.timestamp:
+        try:
+            ts = datetime.fromisoformat(payload.timestamp.replace("Z", "+00:00"))
+        except ValueError:
+            pass
+
+    try:
+        with get_connection() as conn:
+            cur = conn.cursor()
+
+            meter_id = _resolve_meter(conn, payload.account_number, payload.meter_id)
+            rate = _get_tariff_rate(conn, payload.account_number)
+            kwh_vended = round(payload.amount / rate, 4) if rate > 0 else 0.0
+
+            cur.execute("""
+                SELECT COALESCE(
+                    (SELECT current_balance FROM transactions
+                     WHERE account_number = %s ORDER BY transaction_date DESC LIMIT 1),
+                    0
+                )
+            """, (payload.account_number,))
+            prev_balance = float(cur.fetchone()[0])
+            new_balance = round(prev_balance + payload.amount, 4)
+
+            cur.execute("""
+                INSERT INTO transactions
+                    (account_number, meter_id, transaction_date,
+                     transaction_amount, rate_used, kwh_value,
+                     is_payment, current_balance, source)
+                VALUES (%s, %s, %s, %s, %s, %s, true, %s, 'sms_gateway')
+                RETURNING id
+            """, (
+                payload.account_number, meter_id, ts,
+                payload.amount, rate, kwh_vended,
+                new_balance,
+            ))
+            txn_id = cur.fetchone()[0]
+            conn.commit()
+
+            logger.info("Payment recorded: txn=%d acct=%s M%.2f (%.2f kWh @ %.2f)",
+                        txn_id, payload.account_number, payload.amount, kwh_vended, rate)
+
+            return {
+                "status": "ok",
+                "transaction_id": txn_id,
+                "account_number": payload.account_number,
+                "amount": payload.amount,
+                "kwh_vended": kwh_vended,
+                "rate": rate,
+                "new_balance": new_balance,
+                "meter_id": meter_id,
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Payment webhook failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/record")
+def record_manual_payment(payload: ManualPayment):
+    """Record a manual payment (e.g., from portal or field agent)."""
+    if payload.amount <= 0:
+        raise HTTPException(status_code=400, detail="Amount must be positive")
+
+    try:
+        with get_connection() as conn:
+            cur = conn.cursor()
+            meter_id = _resolve_meter(conn, payload.account_number, payload.meter_id)
+            rate = _get_tariff_rate(conn, payload.account_number)
+            kwh = payload.kwh if payload.kwh is not None else (
+                round(payload.amount / rate, 4) if rate > 0 else 0.0
+            )
+
+            cur.execute("""
+                SELECT COALESCE(
+                    (SELECT current_balance FROM transactions
+                     WHERE account_number = %s ORDER BY transaction_date DESC LIMIT 1),
+                    0
+                )
+            """, (payload.account_number,))
+            prev_balance = float(cur.fetchone()[0])
+            new_balance = round(prev_balance + payload.amount, 4)
+
+            cur.execute("""
+                INSERT INTO transactions
+                    (account_number, meter_id, transaction_date,
+                     transaction_amount, rate_used, kwh_value,
+                     is_payment, current_balance, source)
+                VALUES (%s, %s, NOW(), %s, %s, %s, true, %s, 'portal')
+                RETURNING id
+            """, (
+                payload.account_number, meter_id,
+                payload.amount, rate, kwh, new_balance,
+            ))
+            txn_id = cur.fetchone()[0]
+            conn.commit()
+
+            return {
+                "status": "ok",
+                "transaction_id": txn_id,
+                "amount": payload.amount,
+                "kwh": kwh,
+                "new_balance": new_balance,
+            }
+    except Exception as e:
+        logger.error("Manual payment failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{account_number}")
+def get_payment_history(
+    account_number: str,
+    limit: int = Query(50, le=500),
+    offset: int = Query(0, ge=0),
+):
+    """Get payment/transaction history for an account."""
+    try:
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT id, account_number, meter_id, transaction_date,
+                       transaction_amount, rate_used, kwh_value,
+                       is_payment, current_balance, source
+                FROM transactions
+                WHERE account_number = %s
+                ORDER BY transaction_date DESC
+                LIMIT %s OFFSET %s
+            """, (account_number, limit, offset))
+            columns = [d[0] for d in cur.description]
+            rows = [dict(zip(columns, r)) for r in cur.fetchall()]
+
+            cur.execute(
+                "SELECT count(*) FROM transactions WHERE account_number = %s",
+                (account_number,),
+            )
+            total = cur.fetchone()[0]
+
+            return {"transactions": rows, "total": total, "limit": limit, "offset": offset}
+    except Exception as e:
+        logger.error("Payment history failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))

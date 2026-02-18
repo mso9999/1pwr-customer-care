@@ -221,3 +221,60 @@
 - CONTEXT.md was sufficient for CC Portal orientation but lacks documentation of: scheduled tasks, SMS Gateway, import_meter_readings pipeline, external system credentials
 - SESSION_LOG.md from previous sessions was critical for understanding the two-DB architecture and the tenure chart data era mismatch
 - Recommend adding an "ACCDB Schema" section to CONTEXT.md with the table inventory from this audit
+
+---
+
+## Session 2026-02-18 202602181830 (SMS Gateway SOP Review & SMSsync Protocol Integration)
+
+### What Was Done
+1. **Fetched SMS Gateway SOPs via Dropbox API** — used the `dropbox_client.py` credentials from Email Overlord `.env` to download three SOP documents that were Dropbox smart-sync placeholders (0 bytes locally):
+   - `MGD070V01-SMS Platform SOP.docx` — CM.com bulk SMS sending (not the payment gateway)
+   - `MGD074V01-SMSsync Setup + settings.docx` — **critical**: documents the SMSsync app config and M-PESA flow
+   - `MGD075V01-Payment Error Trobleshooting SOP.docx` — payment troubleshooting procedures
+2. **Discovered actual SMS Gateway architecture from SOPs**:
+   - **App**: SMSsync (NOT Medic Mobile as previously assumed)
+   - **Current endpoint**: `https://iometering.co.za/admin/mpesa/smssync.php` (purchase + balance check)
+   - **Alternate endpoint**: `https://iometering.co.za/admin/mpesa/smsrecieve.php` (purchases only)
+   - **Secret key**: `159951`
+   - **Protocol**: form-encoded POST with fields `from`, `message`, `sent_timestamp`, `message_id`, `sent_to`, `device_id`, `secret`
+   - **Response format**: `{"payload":{"success":"true","error":null}}`
+   - **M-PESA SMS format**: `"5L956Z39DJ Confirmed. on 9/12/18 at 8:59 AM M1.00 received from 26657755403 - Tamer Teker 26657755403.New M-Pesa balance is M387.80 Reference: 315103084."`
+   - **Reference field** (`315103084`) = Iometer/SparkMeter channel ID (how payment maps to meter)
+3. **Rewrote `/api/sms/incoming` in `ingest.py`** to:
+   - Accept the SMSsync form-encoded protocol (was incorrectly expecting JSON with `messages` array)
+   - Validate against the shared secret (`159951`)
+   - **Forward every SMS to Iometer first** (`https://iometering.co.za/admin/mpesa/smssync.php`) — preserves existing payment pipeline
+   - Parse M-PESA confirmation text with regex matched to actual documented format
+   - Record payment transaction in 1PDB if parseable and account matchable
+   - Return SMSsync-compatible JSON response (`{"payload":{"success":"true","error":null}}`)
+   - Use `sent_timestamp` (UNIX ms) for transaction dating
+4. **Updated M-PESA regex** — primary pattern extracts txn_id, amount, phone, and reference from the documented format; fallback pattern catches amount + phone for format drift
+
+### Key Decisions
+- **Forward-first architecture**: Every SMS is forwarded to Iometer before 1PDB processing. If 1PDB parsing fails, the existing pipeline is unaffected.
+- **Non-blocking forwarding**: Iometer forward uses `urllib` with 10s timeout; failures are logged but don't prevent SMSsync from getting a success response.
+- **Secret key validation**: Uses `159951` (from SOP) rather than the previously invented `1pwr-sms-gateway-2026`.
+- **Removed the `payments.py` webhook dependency for SMS**: The SMS flow now goes entirely through `ingest.py`'s `/api/sms/incoming`. The `payments.py` `/webhook` endpoint remains for future structured payment APIs.
+
+### What Next Session Should Know
+- **To activate**: Change the SMSsync app's Custom Web Service URL from `https://iometering.co.za/admin/mpesa/smssync.php` to `https://cc.1pwrafrica.com/api/sms/incoming` with the same secret `159951`. The 1PDB endpoint will transparently forward to Iometer.
+- **SMSsync Task Checking** is set to 5-minute intervals — this is for outbound SMS (currently unused by 1PDB but could be used for balance confirmations).
+- **The `payments.py` router** still uses the old `SMS_GATEWAY_KEY` (`1pwr-sms-gateway-2026`) for its `/webhook` endpoint. This is a different API (structured JSON, not SMSsync protocol) and can be kept for future direct integrations.
+- **Need to deploy** `ingest.py` changes to production before switching SMSsync's URL.
+- **Iometer contact**: Edward Lubbe at edward@gisolutions.co.za (from troubleshooting SOP)
+
+### Correction: SMSsync → Medic Mobile Gateway
+The SOPs described an **outdated** configuration (iometering.co.za, SMSsync, 2018 era). After probing:
+- `sms.1pwrafrica.com/receive.php` (199.250.204.46) is the **actual live endpoint**
+- The PHP filters by User-Agent (`.htaccess`) — only accepts `medic-gateway` or `SMSSync`
+- GET returns `{"medic-gateway": true}` — the **Medic Mobile Gateway** handshake
+- POST accepts JSON: `{"messages": [{"id","from","content","sms_sent","sms_received"}], "updates": [...]}`
+- The PHP (`onepowerLS/SMSComms` repo) uses MySQL (`npower5_sms`) with a `smstypes` table to classify SMS
+- Payment files are dropped to `./incoming/mpesa/PAY_*.txt` as CSV: `timestamp,txn_id,amount,phone,sender`
+- `sparkmeter/new_file_watcher.php` (cron) picks up files → looks up customer → calls ThunderCloud API (`sparkcloud-u740425.sparkmeter.cloud/api/v0/transaction/`) to credit
+- `ingest.py` was re-rewritten to speak Medic Mobile Gateway protocol (JSON), forward raw body to `sms.1pwrafrica.com/receive.php` with `User-Agent: medic-gateway`
+
+### Protocol Feedback
+- Dropbox API credentials in Email Overlord `.env` were essential for fetching un-synced files
+- The SOP documents were **outdated** — probing the live endpoints and finding the `SMSComms` repo was necessary to get the real architecture
+- CONTEXT.md should be updated to document the SMS Gateway architecture now that it's known
