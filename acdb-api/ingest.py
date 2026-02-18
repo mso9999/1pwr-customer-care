@@ -36,6 +36,20 @@ PROTOTYPE_METERS = {
 }
 
 
+def _resolve_meter(raw_id: str) -> tuple[str, str | None]:
+    """Resolve a meter ID (padded or unpadded) to (canonical_id, account).
+
+    IoT Core sends 12-digit padded IDs (e.g. '000023022673') while the
+    config uses short IDs ('23022673').  Accept either form.
+    """
+    if raw_id in PROTOTYPE_METERS:
+        return raw_id, PROTOTYPE_METERS[raw_id]
+    stripped = raw_id.lstrip("0") or raw_id
+    if stripped in PROTOTYPE_METERS:
+        return stripped, PROTOTYPE_METERS[stripped]
+    return raw_id, None
+
+
 # ---------------------------------------------------------------------------
 # Prototype meter reading ingestion (from ingestion_gate Lambda)
 # ---------------------------------------------------------------------------
@@ -56,7 +70,7 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
     if x_iot_key != IOT_KEY:
         raise HTTPException(status_code=403, detail="Invalid IoT key")
 
-    account = PROTOTYPE_METERS.get(reading.meter_id)
+    meter_id, account = _resolve_meter(reading.meter_id)
     if not account:
         raise HTTPException(status_code=404, detail=f"Unknown prototype meter: {reading.meter_id}")
 
@@ -69,10 +83,9 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
         with get_connection() as conn:
             cur = conn.cursor()
 
-            # Get previous energy for delta calculation
             cur.execute(
                 "SELECT last_energy_kwh FROM prototype_meter_state WHERE meter_id = %s",
-                (reading.meter_id,),
+                (meter_id,),
             )
             row = cur.fetchone()
             prev_energy = float(row[0]) if row else None
@@ -81,7 +94,6 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
             if prev_energy is not None and reading.energy_active >= prev_energy:
                 delta_kwh = reading.energy_active - prev_energy
 
-            # Insert raw reading
             cur.execute("""
                 INSERT INTO meter_readings
                     (meter_id, account_number, reading_time,
@@ -89,11 +101,10 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
                 VALUES (%s, %s, %s, %s, %s, 'MAK', 'iot')
                 ON CONFLICT DO NOTHING
             """, (
-                reading.meter_id, account, ts,
+                meter_id, account, ts,
                 reading.energy_active * 1000, reading.power_active,
             ))
 
-            # Hourly bin
             hour_key = ts.strftime("%Y-%m-%d %H:00:00+00")
             if delta_kwh > 0:
                 cur.execute("""
@@ -102,9 +113,8 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
                     VALUES (%s, %s, %s, %s, 'MAK', 'iot')
                     ON CONFLICT (meter_id, reading_hour) DO UPDATE
                         SET kwh = hourly_consumption.kwh + EXCLUDED.kwh
-                """, (account, reading.meter_id, hour_key, round(delta_kwh, 4)))
+                """, (account, meter_id, hour_key, round(delta_kwh, 4)))
 
-            # Update state
             cur.execute("""
                 INSERT INTO prototype_meter_state
                     (meter_id, account_number, last_energy_kwh,
@@ -116,18 +126,18 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
                     last_seen_at = EXCLUDED.last_seen_at,
                     last_synced_at = NOW()
             """, (
-                reading.meter_id, account, reading.energy_active,
+                meter_id, account, reading.energy_active,
                 reading.relay, ts,
             ))
 
             conn.commit()
 
             logger.info("Meter reading: %s energy=%.2f kWh delta=%.4f relay=%s",
-                        reading.meter_id, reading.energy_active, delta_kwh, reading.relay)
+                        meter_id, reading.energy_active, delta_kwh, reading.relay)
 
             return {
                 "status": "ok",
-                "meter_id": reading.meter_id,
+                "meter_id": meter_id,
                 "account": account,
                 "delta_kwh": round(delta_kwh, 4),
                 "relay": reading.relay,
