@@ -244,6 +244,9 @@ from registration import router as registration_router
 from payments import router as payments_router
 from ingest import router as ingest_router
 
+from db_auth import init_auth_db
+init_auth_db()
+
 app.include_router(auth_router)
 app.include_router(schema_router)
 app.include_router(crud_router)

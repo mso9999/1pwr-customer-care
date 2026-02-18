@@ -709,13 +709,41 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
                 }
                 break
 
-        # Daily consumption for last 30 days
+        # Daily consumption for last 30 days (from transactions)
         daily = defaultdict(float)
         cutoff_30 = now - timedelta(days=30)
         for r in history_rows:
             if r["date"] and r["date"] >= cutoff_30 and r["kwh"] > 0:
                 day_key = r["date"].strftime("%Y-%m-%d")
                 daily[day_key] += r["kwh"]
+
+        # Supplement with metered consumption (IoT, Koios, ThunderCloud)
+        consumption_daily = defaultdict(float)
+        consumption_monthly = defaultdict(float)
+        try:
+            cursor.execute(
+                "SELECT reading_hour, kwh FROM hourly_consumption "
+                "WHERE account_number = %s AND reading_hour >= %s "
+                "ORDER BY reading_hour",
+                (acct, now - timedelta(days=365)),
+            )
+            for row in cursor.fetchall():
+                dt_h = row[0]
+                kwh_h = float(row[1] or 0)
+                if kwh_h > 0 and dt_h is not None:
+                    if isinstance(dt_h, str):
+                        try:
+                            dt_h = datetime.fromisoformat(dt_h)
+                        except ValueError:
+                            continue
+                    consumption_daily[dt_h.strftime("%Y-%m-%d")] += kwh_h
+                    consumption_monthly[dt_h.strftime("%Y-%m")] += kwh_h
+        except Exception as e:
+            logger.debug("Dashboard: hourly_consumption query failed: %s", e)
+
+        for day_key, kwh_val in consumption_daily.items():
+            if kwh_val > daily.get(day_key, 0):
+                daily[day_key] = kwh_val
 
         # Average kWh/day over last 30 days
         days_with_data = len(daily)
@@ -740,25 +768,26 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
             estimated_seconds = 0
 
         # Build chart data
-        # Last 7 days
         daily_7d = []
         for i in range(6, -1, -1):
             d = (now - timedelta(days=i)).strftime("%Y-%m-%d")
             daily_7d.append({"date": d, "kwh": round(daily.get(d, 0), 2)})
 
-        # Last 30 days
         daily_30d = []
         for i in range(29, -1, -1):
             d = (now - timedelta(days=i)).strftime("%Y-%m-%d")
             daily_30d.append({"date": d, "kwh": round(daily.get(d, 0), 2)})
 
-        # Monthly for last 12 months
         monthly = defaultdict(float)
         cutoff_12m = now - timedelta(days=365)
         for r in history_rows:
             if r["date"] and r["date"] >= cutoff_12m and r["kwh"] > 0:
                 mo_key = r["date"].strftime("%Y-%m")
                 monthly[mo_key] += r["kwh"]
+
+        for mo_key, kwh_val in consumption_monthly.items():
+            if kwh_val > monthly.get(mo_key, 0):
+                monthly[mo_key] = kwh_val
 
         monthly_12m = []
         for i in range(11, -1, -1):
