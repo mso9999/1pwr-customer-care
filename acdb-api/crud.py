@@ -601,7 +601,7 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
       - monthly_12m: [{month, kwh}] last 12 months
     """
     import math
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
     from collections import defaultdict
 
     if user.user_type != UserType.customer:
@@ -609,10 +609,15 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
 
     from customer_api import get_connection
 
+    def _ensure_naive(dt):
+        """Strip tzinfo for consistent comparisons (all times are UTC)."""
+        if dt and hasattr(dt, 'tzinfo') and dt.tzinfo is not None:
+            return dt.replace(tzinfo=None)
+        return dt
+
     with get_connection() as conn:
         cursor = conn.cursor()
 
-        # The user_id IS the account number (e.g. "0045MAK")
         acct = user.user_id
 
         if not acct:
@@ -628,7 +633,6 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
                 "monthly_12m": [],
             }
 
-        # Query transaction history (single table, known column names)
         history_rows = []
         latest_balance = None
 
@@ -642,8 +646,7 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
         for r in cursor.fetchall():
             kwh = float(r[1] or 0)
             lsl = float(r[2] or 0)
-            dt = r[3]
-            # Capture the most recent balance value
+            dt = _ensure_naive(r[3])
             if latest_balance is None and r[4] is not None:
                 try:
                     latest_balance = float(r[4])
