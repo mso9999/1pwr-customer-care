@@ -34,7 +34,7 @@ ROLE_PERMISSIONS = {
 }
 
 # Tables considered "transaction" tables (finance can write these)
-TRANSACTION_TABLES = {"tblaccountnumbers", "tblbilling", "tblpayments", "tbltransactions", "tblinvoices", "tblaccounthistory1", "tblaccounthistoryOriginal"}
+TRANSACTION_TABLES = {"accounts", "payments", "transactions", "monthly_transactions"}
 
 
 class EmployeeLoginRequest(BaseModel):
@@ -43,12 +43,12 @@ class EmployeeLoginRequest(BaseModel):
 
 
 class CustomerLoginRequest(BaseModel):
-    customer_id: str = Field(..., min_length=1, description="Customer ID from ACCDB")
+    customer_id: str = Field(..., min_length=1, description="Customer ID")
     password: str = Field(..., min_length=1, description="Customer password")
 
 
 class CustomerRegisterRequest(BaseModel):
-    customer_id: str = Field(..., min_length=1, description="Customer ID from ACCDB")
+    customer_id: str = Field(..., min_length=1, description="Customer ID")
     password: str = Field(..., min_length=6, description="New password (min 6 chars)")
 
 

@@ -1,8 +1,8 @@
 """
-ACCDB schema introspection endpoints.
+PostgreSQL schema introspection endpoints.
 
-Uses pyodbc cursor.tables() and cursor.columns() to discover
-all tables and their columns in the Access database.
+Uses information_schema to discover all tables and their columns
+in the 1PDB PostgreSQL database.
 """
 
 import logging
@@ -13,14 +13,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from models import ColumnInfo, CurrentUser, TableInfo
 from middleware import require_employee
 
-logger = logging.getLogger("acdb-api.schema")
+logger = logging.getLogger("cc-api.schema")
 
 router = APIRouter(prefix="/api/schema", tags=["schema"])
-
-
-# System/internal tables to exclude from listings
-_SYSTEM_PREFIXES = ("MSys", "~", "f_")
-_SYSTEM_TYPES = {"SYSTEM TABLE", "VIEW"}
 
 
 def _get_connection():
@@ -29,67 +24,50 @@ def _get_connection():
     return get_connection()
 
 
-def _discover_tables(cursor) -> list[str]:
-    """
-    Discover all user tables in the ACCDB.
-    Tries multiple tableType values to catch standard tables,
-    linked tables, and other Access-specific types.
-    """
-    seen = set()
-
-    # First pass: no filter -- get everything, then filter by type
-    try:
-        for row in cursor.tables():
-            name = row.table_name
-            ttype = (row.table_type or "").upper()
-            if ttype in _SYSTEM_TYPES:
-                continue
-            if any(name.startswith(p) for p in _SYSTEM_PREFIXES):
-                continue
-            seen.add(name)
-    except Exception as e:
-        logger.warning("Unfiltered table scan failed: %s", e)
-
-    # Fallback: if nothing found, try specific types
-    if not seen:
-        for table_type in ("TABLE", "LINK", "ACCESS TABLE"):
-            try:
-                for row in cursor.tables(tableType=table_type):
-                    name = row.table_name
-                    if any(name.startswith(p) for p in _SYSTEM_PREFIXES):
-                        continue
-                    seen.add(name)
-            except Exception:
-                continue
-
-    return sorted(seen)
-
-
 @router.get("/tables", response_model=List[TableInfo])
 def list_tables(user: CurrentUser = Depends(require_employee)):
     """
-    List all user tables in the ACCDB with row counts and column counts.
-    Excludes system tables (MSys*, ~TMP*, etc.).
+    List all user tables in the database with row counts and column counts.
+    Excludes system tables.
     """
     with _get_connection() as conn:
         cursor = conn.cursor()
-        table_names = _discover_tables(cursor)
-        logger.info("Discovered %d tables in ACCDB", len(table_names))
+
+        # Get all public tables
+        cursor.execute(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = 'public' AND table_type = 'BASE TABLE' "
+            "ORDER BY table_name"
+        )
+        table_names = [r[0] for r in cursor.fetchall()]
+        logger.info("Discovered %d tables in database", len(table_names))
 
         tables = []
         for name in table_names:
-            # Get row count
+            # Get row count (approximate for large tables)
             try:
-                cursor.execute(f"SELECT COUNT(*) FROM [{name}]")
-                row_count = cursor.fetchone()[0]
+                cursor.execute(
+                    "SELECT reltuples::bigint FROM pg_class WHERE relname = %s",
+                    (name,),
+                )
+                result = cursor.fetchone()
+                row_count = result[0] if result else -1
+                # If stats are stale (0 for non-empty table), do exact count
+                if row_count == 0:
+                    cursor.execute(f"SELECT COUNT(*) FROM {name}")
+                    row_count = cursor.fetchone()[0]
             except Exception as e:
                 logger.debug("Could not count rows in %s: %s", name, e)
                 row_count = -1
 
             # Get column count
             try:
-                cols = list(cursor.columns(table=name))
-                col_count = len(cols)
+                cursor.execute(
+                    "SELECT COUNT(*) FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND table_name = %s",
+                    (name,),
+                )
+                col_count = cursor.fetchone()[0]
             except Exception:
                 col_count = -1
 
@@ -105,16 +83,29 @@ def list_columns(table_name: str, user: CurrentUser = Depends(require_employee))
     """
     with _get_connection() as conn:
         cursor = conn.cursor()
-        columns = []
-        for col in cursor.columns(table=table_name):
-            columns.append(ColumnInfo(
-                name=col.column_name,
-                type_name=col.type_name,
-                nullable=col.nullable == 1,
-                size=col.column_size,
-            ))
+        cursor.execute(
+            "SELECT column_name, data_type, is_nullable, "
+            "character_maximum_length "
+            "FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = %s "
+            "ORDER BY ordinal_position",
+            (table_name,),
+        )
+        rows = cursor.fetchall()
 
-        if not columns:
-            raise HTTPException(status_code=404, detail=f"Table '{table_name}' not found or has no columns")
+        if not rows:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Table '{table_name}' not found or has no columns",
+            )
+
+        columns = []
+        for r in rows:
+            columns.append(ColumnInfo(
+                name=r[0],
+                type_name=r[1],
+                nullable=r[2] == "YES",
+                size=r[3],
+            ))
 
         return columns

@@ -3,6 +3,68 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-02-17 202602170230 (ACCDB to PostgreSQL Migration — Full Implementation)
+
+### What Was Done
+- **Created the `1PDB` repository** at `/Users/mattmso/Dropbox/AI Projects/1PDB/` with complete structure: schema/, services/, migration/, config/, systemd/
+- **Wrote PostgreSQL schema** (`schema/001_initial.sql`): 20 tables including customers, accounts, meters, transactions, meter_readings (partitioned by year), hourly/monthly consumption, monthly_transactions, system_config, payments, sms_outbox, callback_log, balance_corrections, relay_commands, reconciliation_log, prototype_meter_state. Plus ENUM types, indexes, triggers, and a `next_account_number()` function.
+- **Wrote ACCDB migration script** (`migration/migrate_accdb.py`): Full data migration from ACCDB to PostgreSQL including customers, accounts, meters (merged from two tables), transactions (merged from two history tables), meter readings (merged from three data tables), derived tables, and config.
+- **Converted ALL 13 backend Python files** from pyodbc/ACCDB to psycopg2/PostgreSQL:
+  - `customer_api.py`: Connection pool (ThreadedConnectionPool), single DB, new column names
+  - `crud.py`: Rewritten PK detection, type coercion, pagination (SQL OFFSET), information_schema introspection
+  - `om_report.py`: Removed all dual-table fallbacks, derived DB, dynamic date column detection
+  - `tariff.py`: system_config key-value queries replace tblconfig
+  - `commission.py`: New column names, single meters table, added bulk status endpoint
+  - `sync_ugridplan.py`: Single meters/transactions table, no fallback loops
+  - `mutations.py`: pg_index-based PK detection, renamed fetch function
+  - `exports.py`: information_schema-based introspection
+  - `stats.py`: Single transactions table
+  - `schema.py`: Complete rewrite using information_schema
+  - `auth.py`: Updated customer/account validation queries
+  - `models.py`: Updated TRANSACTION_TABLES set
+  - `requirements.txt`: pyodbc -> psycopg2-binary
+- **Wrote prepaid balance engine** (`1PDB/services/prepaid_engine.py`): Payment processing, balance management, correction push to SparkMeter (Koios + ThunderCloud), prototype meter relay control (IoT Core MQTT), SMS alerts, balance reconciliation
+- **Wrote import service** (`1PDB/services/import_service.py`): Koios API import, ThunderCloud import, DynamoDB prototype meter sync, monthly aggregate rebuilding
+- **Wrote DynamoDB sync service** (`1PDB/services/dynamodb_sync.py`): Lightweight cron wrapper for prototype meter sync
+- **Wrote SMS service** (`1PDB/services/sms_service.py`): Outbound SMS dispatch with Sesotho templates
+- **Wrote customer registration module** (`acdb-api/registration.py`): Account number generation, single and bulk (Excel) registration, mounted as new router
+- **Rewrote deploy.yml**: Removed Windows self-hosted runner job, both frontend and backend deploy to Linux EC2 via GitHub-hosted ubuntu runner + SSH/rsync
+- **Created systemd units**: 1pdb-api.service, 1pdb-import.service + timer, Caddyfile.example, setup-server.sh
+- **Wrote validation script** (`1PDB/migration/validate_migration.py`): Row count checks, data integrity, financial consistency, partition health, API endpoint testing
+- **Wrote site config** (`1PDB/config/sites.py`): All 15 Lesotho sites, Koios service areas, ThunderCloud sites, prototype meters, IoT Core config, SMS templates
+
+### Key Decisions
+- PostgreSQL column names use snake_case (not ACCDB "SPACE SEPARATED" names) — _normalize_customer() maps between them
+- `customer_id_legacy` preserves the old ACCDB autonumber for backward compatibility
+- `tblmeter` and `Copy Of tblmeter` merged into single `meters` table
+- `tblaccounthistory1` and `tblaccounthistoryOriginal` merged into single `transactions` table
+- meter_readings partitioned by year (2018-2027)
+- Connection pooling via psycopg2 ThreadedConnectionPool (2-10 connections)
+- Single PostgreSQL database replaces both ACCDB files (main + derived)
+
+### What Next Session Should Know
+- **IMPORTANT**: The implementation is code-complete but NOT deployed. The next steps are:
+  1. Create the `onepowerLS/1PDB` GitHub repo and push the 1PDB code
+  2. Run `setup-server.sh` on the Linux EC2 to install PostgreSQL 16
+  3. Copy IoT TLS certificates from Windows EC2 to Linux EC2
+  4. Run `migrate_accdb.py --all` from Windows EC2 to populate PostgreSQL
+  5. Run `validate_migration.py --full` to verify data integrity
+  6. Update DNS/Caddy to point backend to localhost:8100
+  7. Push converted backend to main branch (triggers deploy)
+  8. Run 2-week parallel operation before decommissioning Windows EC2
+- `import_meter_readings.py` and `compact_accdb.py` still use pyodbc — these are legacy tools superseded by the new 1PDB services
+- The SQLite auth DB (`cc_auth.db`) was NOT migrated to PostgreSQL — it stays as-is (works fine, small, no ACCDB dependency)
+- The `_accdb_writer.py` subprocess helper is now obsolete
+- The WhatsApp bridge (`whatsapp-bridge/`) needs no changes
+
+### Senescence Notes
+- No degradation detected — this was a single focused implementation session
+
+### Protocol Feedback
+- CONTEXT.md and SESSION_LOG.md from previous sessions were essential for understanding the full system architecture
+- The conversation summary from the previous session was invaluable — it captured all architectural decisions and open questions
+- The plan file (.cursor/plans/accdb_to_postgresql_migration_0408bc5f.plan.md) served as an excellent structured guide
+
 ---
 
 ## Session 2026-02-15 202602151430 (Initial Setup & Financial Analytics)
@@ -122,3 +184,40 @@
 ### Protocol Feedback
 - The plan file was clear about the three options and recommendation
 - Conversation context from the previous session was essential for understanding the data model
+
+---
+
+## Session 2026-02-17 202602170000 (ACCDB Data Flow Audit — Initial)
+
+### What Was Done
+- Initial high-level audit of ACCDB data flows (superseded by 202602170045)
+
+---
+
+## Session 2026-02-17 202602170045 (Complete ACCDB Migration Audit)
+
+### What Was Done
+1. **Complete table inventory** — 10 tables in main ACCDB, 3 in derived_data.accdb, 8 in SQLite auth DB
+2. **Full per-table read/write matrix** with exact SQL operations, column lists, and triggering endpoints
+3. **All 7 WRITE operations to tblcustomer** documented (crud generic x3, commission x2, sync_ugridplan GPS, mutations revert)
+4. **All 1 WRITE operations to tblconfig** documented (tariff.py global rate update)
+5. **import_meter_readings.py 6-step pipeline** fully mapped: ACCDB local aggregation → Koios consumption → ThunderCloud → Portfolio CSVs → Koios transactions → ThunderCloud transactions
+6. **SMS Gateway App architecture** fully documented: Medic Mobile fork, polls configurable webappUrl, bridges customer payment SMS → Koios/SparkMeter → eventually ACCDB via import pipeline. Never touches ACCDB directly.
+7. **Scheduled task analysis**: download_and_log.py (FTP→tblmeterdata1), mqtt_publish.py (ACCDB→MQTT→meters), retrieve_s3.py (S3→tblmeterdata1). Scripts are EC2-only, not in repo.
+8. **External system map**: Koios, ThunderCloud, Dropbox, uGridPlan, HR Portal, FTP, S3, MQTT, SMS Gateway, WhatsApp Bridge
+
+### Key Decisions
+- N/A — read-only audit session, no code changes
+
+### What Next Session Should Know
+- **For migration**: Only 3 ACCDB tables are written to by the CC Portal: `tblcustomer` (7 write paths), `tblconfig` (1 write path), `tblaccountnumbers` (generic CRUD). Everything else is read-only from the portal's perspective.
+- **The 3 EC2-only scripts** (download_and_log.py, mqtt_publish.py, retrieve_s3.py) are the primary data ingest path and are NOT in this repo. Must be obtained via RDP for migration.
+- **Jet SQL dialect** is used throughout: `TOP N` (not LIMIT), bracket-quoted `[column name]`, `AUTOINCREMENT`, no OFFSET support (Python-side pagination). All in pyodbc.
+- **The SMS Gateway App needs no changes** for any ACCDB migration — it's a pure SMS bridge to Koios.
+- **derived_data.accdb exists because main ACCDB is at 2 GB limit**. A PostgreSQL/MySQL migration eliminates the need for two files.
+- **Koios API credentials** are hardcoded in import_meter_readings.py (API key + secret). Same for ThunderCloud.
+
+### Protocol Feedback
+- CONTEXT.md was sufficient for CC Portal orientation but lacks documentation of: scheduled tasks, SMS Gateway, import_meter_readings pipeline, external system credentials
+- SESSION_LOG.md from previous sessions was critical for understanding the two-DB architecture and the tenure chart data era mismatch
+- Recommend adding an "ACCDB Schema" section to CONTEXT.md with the table inventory from this audit

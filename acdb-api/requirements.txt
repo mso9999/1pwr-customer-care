@@ -1,6 +1,6 @@
 fastapi
 uvicorn
-pyodbc
+psycopg2-binary
 python-jose[cryptography]
 passlib[bcrypt]
 bcrypt
@@ -11,3 +11,4 @@ xhtml2pdf
 jinja2
 pandas
 pyarrow
+python-multipart

@@ -33,7 +33,6 @@ jobs:
 
       - name: Deploy frontend to Linux EC2
         run: |
-          # Clear old files and deploy new build
           ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_LINUX_HOST }} "sudo rm -rf /opt/cc-portal/frontend/*"
           rsync -avz --delete \
             -e "ssh -i ~/.ssh/deploy_key" \
@@ -45,7 +44,6 @@ jobs:
 
       - name: Verify frontend
         run: |
-          # Check that Caddy serves the new frontend
           sleep 2
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://cc.1pwrafrica.com/)
           echo "Frontend HTTP status: $STATUS"
@@ -54,86 +52,67 @@ jobs:
             exit 1
           fi
 
-  # ── Job 2: Deploy backend on self-hosted Windows runner ──
+  # ── Job 2: Deploy backend to Linux EC2 (replaces Windows self-hosted runner) ──
   deploy-backend:
-    runs-on: self-hosted
-    defaults:
-      run:
-        shell: powershell
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Stop ACDB service
+      - name: Setup SSH
         run: |
-          schtasks.exe /End /TN "ACDBCustomerAPI" 2>$null
-          $global:LASTEXITCODE = 0
-          # Also kill any lingering Python process
-          Get-Process -Name python* -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-          Start-Sleep -Seconds 5
-          # Remove stale ACCDB lock files (best-effort, non-fatal)
-          $dbDir = "C:\Users\Administrator\Desktop\AccessDB_Clone"
-          Get-ChildItem -Path $dbDir -Filter "*.ldb" -ErrorAction SilentlyContinue | ForEach-Object {
-            Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
-            Write-Host "Removed stale lock file: $($_.Name)"
-          }
-          $global:LASTEXITCODE = 0
-          Write-Host "ACDB service stopped"
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -T 30 -H ${{ secrets.EC2_LINUX_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
 
-      - name: Deploy backend
+      - name: Deploy backend to Linux EC2
         run: |
-          $source = "acdb-api"
-          $dest = "C:\acdb-customer-api"
+          # Sync Python backend files (exclude frontend, venv, caches, db files)
+          rsync -avz --delete \
+            --exclude='frontend/' \
+            --exclude='venv/' \
+            --exclude='__pycache__/' \
+            --exclude='.mypy_cache/' \
+            --exclude='node_modules/' \
+            --exclude='.env' \
+            --exclude='*.accdb' \
+            --exclude='cc_auth.db' \
+            --exclude='*.pyc' \
+            --exclude='*.ldb' \
+            -e "ssh -i ~/.ssh/deploy_key" \
+            acdb-api/ \
+            ubuntu@${{ secrets.EC2_LINUX_HOST }}:/tmp/cc-backend/
 
-          if (-not (Test-Path $dest)) {
-            New-Item -ItemType Directory -Path $dest -Force
-          }
+          # Move to final location and set permissions
+          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_LINUX_HOST }} << 'DEPLOY_SCRIPT'
+            sudo rsync -a /tmp/cc-backend/ /opt/cc-portal/backend/
+            sudo chown -R cc_api:cc_api /opt/cc-portal/backend/
+            rm -rf /tmp/cc-backend
 
-          # Copy Python backend only (exclude frontend, venv, env, caches, db files)
-          robocopy $source $dest /E /R:3 /W:5 /XD venv logs __pycache__ .mypy_cache node_modules frontend /XF .env *.accdb cc_auth.db *.pyc /NFL /NDL /NJH /NJS /NC /NS
-          $roboExit = $LASTEXITCODE
-          if ($roboExit -ge 8) {
-            Write-Host "ERROR: robocopy failed with exit code $roboExit"
-            exit 1
-          }
-          Write-Host "Backend deployed to $dest (robocopy exit: $roboExit)"
-          $global:LASTEXITCODE = 0
+            # Install Python dependencies if requirements changed
+            cd /opt/cc-portal/backend
+            if [ -f venv/bin/pip ]; then
+              sudo -u cc_api venv/bin/pip install -r requirements.txt --quiet 2>/dev/null
+            fi
 
-      - name: Install Python dependencies
-        run: |
-          $pip = "C:\acdb-customer-api\venv\Scripts\pip.exe"
-          if (Test-Path $pip) {
-            $ErrorActionPreference = 'SilentlyContinue'
-            & $pip install -r C:\acdb-customer-api\requirements.txt --quiet 2>$null
-            $ErrorActionPreference = 'Stop'
-            Write-Host "Python dependencies updated"
-            $global:LASTEXITCODE = 0
-          } else {
-            Write-Host "WARNING: pip not found at $pip - skipping dependency install"
-          }
-
-      - name: Start ACDB service
-        run: |
-          schtasks.exe /Run /TN "ACDBCustomerAPI"
-          $global:LASTEXITCODE = 0
-          Write-Host "Started ACDBCustomerAPI task"
+            # Restart the API service
+            sudo systemctl restart 1pdb-api
+            echo "Backend deployed and service restarted"
+          DEPLOY_SCRIPT
 
       - name: Health check
         run: |
-          Write-Host "Waiting for service to start..."
-          Start-Sleep -Seconds 8
-
-          $maxRetries = 3
-          for ($i = 1; $i -le $maxRetries; $i++) {
-            try {
-              $response = Invoke-RestMethod -Uri http://localhost:8100/health -TimeoutSec 10
-              Write-Host "Health check passed: $($response | ConvertTo-Json -Compress)"
+          echo "Waiting for service to start..."
+          sleep 8
+          for i in 1 2 3; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://cc.1pwrafrica.com/api/health)
+            echo "Health check attempt $i: HTTP $STATUS"
+            if [ "$STATUS" = "200" ]; then
+              # Fetch and display health details
+              curl -s https://cc.1pwrafrica.com/api/health | python3 -m json.tool
               exit 0
-            } catch {
-              Write-Host "Health check attempt $i/$maxRetries failed: $_"
-              if ($i -lt $maxRetries) {
-                Start-Sleep -Seconds 5
-              }
-            }
-          }
-          Write-Host "WARNING: Health check failed after $maxRetries attempts"
+            fi
+            sleep 5
+          done
+          echo "WARNING: Health check failed after 3 attempts"
           exit 1

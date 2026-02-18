@@ -1,6 +1,6 @@
 """
 Commission Customer router for 1PWR Customer Care Portal.
-Handles customer commissioning (populating tblcustomer fields on service
+Handles customer commissioning (populating customers fields on service
 connection) and bilingual contract generation with SMS delivery.
 
 Endpoints:
@@ -12,6 +12,7 @@ Endpoints:
 
 import logging
 import os
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -77,7 +78,7 @@ async def get_commission_data(customer_id: int, user: CurrentUser = Depends(requ
 
         # Customer basics
         cursor.execute(
-            "SELECT * FROM tblcustomer WHERE [CUSTOMER ID] = ?", (customer_id,)
+            "SELECT * FROM customers WHERE customer_id_legacy = %s", (customer_id,)
         )
         row = cursor.fetchone()
         if not row:
@@ -90,8 +91,8 @@ async def get_commission_data(customer_id: int, user: CurrentUser = Depends(requ
         meter = None
         try:
             cursor.execute(
-                "SELECT TOP 1 * FROM tblmeter WHERE [customer id] = ? "
-                "ORDER BY [customer connect date] DESC",
+                "SELECT * FROM meters WHERE customer_id_legacy = %s "
+                "ORDER BY customer_connect_date DESC NULLS LAST LIMIT 1",
                 (customer_id,),
             )
             mrow = cursor.fetchone()
@@ -104,12 +105,12 @@ async def get_commission_data(customer_id: int, user: CurrentUser = Depends(requ
         # Account number
         account_number = ""
         if meter:
-            account_number = str(meter.get("accountnumber", ""))
+            account_number = str(meter.get("account_number", ""))
         if not account_number:
             try:
                 cursor.execute(
-                    "SELECT TOP 1 accountnumber FROM tblaccountnumbers "
-                    "WHERE customerid = ? ORDER BY [opened date] DESC",
+                    "SELECT account_number FROM accounts "
+                    "WHERE customer_id = %s ORDER BY opened_date DESC NULLS LAST LIMIT 1",
                     (customer_id,),
                 )
                 arow = cursor.fetchone()
@@ -126,18 +127,18 @@ async def get_commission_data(customer_id: int, user: CurrentUser = Depends(requ
     return {
         "customer": {
             "customer_id": customer_id,
-            "first_name": customer.get("FIRST NAME", ""),
-            "last_name": customer.get("LAST NAME", ""),
-            "phone": customer.get("PHONE", "") or customer.get("CELL PHONE 1", ""),
-            "national_id": customer.get("ID NUMBER", ""),
-            "concession": customer.get("Concession name", ""),
-            "customer_type": customer.get("CUSTOMER POSITION", ""),
-            "gps_x": customer.get("GPS X", ""),
-            "gps_y": customer.get("GPS Y", ""),
-            "date_connected": str(customer.get("DATE SERVICE CONNECTED", "") or ""),
+            "first_name": customer.get("first_name", ""),
+            "last_name": customer.get("last_name", ""),
+            "phone": customer.get("phone", "") or customer.get("cell_phone_1", ""),
+            "national_id": customer.get("national_id", ""),
+            "concession": customer.get("community", ""),
+            "customer_type": customer.get("customer_position", ""),
+            "gps_x": customer.get("gps_lat", ""),
+            "gps_y": customer.get("gps_lon", ""),
+            "date_connected": str(customer.get("date_service_connected", "") or ""),
         },
         "meter": {
-            "meter_id": meter.get("meterid", "") if meter else "",
+            "meter_id": meter.get("meter_id", "") if meter else "",
             "community": meter.get("community", "") if meter else "",
         } if meter else None,
         "account_number": account_number,
@@ -152,18 +153,18 @@ async def get_commission_data(customer_id: int, user: CurrentUser = Depends(requ
 @router.post("/api/commission/execute")
 async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends(require_employee)):
     """Execute customer commissioning:
-    1. Update tblcustomer with commissioning fields
+    1. Update customers table with commissioning fields
     2. Generate bilingual contract PDFs
     3. SMS download links to customer
     """
 
-    # ----- Phase 1: Update ACCDB ----- #
+    # ----- Phase 1: Update PostgreSQL ----- #
     with _get_connection() as conn:
         cursor = conn.cursor()
 
         # Fetch current customer to get names if not provided
         cursor.execute(
-            "SELECT [FIRST NAME], [LAST NAME] FROM tblcustomer WHERE [CUSTOMER ID] = ?",
+            "SELECT first_name, last_name FROM customers WHERE customer_id_legacy = %s",
             (req.customer_id,),
         )
         row = cursor.fetchone()
@@ -175,25 +176,25 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
 
         # Build UPDATE
         updates: Dict[str, Any] = {
-            "DATE SERVICE CONNECTED": req.connection_date,
-            "CUSTOMER POSITION": req.customer_type,
-            "ID NUMBER": req.national_id,
+            "date_service_connected": req.connection_date,
+            "customer_position": req.customer_type,
+            "national_id": req.national_id,
         }
         if req.gps_lat:
-            updates["GPS Y"] = req.gps_lat
+            updates["gps_lat"] = req.gps_lat
         if req.gps_lng:
-            updates["GPS X"] = req.gps_lng
+            updates["gps_lon"] = req.gps_lng
 
         if updates:
-            set_clause = ", ".join(f"[{k}] = ?" for k in updates)
+            set_clause = ", ".join(f"{k} = %s" for k in updates)
             values = list(updates.values()) + [req.customer_id]
             cursor.execute(
-                f"UPDATE tblcustomer SET {set_clause} WHERE [CUSTOMER ID] = ?",
+                f"UPDATE customers SET {set_clause} WHERE customer_id_legacy = %s",
                 values,
             )
             conn.commit()
             logger.info(
-                "Updated tblcustomer for customer %d: %s",
+                "Updated customers for customer %d: %s",
                 req.customer_id,
                 list(updates.keys()),
             )
@@ -254,7 +255,7 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
 async def decommission_customer(customer_id: int, user: CurrentUser = Depends(require_employee)):
     """Decommission a customer (non-destructive).
 
-    Sets DATE SERVICE TERMINATED on tblcustomer.  All meter, account,
+    Sets date_service_terminated on customers table.  All meter, account,
     and transaction records are preserved intact for historical record.
     The terminated date is what marks the customer as decommissioned
     throughout the system.
@@ -268,8 +269,8 @@ async def decommission_customer(customer_id: int, user: CurrentUser = Depends(re
 
         # Verify the customer exists and is currently commissioned
         cursor.execute(
-            "SELECT [DATE SERVICE CONNECTED], [DATE SERVICE TERMINATED] "
-            "FROM tblcustomer WHERE [CUSTOMER ID] = ?",
+            "SELECT date_service_connected, date_service_terminated "
+            "FROM customers WHERE customer_id_legacy = %s",
             (customer_id,),
         )
         row = cursor.fetchone()
@@ -281,7 +282,7 @@ async def decommission_customer(customer_id: int, user: CurrentUser = Depends(re
         if not connected or (isinstance(connected, str) and not connected.strip()):
             raise HTTPException(
                 status_code=400,
-                detail="Customer has not been commissioned (no DATE SERVICE CONNECTED).",
+                detail="Customer has not been commissioned (no date_service_connected).",
             )
         if terminated and str(terminated).strip():
             raise HTTPException(
@@ -293,27 +294,25 @@ async def decommission_customer(customer_id: int, user: CurrentUser = Depends(re
         meters: List[Dict[str, str]] = []
         accounts: List[Dict[str, str]] = []
 
-        for meter_table in ["tblmeter", "Copy Of tblmeter"]:
-            try:
-                cursor.execute(
-                    f"SELECT [meterid], [accountnumber], [community] "
-                    f"FROM [{meter_table}] WHERE [customer id] = ?",
-                    (customer_id,),
-                )
-                for mrow in cursor.fetchall():
-                    meters.append({
-                        "source": meter_table,
-                        "meterid": str(mrow[0] or ""),
-                        "accountnumber": str(mrow[1] or ""),
-                        "community": str(mrow[2] or ""),
-                    })
-            except Exception as e:
-                logger.warning("Could not query %s for decommission info: %s", meter_table, e)
+        try:
+            cursor.execute(
+                "SELECT meter_id, account_number, community "
+                "FROM meters WHERE customer_id_legacy = %s",
+                (customer_id,),
+            )
+            for mrow in cursor.fetchall():
+                meters.append({
+                    "meterid": str(mrow[0] or ""),
+                    "accountnumber": str(mrow[1] or ""),
+                    "community": str(mrow[2] or ""),
+                })
+        except Exception as e:
+            logger.warning("Could not query meters for decommission info: %s", e)
 
         try:
             cursor.execute(
-                "SELECT [accountnumber], [meterid] "
-                "FROM tblaccountnumbers WHERE [customerid] = ?",
+                "SELECT account_number, meter_id "
+                "FROM accounts WHERE customer_id = %s",
                 (customer_id,),
             )
             for arow in cursor.fetchall():
@@ -322,17 +321,17 @@ async def decommission_customer(customer_id: int, user: CurrentUser = Depends(re
                     "meterid": str(arow[1] or ""),
                 })
         except Exception as e:
-            logger.warning("Could not query tblaccountnumbers for decommission info: %s", e)
+            logger.warning("Could not query accounts for decommission info: %s", e)
 
-        # Set DATE SERVICE TERMINATED — the only write operation
+        # Set date_service_terminated — the only write operation
         today = datetime.now().strftime("%Y-%m-%d")
         cursor.execute(
-            "UPDATE tblcustomer SET [DATE SERVICE TERMINATED] = ? "
-            "WHERE [CUSTOMER ID] = ?",
+            "UPDATE customers SET date_service_terminated = %s "
+            "WHERE customer_id_legacy = %s",
             (today, customer_id),
         )
         conn.commit()
-        logger.info("Decommissioned customer %d: DATE SERVICE TERMINATED = %s", customer_id, today)
+        logger.info("Decommissioned customer %d: date_service_terminated = %s", customer_id, today)
 
     return {
         "status": "ok",
@@ -386,8 +385,8 @@ async def list_contracts_for_customer(customer_id: int, user: CurrentUser = Depe
         cursor = conn.cursor()
         try:
             cursor.execute(
-                "SELECT TOP 1 accountnumber FROM tblaccountnumbers "
-                "WHERE customerid = ? ORDER BY [opened date] DESC",
+                "SELECT account_number FROM accounts "
+                "WHERE customer_id = %s ORDER BY opened_date DESC NULLS LAST LIMIT 1",
                 (customer_id,),
             )
             row = cursor.fetchone()
@@ -396,12 +395,12 @@ async def list_contracts_for_customer(customer_id: int, user: CurrentUser = Depe
         except Exception:
             pass
 
-        # Also try tblmeter
+        # Also try meters
         if not account_number:
             try:
                 cursor.execute(
-                    "SELECT TOP 1 accountnumber FROM tblmeter "
-                    "WHERE [customer id] = ? ORDER BY [customer connect date] DESC",
+                    "SELECT account_number FROM meters "
+                    "WHERE customer_id_legacy = %s ORDER BY customer_connect_date DESC NULLS LAST LIMIT 1",
                     (customer_id,),
                 )
                 row = cursor.fetchone()
@@ -415,3 +414,84 @@ async def list_contracts_for_customer(customer_id: int, user: CurrentUser = Depe
 
     contracts = list_customer_contracts(account_number)
     return {"contracts": contracts, "account_number": account_number}
+
+
+# ---------------------------------------------------------------------------
+# Bulk commissioning status update (replaces VBA file-based sync)
+# ---------------------------------------------------------------------------
+
+class BulkStatusItem(BaseModel):
+    customer_id: int
+    step: str  # one of the 7 commissioning step field names
+    value: bool
+    date: Optional[str] = None
+
+
+class BulkStatusRequest(BaseModel):
+    updates: List[BulkStatusItem]
+
+
+COMMISSIONING_STEPS = {
+    "connection_fee_paid",
+    "readyboard_fee_paid",
+    "readyboard_tested",
+    "readyboard_installed",
+    "airdac_connected",
+    "meter_installed",
+    "customer_commissioned",
+}
+
+
+@router.post("/api/commission/bulk-status")
+def bulk_update_commissioning_status(
+    req: BulkStatusRequest,
+    user: CurrentUser = Depends(require_employee),
+):
+    """Bulk update commissioning step flags for multiple customers.
+
+    Replaces VBA: retrievecustomerstatus.bas, updatecommissioning.bas
+    """
+    with _get_connection() as conn:
+        cursor = conn.cursor()
+        updated = 0
+        errors = []
+
+        for item in req.updates:
+            if item.step not in COMMISSIONING_STEPS:
+                errors.append({
+                    "customer_id": item.customer_id,
+                    "error": f"Invalid step: {item.step}",
+                })
+                continue
+
+            date_col = f"{item.step}_date"
+
+            try:
+                cursor.execute(
+                    f"UPDATE customers SET {item.step} = %s, {date_col} = %s, "
+                    f"updated_at = NOW(), updated_by = %s "
+                    f"WHERE customer_id_legacy = %s",
+                    (item.value, item.date or datetime.now().isoformat(),
+                     user.user_id, item.customer_id),
+                )
+                if cursor.rowcount > 0:
+                    updated += 1
+                else:
+                    errors.append({
+                        "customer_id": item.customer_id,
+                        "error": "Customer not found",
+                    })
+            except Exception as e:
+                errors.append({
+                    "customer_id": item.customer_id,
+                    "error": str(e),
+                })
+                conn.rollback()
+
+        conn.commit()
+
+    return {
+        "updated": updated,
+        "errors": errors,
+        "total_requested": len(req.updates),
+    }

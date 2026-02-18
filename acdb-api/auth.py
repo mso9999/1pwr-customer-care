@@ -209,13 +209,13 @@ def normalize_account_number(raw: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _validate_customer_exists(customer_id: str) -> dict:
-    """Check that a customer_id exists in the ACCDB tblcustomer. Returns customer data or raises 404."""
+    """Check that a customer_id exists in the customers table. Returns customer data or raises 404."""
     from customer_api import get_connection, _row_to_dict, _normalize_customer
 
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT * FROM tblcustomer WHERE [CUSTOMER ID] = ?", (customer_id,))
+            cursor.execute("SELECT * FROM customers WHERE customer_id_legacy = %s", (int(customer_id),))
             row = cursor.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail=f"Customer ID '{customer_id}' not found")
@@ -223,13 +223,13 @@ def _validate_customer_exists(customer_id: str) -> dict:
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("ACCDB lookup for customer %s failed: %s", customer_id, e)
+        logger.error("Customer lookup for %s failed: %s", customer_id, e)
         raise HTTPException(status_code=500, detail="Database error during customer validation")
 
 
 def _validate_account_exists(account_number: str) -> dict:
     """
-    Validate that an account number exists in tblaccounthistory1.
+    Validate that an account number exists in the database.
     Returns a dict with account_number, customer_id (if found), and name.
     """
     from customer_api import get_connection, _row_to_dict, _normalize_customer
@@ -240,13 +240,20 @@ def _validate_account_exists(account_number: str) -> dict:
         with get_connection() as conn:
             cursor = conn.cursor()
 
-            # Check account exists in transaction history
+            # Check account exists in transactions or accounts table
             cursor.execute(
-                "SELECT TOP 1 [accountnumber], [meterid] "
-                "FROM [tblaccounthistory1] WHERE [accountnumber] = ?",
+                "SELECT account_number, meter_id "
+                "FROM transactions WHERE account_number = %s LIMIT 1",
                 (acct,),
             )
             row = cursor.fetchone()
+            if not row:
+                # Also try the accounts table
+                cursor.execute(
+                    "SELECT account_number FROM accounts WHERE account_number = %s",
+                    (acct,),
+                )
+                row = cursor.fetchone()
             if not row:
                 raise HTTPException(
                     status_code=404,
@@ -256,10 +263,10 @@ def _validate_account_exists(account_number: str) -> dict:
 
             result = {"account_number": acct, "customer_id": None, "name": acct}
 
-            # Try to resolve to a tblcustomer record via Copy Of tblmeter
+            # Resolve to a customer record via meters table
             try:
                 cursor.execute(
-                    "SELECT [customer id] FROM [Copy Of tblmeter] WHERE [accountnumber] = ?",
+                    "SELECT customer_id_legacy FROM meters WHERE account_number = %s",
                     (acct,),
                 )
                 meter_row = cursor.fetchone()
@@ -267,8 +274,8 @@ def _validate_account_exists(account_number: str) -> dict:
                     cust_id = str(meter_row[0])
                     result["customer_id"] = cust_id
                     cursor.execute(
-                        "SELECT * FROM tblcustomer WHERE [CUSTOMER ID] = ?",
-                        (cust_id,),
+                        "SELECT * FROM customers WHERE customer_id_legacy = %s",
+                        (int(cust_id),),
                     )
                     cust_row = cursor.fetchone()
                     if cust_row:

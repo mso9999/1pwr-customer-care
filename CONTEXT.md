@@ -16,9 +16,9 @@
 
 **Domain**: Rural minigrids (solar+battery) in Lesotho, operated by 1PWR Africa / OnePower Lesotho.
 **Users**: 1PWR operations staff, finance team, customer care agents.
-**Data Source**: ACDB (Microsoft Access `.accdb` database) containing ~1,300+ customers across 10+ sites.
+**Data Source**: 1PDB (PostgreSQL 16) — migrated from ACCDB. ~1,300+ customers across 10+ sites.
 
-## Architecture
+## Architecture (Post-Migration)
 
 ```
 cc.1pwrafrica.com
@@ -28,26 +28,34 @@ cc.1pwrafrica.com
 │  Linux EC2 (13.244.104.137) - Caddy              │
 │                                                    │
 │  Static files → /opt/cc-portal/frontend/           │
-│  /api/*       → reverse_proxy 172.31.2.39:8100     │
-│  /health      → reverse_proxy 172.31.2.39:8100     │
-│  /customers/* → reverse_proxy 172.31.2.39:8100     │
-│  /sites       → reverse_proxy 172.31.2.39:8100     │
+│  /api/*       → reverse_proxy localhost:8100       │
+│  /health      → reverse_proxy localhost:8100       │
+│  /customers/* → reverse_proxy localhost:8100       │
+│  /sites       → reverse_proxy localhost:8100       │
+│                                                    │
+│  FastAPI backend (psycopg2 → PostgreSQL)           │
+│  PostgreSQL 16 (1PDB - master of record)           │
+│  systemd: 1pdb-api, 1pdb-import (timer)            │
 └──────────────────────────────────────────────────┘
-       │                              │
-       ▼                              ▼
-┌──────────────┐         ┌─────────────────────────┐
-│ WhatsApp     │         │ Windows EC2             │
-│ Bridge       │         │ (172.31.2.39)           │
-│ (Node.js)    │         │                         │
-│ PM2-managed  │         │ FastAPI on port 8100    │
-│              │         │ ACDB via pyodbc/ODBC    │
-│ Creates O&M  │         │ Scheduled Task:         │
-│ tickets via  │         │   ACDBCustomerAPI       │
-│ uGridPlan API│         │ Runner: LocalSystem     │
-└──────────────┘         └─────────────────────────┘
+       │
+       ▼
+┌──────────────┐
+│ WhatsApp     │
+│ Bridge       │
+│ (Node.js)    │
+│ PM2-managed  │
+│ Creates O&M  │
+│ tickets via  │
+│ uGridPlan API│
+└──────────────┘
 ```
 
-All three EC2 instances are in AWS af-south-1, same VPC (`172.31.0.0/16`).
+The Linux EC2 runs everything: Caddy, FastAPI, PostgreSQL. No Windows EC2 dependency.
+
+### Related Repos
+- **onepowerLS/1PDB** — Database schema, migration scripts, data pipeline services
+- **onepowerLS/SMS-Gateway-APP** — M-PESA/EcoCash payment bridge (webhook POST to 1PDB)
+- **onepowerLS/ingestion_gate** — Prototype meter IoT Lambda (DynamoDB)
 
 ## Key Files
 
@@ -55,21 +63,23 @@ All three EC2 instances are in AWS af-south-1, same VPC (`172.31.0.0/16`).
 
 | File | Purpose |
 |------|---------|
-| `customer_api.py` | Main FastAPI app -- mounts all routers, CORS, auth |
+| `customer_api.py` | Main FastAPI app -- mounts all routers, psycopg2 pool, CORS, auth |
 | `om_report.py` | O&M analytics endpoints: customer stats, consumption, sales, ARPU |
-| `crud.py` | Customer CRUD operations |
+| `crud.py` | Customer CRUD operations (PostgreSQL information_schema introspection) |
 | `auth.py` | Authentication (employee login, JWT tokens) |
 | `db_auth.py` | Auth database (SQLite for user accounts) |
 | `middleware.py` | Auth middleware, role-based access |
 | `models.py` | Pydantic models |
-| `tariff.py` | Tariff management endpoints |
+| `tariff.py` | Tariff management endpoints (system_config table) |
 | `mutations.py` | Data mutation audit log |
 | `exports.py` | Data export endpoints |
 | `stats.py` | Dashboard statistics |
-| `commission.py` | Commission calculations |
+| `commission.py` | Commission workflow + bulk status update |
+| `registration.py` | Customer registration + Excel bulk import |
 | `contract_gen.py` | Contract PDF generation |
 | `sync_ugridplan.py` | Sync data to uGridPlan |
-| `requirements.txt` | Python dependencies |
+| `schema.py` | PostgreSQL schema introspection endpoints |
+| `requirements.txt` | Python dependencies (psycopg2-binary, no pyodbc) |
 
 ### Frontend (`acdb-api/frontend/`)
 

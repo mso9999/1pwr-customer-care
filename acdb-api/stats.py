@@ -2,7 +2,7 @@
 Dashboard statistics endpoints.
 
 Computes aggregated MWh consumed and '000 LSL sold per site
-from tblaccounthistoryOriginal (full history) and tblaccounthistory1 (recent).
+from the transactions table (consolidated history).
 """
 
 import logging
@@ -35,75 +35,62 @@ def site_summary(user: CurrentUser = Depends(require_employee)):
     """
     Aggregate MWh consumed and '000 LSL revenue per site.
 
-    Uses tblaccounthistoryOriginal for full history, falling back to
-    tblaccounthistory1 if the main table is too slow.
-    Site code is extracted from the last 3 chars of accountnumber.
+    Queries the transactions table directly.
+    Site code is extracted from the last 3 chars of account_number.
     """
-    # Try tblaccounthistory1 first (smaller, faster, recent data)
-    # Then tblaccounthistoryOriginal for the full picture
-    tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
-
     results: Dict[str, Dict[str, float]] = {}  # site -> {mwh, lsl_thousands}
-    source_table = ""
+    source_table = "transactions"
 
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        for table in tables_to_try:
-            try:
-                cursor.execute(f"""
-                    SELECT [accountnumber],
-                           SUM([kwh value]) AS total_kwh,
-                           SUM([transaction amount]) AS total_lsl
-                    FROM [{table}]
-                    GROUP BY [accountnumber]
-                """)
-                rows = cursor.fetchall()
-                if not rows:
+        try:
+            cursor.execute("""
+                SELECT account_number,
+                       SUM(kwh_value) AS total_kwh,
+                       SUM(transaction_amount) AS total_lsl
+                FROM transactions
+                GROUP BY account_number
+            """)
+            rows = cursor.fetchall()
+
+            for row in rows:
+                acct = str(row[0] or "").strip()
+                site = _extract_site(acct)
+                if not site or len(site) < 2:
                     continue
 
-                results = {}
-                for row in rows:
-                    acct = str(row[0] or "").strip()
-                    site = _extract_site(acct)
-                    if not site or len(site) < 2:
-                        continue
+                if site not in results:
+                    results[site] = {"mwh": 0.0, "lsl_thousands": 0.0}
 
-                    if site not in results:
-                        results[site] = {"mwh": 0.0, "lsl_thousands": 0.0}
+                kwh = float(row[1] or 0)
+                lsl = float(row[2] or 0)
+                results[site]["mwh"] += kwh / 1000.0  # kWh -> MWh
+                results[site]["lsl_thousands"] += lsl / 1000.0  # LSL -> '000 LSL
 
-                    kwh = float(row[1] or 0)
-                    lsl = float(row[2] or 0)
-                    results[site]["mwh"] += kwh / 1000.0  # kWh -> MWh
-                    results[site]["lsl_thousands"] += lsl / 1000.0  # LSL -> '000 LSL
+        except Exception as e:
+            logger.warning("Failed to query transactions: %s", e)
 
-                source_table = table
-                break  # Success, don't try next table
+    # Totals
+    total_mwh = sum(s["mwh"] for s in results.values())
+    total_lsl = sum(s["lsl_thousands"] for s in results.values())
 
-            except Exception as e:
-                logger.warning("Failed to query %s: %s", table, e)
-                continue
+    # Build per-site list sorted by site name
+    sites = []
+    for site_code in sorted(results.keys()):
+        data = results[site_code]
+        sites.append({
+            "site": site_code,
+            "mwh": round(data["mwh"], 2),
+            "lsl_thousands": round(data["lsl_thousands"], 2),
+        })
 
-        # Also get totals
-        total_mwh = sum(s["mwh"] for s in results.values())
-        total_lsl = sum(s["lsl_thousands"] for s in results.values())
-
-        # Build per-site list sorted by site name
-        sites = []
-        for site_code in sorted(results.keys()):
-            data = results[site_code]
-            sites.append({
-                "site": site_code,
-                "mwh": round(data["mwh"], 2),
-                "lsl_thousands": round(data["lsl_thousands"], 2),
-            })
-
-        return {
-            "sites": sites,
-            "totals": {
-                "mwh": round(total_mwh, 2),
-                "lsl_thousands": round(total_lsl, 2),
-            },
-            "source_table": source_table,
-            "site_count": len(sites),
-        }
+    return {
+        "sites": sites,
+        "totals": {
+            "mwh": round(total_mwh, 2),
+            "lsl_thousands": round(total_lsl, 2),
+        },
+        "source_table": source_table,
+        "site_count": len(sites),
+    }

@@ -1,10 +1,10 @@
 """
-uGridPLAN <-> ACCDB bidirectional customer data sync.
+uGridPLAN <-> PostgreSQL bidirectional customer data sync.
 
 - Fetches connection elements from uGridPLAN (customer_type, meter_serial, GPS)
-- Matches to ACCDB customers by Customer_Code or GPS proximity
+- Matches to customers by Customer_Code or GPS proximity
 - Stores customer_type/meter_serial/GPS in SQLite cc_customer_metadata
-- Pushes ACCDB demographics (name, phone, address) to uGridPLAN connections
+- Pushes customer demographics (name, phone, address) to uGridPLAN connections
 
 Endpoints:
   GET  /api/sync/sites          - list configured sites with project IDs
@@ -400,7 +400,7 @@ def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 def _survey_id_to_account_number(survey_id: str) -> Optional[str]:
     """
-    Parse a uGridPLAN Survey_ID into the ACCDB account number format.
+    Parse a uGridPLAN Survey_ID into the account number format.
 
     Survey_ID format:  "MAK 0047 HH"  (site_code  number  type)
     Account number:    "0047MAK"       (number + site_code)
@@ -422,71 +422,64 @@ def _survey_id_to_account_number(survey_id: str) -> Optional[str]:
 # Consumption-based Load_A calculation
 # ---------------------------------------------------------------------------
 
-_HISTORY_TABLES = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
-
-
 def _compute_avg_kwh_per_day(cursor, account_number: str) -> Optional[float]:
     """
-    Compute average daily kWh consumption for an account from ACCDB history.
+    Compute average daily kWh consumption for an account from transaction history.
 
-    Queries tblaccounthistory1 (with fallback to tblaccounthistoryOriginal),
-    sums all ``kwh value`` entries, and divides by the day-span between the
-    earliest and latest ``transaction date``.
+    Queries the transactions table, sums all ``kwh_value`` entries, and divides
+    by the day-span between the earliest and latest ``transaction_date``.
 
     Returns None if there is insufficient data (< 2 transactions or < 1 day span).
     """
-    for table in _HISTORY_TABLES:
-        try:
-            cursor.execute(
-                f"SELECT [kwh value], [transaction date] "
-                f"FROM [{table}] "
-                f"WHERE [accountnumber] = ? "
-                f"  AND [kwh value] IS NOT NULL "
-                f"  AND [transaction date] IS NOT NULL",
-                (account_number,),
-            )
-            rows = cursor.fetchall()
-            if len(rows) < 2:
+    try:
+        cursor.execute(
+            "SELECT kwh_value, transaction_date "
+            "FROM transactions "
+            "WHERE account_number = %s "
+            "  AND kwh_value IS NOT NULL "
+            "  AND transaction_date IS NOT NULL",
+            (account_number,),
+        )
+        rows = cursor.fetchall()
+        if len(rows) < 2:
+            return None
+
+        total_kwh = 0.0
+        min_date = None
+        max_date = None
+        for kwh_val, tx_date in rows:
+            try:
+                kwh = float(kwh_val)
+            except (ValueError, TypeError):
                 continue
-
-            total_kwh = 0.0
-            min_date = None
-            max_date = None
-            for kwh_val, tx_date in rows:
-                try:
-                    kwh = float(kwh_val)
-                except (ValueError, TypeError):
-                    continue
-                if kwh <= 0:
-                    continue
-                total_kwh += kwh
-
-                # Parse date — pyodbc returns datetime objects for Access dates
-                if tx_date is not None:
-                    if isinstance(tx_date, str):
-                        try:
-                            tx_date = datetime.fromisoformat(tx_date.replace(" ", "T"))
-                        except ValueError:
-                            continue
-                    if min_date is None or tx_date < min_date:
-                        min_date = tx_date
-                    if max_date is None or tx_date > max_date:
-                        max_date = tx_date
-
-            if min_date is None or max_date is None:
+            if kwh <= 0:
                 continue
-            day_span = (max_date - min_date).total_seconds() / 86400.0
-            if day_span < 1.0:
-                continue
+            total_kwh += kwh
 
-            avg = total_kwh / day_span
-            return avg
+            # Parse date — psycopg2 returns datetime objects for PostgreSQL timestamps
+            if tx_date is not None:
+                if isinstance(tx_date, str):
+                    try:
+                        tx_date = datetime.fromisoformat(tx_date.replace(" ", "T"))
+                    except ValueError:
+                        continue
+                if min_date is None or tx_date < min_date:
+                    min_date = tx_date
+                if max_date is None or tx_date > max_date:
+                    max_date = tx_date
 
-        except Exception as e:
-            logger.debug("Could not query %s for account %s: %s", table, account_number, e)
-            continue
+        if min_date is None or max_date is None:
+            return None
+        day_span = (max_date - min_date).total_seconds() / 86400.0
+        if day_span < 1.0:
+            return None
 
-    return None
+        avg = total_kwh / day_span
+        return avg
+
+    except Exception as e:
+        logger.debug("Could not query transactions for account %s: %s", account_number, e)
+        return None
 
 
 def _kwh_per_day_to_amps(kwh_per_day: float, voltage: float = SYNC_LV_VOLTAGE) -> float:
@@ -501,42 +494,35 @@ def _kwh_per_day_to_amps(kwh_per_day: float, voltage: float = SYNC_LV_VOLTAGE) -
 
 
 # ---------------------------------------------------------------------------
-# ACCDB Meter data loader
+# Meter data loader
 # ---------------------------------------------------------------------------
-
-_METER_TABLES = ["Copy Of tblmeter", "tblmeter"]
-
 
 def _load_meter_data(cursor, site_code: str) -> List[Dict[str, Any]]:
     """
-    Load meter records from ACCDB for a given site (community).
+    Load meter records from PostgreSQL for a given site (community).
     Returns list of dicts with: meterid, customer_id, accountnumber,
     customer_type, latitude, longitude, community.
     """
     meters = []
-    for table in _METER_TABLES:
-        try:
-            cursor.execute(
-                f"SELECT [meterid], [customer id], [accountnumber], [customer type], "
-                f"[latitude], [longitude], [community] "
-                f"FROM [{table}] WHERE [community] = ?",
-                (site_code,),
-            )
-            for row in cursor.fetchall():
-                meters.append({
-                    "meterid": str(row[0] or "").strip(),
-                    "customer_id": str(row[1] or "").strip() if row[1] else "",
-                    "accountnumber": str(row[2] or "").strip(),
-                    "customer_type": str(row[3] or "").strip(),
-                    "latitude": row[4],
-                    "longitude": row[5],
-                    "community": str(row[6] or "").strip(),
-                })
-            if meters:
-                return meters
-        except Exception as e:
-            logger.warning("Could not read meter data from %s: %s", table, e)
-            continue
+    try:
+        cursor.execute(
+            "SELECT meter_id, customer_id_legacy, account_number, customer_type, "
+            "latitude, longitude, community "
+            "FROM meters WHERE community = %s",
+            (site_code,),
+        )
+        for row in cursor.fetchall():
+            meters.append({
+                "meterid": str(row[0] or "").strip(),
+                "customer_id": str(row[1] or "").strip() if row[1] else "",
+                "accountnumber": str(row[2] or "").strip(),
+                "customer_type": str(row[3] or "").strip(),
+                "latitude": row[4],
+                "longitude": row[5],
+                "community": str(row[6] or "").strip(),
+            })
+    except Exception as e:
+        logger.warning("Could not read meter data from meters table: %s", e)
     return meters
 
 
@@ -565,36 +551,32 @@ def _match_customers(
     accdb_meters: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     """
-    Match uGridPLAN connections to ACCDB customers.
+    Match uGridPLAN connections to customers.
 
     Matching strategies (tried in order):
-      1. Customer_Code (uGP) == customer_id (ACCDB)
-      2. Survey_ID (uGP) == plot_number (ACCDB)  — exact match
-      3. Plot prefix (uGP) == plot prefix (ACCDB) — ignoring type suffix
-         e.g. "MAK 0029 HH" matches "MAK 0029 SME" (ACCDB type wins)
+      1. Customer_Code (uGP) == customer_id (DB)
+      2. Survey_ID (uGP) == plot_number (DB)  — exact match
+      3. Plot prefix (uGP) == plot prefix (DB) — ignoring type suffix
+         e.g. "MAK 0029 HH" matches "MAK 0029 SME" (DB type wins)
       4. GPS proximity via meter table (within GPS_MATCH_RADIUS_M)
 
     Returns match results with proposed sync actions.
     """
-    # Index ACCDB customers by customer_id
+    # Index customers by customer_id
     accdb_by_id: Dict[str, Dict] = {}
     for c in accdb_customers:
         cid = str(c.get("customer_id", "")).strip()
         if cid:
             accdb_by_id[cid] = c
 
-    # Index ACCDB customers by plot_number (normalized: uppercased, stripped)
-    # The ACCDB PLOT NUMBER field uses the same format as uGridPLAN Survey_ID
-    # e.g. "MAK 0047 HH"
+    # Index customers by plot_number (normalized: uppercased, stripped)
     accdb_by_plot: Dict[str, Dict] = {}
     for c in accdb_customers:
         plot = str(c.get("plot_number", "")).strip().upper()
         if plot and plot != "NONE":
             accdb_by_plot[plot] = c
 
-    # Index ACCDB customers by plot *prefix* (site + number, ignoring type suffix)
-    # Used for fuzzy matching when the type suffix differs between uGP and ACCDB.
-    # If multiple ACCDB customers share a prefix, mark as ambiguous (None).
+    # Index customers by plot *prefix* (site + number, ignoring type suffix)
     accdb_by_prefix: Dict[str, Optional[Dict]] = {}
     for c in accdb_customers:
         plot = str(c.get("plot_number", "")).strip().upper()
@@ -605,7 +587,7 @@ def _match_customers(
             else:
                 accdb_by_prefix[pfx] = c
 
-    # Index ACCDB meters by customer_id and by accountnumber
+    # Index meters by customer_id and by accountnumber
     meters_by_cust: Dict[str, Dict] = {}
     meters_by_acct: Dict[str, Dict] = {}
     meters_by_meterid: Dict[str, Dict] = {}
@@ -649,7 +631,6 @@ def _match_customers(
             unmatched_accdb.discard(customer_code)
 
         # Strategy 2: Match by Survey_ID == PLOT NUMBER (exact)
-        # Both use the same "MAK 0047 HH" format
         if not accdb_match and survey_id:
             normalized_sid = survey_id.strip().upper()
             if normalized_sid in accdb_by_plot:
@@ -659,9 +640,6 @@ def _match_customers(
                 unmatched_accdb.discard(cid)
 
         # Strategy 3: Match by plot prefix (ignoring type suffix)
-        # Handles cases where uGP has "MAK 0029 HH" but ACCDB has "MAK 0029 SME".
-        # ACCDB is the source of truth for Customer_Type — the correct type is
-        # pushed to uGP via the accdb_to_ugp updates.
         if not accdb_match and survey_id:
             sid_prefix = _plot_prefix(survey_id)
             candidate = accdb_by_prefix.get(sid_prefix)
@@ -672,7 +650,7 @@ def _match_customers(
                 cid = str(accdb_match.get("customer_id", "")).strip()
                 unmatched_accdb.discard(cid)
 
-        # Strategy 4: GPS proximity (using meter table GPS as ACCDB source)
+        # Strategy 4: GPS proximity (using meter table GPS as source)
         if not accdb_match and gps_x is not None and gps_y is not None and accdb_meters:
             best_dist = GPS_MATCH_RADIUS_M
             best_meter = None
@@ -699,7 +677,7 @@ def _match_customers(
         if accdb_match:
             cid = str(accdb_match.get("customer_id", "")).strip()
 
-            # Look up meter data from ACCDB (source of truth)
+            # Look up meter data (source of truth)
             meter = meters_by_cust.get(cid, {})
             accdb_meter_serial = meter.get("meterid", "")
             accdb_customer_type = meter.get("customer_type", "")
@@ -712,7 +690,7 @@ def _match_customers(
             except (ValueError, TypeError):
                 accdb_lat = accdb_lon = None
 
-            # Resolve best values: ACCDB is source of truth for meter/type/GPS
+            # Resolve best values: DB is source of truth for meter/type/GPS
             final_customer_type = accdb_customer_type or ugp_customer_type
             final_meter_serial = accdb_meter_serial or ugp_meter_serial
             final_gps_x = accdb_lon if accdb_lon else gps_x
@@ -729,7 +707,7 @@ def _match_customers(
             if final_gps_y is not None:
                 to_sqlite["gps_y"] = final_gps_y
 
-            # Data to push to uGridPLAN (from ACCDB)
+            # Data to push to uGridPLAN (from DB)
             accdb_to_ugp = {}
             first = accdb_match.get("first_name", "")
             last = accdb_match.get("last_name", "")
@@ -766,7 +744,6 @@ def _match_customers(
             elif customer_code and customer_code not in accdb_by_id:
                 reason = "customer_code_not_in_accdb"
             else:
-                # Has a survey_id but neither exact nor prefix matched
                 sid_prefix = _plot_prefix(normalized_sid)
                 if sid_prefix in accdb_by_prefix and accdb_by_prefix[sid_prefix] is None:
                     reason = "ambiguous_prefix"
@@ -781,7 +758,7 @@ def _match_customers(
                 "reason": reason,
             })
 
-    # Build detailed unmatched ACCDB list with names/plot numbers
+    # Build detailed unmatched list with names/plot numbers
     unmatched_accdb_details = []
     for cid in unmatched_accdb:
         c = accdb_by_id.get(cid, {})
@@ -844,7 +821,6 @@ def list_site_projects(user: CurrentUser = Depends(require_employee)):
 
         result = []
         for row in rows:
-            # sync_info is keyed by the project_name stored as ugp_project_id
             info = sync_info.get(row["project_id"], {})
             result.append({
                 "site_code": row["site_code"],
@@ -937,9 +913,6 @@ def discover_projects(user: CurrentUser = Depends(require_employee)):
 
         if site_code:
             site_name = SITE_ABBREV.get(site_code, proj_name)
-            # Store the project *code* (registry key) as project_id, not the
-            # display name.  The /projects/{key}/load endpoint requires the
-            # registry key which matches the code field.
             registry_key = proj_code or proj_name
             with get_auth_db() as conn:
                 conn.execute(
@@ -981,7 +954,7 @@ def sync_preview(
 ):
     """
     Preview sync results without making changes.
-    Fetches connections from uGridPLAN and matches to ACCDB customers.
+    Fetches connections from uGridPLAN and matches to customers.
     """
     # Look up project name
     with get_auth_db() as conn:
@@ -1006,7 +979,7 @@ def sync_preview(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"uGridPLAN fetch failed: {e}")
 
-    # Fetch ACCDB customers + meter data for this site
+    # Fetch customers + meter data for this site
     from customer_api import get_connection, _row_to_dict, _normalize_customer
     from om_report import SITE_ABBREV
 
@@ -1015,10 +988,8 @@ def sync_preview(
 
     with get_connection() as conn:
         cursor = conn.cursor()
-        # ACCDB stores abbreviations ("MAK") in [Concession name], not full
-        # names ("Ha Makebe").  Match on site code OR full name for safety.
         cursor.execute(
-            "SELECT * FROM tblcustomer WHERE [Concession name] = ? OR [Concession name] LIKE ?",
+            "SELECT * FROM customers WHERE community = %s OR community LIKE %s",
             (site_code, f"%{concession_name}%"),
         )
         rows = cursor.fetchall()
@@ -1056,14 +1027,10 @@ def sync_execute(
     """
     Execute sync for a site.
     - pull_to_sqlite: store customer_type/meter_serial/GPS from uGridPLAN in SQLite
-    - push_to_ugp: push ACCDB customer data (Customer_Code, notes, Load_A) to uGridPLAN
-    - Writes uGridPLAN GPS back to ACCDB customers that have empty GPS X/GPS Y
+    - push_to_ugp: push customer data (Customer_Code, notes, Load_A) to uGridPLAN
+    - Writes uGridPLAN GPS back to customers that have empty gps_lat/gps_lon
     - Computes Load_A from consumption history and pushes to uGridPLAN
     """
-    # Any employee can execute sync — the preview step provides transparency
-    # before changes are applied. Previously restricted to superadmin/onm_team.
-
-    # First do a preview to get match data
     with get_auth_db() as conn:
         row = conn.execute(
             "SELECT project_id FROM cc_site_projects WHERE site_code = ?",
@@ -1097,10 +1064,8 @@ def sync_execute(
 
     with get_connection() as conn:
         cursor = conn.cursor()
-        # ACCDB stores abbreviations ("MAK") in [Concession name], not full
-        # names ("Ha Makebe").  Match on site code OR full name for safety.
         cursor.execute(
-            "SELECT * FROM tblcustomer WHERE [Concession name] = ? OR [Concession name] LIKE ?",
+            "SELECT * FROM customers WHERE community = %s OR community LIKE %s",
             (site_code, f"%{concession_name}%"),
         )
         rows = cursor.fetchall()
@@ -1168,10 +1133,8 @@ def sync_execute(
                 sqlite_written += 1
 
     # ---------------------------------------------------------------
-    # GPS write-back: uGridPLAN GPS -> ACCDB customer GPS X/GPS Y
+    # GPS write-back: uGridPLAN GPS -> customers gps_lat/gps_lon
     # ---------------------------------------------------------------
-    # For matched customers whose ACCDB record has empty GPS, write the
-    # uGridPLAN connection's GPS coordinates into tblcustomer.
     with get_connection() as conn:
         cursor = conn.cursor()
         for m in match_results["matched"]:
@@ -1193,23 +1156,23 @@ def sync_execute(
             except (ValueError, TypeError):
                 continue
 
-            # Check if the ACCDB customer already has GPS
+            # Check if the customer already has GPS
             try:
                 cursor.execute(
-                    "SELECT [GPS X], [GPS Y] FROM tblcustomer WHERE [CUSTOMER ID] = ?",
+                    "SELECT gps_lat, gps_lon FROM customers WHERE customer_id_legacy = %s",
                     (int(cid),),
                 )
                 row = cursor.fetchone()
                 if not row:
                     continue
 
-                existing_x = row[0]
-                existing_y = row[1]
+                existing_lat = row[0]
+                existing_lon = row[1]
                 has_gps = (
-                    existing_x is not None
-                    and existing_y is not None
-                    and float(existing_x) != 0.0
-                    and float(existing_y) != 0.0
+                    existing_lat is not None
+                    and existing_lon is not None
+                    and float(existing_lat) != 0.0
+                    and float(existing_lon) != 0.0
                 )
             except (ValueError, TypeError):
                 has_gps = False
@@ -1217,8 +1180,8 @@ def sync_execute(
             if not has_gps:
                 try:
                     cursor.execute(
-                        "UPDATE tblcustomer SET [GPS X] = ?, [GPS Y] = ? "
-                        "WHERE [CUSTOMER ID] = ?",
+                        "UPDATE customers SET gps_lat = %s, gps_lon = %s "
+                        "WHERE customer_id_legacy = %s",
                         (ugp_gps_x, ugp_gps_y, int(cid)),
                     )
                     conn.commit()
@@ -1228,18 +1191,8 @@ def sync_execute(
 
     # ---------------------------------------------------------------
     # Compute Load_A from consumption history and push to uGridPLAN.
-    # Uses per-connection voltage from Vdrop when available, else
-    # falls back to the default nominal voltage (SYNC_LV_VOLTAGE).
-    # A note is written to the connection's ``notes`` field indicating
-    # whether the Amps value was derived via Vdrop or the default.
-    #
-    # All updates are collected locally, then sent to uGridPLAN in a
-    # SINGLE batch HTTP call via /project/batch-connection-update.
-    # This avoids 182+ individual /project/update calls each of which
-    # triggers a full visualization recompute (~1.5 s each).
     # ---------------------------------------------------------------
     if req.push_to_ugp:
-        # Phase 1: compute all updates locally (ACCDB queries, Load_A calc)
         batch_updates: Dict[str, Dict[str, Any]] = {}
         with get_connection() as conn:
             cursor = conn.cursor()
@@ -1253,7 +1206,6 @@ def sync_execute(
                 if acct:
                     avg_kwh = _compute_avg_kwh_per_day(cursor, acct)
                     if avg_kwh is not None and avg_kwh > 0:
-                        # Determine voltage: prefer Vdrop, fall back to default
                         vdrop_v = vdrop_voltages.get(sid)
                         if vdrop_v is not None and vdrop_v > 0:
                             voltage = vdrop_v
@@ -1268,7 +1220,6 @@ def sync_execute(
                             updates["Load_A"] = load_a
                             load_a_computed += 1
 
-                            # Annotate the notes field with voltage source
                             if used_vdrop:
                                 note = f"Load_A={load_a}A (Vdrop {voltage:.1f}V)"
                                 load_a_via_vdrop += 1
@@ -1280,7 +1231,7 @@ def sync_execute(
                 if updates:
                     batch_updates[sid] = updates
 
-        # Phase 2: push ALL updates to uGridPLAN in a single batch call
+        # Push ALL updates to uGridPLAN in a single batch call
         if batch_updates:
             logger.info("Pushing %d updates to uGridPLAN via batch endpoint", len(batch_updates))
             try:

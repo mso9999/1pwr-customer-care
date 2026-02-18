@@ -49,8 +49,13 @@ def export_table(
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        # Verify table exists
-        found = any(t.table_name == table_name for t in cursor.tables(tableType="TABLE"))
+        # Verify table exists via information_schema
+        cursor.execute(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.tables "
+            "WHERE table_schema = 'public' AND table_name = %s)",
+            (table_name,),
+        )
+        found = cursor.fetchone()[0]
         if not found:
             raise HTTPException(status_code=404, detail=f"Table '{table_name}' not found")
 
@@ -59,19 +64,25 @@ def export_table(
         params = []
 
         if filter_col and filter_val:
-            where_clauses.append(f"[{filter_col}] = ?")
+            where_clauses.append(f"{filter_col} = %s")
             params.append(filter_val)
 
         if search:
-            cols = [c.column_name for c in cursor.columns(table=table_name)
-                    if c.type_name in ("VARCHAR", "LONGCHAR", "CHAR", "TEXT")]
-            if cols:
-                search_parts = [f"[{c}] LIKE ?" for c in cols[:10]]
+            # Find text columns via information_schema
+            cursor.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = %s "
+                "AND data_type IN ('character varying', 'text')",
+                (table_name,),
+            )
+            text_cols = [row[0] for row in cursor.fetchall()]
+            if text_cols:
+                search_parts = [f"{c} LIKE %s" for c in text_cols[:10]]
                 where_clauses.append(f"({' OR '.join(search_parts)})")
                 params.extend([f"%{search}%"] * len(search_parts))
 
         where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-        sql = f"SELECT * FROM [{table_name}]{where_sql}"
+        sql = f"SELECT * FROM {table_name}{where_sql}"
 
         cursor.execute(sql, params)
 

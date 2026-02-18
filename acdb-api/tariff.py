@@ -8,7 +8,7 @@ Provides:
   - Future effective-date support (overrides stored but not active until date)
 
 Tariff overrides live in the SQLite auth DB (cc_tariff_overrides / cc_tariff_history).
-The global rate is synced to tblconfig.therate in the ACCDB.
+The global rate is synced to system_config (key='tariff_rate') in PostgreSQL.
 """
 
 import logging
@@ -66,7 +66,7 @@ def resolve_rate(
     Cascade:
       1. Customer-level override  (if set and effective)
       2. Concession-level override (if set and effective)
-      3. Global rate from tblconfig.therate
+      3. Global rate from system_config (key='tariff_rate')
 
     Returns dict: {rate_lsl, source, source_key, effective_from}
     """
@@ -76,7 +76,7 @@ def resolve_rate(
     if customer_id and not concession and cursor:
         try:
             cursor.execute(
-                "SELECT [Concession name] FROM tblcustomer WHERE [CUSTOMER ID] = ?",
+                "SELECT community FROM customers WHERE customer_id_legacy = %s",
                 (str(customer_id),),
             )
             row = cursor.fetchone()
@@ -116,23 +116,22 @@ def resolve_rate(
                     "effective_from": row["effective_from"],
                 }
 
-    # 3. Global rate from ACCDB tblconfig
+    # 3. Global rate from system_config
     global_rate = 5.0  # fallback
     if cursor:
         try:
-            cursor.execute("SELECT [therate] FROM tblconfig")
+            cursor.execute("SELECT value FROM system_config WHERE key = 'tariff_rate'")
             row = cursor.fetchone()
             if row and row[0] is not None:
                 global_rate = float(row[0])
         except Exception:
             pass
     else:
-        # No cursor passed, read from ACCDB directly
         try:
             from customer_api import get_connection
             with get_connection() as conn:
                 c = conn.cursor()
-                c.execute("SELECT [therate] FROM tblconfig")
+                c.execute("SELECT value FROM system_config WHERE key = 'tariff_rate'")
                 row = c.fetchone()
                 if row and row[0] is not None:
                     global_rate = float(row[0])
@@ -156,12 +155,12 @@ def get_current_tariffs(user: CurrentUser = Depends(require_employee)):
     """Return the global rate, all concession overrides, and customer override count."""
     from customer_api import get_connection
 
-    # Global rate from ACCDB
+    # Global rate from PostgreSQL
     global_rate = 5.0
     try:
         with get_connection() as conn:
             c = conn.cursor()
-            c.execute("SELECT [therate] FROM tblconfig")
+            c.execute("SELECT value FROM system_config WHERE key = 'tariff_rate'")
             row = c.fetchone()
             if row and row[0] is not None:
                 global_rate = float(row[0])
@@ -236,7 +235,7 @@ def resolve_customer_rate(
         if cust_id.isdigit():
             try:
                 cursor.execute(
-                    "SELECT [Concession name] FROM tblcustomer WHERE [CUSTOMER ID] = ?",
+                    "SELECT community FROM customers WHERE customer_id_legacy = %s",
                     (cust_id,),
                 )
                 row = cursor.fetchone()
@@ -245,24 +244,22 @@ def resolve_customer_rate(
             except Exception:
                 pass
         else:
-            # Account number -> resolve to customer ID
-            for mt in ["tblmeter", "Copy Of tblmeter"]:
-                try:
-                    cursor.execute(
-                        f"SELECT [customer id] FROM [{mt}] WHERE [accountnumber] = ?",
-                        (cust_id,),
-                    )
-                    row = cursor.fetchone()
-                    if row and row[0]:
-                        cust_id = str(row[0]).strip()
-                        break
-                except Exception:
-                    continue
+            # Account number -> resolve to customer ID via meters
+            try:
+                cursor.execute(
+                    "SELECT customer_id_legacy FROM meters WHERE account_number = %s",
+                    (cust_id,),
+                )
+                row = cursor.fetchone()
+                if row and row[0]:
+                    cust_id = str(row[0]).strip()
+            except Exception:
+                pass
 
             if cust_id and cust_id.isdigit():
                 try:
                     cursor.execute(
-                        "SELECT [Concession name] FROM tblcustomer WHERE [CUSTOMER ID] = ?",
+                        "SELECT community FROM customers WHERE customer_id_legacy = %s",
                         (cust_id,),
                     )
                     row = cursor.fetchone()
@@ -328,7 +325,7 @@ def update_global_rate(
     req: TariffUpdateRequest,
     user: CurrentUser = Depends(require_employee),
 ):
-    """Update the global tariff rate (tblconfig.therate)."""
+    """Update the global tariff rate (system_config key='tariff_rate')."""
     _require_tariff_role(user)
 
     from customer_api import get_connection
@@ -340,7 +337,7 @@ def update_global_rate(
     try:
         with get_connection() as conn:
             c = conn.cursor()
-            c.execute("SELECT [therate] FROM tblconfig")
+            c.execute("SELECT value FROM system_config WHERE key = 'tariff_rate'")
             row = c.fetchone()
             if row and row[0] is not None:
                 old_rate = float(row[0])
@@ -350,15 +347,18 @@ def update_global_rate(
     now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     is_future = eff > now_iso
 
-    # Update ACCDB if effective now
+    # Update PostgreSQL if effective now
     if not is_future:
         try:
             with get_connection() as conn:
                 c = conn.cursor()
-                c.execute("UPDATE tblconfig SET [therate] = ?", (req.rate_lsl,))
+                c.execute(
+                    "UPDATE system_config SET value = %s, updated_at = NOW() WHERE key = 'tariff_rate'",
+                    (req.rate_lsl,),
+                )
                 conn.commit()
         except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to update ACCDB: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to update system_config: {e}")
 
     # Log to tariff history
     with get_auth_db() as conn:
@@ -372,9 +372,9 @@ def update_global_rate(
 
     # Also log to cc_mutations for unified audit trail
     log_mutation(
-        user, "update", "tblconfig", "therate",
-        old_values={"therate": old_rate},
-        new_values={"therate": req.rate_lsl, "effective_from": eff},
+        user, "update", "system_config", "tariff_rate",
+        old_values={"value": old_rate},
+        new_values={"value": req.rate_lsl, "effective_from": eff},
     )
 
     status = "scheduled" if is_future else "applied"

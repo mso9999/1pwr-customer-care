@@ -60,16 +60,35 @@ def log_mutation(
 
 
 # ---------------------------------------------------------------------------
-# Helper: fetch a row from ACCDB
+# Helper: get primary key column for a PostgreSQL table
 # ---------------------------------------------------------------------------
 
-def _fetch_accdb_row(table_name: str, pk: str, record_id: str) -> Optional[Dict[str, Any]]:
-    """Fetch a single row from the ACCDB as a dict."""
+def _get_primary_key(conn, table_name: str) -> Optional[str]:
+    """Detect the primary key column for a PostgreSQL table via pg_index."""
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT a.attname
+        FROM pg_index i
+        JOIN pg_attribute a ON a.attrelid = i.indrelid
+                            AND a.attnum = ANY(i.indkey)
+        WHERE i.indrelid = %s::regclass
+          AND i.indisprimary
+    """, (table_name,))
+    row = cursor.fetchone()
+    return row[0] if row else None
+
+
+# ---------------------------------------------------------------------------
+# Helper: fetch a row from PostgreSQL
+# ---------------------------------------------------------------------------
+
+def _fetch_pg_row(table_name: str, pk: str, record_id: str) -> Optional[Dict[str, Any]]:
+    """Fetch a single row from PostgreSQL as a dict."""
     from customer_api import get_connection
 
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute(f"SELECT * FROM [{table_name}] WHERE [{pk}] = ?", (record_id,))
+        cursor.execute(f"SELECT * FROM {table_name} WHERE {pk} = %s", (record_id,))
         row = cursor.fetchone()
         if not row:
             return None
@@ -201,7 +220,6 @@ def revert_mutation(
     new_values = json.loads(mutation["new_values"]) if mutation["new_values"] else None
 
     from customer_api import get_connection
-    from crud import _get_primary_key
 
     with get_connection() as conn:
         pk = _get_primary_key(conn, table_name)
@@ -213,7 +231,7 @@ def revert_mutation(
         try:
             if action == "create":
                 # Undo create = delete the record
-                cursor.execute(f"DELETE FROM [{table_name}] WHERE [{pk}] = ?", (record_id,))
+                cursor.execute(f"DELETE FROM {table_name} WHERE {pk} = %s", (record_id,))
                 conn.commit()
                 log_mutation(user, "revert_delete", table_name, record_id, old_values=new_values)
 
@@ -221,10 +239,10 @@ def revert_mutation(
                 if not old_values:
                     raise HTTPException(status_code=400, detail="No old values to restore")
                 # Undo update = set back to old values
-                set_parts = [f"[{col}] = ?" for col in old_values.keys() if col != pk]
+                set_parts = [f"{col} = %s" for col in old_values.keys() if col != pk]
                 vals = [old_values[col] for col in old_values.keys() if col != pk] + [record_id]
                 cursor.execute(
-                    f"UPDATE [{table_name}] SET {', '.join(set_parts)} WHERE [{pk}] = ?",
+                    f"UPDATE {table_name} SET {', '.join(set_parts)} WHERE {pk} = %s",
                     vals,
                 )
                 conn.commit()
@@ -235,11 +253,11 @@ def revert_mutation(
                     raise HTTPException(status_code=400, detail="No old values to restore")
                 # Undo delete = re-insert old values
                 columns = list(old_values.keys())
-                placeholders = ", ".join(["?"] * len(columns))
-                col_list = ", ".join([f"[{c}]" for c in columns])
+                placeholders = ", ".join(["%s"] * len(columns))
+                col_list = ", ".join(columns)
                 vals = [old_values[c] for c in columns]
                 cursor.execute(
-                    f"INSERT INTO [{table_name}] ({col_list}) VALUES ({placeholders})",
+                    f"INSERT INTO {table_name} ({col_list}) VALUES ({placeholders})",
                     vals,
                 )
                 conn.commit()

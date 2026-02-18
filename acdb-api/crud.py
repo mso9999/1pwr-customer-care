@@ -1,5 +1,5 @@
 """
-Generic CRUD endpoints for ACCDB tables.
+Generic CRUD endpoints for PostgreSQL tables.
 
 Provides paginated list, get-by-id, create, update, delete
 with role-based permission gating.
@@ -27,17 +27,12 @@ logger = logging.getLogger("acdb-api.crud")
 router = APIRouter(prefix="/api/tables", tags=["crud"])
 
 # Tables that customers can read their own rows from
-CUSTOMER_READABLE_TABLES = {"tblcustomer", "tblaccountnumbers"}
+CUSTOMER_READABLE_TABLES = {"customers", "accounts"}
 
 
 def _get_connection():
     from customer_api import get_connection
     return get_connection()
-
-
-def _get_derived_connection():
-    from customer_api import get_derived_connection
-    return get_derived_connection()
 
 
 def _row_to_dict(cursor, row) -> Dict[str, Any]:
@@ -52,23 +47,32 @@ def _row_to_dict(cursor, row) -> Dict[str, Any]:
 
 
 def _get_primary_key(conn, table_name: str) -> Optional[str]:
-    """Try to detect the primary key column for a table."""
+    """Detect the primary key column for a table using pg_index."""
     cursor = conn.cursor()
     try:
-        # Try statistics/indexes to find the PK
-        for row in cursor.statistics(table=table_name):
-            if row.index_name and "PrimaryKey" in str(row.index_name):
-                return row.column_name
+        cursor.execute(
+            "SELECT a.attname FROM pg_index i "
+            "JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) "
+            "WHERE i.indrelid = %s::regclass AND i.indisprimary",
+            (table_name,)
+        )
+        row = cursor.fetchone()
+        if row:
+            return row[0]
     except Exception:
-        pass
+        conn.rollback()
 
     # Fallback: common PK column patterns
-    cols = [c.column_name for c in cursor.columns(table=table_name)]
-    for candidate in ["ID", "Id", "id", "CUSTOMER ID", "customerid", "accountnumber"]:
+    cursor.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_schema = 'public' AND table_name = %s",
+        (table_name,)
+    )
+    cols = [r[0] for r in cursor.fetchall()]
+    for candidate in ["id", "customer_id_legacy", "account_number"]:
         if candidate in cols:
             return candidate
 
-    # Use first column as fallback
     return cols[0] if cols else None
 
 
@@ -101,8 +105,12 @@ def list_rows(
         cursor = conn.cursor()
 
         # Verify table exists
-        found = any(t.table_name == table_name for t in cursor.tables(tableType="TABLE"))
-        if not found:
+        cursor.execute(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = 'public' AND table_name = %s",
+            (table_name,)
+        )
+        if not cursor.fetchone():
             raise HTTPException(status_code=404, detail=f"Table '{table_name}' not found")
 
         # Build WHERE clause
@@ -111,61 +119,49 @@ def list_rows(
 
         # Customer scope: only own records
         if user.user_type == UserType.customer:
-            if table_name.lower() == "tblcustomer":
-                where_clauses.append("[CUSTOMER ID] = ?")
+            if table_name.lower() == "customers":
+                where_clauses.append("customer_id_legacy = %s")
                 params.append(user.user_id)
-            elif table_name.lower() == "tblaccountnumbers":
-                where_clauses.append("customerid = ?")
+            elif table_name.lower() == "accounts":
+                where_clauses.append("account_number = %s")
                 params.append(user.user_id)
 
         # Column filter
         if filter_col and filter_val:
-            where_clauses.append(f"[{filter_col}] = ?")
+            where_clauses.append(f"{filter_col} = %s")
             params.append(filter_val)
 
         # Text search across all text columns
         if search:
-            cols = [c.column_name for c in cursor.columns(table=table_name)
-                    if c.type_name in ("VARCHAR", "LONGCHAR", "CHAR", "TEXT")]
-            if cols:
-                search_parts = [f"[{c}] LIKE ?" for c in cols[:10]]  # Limit to 10 columns
+            cursor.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = %s "
+                "AND data_type IN ('character varying', 'text', 'character')",
+                (table_name,)
+            )
+            text_cols = [r[0] for r in cursor.fetchall()]
+            if text_cols:
+                search_parts = [f"{c} ILIKE %s" for c in text_cols[:10]]
                 where_clauses.append(f"({' OR '.join(search_parts)})")
                 params.extend([f"%{search}%"] * len(search_parts))
 
         where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
         # Count total
-        count_sql = f"SELECT COUNT(*) FROM [{table_name}]{where_sql}"
-        cursor.execute(count_sql, params)
+        cursor.execute(f"SELECT COUNT(*) FROM {table_name}{where_sql}", params)
         total = cursor.fetchone()[0]
 
         # Sort
         order_sql = ""
         if sort:
-            order_sql = f" ORDER BY [{sort}] {order.upper()}"
+            order_sql = f" ORDER BY {sort} {order.upper()}"
 
-        # Paginate using TOP + offset simulation for Access SQL
+        # Paginate with LIMIT/OFFSET
         offset = (page - 1) * limit
-        # Access SQL doesn't support OFFSET; use a subquery approach
-        if offset == 0:
-            sql = f"SELECT TOP {limit} * FROM [{table_name}]{where_sql}{order_sql}"
-            cursor.execute(sql, params)
-        else:
-            # For Access: fetch all and slice in Python (simpler + reliable)
-            sql = f"SELECT * FROM [{table_name}]{where_sql}{order_sql}"
-            cursor.execute(sql, params)
-            # Skip to offset
-            for _ in range(offset):
-                r = cursor.fetchone()
-                if r is None:
-                    break
+        sql = f"SELECT * FROM {table_name}{where_sql}{order_sql} LIMIT %s OFFSET %s"
+        cursor.execute(sql, params + [limit, offset])
 
-        rows = []
-        for _ in range(limit):
-            row = cursor.fetchone()
-            if row is None:
-                break
-            rows.append(_row_to_dict(cursor, row))
+        rows = [_row_to_dict(cursor, row) for row in cursor.fetchall()]
 
         return PaginatedResponse(
             rows=rows,
@@ -197,7 +193,7 @@ def get_record(
             raise HTTPException(status_code=400, detail="Cannot determine primary key")
 
         cursor = conn.cursor()
-        sql = f"SELECT * FROM [{table_name}] WHERE [{pk}] = ?"
+        sql = f"SELECT * FROM {table_name} WHERE {pk} = %s"
         cursor.execute(sql, (record_id,))
         row = cursor.fetchone()
 
@@ -208,7 +204,7 @@ def get_record(
 
         # Customer scope check
         if user.user_type == UserType.customer:
-            cid = record.get("CUSTOMER ID") or record.get("customerid")
+            cid = record.get("customer_id_legacy") or record.get("customer_id")
             if cid and cid != user.user_id:
                 raise HTTPException(status_code=403, detail="Access denied")
 
@@ -220,8 +216,8 @@ def get_record(
 # ---------------------------------------------------------------------------
 
 # Country code → dialling prefix mapping.
-# Used to strip country codes from phone numbers so they fit in ACCDB INTEGER columns.
-# The COUNTRY field in the same record tells us which prefix to strip.
+# Used to strip country codes from phone numbers so they fit in integer columns.
+# The country field in the same record tells us which prefix to strip.
 _COUNTRY_DIAL_CODES: Dict[str, str] = {
     "lesotho": "266",
     "benin": "229",
@@ -241,8 +237,8 @@ _COUNTRY_DIAL_CODES: Dict[str, str] = {
     "dr congo": "243",
 }
 
-# Column names that hold phone numbers (case-insensitive match)
-_PHONE_COLUMNS = {"cell phone 1", "cell phone 2", "phone", "cell phone"}
+# Column names that hold phone numbers
+_PHONE_COLUMNS = {"cell_phone_1", "cell_phone_2", "phone"}
 
 
 def _strip_country_code(raw_phone: str, country: str) -> str:
@@ -254,25 +250,18 @@ def _strip_country_code(raw_phone: str, country: str) -> str:
       0056601826      →  56601826   (00 international prefix)
       56601826        →  56601826   (already local)
     """
-    # Remove all non-digit characters
     digits = "".join(c for c in raw_phone if c.isdigit())
     if not digits:
         return ""
 
-    # Look up the country dial code
     code = _COUNTRY_DIAL_CODES.get(country.lower().strip(), "")
     if not code:
         return digits
 
-    # Strip leading 00 (international dialling prefix)
     if digits.startswith("00"):
         digits = digits[2:]
-
-    # Strip the country code if the number starts with it
     if digits.startswith(code):
         digits = digits[len(code):]
-
-    # Strip leading 0 (local trunk prefix) if present
     if digits.startswith("0") and len(digits) > 8:
         digits = digits[1:]
 
@@ -281,92 +270,100 @@ def _strip_country_code(raw_phone: str, country: str) -> str:
 
 def _coerce_values(cursor, table_name: str, data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Coerce frontend string values to match ACCDB column types so that
-    pyodbc doesn't hit 'Numeric value out of range' or type errors.
+    Coerce frontend string values to match PostgreSQL column types so that
+    psycopg2 doesn't hit type mismatch errors.
 
-    - COUNTER (AutoNumber) columns are dropped (Access auto-generates).
-    - INTEGER/SMALLINT: strip non-digits, clamp to 32-bit signed range.
-      For phone columns, strip country code first (inferred from COUNTRY field).
-    - DOUBLE/REAL/FLOAT/CURRENCY: parse as float.
-    - BIT: convert to bool.
-    - DATETIME: pass through (pyodbc handles ISO strings).
+    - Serial/identity columns are dropped (PostgreSQL auto-generates).
+    - integer/smallint/bigint: strip non-digits, validate range.
+      For phone columns, strip country code first (inferred from country field).
+    - double precision/real/numeric/money: parse as float.
+    - boolean: convert to bool.
+    - Other types (text, timestamp, etc.): pass as string.
 
-    Column name matching is case-insensitive (Access column names are
-    case-insensitive but cursor.columns() returns stored case).
+    Column name matching is case-insensitive (frontend may send mixed case).
     """
-    # Build case-insensitive column type map:
-    #   col_types_lower  = { "current balance": "CURRENCY", ... }
-    #   col_actual_name  = { "current balance": "Current Balance", ... }
-    col_types_lower: Dict[str, str] = {}
-    col_actual_name: Dict[str, str] = {}
+    col_types: Dict[str, str] = {}
     try:
-        for col in cursor.columns(table=table_name):
-            lname = col.column_name.lower().strip()
-            col_types_lower[lname] = (col.type_name or "").upper()
-            col_actual_name[lname] = col.column_name
+        cursor.execute(
+            "SELECT column_name, data_type FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = %s",
+            (table_name,)
+        )
+        for row in cursor.fetchall():
+            col_types[row[0]] = row[1]
     except Exception:
-        return data  # If introspection fails, pass through unchanged
+        return data
 
-    # Resolve country from the payload (for phone number handling)
-    country = str(data.get("COUNTRY", data.get("country", "")) or "").strip()
+    # Detect serial/identity columns (auto-generated via nextval)
+    serial_cols: set = set()
+    try:
+        cursor.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = %s "
+            "AND column_default LIKE 'nextval%%'",
+            (table_name,)
+        )
+        serial_cols = {r[0] for r in cursor.fetchall()}
+    except Exception:
+        pass
+
+    country = str(data.get("country", "") or "").strip()
 
     coerced: Dict[str, Any] = {}
     for key, val in data.items():
         lkey = key.lower().strip()
-        col_type = col_types_lower.get(lkey, "VARCHAR")
-        # Use the ACCDB's actual column name so the SQL matches exactly
-        actual_key = col_actual_name.get(lkey, key)
+        col_type = col_types.get(lkey, "character varying")
 
-        # Skip AutoNumber columns — Access generates these
-        if col_type == "COUNTER":
+        # Skip serial/identity columns — PostgreSQL generates these
+        if lkey in serial_cols:
             continue
 
         if val is None or (isinstance(val, str) and not val.strip()):
-            coerced[actual_key] = None
+            coerced[lkey] = None
             continue
 
         str_val = str(val).strip()
 
-        if col_type in ("INTEGER", "SMALLINT", "SHORT"):
+        if col_type in ("integer", "smallint", "bigint"):
             is_phone = lkey in _PHONE_COLUMNS
 
             if is_phone and country:
-                # Strip country code so local number fits in INTEGER
                 digits = _strip_country_code(str_val, country)
             else:
-                # Generic integer: strip non-digit chars but keep leading minus
                 digits = "".join(c for c in str_val if c.isdigit() or c == "-")
 
             if not digits or digits == "-":
-                coerced[actual_key] = None
+                coerced[lkey] = None
                 continue
             try:
                 num = int(digits)
-                # Access INTEGER is 32-bit signed: -2,147,483,648 to 2,147,483,647
-                if -2_147_483_648 <= num <= 2_147_483_647:
-                    coerced[actual_key] = num
-                else:
+                if col_type == "smallint" and not (-32_768 <= num <= 32_767):
                     logger.warning(
-                        "Skipping column [%s]: value %s overflows INTEGER even after "
-                        "country-code stripping (country=%s)",
-                        actual_key, num, country or "unknown",
+                        "Skipping column %s: value %s overflows smallint", lkey, num,
                     )
                     continue
+                if col_type == "integer" and not (-2_147_483_648 <= num <= 2_147_483_647):
+                    logger.warning(
+                        "Skipping column %s: value %s overflows integer (country=%s)",
+                        lkey, num, country or "unknown",
+                    )
+                    continue
+                coerced[lkey] = num
             except ValueError:
-                coerced[actual_key] = None
+                coerced[lkey] = None
 
-        elif col_type in ("DOUBLE", "REAL", "FLOAT", "NUMERIC", "DECIMAL", "CURRENCY"):
+        elif col_type in ("double precision", "real", "numeric", "money"):
             try:
-                coerced[actual_key] = float(str_val)
+                coerced[lkey] = float(str_val)
             except ValueError:
-                coerced[actual_key] = None
+                coerced[lkey] = None
 
-        elif col_type == "BIT":
-            coerced[actual_key] = str_val.lower() in ("1", "true", "yes")
+        elif col_type == "boolean":
+            coerced[lkey] = str_val.lower() in ("1", "true", "yes", "t")
 
         else:
-            # VARCHAR, LONGCHAR, DATETIME, etc. — pass as string
-            coerced[actual_key] = str_val
+            # text, character varying, timestamp, date, etc. — pass as string
+            coerced[lkey] = str_val
 
     return coerced
 
@@ -387,30 +384,29 @@ def create_record(
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        # Coerce values to match ACCDB column types
         coerced = _coerce_values(cursor, table_name, req.data)
         if not coerced:
             raise HTTPException(status_code=400, detail="No valid fields after type coercion")
 
         columns = list(coerced.keys())
-        placeholders = ", ".join(["?"] * len(columns))
-        col_list = ", ".join([f"[{c}]" for c in columns])
+        placeholders = ", ".join(["%s"] * len(columns))
+        col_list = ", ".join(columns)
         values = [coerced[c] for c in columns]
 
-        sql = f"INSERT INTO [{table_name}] ({col_list}) VALUES ({placeholders})"
+        sql = f"INSERT INTO {table_name} ({col_list}) VALUES ({placeholders})"
         try:
             cursor.execute(sql, values)
             conn.commit()
         except Exception as e:
+            conn.rollback()
             raise HTTPException(status_code=400, detail=f"Insert failed: {e}")
 
-        # Determine record ID for the log (use PK value, case-insensitive)
+        # Determine record ID for the audit log
         pk = _get_primary_key(conn, table_name)
         rid = "unknown"
         if pk:
-            pk_lower = pk.lower()
             for k, v in req.data.items():
-                if k.lower() == pk_lower:
+                if k.lower() == pk:
                     rid = str(v)
                     break
 
@@ -444,19 +440,18 @@ def update_record(
 
         # Capture old values before the update
         cursor = conn.cursor()
-        cursor.execute(f"SELECT * FROM [{table_name}] WHERE [{pk}] = ?", (record_id,))
+        cursor.execute(f"SELECT * FROM {table_name} WHERE {pk} = %s", (record_id,))
         old_row = cursor.fetchone()
         old_values = _row_to_dict(cursor, old_row) if old_row else None
 
-        # Coerce values to match ACCDB column types
         coerced = _coerce_values(cursor, table_name, req.data)
         if not coerced:
             raise HTTPException(status_code=400, detail="No valid fields after type coercion")
 
-        set_parts = [f"[{col}] = ?" for col in coerced.keys()]
+        set_parts = [f"{col} = %s" for col in coerced.keys()]
         values = list(coerced.values()) + [record_id]
 
-        sql = f"UPDATE [{table_name}] SET {', '.join(set_parts)} WHERE [{pk}] = ?"
+        sql = f"UPDATE {table_name} SET {', '.join(set_parts)} WHERE {pk} = %s"
         try:
             cursor.execute(sql, values)
             conn.commit()
@@ -465,6 +460,7 @@ def update_record(
         except HTTPException:
             raise
         except Exception as e:
+            conn.rollback()
             raise HTTPException(status_code=400, detail=f"Update failed: {e}")
 
         # Build new_values by merging old with actually-written fields
@@ -496,11 +492,11 @@ def delete_record(
 
         # Capture old values before deletion
         cursor = conn.cursor()
-        cursor.execute(f"SELECT * FROM [{table_name}] WHERE [{pk}] = ?", (record_id,))
+        cursor.execute(f"SELECT * FROM {table_name} WHERE {pk} = %s", (record_id,))
         old_row = cursor.fetchone()
         old_values = _row_to_dict(cursor, old_row) if old_row else None
 
-        sql = f"DELETE FROM [{table_name}] WHERE [{pk}] = ?"
+        sql = f"DELETE FROM {table_name} WHERE {pk} = %s"
         try:
             cursor.execute(sql, (record_id,))
             conn.commit()
@@ -509,6 +505,7 @@ def delete_record(
         except HTTPException:
             raise
         except Exception as e:
+            conn.rollback()
             raise HTTPException(status_code=400, detail=f"Delete failed: {e}")
 
         log_mutation(user, "delete", table_name, record_id, old_values=old_values)
@@ -527,9 +524,9 @@ customer_router = APIRouter(prefix="/api/my", tags=["customer-self-service"])
 def my_profile(user: CurrentUser = Depends(get_current_user)):
     """Customer: get own profile.
 
-    user_id is the account number (e.g. 0045MAK). We resolve to a tblcustomer
-    record via Copy Of tblmeter when possible, and always include the account
-    number and recent transaction info.
+    user_id is the account number (e.g. 0045MAK). We resolve to a customers
+    record via meters when possible, and always include the account number
+    and recent transaction info.
     """
     if user.user_type != UserType.customer:
         raise HTTPException(status_code=403, detail="Customer endpoint only")
@@ -549,16 +546,19 @@ def my_profile(user: CurrentUser = Depends(get_current_user)):
             "account_numbers": [acct],
         }
 
-        # Try to resolve account -> customer via Copy Of tblmeter
+        # Resolve account -> customer via meters table
         try:
             cursor.execute(
-                "SELECT [customer id] FROM [Copy Of tblmeter] WHERE [accountnumber] = ?",
+                "SELECT customer_id_legacy FROM meters WHERE account_number = %s",
                 (acct,),
             )
             meter_row = cursor.fetchone()
             if meter_row and meter_row[0]:
                 cust_id = str(meter_row[0])
-                cursor.execute("SELECT * FROM tblcustomer WHERE [CUSTOMER ID] = ?", (cust_id,))
+                cursor.execute(
+                    "SELECT * FROM customers WHERE customer_id_legacy = %s",
+                    (cust_id,),
+                )
                 cust_row = cursor.fetchone()
                 if cust_row:
                     cust = _normalize_customer(_row_to_dict(cursor, cust_row))
@@ -567,11 +567,11 @@ def my_profile(user: CurrentUser = Depends(get_current_user)):
         except Exception:
             pass
 
-        # Also try tblaccountnumbers for any additional accounts
+        # Also check accounts table for any additional accounts
         if cust.get("customer_id"):
             try:
                 cursor.execute(
-                    "SELECT accountnumber FROM tblaccountnumbers WHERE customerid = ?",
+                    "SELECT account_number FROM accounts WHERE customer_id = %s",
                     (cust["customer_id"],),
                 )
                 extra = [str(r[0]).strip() for r in cursor.fetchall() if r[0]]
@@ -612,10 +612,10 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
     with get_connection() as conn:
         cursor = conn.cursor()
 
-        # 1. The user_id IS the account number (e.g. "0045MAK")
-        accounts = [user.user_id]
+        # The user_id IS the account number (e.g. "0045MAK")
+        acct = user.user_id
 
-        if not accounts or not accounts[0]:
+        if not acct:
             return {
                 "balance_kwh": 0,
                 "last_payment": None,
@@ -628,76 +628,40 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
                 "monthly_12m": [],
             }
 
-        placeholders = ",".join("?" for _ in accounts)
-
-        # 2. Query account history for this customer's accounts
-        #    Columns: accountnumber, kwh value, transaction amount, date columns
+        # Query transaction history (single table, known column names)
         history_rows = []
         latest_balance = None
-        for table in ["tblaccounthistory1", "tblaccounthistoryOriginal"]:
-            try:
-                # Get column names first to find the date column
-                cursor.execute(f"SELECT TOP 1 * FROM [{table}]")
-                cols = [desc[0].lower().strip() for desc in cursor.description]
 
-                # Find the date column (varies by table)
-                date_col = None
-                for candidate in ["date", "transactiondate", "transaction date", "datetime", "timestamp"]:
-                    if candidate in cols:
-                        date_col = candidate
-                        break
-                # Fallback: any column with 'date' in the name
-                if not date_col:
-                    for c in cols:
-                        if "date" in c:
-                            date_col = c
-                            break
-
-                if not date_col:
-                    continue
-
-                # Also grab [current balance] if it exists
-                has_balance = "current balance" in cols
-                balance_col = ", [current balance]" if has_balance else ""
-
-                cursor.execute(
-                    f"SELECT [accountnumber], [kwh value], [transaction amount], [{date_col}]{balance_col} "
-                    f"FROM [{table}] WHERE [accountnumber] IN ({placeholders}) "
-                    f"ORDER BY [{date_col}] DESC",
-                    accounts,
-                )
-                history_rows = []
-                latest_balance = None
-                for r in cursor.fetchall():
-                    kwh = float(r[1] or 0)
-                    lsl = float(r[2] or 0)
-                    dt = r[3]
-                    # Capture the most recent balance value
-                    if has_balance and latest_balance is None and r[4] is not None:
+        cursor.execute(
+            "SELECT account_number, kwh_value, transaction_amount, "
+            "transaction_date, current_balance "
+            "FROM transactions WHERE account_number = %s "
+            "ORDER BY transaction_date DESC",
+            (acct,),
+        )
+        for r in cursor.fetchall():
+            kwh = float(r[1] or 0)
+            lsl = float(r[2] or 0)
+            dt = r[3]
+            # Capture the most recent balance value
+            if latest_balance is None and r[4] is not None:
+                try:
+                    latest_balance = float(r[4])
+                except (ValueError, TypeError):
+                    pass
+            if dt is not None:
+                if isinstance(dt, str):
+                    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"):
                         try:
-                            latest_balance = float(r[4])
-                        except (ValueError, TypeError):
-                            pass
-                    if dt is not None:
-                        if isinstance(dt, str):
-                            # Try common date formats
-                            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"):
-                                try:
-                                    dt = datetime.strptime(dt.strip(), fmt)
-                                    break
-                                except ValueError:
-                                    continue
-                            else:
-                                dt = None
-                    history_rows.append({"kwh": kwh, "lsl": lsl, "date": dt})
+                            dt = datetime.strptime(dt.strip(), fmt)
+                            break
+                        except ValueError:
+                            continue
+                    else:
+                        dt = None
+            history_rows.append({"kwh": kwh, "lsl": lsl, "date": dt})
 
-                if history_rows:
-                    break  # Got data, don't try fallback table
-            except Exception as e:
-                logger.warning("Dashboard: failed to read %s: %s", table, e)
-                continue
-
-        # 2b. Supplement with tblmonthlytransactions for months beyond history
+        # Supplement with monthly_transactions for months beyond history
         latest_hist_dt: Optional[datetime] = None
         for r in history_rows:
             if r["date"] and isinstance(r["date"], datetime):
@@ -705,39 +669,31 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
                     latest_hist_dt = r["date"]
 
         try:
-            with _get_derived_connection() as dconn:
-                dcursor = dconn.cursor()
-                existing_tbl = {
-                    t.table_name.lower()
-                    for t in dcursor.tables(tableType="TABLE")
-                }
-                if "tblmonthlytransactions" in existing_tbl:
-                    acct_key = accounts[0]
-                    dcursor.execute(
-                        "SELECT [yearmonth], [amount_lsl], [kwh_vended] "
-                        "FROM [tblmonthlytransactions] "
-                        "WHERE [accountnumber] = ? "
-                        "ORDER BY [yearmonth] DESC",
-                        (acct_key,),
-                    )
-                    for r2 in dcursor.fetchall():
-                        ym = str(r2[0] or "").strip()
-                        if not ym:
-                            continue
-                        try:
-                            y2, m2 = int(ym[:4]), int(ym[5:7])
-                            row_dt2 = datetime(y2, m2, 15)
-                        except (ValueError, IndexError):
-                            continue
-                        if latest_hist_dt and row_dt2 <= latest_hist_dt:
-                            continue
-                        lsl2 = float(r2[1] or 0)
-                        kwh2 = float(r2[2] or 0)
-                        history_rows.append({"kwh": kwh2, "lsl": lsl2, "date": row_dt2})
+            cursor.execute(
+                "SELECT year_month, amount_lsl, kwh_vended "
+                "FROM monthly_transactions "
+                "WHERE account_number = %s "
+                "ORDER BY year_month DESC",
+                (acct,),
+            )
+            for r2 in cursor.fetchall():
+                ym = str(r2[0] or "").strip()
+                if not ym:
+                    continue
+                try:
+                    y2, m2 = int(ym[:4]), int(ym[5:7])
+                    row_dt2 = datetime(y2, m2, 15)
+                except (ValueError, IndexError):
+                    continue
+                if latest_hist_dt and row_dt2 <= latest_hist_dt:
+                    continue
+                lsl2 = float(r2[1] or 0)
+                kwh2 = float(r2[2] or 0)
+                history_rows.append({"kwh": kwh2, "lsl": lsl2, "date": row_dt2})
         except Exception as e:
-            logger.warning("Dashboard: failed to supplement from tblmonthlytransactions: %s", e)
+            logger.warning("Dashboard: failed to supplement from monthly_transactions: %s", e)
 
-        # 3. Compute aggregates
+        # Compute aggregates
         now = datetime.utcnow()
         total_kwh = sum(r["kwh"] for r in history_rows)
         total_lsl = sum(r["lsl"] for r in history_rows)
@@ -765,8 +721,7 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
         days_with_data = len(daily)
         avg_kwh_per_day = sum(daily.values()) / max(days_with_data, 1)
 
-        # Balance: prefer the actual "current balance" field from the most recent
-        # transaction record. Fall back to estimation if not available.
+        # Balance: prefer actual current_balance from most recent transaction
         if latest_balance is not None:
             balance_kwh = max(0, latest_balance)
         else:
@@ -784,7 +739,7 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
         else:
             estimated_seconds = 0
 
-        # 4. Build chart data
+        # Build chart data
         # Last 7 days
         daily_7d = []
         for i in range(6, -1, -1):
@@ -857,6 +812,10 @@ def employee_customer_data(
             if resolved:
                 acct = resolved[0].upper()
 
+        # Parse account number pattern for community extraction
+        import re as _re
+        acct_match = _re.match(r"^(\d{3,4})([A-Za-z]{2,4})$", acct)
+
         # --- Resolve customer profile ---
         profile: dict = {
             "account_number": acct,
@@ -866,143 +825,106 @@ def employee_customer_data(
         }
         meter_info: dict = {}
 
-        # Try meter tables first
-        for meter_table in ["tblmeter", "Copy Of tblmeter"]:
-            try:
-                cursor.execute(
-                    f"SELECT * FROM [{meter_table}] WHERE [accountnumber] = ?",
-                    (acct,),
-                )
-                mrow = cursor.fetchone()
-                if mrow:
-                    meter_info = _row_to_dict(cursor, mrow)
-                    cust_id = meter_info.get("customer id")
-                    if cust_id:
-                        cursor.execute(
-                            "SELECT * FROM tblcustomer WHERE [CUSTOMER ID] = ?",
-                            (str(cust_id),),
-                        )
-                        crow = cursor.fetchone()
-                        if crow:
-                            profile = _normalize_customer(_row_to_dict(cursor, crow))
-                            profile["account_number"] = acct
-                    break
-            except Exception:
-                continue
-
-        # If meter tables didn't find the customer, try reverse-deriving
-        # from PLOT NUMBER:  account 0045MAK -> plot like 'MAK 0045%'
-        if not profile.get("customer_id"):
-            from customer_api import _derive_account_from_plot
-            # Extract community suffix and numeric part from the account
-            import re as _re
-            m = _re.match(r"^(\d{3,4})([A-Za-z]{2,4})$", acct)
-            if m:
-                num_part, comm = m.group(1), m.group(2).upper()
-                plot_pattern = f"{comm} {num_part}%"
-                try:
+        # Try meters table (single table — tblmeter and Copy Of tblmeter merged)
+        try:
+            cursor.execute(
+                "SELECT * FROM meters WHERE account_number = %s",
+                (acct,),
+            )
+            mrow = cursor.fetchone()
+            if mrow:
+                meter_info = _row_to_dict(cursor, mrow)
+                cust_id = meter_info.get("customer_id_legacy")
+                if cust_id:
                     cursor.execute(
-                        "SELECT * FROM tblcustomer WHERE [PLOT NUMBER] LIKE ? AND [Concession name] = ?",
-                        (plot_pattern, comm),
+                        "SELECT * FROM customers WHERE customer_id_legacy = %s",
+                        (str(cust_id),),
                     )
                     crow = cursor.fetchone()
                     if crow:
                         profile = _normalize_customer(_row_to_dict(cursor, crow))
                         profile["account_number"] = acct
-                except Exception:
-                    pass
+        except Exception:
+            pass
 
-        # If still no meter info, try to get meter ID from history
-        if not meter_info:
-            for htable in ["tblaccounthistory1", "tblaccounthistoryOriginal"]:
-                try:
-                    cursor.execute(
-                        f"SELECT TOP 1 [meterid] FROM [{htable}] "
-                        f"WHERE [accountnumber] = ? AND [meterid] IS NOT NULL AND [meterid] <> ''",
-                        (acct,),
-                    )
-                    hrow = cursor.fetchone()
-                    if hrow and hrow[0]:
-                        meter_info = {"meterid": str(hrow[0]).strip()}
-                        # Try to find the community from the account suffix
-                        if m:
-                            meter_info["community"] = m.group(2).upper()
-                        break
-                except Exception:
-                    continue
-
-        # --- Transaction history (paginated, most recent first) ---
-        transactions = []
-        for table in ["tblaccounthistory1", "tblaccounthistoryOriginal"]:
+        # If meters didn't find the customer, try reverse-deriving
+        # from plot_number: account 0045MAK -> plot like 'MAK 0045%'
+        if not profile.get("customer_id") and acct_match:
+            num_part, comm = acct_match.group(1), acct_match.group(2).upper()
+            plot_pattern = f"{comm} {num_part}%"
             try:
-                cursor.execute(f"SELECT TOP 1 * FROM [{table}]")
-                cols = [d[0].lower().strip() for d in cursor.description]
-                date_col = None
-                for cand in ["transaction date", "date", "transactiondate", "datetime", "timestamp"]:
-                    if cand in cols:
-                        date_col = cand
-                        break
-                if not date_col:
-                    for c in cols:
-                        if "date" in c:
-                            date_col = c
-                            break
-                if not date_col:
-                    continue
-
-                has_balance = "current balance" in cols
-
-                balance_sel = ", [current balance]" if has_balance else ""
                 cursor.execute(
-                    f"SELECT [ID], [accountnumber], [meterid], [{date_col}], "
-                    f"[transaction amount], [rate used], [kwh value], [payment]{balance_sel} "
-                    f"FROM [{table}] WHERE [accountnumber] = ? "
-                    f"ORDER BY [{date_col}] DESC",
+                    "SELECT * FROM customers WHERE plot_number LIKE %s AND community = %s",
+                    (plot_pattern, comm),
+                )
+                crow = cursor.fetchone()
+                if crow:
+                    profile = _normalize_customer(_row_to_dict(cursor, crow))
+                    profile["account_number"] = acct
+            except Exception:
+                pass
+
+        # If still no meter info, try to get meter ID from transactions
+        if not meter_info:
+            try:
+                cursor.execute(
+                    "SELECT meter_id FROM transactions "
+                    "WHERE account_number = %s AND meter_id IS NOT NULL AND meter_id <> '' "
+                    "LIMIT 1",
                     (acct,),
                 )
-                for r in cursor.fetchall():
-                    dt_raw = r[3]
-                    dt_str = None
-                    dt_parsed = None
-                    if dt_raw is not None:
-                        if isinstance(dt_raw, str):
-                            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y"):
-                                try:
-                                    dt_parsed = datetime.strptime(dt_raw.strip(), fmt)
-                                    dt_str = dt_parsed.strftime("%Y-%m-%d %H:%M:%S")
-                                    break
-                                except ValueError:
-                                    continue
-                        else:
-                            dt_parsed = dt_raw
-                            dt_str = dt_raw.strftime("%Y-%m-%d %H:%M:%S") if hasattr(dt_raw, "strftime") else str(dt_raw)
+                hrow = cursor.fetchone()
+                if hrow and hrow[0]:
+                    meter_info = {"meter_id": str(hrow[0]).strip()}
+                    if acct_match:
+                        meter_info["community"] = acct_match.group(2).upper()
+            except Exception:
+                pass
 
-                    txn = {
-                        "id": r[0],
-                        "account": r[1],
-                        "meter": r[2],
-                        "date": dt_str,
-                        "amount_lsl": round(float(r[4] or 0), 2),
-                        "rate": round(float(r[5] or 0), 2),
-                        "kwh": round(float(r[6] or 0), 2),
-                        "is_payment": bool(r[7]),
-                    }
-                    if has_balance:
-                        try:
-                            txn["balance"] = round(float(r[8] or 0), 2)
-                        except (ValueError, TypeError):
-                            txn["balance"] = None
-                    transactions.append(txn)
+        # --- Transaction history (most recent first) ---
+        transactions = []
+        try:
+            cursor.execute(
+                "SELECT id, account_number, meter_id, transaction_date, "
+                "transaction_amount, rate_used, kwh_value, is_payment, current_balance "
+                "FROM transactions WHERE account_number = %s "
+                "ORDER BY transaction_date DESC",
+                (acct,),
+            )
+            for r in cursor.fetchall():
+                dt_raw = r[3]
+                dt_str = None
+                if dt_raw is not None:
+                    if isinstance(dt_raw, str):
+                        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y"):
+                            try:
+                                dt_parsed = datetime.strptime(dt_raw.strip(), fmt)
+                                dt_str = dt_parsed.strftime("%Y-%m-%d %H:%M:%S")
+                                break
+                            except ValueError:
+                                continue
+                    else:
+                        dt_str = dt_raw.strftime("%Y-%m-%d %H:%M:%S") if hasattr(dt_raw, "strftime") else str(dt_raw)
 
-                if transactions:
-                    break
-            except Exception as e:
-                logger.warning("customer-data: failed to read %s: %s", table, e)
-                continue
+                txn = {
+                    "id": r[0],
+                    "account": r[1],
+                    "meter": r[2],
+                    "date": dt_str,
+                    "amount_lsl": round(float(r[4] or 0), 2),
+                    "rate": round(float(r[5] or 0), 2),
+                    "kwh": round(float(r[6] or 0), 2),
+                    "is_payment": bool(r[7]),
+                }
+                try:
+                    txn["balance"] = round(float(r[8] or 0), 2)
+                except (ValueError, TypeError):
+                    txn["balance"] = None
+                transactions.append(txn)
+        except Exception as e:
+            logger.warning("customer-data: failed to read transactions: %s", e)
 
-        # --- Supplement with tblmonthlytransactions for months beyond history ---
-        # The history tables may be stale (cloned ACCDB).  tblmonthlytransactions
-        # has SparkMeter portfolio data that may cover more recent months.
+        # --- Supplement with monthly_transactions for months beyond history ---
         latest_hist_date: Optional[datetime] = None
         for t in transactions:
             if t["date"]:
@@ -1014,55 +936,48 @@ def employee_customer_data(
                     pass
 
         try:
-            with _get_derived_connection() as dconn:
-                dcursor = dconn.cursor()
-                existing_tables = {
-                    tbl.table_name.lower()
-                    for tbl in dcursor.tables(tableType="TABLE")
-                }
-                if "tblmonthlytransactions" in existing_tables:
-                    dcursor.execute(
-                        "SELECT [yearmonth], [amount_lsl], [kwh_vended], "
-                        "[n_transactions], [meterid], [community] "
-                        "FROM [tblmonthlytransactions] "
-                        "WHERE [accountnumber] = ? "
-                        "ORDER BY [yearmonth] DESC",
-                        (acct,),
-                    )
-                    for r in dcursor.fetchall():
-                        ym = str(r[0] or "").strip()
-                        if not ym:
-                            continue
-                        try:
-                            y, m = int(ym[:4]), int(ym[5:7])
-                            row_dt = datetime(y, m, 15)  # mid-month placeholder
-                        except (ValueError, IndexError):
-                            continue
+            cursor.execute(
+                "SELECT year_month, amount_lsl, kwh_vended, "
+                "txn_count, meter_id, community "
+                "FROM monthly_transactions "
+                "WHERE account_number = %s "
+                "ORDER BY year_month DESC",
+                (acct,),
+            )
+            for r in cursor.fetchall():
+                ym = str(r[0] or "").strip()
+                if not ym:
+                    continue
+                try:
+                    y, m_val = int(ym[:4]), int(ym[5:7])
+                    row_dt = datetime(y, m_val, 15)  # mid-month placeholder
+                except (ValueError, IndexError):
+                    continue
 
-                        # Only add if this month is AFTER the latest history record
-                        if latest_hist_date and row_dt <= latest_hist_date:
-                            continue
+                # Only add if this month is AFTER the latest history record
+                if latest_hist_date and row_dt <= latest_hist_date:
+                    continue
 
-                        lsl = round(float(r[1] or 0), 2)
-                        kwh = round(float(r[2] or 0), 2)
-                        n_txn = int(r[3] or 0)
-                        mid = str(r[4] or "").strip()
+                lsl = round(float(r[1] or 0), 2)
+                kwh = round(float(r[2] or 0), 2)
+                n_txn = int(r[3] or 0)
+                mid = str(r[4] or "").strip()
 
-                        transactions.append({
-                            "id": None,
-                            "account": acct,
-                            "meter": mid,
-                            "date": row_dt.strftime("%Y-%m-%d %H:%M:%S"),
-                            "amount_lsl": lsl,
-                            "rate": 0,
-                            "kwh": kwh,
-                            "is_payment": lsl > 0,
-                            "source": "sparkmeter_monthly",
-                            "n_transactions": n_txn,
-                            "yearmonth": ym,
-                        })
+                transactions.append({
+                    "id": None,
+                    "account": acct,
+                    "meter": mid,
+                    "date": row_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                    "amount_lsl": lsl,
+                    "rate": 0,
+                    "kwh": kwh,
+                    "is_payment": lsl > 0,
+                    "source": "sparkmeter_monthly",
+                    "txn_count": n_txn,
+                    "yearmonth": ym,
+                })
         except Exception as e:
-            logger.warning("customer-data: failed to supplement from tblmonthlytransactions: %s", e)
+            logger.warning("customer-data: failed to supplement from monthly_transactions: %s", e)
 
         # Re-sort by date descending after supplementing
         def _txn_sort_key(t):
@@ -1149,12 +1064,12 @@ def employee_customer_data(
             "account_number": acct,
             "profile": profile,
             "meter": {
-                "meterid": meter_info.get("meterid"),
+                "meter_id": meter_info.get("meter_id"),
                 "community": meter_info.get("community"),
-                "customer_type": meter_info.get("customer type"),
-                "village": meter_info.get("Village name"),
-                "status": meter_info.get("current status"),
-                "connect_date": str(meter_info.get("customer connect date") or ""),
+                "customer_type": meter_info.get("customer_type"),
+                "village": meter_info.get("village_name"),
+                "status": meter_info.get("status"),
+                "connect_date": str(meter_info.get("customer_connect_date") or ""),
             } if meter_info else None,
             "tariff": tariff_info,
             "dashboard": {

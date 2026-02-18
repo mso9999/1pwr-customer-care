@@ -1,7 +1,7 @@
 """
 O&M Quarterly Report data endpoints.
 
-Auto-generates analytics from ACCDB data to mirror the figures in
+Auto-generates analytics from PostgreSQL data to mirror the figures in
 the SMP Operations & Maintenance Quarterly Report:
   - Customer statistics per site (total, active, new per quarter)
   - Customer connection growth over time (quarterly)
@@ -69,11 +69,6 @@ def _get_connection():
     return get_connection()
 
 
-def _get_derived_connection():
-    from customer_api import get_derived_connection
-    return get_derived_connection()
-
-
 def _extract_site(account_number: str) -> str:
     """Extract site code from the last 3 chars of account number.
 
@@ -93,7 +88,6 @@ def _date_to_quarter(dt) -> str:
     if dt is None:
         return ""
     if isinstance(dt, str):
-        # Try parsing common date formats
         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"):
             try:
                 dt = datetime.strptime(dt.strip(), fmt)
@@ -109,53 +103,15 @@ def _date_to_quarter(dt) -> str:
         return ""
 
 
-def _find_date_column(cursor, table_name: str) -> Optional[str]:
-    """Discover the date column in an account history table."""
-    try:
-        cols = cursor.columns(table=table_name)
-        date_candidates = []
-        for col in cols:
-            name = col.column_name
-            tname = (col.type_name or "").upper()
-            if "DATE" in tname or "DATETIME" in tname or "TIMESTAMP" in tname:
-                date_candidates.append(name)
-            elif "date" in name.lower():
-                date_candidates.append(name)
-        # Prefer columns with 'date' in the name
-        for c in date_candidates:
-            if "date" in c.lower():
-                return c
-        return date_candidates[0] if date_candidates else None
-    except Exception:
+def _day_key(val) -> Optional[str]:
+    """Normalise a date/datetime/string to 'YYYY-MM-DD' for unique-day tracking."""
+    if val is None:
         return None
-
-
-# ---------------------------------------------------------------------------
-# Helper: check for tblmonthlytransactions (SparkMeter payment data)
-# Now lives in derived_data.accdb, not the main ACCDB.
-# ---------------------------------------------------------------------------
-
-def _has_txn_table(cursor) -> bool:
-    """Check if tblmonthlytransactions exists and has data in the derived DB."""
-    try:
-        with _get_derived_connection() as dconn:
-            dc = dconn.cursor()
-            existing = {t.table_name.lower() for t in dc.tables(tableType="TABLE")}
-            if "tblmonthlytransactions" not in existing:
-                return False
-            dc.execute("SELECT COUNT(*) FROM [tblmonthlytransactions]")
-            return dc.fetchone()[0] > 0
-    except Exception:
-        return False
-
-
-def _get_derived_cursor_if_available():
-    """Return (connection, cursor) for derived DB, or (None, None) if unavailable."""
-    try:
-        dconn = _get_derived_connection().__enter__()
-        return dconn, dconn.cursor()
-    except Exception:
-        return None, None
+    if hasattr(val, 'strftime'):
+        return val.strftime('%Y-%m-%d')
+    if isinstance(val, str):
+        return val[:10]
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -168,15 +124,13 @@ def report_overview(user: CurrentUser = Depends(require_employee)):
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        # Total customers
-        cursor.execute("SELECT COUNT(*) FROM tblcustomer")
+        cursor.execute("SELECT COUNT(*) FROM customers")
         total_customers = cursor.fetchone()[0]
 
-        # Customers with terminated date
         try:
             cursor.execute(
-                "SELECT COUNT(*) FROM tblcustomer WHERE [DATE SERVICE TERMINATED] IS NOT NULL "
-                "AND [DATE SERVICE TERMINATED] <> ''"
+                "SELECT COUNT(*) FROM customers "
+                "WHERE date_service_terminated IS NOT NULL"
             )
             terminated = cursor.fetchone()[0]
         except Exception:
@@ -184,65 +138,47 @@ def report_overview(user: CurrentUser = Depends(require_employee)):
 
         active_customers = total_customers - terminated
 
-        # Sites (concessions)
         cursor.execute(
-            "SELECT DISTINCT [Concession name] FROM tblcustomer "
-            "WHERE [Concession name] IS NOT NULL AND [Concession name] <> ''"
+            "SELECT DISTINCT community FROM customers "
+            "WHERE community IS NOT NULL AND community <> ''"
         )
         sites = [str(r[0]).strip() for r in cursor.fetchall() if r[0]]
 
-        # Total consumption and sales
-        # Prefer tblmonthlytransactions / tblmonthlyconsumption from derived DB
         total_kwh = 0.0
         total_lsl = 0.0
-        txn_source = "accdb_history"
+        txn_source = "transactions"
 
         try:
-            with _get_derived_connection() as dconn:
-                dcursor = dconn.cursor()
+            cursor.execute("SELECT SUM(amount_lsl) FROM monthly_transactions")
+            row = cursor.fetchone()
+            if row and row[0] is not None:
+                total_lsl = float(row[0])
+                txn_source = "monthly_transactions"
+        except Exception:
+            pass
 
-                if _has_txn_table(cursor):
-                    try:
-                        dcursor.execute(
-                            "SELECT SUM([amount_lsl]) FROM [tblmonthlytransactions]"
-                        )
-                        row = dcursor.fetchone()
-                        if row and row[0] is not None:
-                            total_lsl = float(row[0] or 0)
-                            txn_source = "tblmonthlytransactions"
-                    except Exception:
-                        pass
+        try:
+            cursor.execute("SELECT SUM(kwh) FROM monthly_consumption")
+            row = cursor.fetchone()
+            if row and row[0] is not None:
+                total_kwh = float(row[0])
+        except Exception:
+            pass
 
-                # kWh: prefer tblmonthlyconsumption (actual readings), else history
-                derived_tables = {t.table_name.lower() for t in dcursor.tables(tableType="TABLE")}
-                if "tblmonthlyconsumption" in derived_tables:
-                    try:
-                        dcursor.execute("SELECT SUM([kwh]) FROM [tblmonthlyconsumption]")
-                        row = dcursor.fetchone()
-                        if row and row[0] is not None:
-                            total_kwh = float(row[0] or 0)
-                    except Exception:
-                        pass
-        except Exception as e:
-            logger.warning("Derived DB unavailable for overview totals: %s", e)
-
-        # Fallback: history tables for anything still zero
-        if total_kwh == 0 or (total_lsl == 0 and txn_source == "accdb_history"):
-            tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
-            for table in tables_to_try:
-                try:
-                    cursor.execute(
-                        f"SELECT SUM([kwh value]), SUM([transaction amount]) FROM [{table}]"
-                    )
-                    row = cursor.fetchone()
-                    if row and row[0] is not None:
-                        if total_kwh == 0:
-                            total_kwh = float(row[0] or 0)
-                        if total_lsl == 0:
-                            total_lsl = float(row[1] or 0)
-                        break
-                except Exception:
-                    continue
+        if total_kwh == 0 or (total_lsl == 0 and txn_source == "transactions"):
+            try:
+                cursor.execute(
+                    "SELECT SUM(kwh_value), SUM(transaction_amount) "
+                    "FROM transactions"
+                )
+                row = cursor.fetchone()
+                if row:
+                    if total_kwh == 0 and row[0] is not None:
+                        total_kwh = float(row[0])
+                    if total_lsl == 0 and row[1] is not None:
+                        total_lsl = float(row[1])
+            except Exception:
+                pass
 
         return {
             "total_customers": total_customers,
@@ -267,15 +203,14 @@ def customer_stats_by_site(
     quarter: Optional[str] = Query(None, description="Quarter in YYYY QN format, e.g. '2025 Q4'"),
     user: CurrentUser = Depends(require_employee),
 ):
-    """Customer counts per concession: total, active, and new in the specified quarter."""
+    """Customer counts per community: total, active, and new in the specified quarter."""
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        # All customers grouped by concession
         cursor.execute(
-            "SELECT [Concession name], [CUSTOMER ID], "
-            "[DATE SERVICE CONNECTED], [DATE SERVICE TERMINATED] "
-            "FROM tblcustomer WHERE [Concession name] IS NOT NULL"
+            "SELECT community, customer_id_legacy, "
+            "date_service_connected, date_service_terminated "
+            "FROM customers WHERE community IS NOT NULL"
         )
         rows = cursor.fetchall()
 
@@ -291,12 +226,9 @@ def customer_stats_by_site(
 
             sites[concession]["total"] += 1
 
-            # Active = not terminated
-            is_terminated = terminated_date is not None and str(terminated_date).strip() != ""
-            if not is_terminated:
+            if terminated_date is None:
                 sites[concession]["active"] += 1
 
-            # New in quarter
             if quarter and connected_date:
                 cq = _date_to_quarter(connected_date)
                 if cq == quarter:
@@ -333,8 +265,8 @@ def customer_growth(user: CurrentUser = Depends(require_employee)):
         cursor = conn.cursor()
 
         cursor.execute(
-            "SELECT [DATE SERVICE CONNECTED] FROM tblcustomer "
-            "WHERE [DATE SERVICE CONNECTED] IS NOT NULL"
+            "SELECT date_service_connected FROM customers "
+            "WHERE date_service_connected IS NOT NULL"
         )
         rows = cursor.fetchall()
 
@@ -344,7 +276,6 @@ def customer_growth(user: CurrentUser = Depends(require_employee)):
             if q:
                 quarterly[q] += 1
 
-        # Sort by quarter and compute cumulative
         sorted_quarters = sorted(quarterly.keys())
         cumulative = 0
         result = []
@@ -370,70 +301,56 @@ def consumption_by_site(
     user: CurrentUser = Depends(require_employee),
 ):
     """kWh consumption per site, optionally filtered by quarter."""
-    tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
-
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        for table in tables_to_try:
-            try:
-                date_col = _find_date_column(cursor, table)
+        try:
+            cursor.execute(
+                "SELECT account_number, transaction_date, kwh_value "
+                "FROM transactions"
+            )
+            rows = cursor.fetchall()
+        except Exception as e:
+            logger.warning("Failed to query transactions for consumption: %s", e)
+            return {"sites": [], "total_kwh": 0, "error": "No account history data found"}
 
-                if date_col:
-                    cursor.execute(
-                        f"SELECT [accountnumber], [{date_col}], [kwh value] FROM [{table}]"
-                    )
-                else:
-                    cursor.execute(
-                        f"SELECT [accountnumber], NULL, [kwh value] FROM [{table}]"
-                    )
+        if not rows:
+            return {"sites": [], "total_kwh": 0, "error": "No account history data found"}
 
-                rows = cursor.fetchall()
-                if not rows:
-                    continue
+        site_quarter: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
+        site_totals: Dict[str, float] = defaultdict(float)
 
-                # Per-site, per-quarter aggregation
-                site_quarter: Dict[str, Dict[str, float]] = defaultdict(lambda: defaultdict(float))
-                site_totals: Dict[str, float] = defaultdict(float)
-
-                for row in rows:
-                    acct = str(row[0] or "").strip()
-                    site = _extract_site(acct)
-                    if not site or len(site) < 2:
-                        continue
-
-                    kwh = float(row[2] or 0)
-                    q = _date_to_quarter(row[1]) if row[1] else "Unknown"
-
-                    if quarter and q != quarter:
-                        continue
-
-                    site_quarter[site][q] += kwh
-                    site_totals[site] += kwh
-
-                # Build response
-                per_site = []
-                for site_code in sorted(site_totals.keys()):
-                    quarters_data = {q: round(v, 2) for q, v in sorted(site_quarter[site_code].items())}
-                    per_site.append({
-                        "site": site_code,
-                        "name": SITE_ABBREV.get(site_code, site_code),
-                        "total_kwh": round(site_totals[site_code], 2),
-                        "quarters": quarters_data,
-                    })
-
-                return {
-                    "sites": per_site,
-                    "total_kwh": round(sum(site_totals.values()), 2),
-                    "source_table": table,
-                    "quarter_filter": quarter,
-                }
-
-            except Exception as e:
-                logger.warning("Failed to query %s for consumption: %s", table, e)
+        for row in rows:
+            acct = str(row[0] or "").strip()
+            site = _extract_site(acct)
+            if not site or len(site) < 2:
                 continue
 
-        return {"sites": [], "total_kwh": 0, "error": "No account history data found"}
+            kwh = float(row[2] or 0)
+            q = _date_to_quarter(row[1]) if row[1] else "Unknown"
+
+            if quarter and q != quarter:
+                continue
+
+            site_quarter[site][q] += kwh
+            site_totals[site] += kwh
+
+        per_site = []
+        for site_code in sorted(site_totals.keys()):
+            quarters_data = {q: round(v, 2) for q, v in sorted(site_quarter[site_code].items())}
+            per_site.append({
+                "site": site_code,
+                "name": SITE_ABBREV.get(site_code, site_code),
+                "total_kwh": round(site_totals[site_code], 2),
+                "quarters": quarters_data,
+            })
+
+        return {
+            "sites": per_site,
+            "total_kwh": round(sum(site_totals.values()), 2),
+            "source_table": "transactions",
+            "quarter_filter": quarter,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -448,71 +365,55 @@ def sales_by_site(
     """LSL revenue per site, optionally filtered by quarter.
 
     Data source priority:
-      1. tblmonthlytransactions (SparkMeter, includes corrections)
-      2. tblaccounthistory1 / tblaccounthistoryOriginal (ACCDB, gateway-only)
+      1. monthly_transactions (SparkMeter, includes corrections)
+      2. transactions (raw history, fallback)
     """
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        rows = []
+        rows: List[tuple] = []
         source_table = ""
 
-        # Prefer tblmonthlytransactions from derived DB
-        if _has_txn_table(cursor):
-            try:
-                with _get_derived_connection() as dconn:
-                    dcursor = dconn.cursor()
-                    dcursor.execute(
-                        "SELECT [accountnumber], [yearmonth], [amount_lsl], [community] "
-                        "FROM [tblmonthlytransactions]"
-                    )
-                    raw = dcursor.fetchall()
-                    if raw:
-                        for r in raw:
-                            acct = str(r[0] or "").strip()
-                            ym = str(r[1] or "").strip()
-                            lsl = float(r[2] or 0)
-                            community = str(r[3] or "").strip()
-                            if acct and ym and lsl > 0:
-                                try:
-                                    y, m = int(ym[:4]), int(ym[5:7])
-                                    dt = datetime(y, m, 15)
-                                except (ValueError, IndexError):
-                                    continue
-                                rows.append((acct, dt, lsl, community))
-                        if rows:
-                            source_table = "tblmonthlytransactions"
-            except Exception as e:
-                logger.warning("tblmonthlytransactions query failed: %s", e)
+        try:
+            cursor.execute(
+                "SELECT account_number, year_month, amount_lsl, community "
+                "FROM monthly_transactions"
+            )
+            raw = cursor.fetchall()
+            if raw:
+                for r in raw:
+                    acct = str(r[0] or "").strip()
+                    ym = str(r[1] or "").strip()
+                    lsl = float(r[2] or 0)
+                    community = str(r[3] or "").strip()
+                    if acct and ym and lsl > 0:
+                        try:
+                            y, m = int(ym[:4]), int(ym[5:7])
+                            dt = datetime(y, m, 15)
+                        except (ValueError, IndexError):
+                            continue
+                        rows.append((acct, dt, lsl, community))
+                if rows:
+                    source_table = "monthly_transactions"
+        except Exception as e:
+            logger.warning("monthly_transactions query failed: %s", e)
 
-        # Fallback: history tables
         if not rows:
-            tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
-            for table in tables_to_try:
-                try:
-                    date_col = _find_date_column(cursor, table)
-                    if date_col:
-                        cursor.execute(
-                            f"SELECT [accountnumber], [{date_col}], [transaction amount] "
-                            f"FROM [{table}]"
-                        )
-                    else:
-                        cursor.execute(
-                            f"SELECT [accountnumber], NULL, [transaction amount] "
-                            f"FROM [{table}]"
-                        )
-                    raw = cursor.fetchall()
-                    if raw:
-                        for r in raw:
-                            acct = str(r[0] or "").strip()
-                            lsl = float(r[2] or 0)
-                            rows.append((acct, r[1], lsl, ""))
-                        if rows:
-                            source_table = table
-                            break
-                except Exception as e:
-                    logger.warning("Failed to query %s for sales: %s", table, e)
-                    continue
+            try:
+                cursor.execute(
+                    "SELECT account_number, transaction_date, transaction_amount "
+                    "FROM transactions"
+                )
+                raw = cursor.fetchall()
+                if raw:
+                    for r in raw:
+                        acct = str(r[0] or "").strip()
+                        lsl = float(r[2] or 0)
+                        rows.append((acct, r[1], lsl, ""))
+                    if rows:
+                        source_table = "transactions"
+            except Exception as e:
+                logger.warning("Failed to query transactions for sales: %s", e)
 
         if not rows:
             return {"sites": [], "total_lsl": 0, "error": "No transaction data found"}
@@ -560,58 +461,50 @@ def sales_by_site(
 @router.get("/cumulative-trends")
 def cumulative_trends(user: CurrentUser = Depends(require_employee)):
     """Quarterly cumulative consumption (kWh) and sales (LSL) over time."""
-    tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
-
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        for table in tables_to_try:
-            try:
-                date_col = _find_date_column(cursor, table)
-                if not date_col:
-                    continue
+        try:
+            cursor.execute(
+                "SELECT transaction_date, kwh_value, transaction_amount "
+                "FROM transactions"
+            )
+            rows = cursor.fetchall()
+        except Exception as e:
+            logger.warning("Failed to query transactions for cumulative: %s", e)
+            return {"trends": [], "error": "No date column found in account history"}
 
-                cursor.execute(
-                    f"SELECT [{date_col}], [kwh value], [transaction amount] FROM [{table}]"
-                )
-                rows = cursor.fetchall()
-                if not rows:
-                    continue
+        if not rows:
+            return {"trends": [], "error": "No date column found in account history"}
 
-                quarterly_kwh: Dict[str, float] = defaultdict(float)
-                quarterly_lsl: Dict[str, float] = defaultdict(float)
+        quarterly_kwh: Dict[str, float] = defaultdict(float)
+        quarterly_lsl: Dict[str, float] = defaultdict(float)
 
-                for row in rows:
-                    q = _date_to_quarter(row[0])
-                    if not q:
-                        continue
-                    quarterly_kwh[q] += float(row[1] or 0)
-                    quarterly_lsl[q] += float(row[2] or 0)
-
-                sorted_quarters = sorted(set(quarterly_kwh.keys()) | set(quarterly_lsl.keys()))
-                cum_kwh = 0.0
-                cum_lsl = 0.0
-                result = []
-                for q in sorted_quarters:
-                    kwh = quarterly_kwh.get(q, 0)
-                    lsl = quarterly_lsl.get(q, 0)
-                    cum_kwh += kwh
-                    cum_lsl += lsl
-                    result.append({
-                        "quarter": q,
-                        "kwh": round(kwh, 2),
-                        "lsl": round(lsl, 2),
-                        "cumulative_kwh": round(cum_kwh, 2),
-                        "cumulative_lsl": round(cum_lsl, 2),
-                    })
-
-                return {"trends": result, "source_table": table}
-
-            except Exception as e:
-                logger.warning("Failed to query %s for cumulative: %s", table, e)
+        for row in rows:
+            q = _date_to_quarter(row[0])
+            if not q:
                 continue
+            quarterly_kwh[q] += float(row[1] or 0)
+            quarterly_lsl[q] += float(row[2] or 0)
 
-        return {"trends": [], "error": "No date column found in account history"}
+        sorted_quarters = sorted(set(quarterly_kwh.keys()) | set(quarterly_lsl.keys()))
+        cum_kwh = 0.0
+        cum_lsl = 0.0
+        result = []
+        for q in sorted_quarters:
+            kwh = quarterly_kwh.get(q, 0)
+            lsl = quarterly_lsl.get(q, 0)
+            cum_kwh += kwh
+            cum_lsl += lsl
+            result.append({
+                "quarter": q,
+                "kwh": round(kwh, 2),
+                "lsl": round(lsl, 2),
+                "cumulative_kwh": round(cum_kwh, 2),
+                "cumulative_lsl": round(cum_lsl, 2),
+            })
+
+        return {"trends": result, "source_table": "transactions"}
 
 
 # ---------------------------------------------------------------------------
@@ -621,19 +514,15 @@ def cumulative_trends(user: CurrentUser = Depends(require_employee)):
 @router.get("/avg-consumption-trend")
 def avg_consumption_trend(user: CurrentUser = Depends(require_employee)):
     """Average daily consumption and sales per customer per quarter."""
-    tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
-
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        # First get customer counts per quarter from connection dates
         cursor.execute(
-            "SELECT [DATE SERVICE CONNECTED] FROM tblcustomer "
-            "WHERE [DATE SERVICE CONNECTED] IS NOT NULL"
+            "SELECT date_service_connected FROM customers "
+            "WHERE date_service_connected IS NOT NULL"
         )
         cust_rows = cursor.fetchall()
 
-        # Build cumulative customer count per quarter
         quarterly_new: Dict[str, int] = defaultdict(int)
         for row in cust_rows:
             q = _date_to_quarter(row[0])
@@ -647,63 +536,51 @@ def avg_consumption_trend(user: CurrentUser = Depends(require_employee)):
             cum += quarterly_new[q]
             cum_customers[q] = cum
 
-        # Then get consumption/sales per quarter
-        for table in tables_to_try:
-            try:
-                date_col = _find_date_column(cursor, table)
-                if not date_col:
-                    continue
+        try:
+            cursor.execute(
+                "SELECT transaction_date, kwh_value, transaction_amount "
+                "FROM transactions"
+            )
+            rows = cursor.fetchall()
+        except Exception as e:
+            logger.warning("Failed to query transactions for avg trend: %s", e)
+            return {"trends": [], "error": "No data found"}
 
-                cursor.execute(
-                    f"SELECT [{date_col}], [kwh value], [transaction amount] FROM [{table}]"
-                )
-                rows = cursor.fetchall()
-                if not rows:
-                    continue
+        if not rows:
+            return {"trends": [], "error": "No data found"}
 
-                quarterly_kwh: Dict[str, float] = defaultdict(float)
-                quarterly_lsl: Dict[str, float] = defaultdict(float)
-                quarterly_days: Dict[str, set] = defaultdict(set)
+        quarterly_kwh: Dict[str, float] = defaultdict(float)
+        quarterly_lsl: Dict[str, float] = defaultdict(float)
+        quarterly_days: Dict[str, set] = defaultdict(set)
 
-                for row in rows:
-                    q = _date_to_quarter(row[0])
-                    if not q:
-                        continue
-                    quarterly_kwh[q] += float(row[1] or 0)
-                    quarterly_lsl[q] += float(row[2] or 0)
-                    # Track unique days for daily average
-                    try:
-                        if hasattr(row[0], 'date'):
-                            quarterly_days[q].add(row[0].date())
-                        elif isinstance(row[0], str):
-                            quarterly_days[q].add(row[0][:10])
-                    except Exception:
-                        pass
-
-                sorted_q = sorted(set(quarterly_kwh.keys()) & set(cum_customers.keys()))
-                result = []
-                for q in sorted_q:
-                    customers = cum_customers.get(q, 1)
-                    days = len(quarterly_days.get(q, set())) or 90  # ~90 days per quarter
-                    kwh = quarterly_kwh.get(q, 0)
-                    lsl = quarterly_lsl.get(q, 0)
-
-                    result.append({
-                        "quarter": q,
-                        "customers": customers,
-                        "total_kwh": round(kwh, 2),
-                        "total_lsl": round(lsl, 2),
-                        "avg_daily_kwh_per_customer": round(kwh / (customers * days), 4) if customers > 0 else 0,
-                        "avg_daily_lsl_per_customer": round(lsl / (customers * days), 4) if customers > 0 else 0,
-                    })
-
-                return {"trends": result, "source_table": table}
-
-            except Exception as e:
-                logger.warning("Failed to query %s for avg trend: %s", table, e)
+        for row in rows:
+            q = _date_to_quarter(row[0])
+            if not q:
                 continue
+            quarterly_kwh[q] += float(row[1] or 0)
+            quarterly_lsl[q] += float(row[2] or 0)
+            dk = _day_key(row[0])
+            if dk:
+                quarterly_days[q].add(dk)
 
-        return {"trends": [], "error": "No data found"}
+        sorted_q = sorted(set(quarterly_kwh.keys()) & set(cum_customers.keys()))
+        result = []
+        for q in sorted_q:
+            customers = cum_customers.get(q, 1)
+            days = len(quarterly_days.get(q, set())) or 90
+            kwh = quarterly_kwh.get(q, 0)
+            lsl = quarterly_lsl.get(q, 0)
+
+            result.append({
+                "quarter": q,
+                "customers": customers,
+                "total_kwh": round(kwh, 2),
+                "total_lsl": round(lsl, 2),
+                "avg_daily_kwh_per_customer": round(kwh / (customers * days), 4) if customers > 0 else 0,
+                "avg_daily_lsl_per_customer": round(lsl / (customers * days), 4) if customers > 0 else 0,
+            })
+
+        return {"trends": result, "source_table": "transactions"}
 
 
 # ---------------------------------------------------------------------------
@@ -712,16 +589,16 @@ def avg_consumption_trend(user: CurrentUser = Depends(require_employee)):
 
 @router.get("/site-overview")
 def site_overview(user: CurrentUser = Depends(require_employee)):
-    """List of all concessions with customer counts and district info."""
+    """List of all communities with customer counts and district info."""
     with _get_connection() as conn:
         cursor = conn.cursor()
 
         cursor.execute(
-            "SELECT [Concession name], COUNT(*) as cnt "
-            "FROM tblcustomer "
-            "WHERE [Concession name] IS NOT NULL AND [Concession name] <> '' "
-            "GROUP BY [Concession name] "
-            "ORDER BY [Concession name]"
+            "SELECT community, COUNT(*) AS cnt "
+            "FROM customers "
+            "WHERE community IS NOT NULL AND community <> '' "
+            "GROUP BY community "
+            "ORDER BY community"
         )
         rows = cursor.fetchall()
 
@@ -729,7 +606,6 @@ def site_overview(user: CurrentUser = Depends(require_employee)):
         for row in rows:
             name = str(row[0]).strip()
             count = row[1]
-            # Try to match abbreviation
             abbrev = ""
             for code, full_name in SITE_ABBREV.items():
                 if full_name.lower() == name.lower() or code.lower() in name.lower():
@@ -748,15 +624,6 @@ def site_overview(user: CurrentUser = Depends(require_employee)):
 # ---------------------------------------------------------------------------
 # 9. Load Curves by Customer Type
 # ---------------------------------------------------------------------------
-#
-# Uses "Copy Of tblmeter" (the ACCDB meter registry) which contains:
-#   meterid, accountnumber, customer id, customer type, latitude, longitude, community
-# Joined with tblaccounthistory1 on accountnumber for consumption data.
-# No uGridPLAN sync required -- ACCDB is the source of truth for meter/type/GPS.
-
-# Meter tables to try (prefer "Copy Of tblmeter" with 5k+ rows over "tblmeter" with 33)
-_METER_TABLES = ["Copy Of tblmeter", "tblmeter"]
-
 
 @router.get("/load-curves-by-type")
 def load_curves_by_type(
@@ -765,147 +632,117 @@ def load_curves_by_type(
 ):
     """
     Average daily consumption per customer type.
-    Joins ACCDB meter table (customer type + account number) with account history.
+    Joins meters table (customer type + account number) with transactions.
     """
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        # 1. Build account -> customer_type mapping from the ACCDB meter table
+        # 1. Build account -> customer_type mapping from meters
         acct_type: Dict[str, str] = {}
-        meter_source = ""
-
-        for meter_table in _METER_TABLES:
-            try:
-                cursor.execute(
-                    f"SELECT [accountnumber], [customer type] FROM [{meter_table}] "
-                    f"WHERE [customer type] IS NOT NULL AND [customer type] <> ''"
-                )
-                for row in cursor.fetchall():
-                    acct = str(row[0] or "").strip()
-                    ctype = str(row[1] or "").strip()
-                    if acct and ctype:
-                        acct_type[acct] = ctype
-                if acct_type:
-                    meter_source = meter_table
-                    break
-            except Exception as e:
-                logger.warning("Could not read %s: %s", meter_table, e)
-                continue
+        cursor.execute(
+            "SELECT account_number, customer_type FROM meters "
+            "WHERE customer_type IS NOT NULL AND customer_type <> ''"
+        )
+        for row in cursor.fetchall():
+            acct = str(row[0] or "").strip()
+            ctype = str(row[1] or "").strip()
+            if acct and ctype:
+                acct_type[acct] = ctype
 
         if not acct_type:
             return {
                 "curves": [],
                 "quarterly": [],
-                "note": "No customer type data found in meter tables.",
+                "note": "No customer type data found in meters table.",
             }
 
-        # 2. Query account history
-        tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
+        # 2. Query transactions
+        try:
+            cursor.execute(
+                "SELECT account_number, transaction_date, kwh_value, "
+                "transaction_amount FROM transactions"
+            )
+            rows = cursor.fetchall()
+        except Exception as e:
+            logger.warning("Failed to query transactions for load curves: %s", e)
+            return {"curves": [], "quarterly": [], "error": "No account history data found"}
 
-        for table in tables_to_try:
-            try:
-                date_col = _find_date_column(cursor, table)
-                if date_col:
-                    cursor.execute(
-                        f"SELECT [accountnumber], [{date_col}], [kwh value], [transaction amount] FROM [{table}]"
-                    )
-                else:
-                    cursor.execute(
-                        f"SELECT [accountnumber], NULL, [kwh value], [transaction amount] FROM [{table}]"
-                    )
+        if not rows:
+            return {"curves": [], "quarterly": [], "error": "No account history data found"}
 
-                rows = cursor.fetchall()
-                if not rows:
-                    continue
+        type_totals: Dict[str, Dict[str, Any]] = defaultdict(
+            lambda: {"kwh": 0.0, "lsl": 0.0, "customers": set(), "days": set()}
+        )
+        type_quarter: Dict[str, Dict[str, Dict[str, float]]] = defaultdict(
+            lambda: defaultdict(lambda: {"kwh": 0.0, "lsl": 0.0})
+        )
 
-                # Aggregate by customer type
-                type_totals: Dict[str, Dict[str, Any]] = defaultdict(
-                    lambda: {"kwh": 0.0, "lsl": 0.0, "customers": set(), "days": set()}
-                )
-                # Quarterly breakdown by type
-                type_quarter: Dict[str, Dict[str, Dict[str, float]]] = defaultdict(
-                    lambda: defaultdict(lambda: {"kwh": 0.0, "lsl": 0.0})
-                )
-
-                for row in rows:
-                    acct = str(row[0] or "").strip()
-                    ctype = acct_type.get(acct)
-                    if not ctype:
-                        continue
-
-                    kwh = float(row[2] or 0)
-                    lsl = float(row[3] or 0)
-                    q = _date_to_quarter(row[1]) if row[1] else "Unknown"
-
-                    if quarter and q != quarter:
-                        continue
-
-                    type_totals[ctype]["kwh"] += kwh
-                    type_totals[ctype]["lsl"] += lsl
-                    type_totals[ctype]["customers"].add(acct)
-                    if row[1]:
-                        try:
-                            if hasattr(row[1], 'date'):
-                                type_totals[ctype]["days"].add(row[1].date())
-                            elif isinstance(row[1], str):
-                                type_totals[ctype]["days"].add(row[1][:10])
-                        except Exception:
-                            pass
-
-                    type_quarter[ctype][q]["kwh"] += kwh
-                    type_quarter[ctype][q]["lsl"] += lsl
-
-                # Build response
-                curves = []
-                for ctype in sorted(type_totals.keys()):
-                    data = type_totals[ctype]
-                    n_customers = len(data["customers"])
-                    n_days = len(data["days"]) or 90
-                    curves.append({
-                        "type": ctype,
-                        "total_kwh": round(data["kwh"], 2),
-                        "total_lsl": round(data["lsl"], 2),
-                        "customer_count": n_customers,
-                        "avg_daily_kwh": round(data["kwh"] / n_days, 4) if n_days > 0 else 0,
-                        "avg_daily_kwh_per_customer": round(
-                            data["kwh"] / (n_customers * n_days), 4
-                        ) if n_customers > 0 and n_days > 0 else 0,
-                    })
-
-                # Quarterly stacked data
-                all_quarters = sorted(
-                    set(q for tq in type_quarter.values() for q in tq.keys())
-                )
-                quarterly = []
-                for q in all_quarters:
-                    entry: Dict[str, Any] = {"quarter": q}
-                    for ctype in sorted(type_totals.keys()):
-                        entry[ctype] = round(type_quarter[ctype].get(q, {}).get("kwh", 0), 2)
-                    quarterly.append(entry)
-
-                return {
-                    "curves": curves,
-                    "quarterly": quarterly,
-                    "customer_types": sorted(type_totals.keys()),
-                    "total_typed_customers": len(acct_type),
-                    "source_table": table,
-                    "meter_source": meter_source,
-                    "quarter_filter": quarter,
-                }
-
-            except Exception as e:
-                logger.warning("Failed to query %s for load curves: %s", table, e)
+        for row in rows:
+            acct = str(row[0] or "").strip()
+            ctype = acct_type.get(acct)
+            if not ctype:
                 continue
 
-        return {"curves": [], "quarterly": [], "error": "No account history data found"}
+            kwh = float(row[2] or 0)
+            lsl = float(row[3] or 0)
+            q = _date_to_quarter(row[1]) if row[1] else "Unknown"
+
+            if quarter and q != quarter:
+                continue
+
+            type_totals[ctype]["kwh"] += kwh
+            type_totals[ctype]["lsl"] += lsl
+            type_totals[ctype]["customers"].add(acct)
+            dk = _day_key(row[1])
+            if dk:
+                type_totals[ctype]["days"].add(dk)
+
+            type_quarter[ctype][q]["kwh"] += kwh
+            type_quarter[ctype][q]["lsl"] += lsl
+
+        curves = []
+        for ctype in sorted(type_totals.keys()):
+            data = type_totals[ctype]
+            n_customers = len(data["customers"])
+            n_days = len(data["days"]) or 90
+            curves.append({
+                "type": ctype,
+                "total_kwh": round(data["kwh"], 2),
+                "total_lsl": round(data["lsl"], 2),
+                "customer_count": n_customers,
+                "avg_daily_kwh": round(data["kwh"] / n_days, 4) if n_days > 0 else 0,
+                "avg_daily_kwh_per_customer": round(
+                    data["kwh"] / (n_customers * n_days), 4
+                ) if n_customers > 0 and n_days > 0 else 0,
+            })
+
+        all_quarters = sorted(
+            set(q for tq in type_quarter.values() for q in tq.keys())
+        )
+        quarterly = []
+        for q in all_quarters:
+            entry: Dict[str, Any] = {"quarter": q}
+            for ctype in sorted(type_totals.keys()):
+                entry[ctype] = round(type_quarter[ctype].get(q, {}).get("kwh", 0), 2)
+            quarterly.append(entry)
+
+        return {
+            "curves": curves,
+            "quarterly": quarterly,
+            "customer_types": sorted(type_totals.keys()),
+            "total_typed_customers": len(acct_type),
+            "source_table": "transactions",
+            "meter_source": "meters",
+            "quarter_filter": quarter,
+        }
 
 
 # ---------------------------------------------------------------------------
 # 10. 24-Hour Daily Load Profiles by Customer Type
 # ---------------------------------------------------------------------------
 #
-# Uses tblmeterdata1 (10-minute interval readings: whdatetime, powerkW, meterid)
-# joined with meter registry (meterid -> customer type) to build average
+# Uses meter_readings (10-minute interval readings: reading_time, power_kw,
+# meter_id) joined with meters (meter_id -> customer type) to build average
 # hourly power curves for each customer type.
 
 @router.get("/daily-load-profiles")
@@ -916,66 +753,51 @@ def daily_load_profiles(
     """
     Average 24-hour load profiles by customer type.
     Returns average kW for each hour (0-23) per type, derived from
-    10-minute meter readings in tblmeterdata1.
+    10-minute meter readings in meter_readings.
     """
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        # 1. Build meterid -> customer_type mapping from meter registry
+        # 1. Build meter_id -> customer_type mapping from meters
         meter_type: Dict[str, str] = {}
-        meter_source = ""
-        for meter_table in _METER_TABLES:
-            try:
-                if site:
-                    cursor.execute(
-                        f"SELECT [meterid], [customer type] FROM [{meter_table}] "
-                        f"WHERE [customer type] IS NOT NULL AND [customer type] <> '' "
-                        f"AND [community] = ?",
-                        (site.upper(),),
-                    )
-                else:
-                    cursor.execute(
-                        f"SELECT [meterid], [customer type] FROM [{meter_table}] "
-                        f"WHERE [customer type] IS NOT NULL AND [customer type] <> ''"
-                    )
-                for row in cursor.fetchall():
-                    mid = str(row[0] or "").strip()
-                    ctype = str(row[1] or "").strip()
-                    if mid and ctype:
-                        meter_type[mid] = ctype
-                if meter_type:
-                    meter_source = meter_table
-                    break
-            except Exception as e:
-                logger.warning("Could not read meter types from %s: %s", meter_table, e)
-                continue
+        if site:
+            cursor.execute(
+                "SELECT meter_id, customer_type FROM meters "
+                "WHERE customer_type IS NOT NULL AND customer_type <> '' "
+                "AND community = %s",
+                (site.upper(),),
+            )
+        else:
+            cursor.execute(
+                "SELECT meter_id, customer_type FROM meters "
+                "WHERE customer_type IS NOT NULL AND customer_type <> ''"
+            )
+        for row in cursor.fetchall():
+            mid = str(row[0] or "").strip()
+            ctype = str(row[1] or "").strip()
+            if mid and ctype:
+                meter_type[mid] = ctype
 
         if not meter_type:
             return {
                 "profiles": [],
-                "note": "No customer type data found in meter tables.",
+                "note": "No customer type data found in meters table.",
             }
 
-        # 2. Query tblmeterdata1 for timestamped readings
-        #    Extract hour from whdatetime, group by type + hour, average kW
+        # 2. Query meter_readings for timestamped readings
         try:
-            # Build SQL with meterid filter for efficiency
-            meter_ids = list(meter_type.keys())
-
-            # For large sets, query all and filter in Python
             if site:
                 cursor.execute(
-                    "SELECT [meterid], [whdatetime], [powerkW] FROM [tblmeterdata1] "
-                    "WHERE [community] = ? AND [powerkW] IS NOT NULL",
+                    "SELECT meter_id, reading_time, power_kw FROM meter_readings "
+                    "WHERE community = %s AND power_kw IS NOT NULL",
                     (site.upper(),),
                 )
             else:
                 cursor.execute(
-                    "SELECT [meterid], [whdatetime], [powerkW] FROM [tblmeterdata1] "
-                    "WHERE [powerkW] IS NOT NULL"
+                    "SELECT meter_id, reading_time, power_kw FROM meter_readings "
+                    "WHERE power_kw IS NOT NULL"
                 )
 
-            # Aggregate: type -> hour -> list of kW readings
             type_hour_kw: Dict[str, Dict[int, List[float]]] = defaultdict(
                 lambda: defaultdict(list)
             )
@@ -998,12 +820,10 @@ def daily_load_profiles(
                 except (ValueError, TypeError):
                     continue
 
-                # Extract hour
                 try:
                     if hasattr(dt, 'hour'):
                         hour = dt.hour
                     elif isinstance(dt, str):
-                        # Parse "YYYY-MM-DD HH:MM:SS"
                         hour = int(dt.split(" ")[1].split(":")[0])
                     else:
                         continue
@@ -1026,10 +846,7 @@ def daily_load_profiles(
                 hourly = []
                 for h in range(24):
                     readings = type_hour_kw[ctype].get(h, [])
-                    n_meters = len(type_meter_count[ctype])
                     avg_kw = sum(readings) / len(readings) if readings else 0
-                    # Average per meter (divide total by number of meters)
-                    avg_kw_per_meter = avg_kw  # already per-reading average
                     hourly.append({
                         "hour": h,
                         "avg_kw": round(avg_kw, 4),
@@ -1047,7 +864,6 @@ def daily_load_profiles(
                     ), 4),
                 })
 
-            # Also build a combined chart data array for frontend
             chart_data = []
             for h in range(24):
                 point: Dict[str, Any] = {"hour": f"{h:02d}:00"}
@@ -1061,12 +877,12 @@ def daily_load_profiles(
                 "chart_data": chart_data,
                 "customer_types": sorted(type_hour_kw.keys()),
                 "total_readings": total_readings,
-                "meter_source": meter_source,
+                "meter_source": "meters",
                 "site_filter": site,
             }
 
         except Exception as e:
-            logger.warning("Failed to query tblmeterdata1 for load profiles: %s", e)
+            logger.warning("Failed to query meter_readings for load profiles: %s", e)
             return {"profiles": [], "error": str(e)}
 
 
@@ -1085,70 +901,58 @@ def arpu_time_series(user: CurrentUser = Depends(require_employee)):
     customer base, and divides quarterly revenue by that base.
 
     Data source priority:
-      1. tblmonthlytransactions (SparkMeter portfolio data, includes manual corrections)
-      2. tblaccounthistory1 / tblaccounthistoryOriginal (ACCDB, gateway-only)
+      1. monthly_transactions (SparkMeter portfolio data, includes manual corrections)
+      2. transactions (raw history, fallback)
     """
 
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        txn_rows = []
+        txn_rows: List[tuple] = []
         source_table = ""
 
-        # Prefer tblmonthlytransactions from derived DB
-        if _has_txn_table(cursor):
-            try:
-                with _get_derived_connection() as dconn:
-                    dcursor = dconn.cursor()
-                    dcursor.execute(
-                        "SELECT [accountnumber], [yearmonth], [amount_lsl], [community] "
-                        "FROM [tblmonthlytransactions]"
-                    )
-                    raw = dcursor.fetchall()
-                    if raw:
-                        for row in raw:
-                            acct = str(row[0] or "").strip()
-                            ym = str(row[1] or "").strip()
-                            lsl = float(row[2] or 0)
-                            community = str(row[3] or "").strip()
-                            if not acct or not ym or lsl <= 0:
-                                continue
-                            try:
-                                y, m = int(ym[:4]), int(ym[5:7])
-                                dt = datetime(y, m, 15)
-                            except (ValueError, IndexError):
-                                continue
-                            txn_rows.append((acct, dt, lsl, community))
-                        if txn_rows:
-                            source_table = "tblmonthlytransactions"
-            except Exception as e:
-                logger.warning("Failed to query tblmonthlytransactions for ARPU: %s", e)
-
-        # Fallback: history tables
-        if not txn_rows:
-            tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
-            for table in tables_to_try:
-                try:
-                    date_col = _find_date_column(cursor, table)
-                    if not date_col:
+        try:
+            cursor.execute(
+                "SELECT account_number, year_month, amount_lsl, community "
+                "FROM monthly_transactions"
+            )
+            raw = cursor.fetchall()
+            if raw:
+                for row in raw:
+                    acct = str(row[0] or "").strip()
+                    ym = str(row[1] or "").strip()
+                    lsl = float(row[2] or 0)
+                    community = str(row[3] or "").strip()
+                    if not acct or not ym or lsl <= 0:
                         continue
-                    cursor.execute(
-                        f"SELECT [accountnumber], [{date_col}], [transaction amount] "
-                        f"FROM [{table}]"
-                    )
-                    raw = cursor.fetchall()
-                    if raw:
-                        txn_rows = [
-                            (str(r[0] or "").strip(), r[1], float(r[2] or 0), "")
-                            for r in raw
-                        ]
-                        source_table = table
-                        break
-                except Exception:
-                    continue
+                    try:
+                        y, m = int(ym[:4]), int(ym[5:7])
+                        dt = datetime(y, m, 15)
+                    except (ValueError, IndexError):
+                        continue
+                    txn_rows.append((acct, dt, lsl, community))
+                if txn_rows:
+                    source_table = "monthly_transactions"
+        except Exception as e:
+            logger.warning("Failed to query monthly_transactions for ARPU: %s", e)
+
+        if not txn_rows:
+            try:
+                cursor.execute(
+                    "SELECT account_number, transaction_date, transaction_amount "
+                    "FROM transactions"
+                )
+                raw = cursor.fetchall()
+                if raw:
+                    txn_rows = [
+                        (str(r[0] or "").strip(), r[1], float(r[2] or 0), "")
+                        for r in raw
+                    ]
+                    source_table = "transactions"
+            except Exception:
+                pass
 
         if txn_rows:
-            # ── Pass 1: bucket revenue and first-seen quarter per account ──
             q_revenue: Dict[str, float] = defaultdict(float)
             q_site_revenue: Dict[str, Dict[str, float]] = defaultdict(
                 lambda: defaultdict(float)
@@ -1174,7 +978,6 @@ def arpu_time_series(user: CurrentUser = Depends(require_employee)):
                     if site and len(site) >= 2:
                         acct_site[acct] = site
 
-            # ── Pass 2: build cumulative customer counts ──
             all_quarters = sorted(q_revenue.keys())
             cumulative_all: set = set()
             cumulative_by_site: Dict[str, set] = defaultdict(set)
@@ -1254,68 +1057,56 @@ def monthly_arpu_time_series(user: CurrentUser = Depends(require_employee)):
     Monthly ARPU: total revenue / cumulative customer base per month.
 
     Data source priority:
-      1. tblmonthlytransactions (SparkMeter portfolio, includes corrections)
-      2. tblaccounthistory1 / tblaccounthistoryOriginal (ACCDB, gateway-only)
+      1. monthly_transactions (SparkMeter portfolio, includes corrections)
+      2. transactions (raw history, fallback)
     """
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        txn_rows = []
+        txn_rows: List[tuple] = []
         source_table = ""
 
-        # Prefer tblmonthlytransactions from derived DB
-        if _has_txn_table(cursor):
-            try:
-                with _get_derived_connection() as dconn:
-                    dcursor = dconn.cursor()
-                    dcursor.execute(
-                        "SELECT [accountnumber], [yearmonth], [amount_lsl], [community] "
-                        "FROM [tblmonthlytransactions]"
-                    )
-                    raw = dcursor.fetchall()
-                    if raw:
-                        for row in raw:
-                            acct = str(row[0] or "").strip()
-                            ym = str(row[1] or "").strip()
-                            lsl = float(row[2] or 0)
-                            community = str(row[3] or "").strip()
-                            if acct and ym and lsl > 0:
-                                txn_rows.append((acct, ym, lsl, community))
-                        if txn_rows:
-                            source_table = "tblmonthlytransactions"
-            except Exception as e:
-                logger.warning("tblmonthlytransactions query failed: %s", e)
+        try:
+            cursor.execute(
+                "SELECT account_number, year_month, amount_lsl, community "
+                "FROM monthly_transactions"
+            )
+            raw = cursor.fetchall()
+            if raw:
+                for row in raw:
+                    acct = str(row[0] or "").strip()
+                    ym = str(row[1] or "").strip()
+                    lsl = float(row[2] or 0)
+                    community = str(row[3] or "").strip()
+                    if acct and ym and lsl > 0:
+                        txn_rows.append((acct, ym, lsl, community))
+                if txn_rows:
+                    source_table = "monthly_transactions"
+        except Exception as e:
+            logger.warning("monthly_transactions query failed: %s", e)
 
-        # Fallback: history tables
         if not txn_rows:
-            tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
-            for table in tables_to_try:
-                try:
-                    date_col = _find_date_column(cursor, table)
-                    if not date_col:
-                        continue
-                    cursor.execute(
-                        f"SELECT [accountnumber], [{date_col}], [transaction amount] "
-                        f"FROM [{table}]"
-                    )
-                    raw = cursor.fetchall()
-                    if raw:
-                        for r in raw:
-                            acct = str(r[0] or "").strip()
-                            m = _date_to_month(r[1])
-                            lsl = float(r[2] or 0)
-                            if acct and m:
-                                txn_rows.append((acct, m, lsl, ""))
-                        if txn_rows:
-                            source_table = table
-                            break
-                except Exception:
-                    continue
+            try:
+                cursor.execute(
+                    "SELECT account_number, transaction_date, transaction_amount "
+                    "FROM transactions"
+                )
+                raw = cursor.fetchall()
+                if raw:
+                    for r in raw:
+                        acct = str(r[0] or "").strip()
+                        m = _date_to_month(r[1])
+                        lsl = float(r[2] or 0)
+                        if acct and m:
+                            txn_rows.append((acct, m, lsl, ""))
+                    if txn_rows:
+                        source_table = "transactions"
+            except Exception:
+                pass
 
         if not txn_rows:
             return {"monthly_arpu": [], "site_codes": [], "error": "No transaction data found"}
 
-        # ── Pass 1: bucket revenue and first-seen month per account ──
         m_revenue: Dict[str, float] = defaultdict(float)
         m_site_revenue: Dict[str, Dict[str, float]] = defaultdict(
             lambda: defaultdict(float)
@@ -1333,7 +1124,6 @@ def monthly_arpu_time_series(user: CurrentUser = Depends(require_employee)):
                 if site and len(site) >= 2:
                     acct_site[acct] = site
 
-        # ── Pass 2: build cumulative customer counts ──
         all_months = sorted(m_revenue.keys())
         cumulative_all: set = set()
         cumulative_by_site: Dict[str, set] = defaultdict(set)
@@ -1407,27 +1197,27 @@ def consumption_by_tenure(
     with +/- 1 standard deviation bands.
 
     Data source priority:
-      1. tblmonthlyconsumption — actual meter readings imported from Koios /
+      1. monthly_consumption -- actual meter readings imported from Koios /
          ThunderCloud via import_meter_readings.py.
-      2. tblaccounthistory1 + tblaccounthistoryOriginal — kWh vended per
-         transaction (fallback if meter readings not yet imported).
+      2. transactions -- kWh vended per transaction (fallback if meter
+         readings not yet imported).
 
-    Customer type is resolved from ACCDB meter tables first, then from the
+    Customer type is resolved from the meters table first, then from the
     static JSON mapping (meter_customer_types.json) as a fallback.
     """
 
-    # ── Load meter → customer-type mapping (JSON fallback) ──
+    # -- Load meter -> customer-type mapping (JSON fallback) --
     _data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
     _type_map_path = os.path.join(_data_dir, "meter_customer_types.json")
     try:
         with open(_type_map_path, "r") as f:
-            meter_type_map: Dict[str, str] = json.load(f)
+            json_type_map: Dict[str, str] = json.load(f)
     except Exception as e:
         logger.error("Cannot load meter_customer_types.json: %s", e)
-        meter_type_map = {}
+        json_type_map = {}
 
     norm_map: Dict[str, str] = {}
-    for mid, ctype in meter_type_map.items():
+    for mid, ctype in json_type_map.items():
         norm_map[mid.upper().replace("_", "-")] = ctype
 
     def _parse_dt(dt) -> Optional[datetime]:
@@ -1455,57 +1245,42 @@ def consumption_by_tenure(
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        # ── Build account → customer_type mapping ──
+        # -- Fetch all meter data in one query --
+        cursor.execute(
+            "SELECT meter_id, account_number, customer_type FROM meters"
+        )
+        all_meter_rows = cursor.fetchall()
+
+        # -- Build mappings from meters table --
         acct_type: Dict[str, str] = {}
-
-        for meter_table in _METER_TABLES:
-            try:
-                cursor.execute(
-                    f"SELECT [accountnumber], [customer type] FROM [{meter_table}] "
-                    f"WHERE [customer type] IS NOT NULL AND [customer type] <> ''"
-                )
-                for row in cursor.fetchall():
-                    acct = str(row[0] or "").strip()
-                    ctype = str(row[1] or "").strip()
-                    if acct and ctype and acct not in acct_type:
-                        acct_type[acct] = ctype
-            except Exception:
-                continue
-
-        # Build meterid → customer_type from ACCDB meter tables directly
-        # (covers rows where Koios stored meter serial as accountnumber)
         meter_type_map: Dict[str, str] = {}
-        for meter_table in _METER_TABLES:
-            try:
-                cursor.execute(
-                    f"SELECT [meterid], [customer type] FROM [{meter_table}] "
-                    f"WHERE [customer type] IS NOT NULL AND [customer type] <> ''"
-                )
-                for row in cursor.fetchall():
-                    mid = str(row[0] or "").strip()
-                    ctype = str(row[1] or "").strip()
-                    if mid and ctype:
-                        meter_type_map[mid] = ctype
-                        meter_type_map[mid.upper()] = ctype
-            except Exception:
-                continue
+        meter_to_acct: Dict[str, str] = {}
 
-        # Also enrich acct_type using JSON map for meters without ACCDB type
-        for meter_table in _METER_TABLES:
-            try:
-                cursor.execute(
-                    f"SELECT [meterid], [accountnumber] FROM [{meter_table}]"
-                )
-                for row in cursor.fetchall():
-                    mid = str(row[0] or "").strip()
-                    acct = str(row[1] or "").strip()
-                    if not acct or acct in acct_type:
-                        continue
-                    ctype = _lookup_type(mid)
-                    if ctype:
-                        acct_type[acct] = ctype
-            except Exception:
+        for row in all_meter_rows:
+            mid = str(row[0] or "").strip()
+            acct = str(row[1] or "").strip()
+            ctype = str(row[2] or "").strip()
+
+            if mid and acct:
+                meter_to_acct[mid] = acct
+                meter_to_acct[mid.upper()] = acct
+
+            if mid and ctype:
+                meter_type_map[mid] = ctype
+                meter_type_map[mid.upper()] = ctype
+
+            if acct and ctype and acct not in acct_type:
+                acct_type[acct] = ctype
+
+        # Enrich acct_type for accounts without a direct type, via JSON
+        for row in all_meter_rows:
+            mid = str(row[0] or "").strip()
+            acct = str(row[1] or "").strip()
+            if not acct or acct in acct_type:
                 continue
+            ctype_json = _lookup_type(mid)
+            if ctype_json:
+                acct_type[acct] = ctype_json
 
         acct_type_lower: Dict[str, str] = {k.lower(): v for k, v in acct_type.items()}
 
@@ -1521,56 +1296,28 @@ def consumption_by_tenure(
                 ct = _lookup_type(meterid)
                 if ct:
                     return ct
-            # accountnumber might actually be a meter serial (Koios fallback)
             ct = meter_type_map.get(acct) or meter_type_map.get(acct.upper())
             if ct:
                 return ct
             return _lookup_type(acct)
 
-        # ── Merge ALL data sources for comprehensive tenure analysis ──
-        # History tables are the comprehensive base (1000+ customers, 4+ years).
-        # Consumption data (tblmonthlyconsumption) overlays actual meter readings
-        # for account-months where it exists.  Consumption takes priority over
-        # vended kWh for overlapping (account, month) pairs.
-
-        # Build meter_serial → accountnumber map to normalise consumption IDs
-        # so that the same physical customer uses a single key across sources.
-        meter_to_acct: Dict[str, str] = {}
-        for meter_table in _METER_TABLES:
-            try:
-                cursor.execute(
-                    f"SELECT [meterid], [accountnumber] FROM [{meter_table}]"
-                )
-                for row in cursor.fetchall():
-                    mid = str(row[0] or "").strip()
-                    a = str(row[1] or "").strip()
-                    if mid and a:
-                        meter_to_acct[mid] = a
-                        meter_to_acct[mid.upper()] = a
-            except Exception:
-                continue
-
+        # -- Merge ALL data sources for comprehensive tenure analysis --
         parsed_rows: List[tuple] = []
         acct_first_txn: Dict[str, datetime] = {}
         debug_info: Dict[str, Any] = {"acct_type_map_size": len(acct_type)}
 
-        # ── Source 1: tblmonthlyconsumption (actual meter readings) ──
-        # Loaded first so consumption takes priority for overlapping data.
+        # -- Source 1: monthly_consumption (actual meter readings) --
         consumption_acct_months: Set[Tuple[str, str]] = set()
-        consumption_rows: List[tuple] = []
+        consumption_rows: list = []
 
         try:
-            with _get_derived_connection() as dconn:
-                dcursor = dconn.cursor()
-                derived_tables = {t.table_name.lower() for t in dcursor.tables(tableType="TABLE")}
-                if "tblmonthlyconsumption" in derived_tables:
-                    dcursor.execute(
-                        "SELECT [accountnumber], [yearmonth], [kwh], [meterid] "
-                        "FROM [tblmonthlyconsumption]"
-                    )
-                    consumption_rows = dcursor.fetchall()
+            cursor.execute(
+                "SELECT account_number, year_month, kwh, meter_id "
+                "FROM monthly_consumption"
+            )
+            consumption_rows = cursor.fetchall()
         except Exception as e:
-            logger.warning("Derived DB unavailable for tblmonthlyconsumption: %s", e)
+            logger.warning("monthly_consumption query failed: %s", e)
 
         cons_matched = 0
         cons_unmatched = 0
@@ -1587,7 +1334,6 @@ def consumption_by_tenure(
             if not raw_acct or not ym or kwh <= 0:
                 continue
 
-            # Normalise: if raw_acct is a meter serial, map to ACCDB account number
             acct = (meter_to_acct.get(raw_acct)
                     or meter_to_acct.get(raw_acct.upper())
                     or raw_acct)
@@ -1617,86 +1363,70 @@ def consumption_by_tenure(
             "added": cons_added,
         }
 
-        # ── Source 2: History tables (comprehensive vended kWh) ──
-        tables_to_try = ["tblaccounthistory1", "tblaccounthistoryOriginal"]
-        all_table_rows: Dict[str, list] = {}
-        for table in tables_to_try:
-            try:
-                date_col = _find_date_column(cursor, table)
-                if not date_col:
-                    continue
-                cursor.execute(
-                    f"SELECT [meterid], [accountnumber], [{date_col}], [kwh value] "
-                    f"FROM [{table}]"
-                )
-                all_table_rows[table] = cursor.fetchall()
-            except Exception as e:
-                logger.warning("Failed to read %s for tenure: %s", table, e)
+        # -- Source 2: transactions (comprehensive vended kWh) --
+        history_rows: list = []
+        try:
+            cursor.execute(
+                "SELECT meter_id, account_number, transaction_date, kwh_value "
+                "FROM transactions"
+            )
+            history_rows = cursor.fetchall()
+        except Exception as e:
+            logger.warning("Failed to read transactions for tenure: %s", e)
 
-        # Extend type mapping from history rows (always, not just fallback)
-        for _table, rows in all_table_rows.items():
-            for row in rows:
-                mid = str(row[0] or "").strip()
-                acct = str(row[1] or "").strip()
-                if not acct or acct in acct_type:
-                    continue
-                ctype = _lookup_type(mid)
-                if ctype:
-                    acct_type[acct] = ctype
-        # Refresh the lower-case index (same dict object so _resolve_type sees it)
+        # Extend type mapping from history rows
+        for row in history_rows:
+            mid = str(row[0] or "").strip()
+            acct = str(row[1] or "").strip()
+            if not acct or acct in acct_type:
+                continue
+            ctype = _lookup_type(mid)
+            if ctype:
+                acct_type[acct] = ctype
         acct_type_lower.update({k.lower(): v for k, v in acct_type.items()})
 
-        per_table_debug: Dict[str, Any] = {}
-        total_hist_rows = 0
         hist_added = 0
         hist_skipped_overlap = 0
+        hist_matched = 0
+        hist_unmatched = 0
 
-        for table, rows in all_table_rows.items():
-            total_hist_rows += len(rows)
-            tbl_matched = 0
-            tbl_unmatched = 0
+        for row in history_rows:
+            mid = str(row[0] or "").strip()
+            acct = str(row[1] or "").strip()
+            if not acct:
+                continue
 
-            for row in rows:
-                mid = str(row[0] or "").strip()
-                acct = str(row[1] or "").strip()
-                if not acct:
-                    continue
+            ctype = _resolve_type(acct, mid)
+            if not ctype:
+                hist_unmatched += 1
+                continue
+            hist_matched += 1
 
-                ctype = _resolve_type(acct, mid)
-                if not ctype:
-                    tbl_unmatched += 1
-                    continue
-                tbl_matched += 1
+            txn_dt = _parse_dt(row[2])
+            if txn_dt is None:
+                continue
+            try:
+                kwh = float(row[3] or 0)
+            except (ValueError, TypeError):
+                continue
 
-                txn_dt = _parse_dt(row[2])
-                if txn_dt is None:
-                    continue
-                try:
-                    kwh = float(row[3] or 0)
-                except (ValueError, TypeError):
-                    continue
+            ym_key = f"{txn_dt.year:04d}-{txn_dt.month:02d}"
+            if (acct, ym_key) in consumption_acct_months:
+                hist_skipped_overlap += 1
+                continue
 
-                # Skip if consumption already covers this account-month
-                ym_key = f"{txn_dt.year:04d}-{txn_dt.month:02d}"
-                if (acct, ym_key) in consumption_acct_months:
-                    hist_skipped_overlap += 1
-                    continue
+            parsed_rows.append((acct, ctype, txn_dt, kwh))
+            hist_added += 1
+            if acct not in acct_first_txn or txn_dt < acct_first_txn[acct]:
+                acct_first_txn[acct] = txn_dt
 
-                parsed_rows.append((acct, ctype, txn_dt, kwh))
-                hist_added += 1
-                if acct not in acct_first_txn or txn_dt < acct_first_txn[acct]:
-                    acct_first_txn[acct] = txn_dt
-
-            per_table_debug[table] = {
-                "rows": len(rows),
-                "matched": tbl_matched,
-                "unmatched": tbl_unmatched,
-            }
-
-        debug_info["history_tables"] = per_table_debug
-        debug_info["history_total_rows"] = total_hist_rows
-        debug_info["history_added"] = hist_added
-        debug_info["history_skipped_overlap"] = hist_skipped_overlap
+        debug_info["transactions"] = {
+            "rows": len(history_rows),
+            "matched": hist_matched,
+            "unmatched": hist_unmatched,
+            "added": hist_added,
+            "skipped_overlap": hist_skipped_overlap,
+        }
         debug_info["total_unique_accounts"] = len(acct_first_txn)
 
         data_source = (
@@ -1713,7 +1443,7 @@ def consumption_by_tenure(
                 "debug": debug_info,
             }
 
-        # ── Aggregate by type -> tenure_month -> acct ──
+        # -- Aggregate by type -> tenure_month -> acct --
         type_tenure_acct: Dict[str, Dict[int, Dict[str, float]]] = defaultdict(
             lambda: defaultdict(lambda: defaultdict(float))
         )
@@ -1739,9 +1469,6 @@ def consumption_by_tenure(
                 "debug": debug_info,
             }
 
-        # Compute each account's tenure as months from first reading/txn to NOW.
-        # Only include accounts that are IN the data source (not the full type map),
-        # so n_eligible reflects actual data coverage, not all known customers.
         now = datetime.now()
         type_acct_tenure: Dict[str, Dict[str, int]] = defaultdict(dict)
         max_tenure = 0
@@ -1756,9 +1483,6 @@ def consumption_by_tenure(
             if tenure > max_tenure:
                 max_tenure = tenure
 
-        # Build chart_data.
-        # n(t) = customers with tenure >= t  (monotonically decreasing).
-        # Average & stddev use ONLY customers with actual data at month t.
         chart_data = []
         last_valid_t = 0
         for t in range(max_tenure + 1):
@@ -1771,7 +1495,6 @@ def consumption_by_tenure(
                 )
                 acct_kwh = type_tenure_acct[ctype].get(t, {})
                 raw_values = sorted(acct_kwh.values())
-                # IQR-based outlier removal
                 if len(raw_values) >= 4:
                     q1_idx = len(raw_values) // 4
                     q3_idx = 3 * len(raw_values) // 4
@@ -1844,7 +1567,7 @@ def consumption_by_tenure(
             "total_accounts_matched": len(acct_first_txn),
             "data_source": data_source,
             "segmentation": "customer_type",
-            "mapping_size": len(meter_type_map),
+            "mapping_size": len(json_type_map),
             "debug": debug_info,
         }
 
@@ -1862,9 +1585,9 @@ def meter_data_export(
     user: CurrentUser = Depends(require_employee),
 ):
     """
-    Export raw meter readings from tblmeterdata1 for CDF generation.
+    Export raw meter readings from meter_readings for CDF generation.
 
-    Returns timestamped kW readings joined with the meter registry to
+    Returns timestamped kW readings joined with the meters table to
     include customer type and site.  Designed for batch consumption by
     the uGridPlan 8760 CDF builder script.
 
@@ -1873,40 +1596,31 @@ def meter_data_export(
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        # ── 1. Build meterid -> (customer_type, community) mapping ──
+        # -- 1. Build meter_id -> (customer_type, community) mapping --
         meter_info: Dict[str, Dict[str, str]] = {}
-        meter_source = ""
-        for meter_table in _METER_TABLES:
-            try:
-                cursor.execute(
-                    f"SELECT [meterid], [customer type], [community] FROM [{meter_table}] "
-                    f"WHERE [customer type] IS NOT NULL AND [customer type] <> ''"
-                )
-                for row in cursor.fetchall():
-                    mid = str(row[0] or "").strip()
-                    ctype = str(row[1] or "").strip().upper()
-                    community = str(row[2] or "").strip().upper()
-                    if mid and ctype:
-                        meter_info[mid] = {"type": ctype, "site": community}
-                if meter_info:
-                    meter_source = meter_table
-                    break
-            except Exception as e:
-                logger.warning("meter-export: could not read %s: %s", meter_table, e)
-                continue
+        cursor.execute(
+            "SELECT meter_id, customer_type, community FROM meters "
+            "WHERE customer_type IS NOT NULL AND customer_type <> ''"
+        )
+        for row in cursor.fetchall():
+            mid = str(row[0] or "").strip()
+            ctype = str(row[1] or "").strip().upper()
+            community = str(row[2] or "").strip().upper()
+            if mid and ctype:
+                meter_info[mid] = {"type": ctype, "site": community}
 
         if not meter_info:
             return {"readings": [], "meta": {"error": "No meter registry data found"}}
 
-        # ── 2. Query tblmeterdata1 ──
+        # -- 2. Query meter_readings --
         sql = (
-            "SELECT [meterid], [whdatetime], [powerkW] FROM [tblmeterdata1] "
-            "WHERE [powerkW] IS NOT NULL"
+            "SELECT meter_id, reading_time, power_kw FROM meter_readings "
+            "WHERE power_kw IS NOT NULL"
         )
         params: List[Any] = []
 
         if site:
-            sql += " AND [community] = ?"
+            sql += " AND community = %s"
             params.append(site.upper())
 
         try:
@@ -1915,7 +1629,7 @@ def meter_data_export(
             logger.warning("meter-export: query failed: %s", e)
             return {"readings": [], "meta": {"error": str(e)}}
 
-        # ── 3. Stream results with Python-side filtering ──
+        # -- 3. Stream results with Python-side filtering --
         readings: List[Dict[str, Any]] = []
         skipped = 0
 
@@ -1929,7 +1643,6 @@ def meter_data_export(
             ctype = info["type"]
             community = info["site"]
 
-            # Customer-type filter
             if customer_type and ctype != customer_type.upper():
                 continue
 
@@ -1943,7 +1656,6 @@ def meter_data_export(
             except (ValueError, TypeError):
                 continue
 
-            # Date parsing
             try:
                 if hasattr(dt_val, 'year'):
                     ts = dt_val
@@ -1954,7 +1666,6 @@ def meter_data_export(
             except (ValueError, AttributeError):
                 continue
 
-            # Date range filters
             if start_date:
                 try:
                     sd = datetime.strptime(start_date, "%Y-%m-%d")
@@ -1978,7 +1689,7 @@ def meter_data_export(
                 "meterid": mid,
             })
 
-        # ── 4. Summary ──
+        # -- 4. Summary --
         type_counts: Dict[str, int] = defaultdict(int)
         site_counts: Dict[str, int] = defaultdict(int)
         for r in readings:
@@ -1990,7 +1701,7 @@ def meter_data_export(
             "meta": {
                 "total_readings": len(readings),
                 "skipped_no_type": skipped,
-                "meter_source": meter_source,
+                "meter_source": "meters",
                 "customer_types": dict(type_counts),
                 "sites": dict(site_counts),
                 "filters": {
