@@ -1,9 +1,13 @@
 import { useState } from 'react';
 import { Link, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { useCountry, COUNTRY_LABELS } from '../contexts/CountryContext';
+
+const FLAG: Record<string, string> = { LS: '\u{1F1F1}\u{1F1F8}', BJ: '\u{1F1E7}\u{1F1EF}' };
 
 export default function Layout() {
   const { user, logout, isEmployee, isCustomer, isSuperadmin } = useAuth();
+  const { country, setCountry } = useCountry();
   const navigate = useNavigate();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -46,8 +50,19 @@ export default function Layout() {
               <span className="text-lg font-bold text-blue-700 whitespace-nowrap">Customer Care</span>
             </Link>
 
-            {/* Right: user info + hamburger */}
+            {/* Right: country selector + user info + hamburger */}
             <div className="flex items-center gap-3">
+              {isEmployee && (
+                <select
+                  value={country}
+                  onChange={(e) => { setCountry(e.target.value); window.location.reload(); }}
+                  className="text-sm border border-gray-200 rounded-md px-2 py-1 bg-white focus:ring-1 focus:ring-blue-400 focus:outline-none"
+                >
+                  {Object.entries(COUNTRY_LABELS).map(([code, name]) => (
+                    <option key={code} value={code}>{FLAG[code] || ''} {name}</option>
+                  ))}
+                </select>
+              )}
               {user && (
                 <div className="hidden sm:flex items-center gap-3">
                   {isEmployee && (

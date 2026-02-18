@@ -348,3 +348,28 @@ The SOPs described an **outdated** configuration (iometering.co.za, SMSsync, 201
 ### Protocol Feedback
 - CONTEXT.md was missing multi-country context entirely — now fixed
 - CONTEXT.md was missing metering architecture (meter roles, prototype meters, data sources) — now fixed
+
+### Checkpoint 1 (16:51 UTC) — Benin Backend Standup In Progress
+
+**Completed this session:**
+1. **Confirmed multi-country architecture** — separate backends, unified frontend
+2. **Probed Benin Koios API** — discovered org (MIONWA GENERATION), 6 sites (GBO, SAM + 4 GBOWÈLE duplicates), ~250 customers, XOF currency, SparkMeter Nova meters (SMRSD-04-*)
+3. **Created `country_config.py`** — country-configurable site codes, currency, Koios org ID based on `COUNTRY_CODE` env var. Defaults to LS for backward compat.
+4. **Updated `om_report.py`** — imports site maps from country_config instead of hardcoded dicts
+5. **Added `/api/config` endpoint** to `customer_api.py` — frontend can discover active country metadata
+6. **Created 1PDB-BJ database** on EC2 (`onepower_bj`, same schema as Lesotho, `system_config` seeded for XOF)
+7. **Created Benin .env** at `/opt/1pdb-bj/.env` with Benin Koios creds, port 8101, `COUNTRY_CODE=BJ`
+8. **Created `1pdb-api-bj.service`** — systemd service running on port 8101, using Benin .env
+9. **Benin API is running** — `curl localhost:8101/api/config` returns `{country_code: "BJ", currency: "XOF", ...}`
+10. **Updated Caddyfile** for `/api/bj/*` → port 8101 routing (prefix stripping)
+11. **Pushed all changes** to main (commit dd81161) — auto-deploy completed
+
+**In progress / broken:**
+- Caddy `/api/bj/*` routing returns 404 — the `uri strip_prefix` + `rewrite` combo isn't working correctly. Need to debug the Caddy rewrite rules.
+
+**Still pending:**
+- Fix Caddy routing for Benin
+- Populate Benin DB with customers/meters from Koios API
+- Set up Koios import service for Benin
+- Frontend country selector and multi-country routing
+- Koios historical import for Lesotho still running (PID 501197 from prior session)
