@@ -214,8 +214,8 @@ def _resolve_accounts_for_customer(cursor, customer_id_legacy: str) -> List[str]
 
 app = FastAPI(
     title="1PWR Customer Care Portal API",
-    description="Customer data management, schema introspection, export, and role-based access for 1PWR Lesotho.",
-    version="3.0.0",
+    description="Customer data management, schema introspection, export, and role-based access.",
+    version="3.1.0",
 )
 
 app.add_middleware(
@@ -263,6 +263,22 @@ app.include_router(customer_data_router)
 app.include_router(registration_router)
 app.include_router(payments_router)
 app.include_router(ingest_router)
+
+
+# ---- Country config ----
+
+@app.get("/api/config")
+def country_config_endpoint():
+    """Return country-specific metadata for the frontend."""
+    from country_config import COUNTRY
+    return {
+        "country_code": COUNTRY.code,
+        "country_name": COUNTRY.name,
+        "currency": COUNTRY.currency,
+        "currency_symbol": COUNTRY.currency_symbol,
+        "dial_code": COUNTRY.dial_code,
+        "sites": COUNTRY.site_abbrev,
+    }
 
 
 # ---- Health ----

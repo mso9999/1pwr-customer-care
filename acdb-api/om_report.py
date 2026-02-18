@@ -30,38 +30,10 @@ logger = logging.getLogger("acdb-api.om-report")
 
 router = APIRouter(prefix="/api/om-report", tags=["om-report"])
 
-# Site abbreviation mapping (from Table 1 in the report)
-SITE_ABBREV = {
-    "MAK": "Ha Makebe",
-    "MAS": "Mashai",
-    "SHG": "Sehonghong",
-    "LEB": "Lebakeng",
-    "SEH": "Sehlabathebe",
-    "MAT": "Matsoaing",
-    "TLH": "Tlhanyaku",
-    "TOS": "Tosing",
-    "SEB": "Sebapala",
-    "RIB": "Ribaneng",
-    "KET": "Ketane",
-    "LSB": "Lets'eng-la-Baroa",
-    # PIH clinics
-    "NKU": "Ha Nkau",
-    "MET": "Methalaneng",
-    "BOB": "Bobete",
-    "MAN": "Manamaneng",
-}
-
-# Valid site codes -- used to filter out garbage from meter serial suffixes
-KNOWN_SITES = set(SITE_ABBREV.keys())
-
-SITE_DISTRICTS = {
-    "MAK": "Maseru", "MAS": "Thaba-Tseka", "SHG": "Thaba-Tseka",
-    "LEB": "Qacha's Nek", "SEH": "Qacha's Nek", "MAT": "Mokhotlong",
-    "TLH": "Mokhotlong", "TOS": "Quthing", "SEB": "Quthing",
-    "RIB": "Mafeteng", "KET": "Mohale's Hoek",
-    "NKU": "Maseru", "MET": "Thaba-Tseka", "BOB": "Thaba-Tseka",
-    "MAN": "Thaba-Tseka",
-}
+from country_config import (
+    SITE_ABBREV, KNOWN_SITES, SITE_DISTRICTS,
+    COUNTRY, CURRENCY, CURRENCY_SYMBOL,
+)
 
 
 def _get_connection():

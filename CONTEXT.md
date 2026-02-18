@@ -14,9 +14,10 @@
 - Billing and payment tracking
 - WhatsApp-based customer care ticketing (automated via AI)
 
-**Domain**: Rural minigrids (solar+battery) in Lesotho, operated by 1PWR Africa / OnePower Lesotho.
+**Domain**: Rural minigrids (solar+battery), starting in Lesotho, expanding to Benin and Zambia.
+**Operated by**: 1PWR Africa / OnePower Lesotho.
 **Users**: 1PWR operations staff, finance team, customer care agents.
-**Data Source**: 1PDB (PostgreSQL 16) — migrated from ACCDB. ~1,300+ customers across 10+ sites.
+**Data Source**: 1PDB (PostgreSQL 16) — migrated from ACCDB. ~1,400+ customers across 10+ sites (Lesotho).
 
 ## Architecture (Post-Migration)
 
@@ -136,6 +137,36 @@ Push to `main` triggers GitHub Actions with two parallel jobs:
 | SEB | Semonkong | SUA | Ha Suoane |
 | TOS | Tosing | DON | Ha Nkone |
 
+## Metering Architecture
+
+### Meter Roles
+The `meters` table has a `role` column (enum: `primary`, `check`, `backup`):
+- **primary**: Billing/production meter. Data used in consumption aggregation and customer dashboard.
+- **check**: Verification meter installed in series with primary during testing. Data stored but excluded from customer-facing aggregates.
+- **backup**: Standby meter. Not currently active.
+
+When promoting a check meter to primary (via `PATCH /api/meters/{id}/role`), the old primary
+on that account is auto-demoted.
+
+### Prototype 1Meters
+Three 1Meter prototypes are installed at MAK in series with SparkMeters for validation:
+- 23022628 → 0005MAK (check), SparkMeter 57408 (primary)
+- 23022696 → 0025MAK (check), SparkMeter 58431 (primary)
+- 23022673 → 0045MAK (check), SparkMeter 41657 (primary)
+- 23022667 — repeater/gateway node at powerhouse (NOT a customer meter, not in meters table)
+- 23022613 — real meter, customer TBD (pending team confirmation)
+
+New meters are registered with one `INSERT INTO meters` row — the ingest API resolves
+meters dynamically from the DB (no hardcoded dicts).
+
+### Data Sources
+| Source | Platform | Coverage | Ingestion |
+|--------|----------|----------|-----------|
+| Koios | SparkMeter Cloud | KET, LSB, MAS, MAT, SHG, TLH | `import_hourly.py` (batch) + systemd timer |
+| ThunderCloud | SparkMeter on-prem | MAK | `import_thundercloud.py` (batch) |
+| IoT / ingestion_gate | 1Meter prototype | MAK (3 meters) | Real-time Lambda → POST /api/meters/reading |
+| SMS Gateway | M-PESA payments | All sites | sms.1pwrafrica.com mirrors to POST /api/sms/incoming |
+
 ## ARPU Methodology
 
 Both quarterly (`/api/om-report/arpu`) and monthly (`/api/om-report/monthly-arpu`) ARPU endpoints use:
@@ -143,6 +174,33 @@ Both quarterly (`/api/om-report/arpu`) and monthly (`/api/om-report/monthly-arpu
 - **Customers**: Cumulative distinct account numbers that have ever transacted up through the period (monotonically increasing)
 - **ARPU**: Revenue / Cumulative Customers
 - **Per-site breakdown**: Account numbers parsed via last 3 characters → site code mapping
+
+## Multi-Country Architecture (Decision: 2026-02-18)
+
+**Approach: Separate country backends, unified frontend.**
+
+Each country gets its own PostgreSQL + FastAPI instance (same codebase, different config).
+The frontend at cc.1pwrafrica.com is the integration layer — country selector at login,
+all API calls routed to the selected country's backend.
+
+```
+cc.1pwrafrica.com (single React app)
+  ├── Lesotho API  → cc-api-ls (1PDB-LS, LSL, M-PESA, Koios + ThunderCloud)
+  ├── Benin API    → cc-api-bj (1PDB-BJ, XOF, MTN MoMo, TBD metering)
+  └── Zambia API   → cc-api-zm (1PDB-ZM, ZMW, Airtel/MTN, TBD metering)
+```
+
+**Rationale**: Currency, payment pipelines (SMS format, mobile money provider, settlement),
+tariff models, and data sovereignty requirements differ per country. A single multi-tenant
+DB would require multi-currency everywhere and fragile payment multiplexing. Separate
+backends keep each country clean; cross-country analytics happen in the frontend by
+fanning out to N APIs and normalizing to USD.
+
+**What's shared**: Frontend codebase, authentication system (employees can have
+multi-country access), the codebase itself (deployed per-country with config).
+
+**What's separate**: Database, API instance, payment pipeline, SparkMeter/meter platform
+integration, SMS gateway.
 
 ## Common Pitfalls
 

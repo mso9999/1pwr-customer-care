@@ -3,6 +3,41 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-02-18 202602161800 (1Meter IoT Backfill & Customer Dashboard)
+
+### What Was Done
+1. **Backfilled 1Meter prototype data from S3 → 1PDB**: Downloaded `1meterdatacopy` S3 JSON (public bucket), parsed 23,964 records from 5 meters, downsampled to 15-min intervals, POSTed 179 readings to `/api/meters/reading` — 0 errors.
+   - 23022628 (0005MAK): 51 readings, 3.01→3.45 kWh, 0.44 kWh consumed
+   - 23022673 (0045MAK): 50 readings, 0.52→0.57 kWh, 0.05 kWh consumed
+   - 23022696 (0025MAK): 78 readings, 20.03→23.85 kWh, 3.85 kWh consumed
+2. **Fixed meter ID padding mismatch**: IoT Core sends 12-digit padded IDs (`000023022673`), config had 8-digit (`23022673`). Added `_resolve_meter()` to `ingest.py` to accept either form.
+3. **Fixed Lambda unit-embedded values**: Meter payloads contain `"230.1 V"`, `"3.01 kWh"` etc. Added `_num()` parser to `meter_ingest_gate.py`. Pushed to `onepowerLS/ingestion_gate`.
+4. **Enhanced customer dashboard with hourly_consumption**: Dashboard now includes metered consumption data (IoT, Koios, ThunderCloud) from `hourly_consumption` table, not just transaction-based kWh.
+5. **Fixed SQLite auth DB initialization**: `init_auth_db()` now runs at module load, not just in `__main__`. Created tables on production server.
+6. **Fixed timezone-naive vs aware datetime comparison** in dashboard.
+7. **Registered 3 customer accounts**: 0005MAK, 0025MAK, 0045MAK — password `1meter2026`.
+8. **Confirmed PostgreSQL (1PDB) is live**: cc.1pwrafrica.com already serves from PostgreSQL with 1,476 customers, all tables present.
+
+### Key Decisions
+- **S3 as backfill source** (not DynamoDB): S3 bucket `1meterdatacopy` is publicly readable, no AWS credentials needed. Contains the same data as DynamoDB.
+- **Canonical meter IDs are unpadded**: `_resolve_meter()` strips leading zeros to match the config. DB stores unpadded form.
+- **Dashboard merge strategy**: For each day, take the HIGHER value between transaction-based kWh and metered consumption kWh. This avoids double-counting while ensuring IoT data appears.
+
+### What Next Session Should Know
+- **PENDING: Lambda deployment**: The updated `meter_ingest_gate.py` is pushed to GitHub but NOT deployed to AWS Lambda. User needs to paste into Lambda Console and deploy.
+- **PENDING: AWS credentials on EC2**: Neither the Linux EC2 nor local machine has AWS credentials. Needed for `prototype_sync.py` daemon. Options: IAM role on instance (preferred) or env-file credentials.
+- **PENDING: prototype_sync.py daemon**: Service file exists at `1PDB/systemd/prototype-sync.service` but not deployed to EC2.
+- **Two unmapped meters**: `23022613` and `23022667` are reporting but not mapped to accounts. User hasn't provided mappings yet.
+- **S3 bucket is publicly readable**: `1meterdatacopy` — flagged to user, awaiting response.
+- **The `allow` flag in the Lambda is computed but never used** to gate DynamoDB/S3 writes — all readings are stored regardless of the 15-min interval check.
+
+### Protocol Feedback
+- CONTEXT.md was accurate about the architecture (PostgreSQL already live on Linux EC2)
+- SESSION_LOG from previous sessions correctly documented that migration was "code-complete but NOT deployed" for 1PDB services — the CC API itself WAS already deployed
+- Needed to discover the S3 bucket public access as an alternative data path
+
+---
+
 ## Session 2026-02-17 202602170230 (ACCDB to PostgreSQL Migration — Full Implementation)
 
 ### What Was Done
@@ -278,3 +313,38 @@ The SOPs described an **outdated** configuration (iometering.co.za, SMSsync, 201
 - Dropbox API credentials in Email Overlord `.env` were essential for fetching un-synced files
 - The SOP documents were **outdated** — probing the live endpoints and finding the `SMSComms` repo was necessary to get the real architecture
 - CONTEXT.md should be updated to document the SMS Gateway architecture now that it's known
+
+---
+
+## Session 2026-02-18 202602181930 (Multi-Country Architecture Decision)
+
+### What Was Done
+1. **Finalized multi-country architecture decision**: Separate country backends, unified frontend
+2. **Updated CONTEXT.md** with:
+   - Multi-country architecture section (decision + rationale + diagram)
+   - Metering architecture section (meter roles, prototype meters, data sources)
+   - Updated domain description to reflect Benin/Zambia expansion
+
+### Key Decisions
+- **Separate backends per country** (1PDB-LS, 1PDB-BJ, 1PDB-ZM), each with its own FastAPI + PostgreSQL
+- **Frontend is the integration layer** — country selector, API routing, cross-country analytics via fan-out + USD normalization
+- **Same codebase** deployed per-country with different config (currency, payment provider, SparkMeter endpoint)
+- **Shared**: Frontend bundle, auth system (multi-country employee access), codebase
+- **Separate**: Database, API instance, payment pipeline, metering integration, SMS gateway
+- **Rationale**: Currency + payment pipeline differences make single-instance multi-tenancy a source of ongoing complexity
+
+### What Next Session Should Know
+- Multi-country architecture is decided but not yet implemented — Lesotho is the only live country
+- When Benin/Zambia come online, the frontend needs: country selector, per-country API base URL config, cross-country dashboard components
+- The employee auth system will need a `countries` field (array of country codes the employee can access)
+- Each country's FastAPI reads a `COUNTRY_CODE` env var to configure currency symbol, tariff model, payment provider, etc.
+
+### Pending Tasks (from prior session)
+- Full Koios historical import still running (PID 501197)
+- Lambda deploy for real-time 1Meter forwarding
+- ACCDB transaction gap (Oct 2025–present)
+- Start systemd import timer after historical import completes
+
+### Protocol Feedback
+- CONTEXT.md was missing multi-country context entirely — now fixed
+- CONTEXT.md was missing metering architecture (meter roles, prototype meters, data sources) — now fixed
