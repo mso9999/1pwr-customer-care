@@ -16,10 +16,11 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
 from pydantic import BaseModel
 
 from customer_api import get_connection
+from sparkmeter_credit import credit_sparkmeter, CreditResult
 
 logger = logging.getLogger("cc-api.payments")
 
@@ -73,11 +74,16 @@ def _get_tariff_rate(conn, account_number: str) -> float:
 
 
 @router.post("/webhook")
-def payment_webhook(payload: PaymentWebhook, _=Depends(_verify_gateway_key)):
+def payment_webhook(
+    payload: PaymentWebhook,
+    background_tasks: BackgroundTasks,
+    _=Depends(_verify_gateway_key),
+):
     """Receive payment notification from the SMS Gateway.
 
     Records the transaction, computes kWh vended at current tariff rate,
-    and returns the new balance + kWh for the SMS confirmation reply.
+    credits SparkMeter in the background, and returns the new balance +
+    kWh for the SMS confirmation reply.
     """
     if payload.amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be positive")
@@ -127,6 +133,12 @@ def payment_webhook(payload: PaymentWebhook, _=Depends(_verify_gateway_key)):
             logger.info("Payment recorded: txn=%d acct=%s M%.2f (%.2f kWh @ %.2f)",
                         txn_id, payload.account_number, payload.amount, kwh_vended, rate)
 
+            background_tasks.add_task(
+                _credit_sm_and_log, payload.account_number,
+                payload.amount, f"sms_gateway txn {txn_id}",
+                str(txn_id),
+            )
+
             return {
                 "status": "ok",
                 "transaction_id": txn_id,
@@ -147,7 +159,11 @@ def payment_webhook(payload: PaymentWebhook, _=Depends(_verify_gateway_key)):
 
 @router.post("/record")
 def record_manual_payment(payload: ManualPayment):
-    """Record a manual payment (e.g., from portal or field agent)."""
+    """Record a manual payment (e.g., from portal or field agent).
+
+    Saves to 1PDB and synchronously credits SparkMeter so the operator
+    sees the result immediately.
+    """
     if payload.amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be positive")
 
@@ -184,16 +200,66 @@ def record_manual_payment(payload: ManualPayment):
             txn_id = cur.fetchone()[0]
             conn.commit()
 
+            sm_result = _credit_sm_sync(
+                payload.account_number, payload.amount,
+                payload.note or f"portal txn {txn_id}", str(txn_id),
+            )
+
             return {
                 "status": "ok",
                 "transaction_id": txn_id,
                 "amount": payload.amount,
                 "kwh": kwh,
                 "new_balance": new_balance,
+                "sm_credit": sm_result,
             }
     except Exception as e:
         logger.error("Manual payment failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# SparkMeter credit helpers
+# ---------------------------------------------------------------------------
+
+def _credit_sm_sync(
+    account_number: str, amount: float, memo: str, external_id: str,
+) -> dict:
+    """Credit SM synchronously and return a summary dict for the API response."""
+    result = credit_sparkmeter(account_number, amount, memo, external_id)
+    summary = {
+        "success": result.success,
+        "platform": result.platform,
+    }
+    if result.sm_transaction_id:
+        summary["sm_transaction_id"] = result.sm_transaction_id
+    if result.error:
+        summary["error"] = result.error
+    if not result.success:
+        logger.warning(
+            "SM credit failed for %s M%.2f: %s",
+            account_number, amount, result.error,
+        )
+    else:
+        logger.info(
+            "SM credit OK for %s M%.2f → %s txn %s",
+            account_number, amount, result.platform, result.sm_transaction_id,
+        )
+    return summary
+
+
+def _credit_sm_and_log(
+    account_number: str, amount: float, memo: str, external_id: str,
+):
+    """Background task: credit SM and log the outcome."""
+    _credit_sm_sync(account_number, amount, memo, external_id)
+
+
+@router.get("/sm-credit-status")
+def sm_credit_status():
+    """Diagnostic: show which SM crediting platforms are configured."""
+    from sparkmeter_credit import is_configured
+    return is_configured()
 
 
 @router.get("/{account_number}")

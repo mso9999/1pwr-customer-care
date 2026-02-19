@@ -9,7 +9,7 @@ import logging
 import math
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 
 from models import (
     CCRole,
@@ -21,6 +21,7 @@ from models import (
 )
 from middleware import can_write_table, get_current_user, require_employee
 from mutations import log_mutation
+from sparkmeter_credit import credit_sparkmeter
 
 logger = logging.getLogger("acdb-api.crud")
 
@@ -368,10 +369,64 @@ def _coerce_values(cursor, table_name: str, data: Dict[str, Any]) -> Dict[str, A
     return coerced
 
 
+# ---------------------------------------------------------------------------
+# SparkMeter credit integration for transaction creates
+# ---------------------------------------------------------------------------
+
+def _maybe_credit_sm(
+    record: dict, txn_id, background_tasks: BackgroundTasks,
+) -> Optional[dict]:
+    """If the record looks like a new payment, credit SparkMeter.
+
+    Returns a summary dict when a credit was attempted, or None if
+    the record isn't a creditable payment.
+    """
+    is_payment = record.get("is_payment")
+    if isinstance(is_payment, str):
+        is_payment = is_payment.lower() in ("1", "true", "yes", "t")
+    if not is_payment:
+        return None
+
+    amount = record.get("transaction_amount")
+    if amount is None:
+        return None
+    try:
+        amount = float(amount)
+    except (ValueError, TypeError):
+        return None
+    if amount <= 0:
+        return None
+
+    account = record.get("account_number", "")
+    if not account:
+        return None
+
+    result = credit_sparkmeter(
+        account_number=account,
+        amount=amount,
+        memo=f"CC portal txn {txn_id}",
+        external_id=str(txn_id),
+    )
+    summary = {"success": result.success, "platform": result.platform}
+    if result.sm_transaction_id:
+        summary["sm_transaction_id"] = result.sm_transaction_id
+    if result.error:
+        summary["error"] = result.error
+    if not result.success:
+        logger.warning("SM credit via CRUD failed for %s: %s", account, result.error)
+    else:
+        logger.info(
+            "SM credit via CRUD OK for %s M%.2f → %s",
+            account, amount, result.platform,
+        )
+    return summary
+
+
 @router.post("/{table_name}", status_code=201)
 def create_record(
     table_name: str,
     req: RecordCreateRequest,
+    background_tasks: BackgroundTasks,
     user: CurrentUser = Depends(require_employee),
 ):
     """Create a new record. Requires write permission for the table."""
@@ -393,15 +448,16 @@ def create_record(
         col_list = ", ".join(columns)
         values = [coerced[c] for c in columns]
 
-        sql = f"INSERT INTO {table_name} ({col_list}) VALUES ({placeholders})"
+        returning = " RETURNING id" if table_name == "transactions" else ""
+        sql = f"INSERT INTO {table_name} ({col_list}) VALUES ({placeholders}){returning}"
         try:
             cursor.execute(sql, values)
+            new_id = cursor.fetchone() if returning else None
             conn.commit()
         except Exception as e:
             conn.rollback()
             raise HTTPException(status_code=400, detail=f"Insert failed: {e}")
 
-        # Determine record ID for the audit log
         pk = _get_primary_key(conn, table_name)
         rid = "unknown"
         if pk:
@@ -412,7 +468,14 @@ def create_record(
 
         log_mutation(user, "create", table_name, rid, new_values=coerced)
 
-        return {"message": "Record created", "table": table_name}
+        response: dict = {"message": "Record created", "table": table_name}
+
+        if table_name == "transactions":
+            sm = _maybe_credit_sm(coerced, new_id[0] if new_id else rid, background_tasks)
+            if sm is not None:
+                response["sm_credit"] = sm
+
+        return response
 
 
 # ---------------------------------------------------------------------------
