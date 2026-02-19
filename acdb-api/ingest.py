@@ -21,10 +21,14 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timezone
+import threading
+import time
+from collections import defaultdict
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException, Request
+import requests as http_requests
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 from pydantic import BaseModel
 
 from customer_api import get_connection
@@ -32,6 +36,154 @@ from customer_api import get_connection
 logger = logging.getLogger("cc-api.ingest")
 
 router = APIRouter(tags=["ingest"])
+
+# ---------------------------------------------------------------------------
+# Koios consumption sync (triggered by payment events)
+# ---------------------------------------------------------------------------
+
+KOIOS_BASE = "https://www.sparkmeter.cloud"
+KOIOS_ORG = "1cddcb07-6647-40aa-aaaa-70d762922029"
+KOIOS_KEY = os.environ.get(
+    "KOIOS_API_KEY", "SGWcnZpgCj-R0fGoVRtjbwMcElV7BvZGz00EEmJDv54"
+)
+KOIOS_SECRET = os.environ.get(
+    "KOIOS_API_SECRET", "gJ5gHPsw21W8Jwl&!aId9O5uoywpg#2G"
+)
+
+KOIOS_SITES = {
+    "MAT": "2f7c38b8-4a70-44fd-bf9c-ebf2b2aa78c0",
+    "TLH": "db5bf699-31ea-44b6-91c5-1b41e4a2d130",
+    "MAS": "101c443e-6500-4a4d-8cdc-6bd15f4388c8",
+    "SHG": "bd7c477d-0742-4056-b75c-38b14ac7cf97",
+    "KET": "a075cbc1-e920-455e-9d5a-8595061dfec0",
+    "LSB": "ed0766c4-9270-4254-a107-eb4464a96ed9",
+}
+
+_sync_lock = threading.Lock()
+
+
+def _fetch_koios_readings(site_id: str, date_from: str, date_to: str) -> list:
+    """Fetch readings from Koios v2 historical API for a site/date range."""
+    session = http_requests.Session()
+    session.headers.update({"X-API-KEY": KOIOS_KEY, "X-API-SECRET": KOIOS_SECRET})
+    all_data, cursor = [], None
+    while True:
+        body = {
+            "filters": {
+                "sites": [site_id],
+                "date_range": {"from": date_from, "to": date_to},
+            },
+            "per_page": 1000,
+        }
+        if cursor:
+            body["cursor"] = cursor
+        for attempt in range(3):
+            try:
+                r = session.post(
+                    f"{KOIOS_BASE}/api/v2/organizations/{KOIOS_ORG}/data/historical",
+                    json=body, timeout=120,
+                )
+                if r.status_code in (500, 502, 503, 504):
+                    time.sleep(3 * (attempt + 1))
+                    continue
+                r.raise_for_status()
+                break
+            except (http_requests.exceptions.ReadTimeout,
+                    http_requests.exceptions.ConnectionError):
+                time.sleep(5 * (attempt + 1))
+                continue
+        else:
+            return all_data
+
+        resp = r.json()
+        all_data.extend(resp.get("data", []))
+        pag = resp.get("pagination", {})
+        cursor = pag.get("cursor")
+        if not pag.get("has_more") or not cursor:
+            break
+        time.sleep(0.3)
+    return all_data
+
+
+def _bin_to_hourly(records: list) -> list[tuple]:
+    """Bin Koios readings to hourly (meter_serial, customer_code, hour_str, kwh)."""
+    hourly: dict[tuple, float] = defaultdict(float)
+    for rec in records:
+        kwh = rec.get("kilowatt_hours", 0) or 0
+        if kwh <= 0:
+            continue
+        meter = rec.get("meter", {})
+        serial = meter.get("serial_number", "")
+        customer = meter.get("customer", {})
+        code = customer.get("code", "") or ""
+        ts_str = rec.get("timestamp", "")
+        if not ts_str or not serial:
+            continue
+        try:
+            dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        hour_str = dt.strftime("%Y-%m-%d %H:00:00+00")
+        hourly[(serial, code, hour_str)] += kwh
+    return [(s, c, h, round(k, 4)) for (s, c, h), k in hourly.items()]
+
+
+def sync_consumption_for_site(community: str):
+    """Fetch last 2 days of Koios consumption for a site and insert into 1PDB."""
+    site_id = KOIOS_SITES.get(community)
+    if not site_id:
+        logger.debug("sync_consumption: unknown community %s", community)
+        return
+
+    if not _sync_lock.acquire(blocking=False):
+        logger.debug("sync_consumption: skipped (another sync running)")
+        return
+    try:
+        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime("%Y-%m-%d")
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        logger.info("sync_consumption: fetching %s (%s) %s..%s",
+                     community, site_id[:8], yesterday, today)
+
+        raw = _fetch_koios_readings(site_id, yesterday, today)
+        if not raw:
+            logger.info("sync_consumption: %s — no data", community)
+            return
+
+        hourly = _bin_to_hourly(raw)
+        if not hourly:
+            logger.info("sync_consumption: %s — no hourly bins", community)
+            return
+
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT meter_id, account_number, community FROM meters")
+            meter_map = {
+                r[0]: {"acct": r[1] or "", "comm": r[2] or ""}
+                for r in cur.fetchall()
+            }
+
+            import psycopg2.extras
+            batch = []
+            for serial, code, hour_str, kwh in hourly:
+                acct = code or meter_map.get(serial, {}).get("acct", serial)
+                comm = meter_map.get(serial, {}).get("comm", community)
+                batch.append((acct, serial, hour_str, kwh, comm, "koios"))
+
+            if batch:
+                psycopg2.extras.execute_batch(cur, """
+                    INSERT INTO hourly_consumption
+                        (account_number, meter_id, reading_hour, kwh, community, source)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (meter_id, reading_hour) DO NOTHING
+                """, batch, page_size=500)
+                conn.commit()
+
+            logger.info("sync_consumption: %s — %d hourly records synced", community, len(batch))
+    except Exception as e:
+        logger.error("sync_consumption failed for %s: %s", community, e)
+    finally:
+        _sync_lock.release()
 
 IOT_KEY = os.environ.get("IOT_INGEST_KEY", "1pwr-iot-ingest-2026")
 
@@ -326,12 +478,13 @@ def _phone_to_account(conn, phone_digits: str) -> Optional[str]:
 
 
 @router.post("/api/sms/incoming")
-async def sms_incoming(request: Request):
+async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
     """Receive mirrored SMS payload from the PHP at sms.1pwrafrica.com.
 
     The PHP (SMSComms/receive.php) does its own processing first (file drop,
     SparkMeter crediting) and then mirrors the raw Medic Mobile Gateway JSON
-    here as a fire-and-forget POST.  We parse M-PESA payments and record them.
+    here as a fire-and-forget POST.  We parse M-PESA payments and record them,
+    then trigger a background Koios consumption sync for the customer's site.
     """
     raw_body = await request.body()
 
@@ -415,8 +568,38 @@ async def sms_incoming(request: Request):
                     txn_db_id, account, amount, phone, reference, mpesa_txn_id,
                 )
 
+                cur.execute(
+                    "SELECT community FROM meters "
+                    "WHERE account_number = %s AND platform = 'sparkmeter' LIMIT 1",
+                    (account,),
+                )
+                comm_row = cur.fetchone()
+                if comm_row and comm_row[0]:
+                    background_tasks.add_task(sync_consumption_for_site, comm_row[0])
+
         except Exception as e:
             logger.error("SMS payment processing failed (forwarded OK): %s", e)
 
     # Return empty messages array — no outbound SMS for now
     return {"messages": []}
+
+
+# ---------------------------------------------------------------------------
+# Manual / external consumption sync trigger
+# ---------------------------------------------------------------------------
+
+@router.post("/api/sync/consumption/{community}")
+def trigger_consumption_sync(community: str, background_tasks: BackgroundTasks):
+    """Trigger a Koios consumption sync for a specific site.
+
+    Call after crediting a meter or whenever fresh data is needed.
+    Returns immediately; sync runs in background.
+    """
+    code = community.upper()
+    if code not in KOIOS_SITES:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown community: {community}. Valid: {list(KOIOS_SITES.keys())}",
+        )
+    background_tasks.add_task(sync_consumption_for_site, code)
+    return {"status": "sync_queued", "community": code}
