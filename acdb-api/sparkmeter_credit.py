@@ -47,6 +47,8 @@ TC_PASSWORD = os.environ.get("THUNDERCLOUD_PASSWORD", "")
 
 THUNDERCLOUD_SITES = {"MAK", "LAB"}
 
+API_TIMEOUT = 90
+
 _tc_token_lock = threading.Lock()
 _tc_session_token: Optional[str] = None
 
@@ -78,7 +80,7 @@ def _tc_login() -> Optional[str]:
             f"{TC_API_BASE}/login",
             data={"email": TC_USERNAME, "password": TC_PASSWORD},
             allow_redirects=False,
-            timeout=30,
+            timeout=API_TIMEOUT,
         )
         cookies = r.cookies
         token = cookies.get("session") or cookies.get("remember_token")
@@ -121,7 +123,7 @@ def _tc_get_customer_id(account_code: str) -> Optional[str]:
     r = requests.get(
         f"{TC_API_BASE}/api/v0/customer/{account_code}",
         headers={"Authentication-Token": token},
-        timeout=30,
+        timeout=API_TIMEOUT,
     )
     body = r.json()
     if body.get("error"):
@@ -154,7 +156,7 @@ def _tc_credit(
             "Content-Type": "application/x-www-form-urlencoded",
             "Authentication-Token": token,
         },
-        timeout=30,
+        timeout=API_TIMEOUT,
     )
     body = r.json()
     if body.get("error"):
@@ -188,7 +190,7 @@ def _koios_get_customer_id(account_code: str) -> Optional[str]:
         f"{KOIOS_BASE}/api/v1/customers",
         params={"code": account_code},
         headers=_koios_headers(),
-        timeout=30,
+        timeout=API_TIMEOUT,
     )
     r.raise_for_status()
     data = r.json().get("data", [])
@@ -208,7 +210,7 @@ def _koios_credit(
         f"{KOIOS_BASE}/api/v1/customers/{customer_id}/payments",
         json=payload,
         headers=_koios_headers(),
-        timeout=30,
+        timeout=API_TIMEOUT,
     )
     body = r.json()
     errors = body.get("errors")
