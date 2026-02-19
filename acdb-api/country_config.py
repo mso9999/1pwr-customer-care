@@ -22,6 +22,8 @@ class CountryConfig:
     currency_symbol: str                # display prefix (M, CFA, etc.)
     dial_code: str                      # international dialing prefix
     koios_org_id: str
+    timezone: str                       # IANA timezone (e.g. Africa/Maseru)
+    utc_offset_hours: int               # fixed offset for simple arithmetic
     site_abbrev: Dict[str, str]         # site_code → full name
     site_districts: Dict[str, str]      # site_code → district/region
     koios_sites: Dict[str, str]         # site_code → Koios UUID
@@ -35,6 +37,8 @@ LESOTHO = CountryConfig(
     currency_symbol="M",
     dial_code="266",
     koios_org_id="1cddcb07-6647-40aa-aaaa-70d762922029",
+    timezone="Africa/Maseru",
+    utc_offset_hours=2,
     site_abbrev={
         "MAK": "Ha Makebe",
         "MAS": "Mashai",
@@ -82,6 +86,8 @@ BENIN = CountryConfig(
     currency_symbol="CFA",
     dial_code="229",
     koios_org_id="0123589c-7f1f-4eb4-8888-d8f8aa706ea4",
+    timezone="Africa/Porto-Novo",
+    utc_offset_hours=1,
     site_abbrev={
         "GBO": "Gbo",
         "SAM": "Sam",
@@ -91,7 +97,7 @@ BENIN = CountryConfig(
         "SAM": "Zou",
     },
     koios_sites={
-        "GBO": "1721a02f-f9ba-4e7d-936b-4fabe07d1543",
+        "GBO": "a23c334e-33f7-473d-9ae3-9e631d5336e4",
         "SAM": "8f80b0a8-0502-4e26-9043-7152979360aa",
     },
     payment_regex_id="momo_bj",
@@ -123,3 +129,5 @@ SITE_DISTRICTS: Dict[str, str] = COUNTRY.site_districts
 KOIOS_SITES: Dict[str, str] = COUNTRY.koios_sites
 CURRENCY: str = COUNTRY.currency
 CURRENCY_SYMBOL: str = COUNTRY.currency_symbol
+TIMEZONE: str = COUNTRY.timezone
+UTC_OFFSET_HOURS: int = COUNTRY.utc_offset_hours

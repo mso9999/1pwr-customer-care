@@ -18,7 +18,7 @@ import logging
 import math
 import os
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from fastapi import APIRouter, Depends, Query
@@ -793,10 +793,12 @@ def daily_load_profiles(
                     continue
 
                 try:
+                    from country_config import UTC_OFFSET_HOURS
                     if hasattr(dt, 'hour'):
-                        hour = dt.hour
+                        local_dt = dt.replace(tzinfo=None) + timedelta(hours=UTC_OFFSET_HOURS) if hasattr(dt, 'tzinfo') and dt.tzinfo else dt + timedelta(hours=UTC_OFFSET_HOURS)
+                        hour = local_dt.hour
                     elif isinstance(dt, str):
-                        hour = int(dt.split(" ")[1].split(":")[0])
+                        hour = (int(dt.split(" ")[1].split(":")[0]) + UTC_OFFSET_HOURS) % 24
                     else:
                         continue
                 except (IndexError, ValueError, AttributeError):

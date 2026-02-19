@@ -5,7 +5,7 @@ Pushes payment credits to SparkMeter's billing systems so that meter
 balances actually update when payments are recorded in CC/1PDB.
 
 Platforms:
-  - Koios v1 API  — all Koios-managed sites across countries
+  - Koios v1 API  — POST /payments with customer_code (single call, no UUID lookup)
   - ThunderCloud v0 API — MAK/LAB on sparkcloud-u740425.sparkmeter.cloud
 
 Multi-country support:
@@ -13,8 +13,11 @@ Multi-country support:
   Credentials are resolved by site code → country → env vars:
     KOIOS_WRITE_API_KEY_LS / KOIOS_WRITE_API_SECRET_LS  (Lesotho)
     KOIOS_WRITE_API_KEY_BN / KOIOS_WRITE_API_SECRET_BN  (Benin)
-  Falls back to the un-suffixed KOIOS_WRITE_API_KEY / KOIOS_WRITE_API_SECRET
-  (which defaults to KOIOS_API_KEY / KOIOS_API_SECRET).
+  Falls back to the un-suffixed KOIOS_WRITE_API_KEY / KOIOS_WRITE_API_SECRET.
+
+Additional capabilities:
+  koios_lookup_payment(external_id)  — idempotency check by external_id
+  koios_reverse_payment(payment_id)  — reverse a processed payment
 
 Environment variables (set in /opt/1pdb/.env):
   KOIOS_WRITE_API_KEY[_XX]   — Koios write key (per-country or global)
@@ -231,47 +234,45 @@ def _koios_headers(country_code: str) -> dict:
     }
 
 
-def _koios_get_customer_id(account_code: str, country_code: str) -> Optional[str]:
-    r = requests.get(
-        f"{KOIOS_BASE}/api/v1/customers",
-        params={"code": account_code},
-        headers=_koios_headers(country_code),
-        timeout=API_TIMEOUT,
-    )
-    r.raise_for_status()
-    data = r.json().get("data", [])
-    return data[0]["id"] if data else None
-
-
 def _koios_credit(
-    customer_id: str, amount: float, country_code: str,
+    account_code: str, amount: float, country_code: str,
     memo: str = "", external_id: str = "",
 ) -> CreditResult:
-    payload: dict = {"amount": str(amount)}
+    """Credit via POST /payments with customer_code (single API call)."""
+    payload: dict = {
+        "customer_code": account_code,
+        "amount": str(amount),
+    }
     if memo:
         payload["memo"] = memo
     if external_id:
         payload["external_id"] = external_id
 
     r = requests.post(
-        f"{KOIOS_BASE}/api/v1/customers/{customer_id}/payments",
+        f"{KOIOS_BASE}/api/v1/payments",
         json=payload,
         headers=_koios_headers(country_code),
         timeout=API_TIMEOUT,
     )
+    if not r.content:
+        logger.warning("Koios returned empty body (HTTP %d) for %s — payment may have succeeded",
+                        r.status_code, account_code)
+        return CreditResult(
+            success=r.status_code < 300, platform="koios",
+            error=None if r.status_code < 300 else f"HTTP {r.status_code} (empty body)",
+        )
     body = r.json()
     errors = body.get("errors")
     if errors:
         return CreditResult(
             success=False, platform="koios",
             error=errors[0].get("title", str(errors)),
-            customer_id=customer_id,
         )
     data = body.get("data", {})
     return CreditResult(
         success=True, platform="koios",
         sm_transaction_id=str(data.get("id", "")),
-        customer_id=customer_id,
+        customer_id=str(data.get("recipient_id", "")),
     )
 
 
@@ -321,17 +322,53 @@ def credit_sparkmeter(
                 )
             return _tc_credit(cid, amount, external_id)
         else:
-            cid = _koios_get_customer_id(account_number, country)
-            if not cid:
-                return CreditResult(
-                    success=False, platform="koios",
-                    error=f"Customer '{account_number}' not found on Koios ({country})",
-                )
-            return _koios_credit(cid, amount, country, memo, external_id)
+            return _koios_credit(account_number, amount, country, memo, external_id)
     except Exception as e:
         platform = "thundercloud" if site in THUNDERCLOUD_SITES else "koios"
         logger.error("SM credit failed for %s: %s", account_number, e)
         return CreditResult(success=False, platform=platform, error=str(e))
+
+
+def koios_lookup_payment(external_id: str, country_code: str = "LS") -> Optional[dict]:
+    """Look up a Koios payment by external_id. Returns payment dict or None."""
+    try:
+        r = requests.get(
+            f"{KOIOS_BASE}/api/v1/payments",
+            params={"external_id": external_id},
+            headers=_koios_headers(country_code),
+            timeout=API_TIMEOUT,
+        )
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        return r.json().get("data")
+    except Exception as e:
+        logger.warning("Koios payment lookup failed for %s: %s", external_id, e)
+        return None
+
+
+def koios_reverse_payment(payment_id: str, country_code: str = "LS") -> CreditResult:
+    """Reverse a Koios payment by its payment UUID."""
+    try:
+        r = requests.post(
+            f"{KOIOS_BASE}/api/v1/payments/{payment_id}/reverse",
+            headers=_koios_headers(country_code),
+            timeout=API_TIMEOUT,
+        )
+        body = r.json()
+        errors = body.get("errors")
+        if errors:
+            return CreditResult(
+                success=False, platform="koios",
+                error=errors[0].get("title", str(errors)),
+            )
+        return CreditResult(
+            success=True, platform="koios",
+            sm_transaction_id=payment_id,
+        )
+    except Exception as e:
+        logger.error("Koios reversal failed for %s: %s", payment_id, e)
+        return CreditResult(success=False, platform="koios", error=str(e))
 
 
 def is_configured() -> dict:

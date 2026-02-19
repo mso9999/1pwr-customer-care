@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from customer_api import get_connection
 from sparkmeter_credit import credit_sparkmeter, CreditResult
+from balance_engine import get_balance_kwh, record_payment_kwh
 
 logger = logging.getLogger("cc-api.payments")
 
@@ -81,9 +82,13 @@ def payment_webhook(
 ):
     """Receive payment notification from the SMS Gateway.
 
-    Records the transaction, computes kWh vended at current tariff rate,
-    credits SparkMeter in the background, and returns the new balance +
-    kWh for the SMS confirmation reply.
+    Records the transaction, converts currency to kWh at current tariff,
+    updates the running kWh balance, credits SparkMeter in the background,
+    and returns the result for the SMS confirmation reply.
+
+    Balance is tracked in kWh:
+      payment  → balance += amount / rate
+      (consumption deductions happen in the import pipeline)
     """
     if payload.amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be positive")
@@ -99,39 +104,15 @@ def payment_webhook(
 
     try:
         with get_connection() as conn:
-            cur = conn.cursor()
-
             meter_id = _resolve_meter(conn, payload.account_number, payload.meter_id)
             rate = _get_tariff_rate(conn, payload.account_number)
-            kwh_vended = round(payload.amount / rate, 4) if rate > 0 else 0.0
 
-            cur.execute("""
-                SELECT COALESCE(
-                    (SELECT current_balance FROM transactions
-                     WHERE account_number = %s ORDER BY transaction_date DESC LIMIT 1),
-                    0
-                )
-            """, (payload.account_number,))
-            prev_balance = float(cur.fetchone()[0])
-            new_balance = round(prev_balance + payload.amount, 4)
-
-            cur.execute("""
-                INSERT INTO transactions
-                    (account_number, meter_id, transaction_date,
-                     transaction_amount, rate_used, kwh_value,
-                     is_payment, current_balance, source)
-                VALUES (%s, %s, %s, %s, %s, %s, true, %s, 'sms_gateway')
-                RETURNING id
-            """, (
-                payload.account_number, meter_id, ts,
-                payload.amount, rate, kwh_vended,
-                new_balance,
-            ))
-            txn_id = cur.fetchone()[0]
+            txn_id, kwh_vended, new_balance_kwh = record_payment_kwh(
+                conn, payload.account_number, meter_id,
+                amount_currency=payload.amount, rate=rate,
+                source="sms_gateway", timestamp=ts,
+            )
             conn.commit()
-
-            logger.info("Payment recorded: txn=%d acct=%s M%.2f (%.2f kWh @ %.2f)",
-                        txn_id, payload.account_number, payload.amount, kwh_vended, rate)
 
             background_tasks.add_task(
                 _credit_sm_and_log, payload.account_number,
@@ -146,7 +127,7 @@ def payment_webhook(
                 "amount": payload.amount,
                 "kwh_vended": kwh_vended,
                 "rate": rate,
-                "new_balance": new_balance,
+                "balance_kwh": new_balance_kwh,
                 "meter_id": meter_id,
             }
 
@@ -161,43 +142,23 @@ def payment_webhook(
 def record_manual_payment(payload: ManualPayment):
     """Record a manual payment (e.g., from portal or field agent).
 
-    Saves to 1PDB and synchronously credits SparkMeter so the operator
-    sees the result immediately.
+    Saves to 1PDB with kWh balance tracking and synchronously credits
+    SparkMeter so the operator sees the result immediately.
     """
     if payload.amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be positive")
 
     try:
         with get_connection() as conn:
-            cur = conn.cursor()
             meter_id = _resolve_meter(conn, payload.account_number, payload.meter_id)
             rate = _get_tariff_rate(conn, payload.account_number)
-            kwh = payload.kwh if payload.kwh is not None else (
-                round(payload.amount / rate, 4) if rate > 0 else 0.0
+
+            txn_id, kwh_vended, new_balance_kwh = record_payment_kwh(
+                conn, payload.account_number, meter_id,
+                amount_currency=payload.amount, rate=rate,
+                kwh_override=payload.kwh,
+                source="portal",
             )
-
-            cur.execute("""
-                SELECT COALESCE(
-                    (SELECT current_balance FROM transactions
-                     WHERE account_number = %s ORDER BY transaction_date DESC LIMIT 1),
-                    0
-                )
-            """, (payload.account_number,))
-            prev_balance = float(cur.fetchone()[0])
-            new_balance = round(prev_balance + payload.amount, 4)
-
-            cur.execute("""
-                INSERT INTO transactions
-                    (account_number, meter_id, transaction_date,
-                     transaction_amount, rate_used, kwh_value,
-                     is_payment, current_balance, source)
-                VALUES (%s, %s, NOW(), %s, %s, %s, true, %s, 'portal')
-                RETURNING id
-            """, (
-                payload.account_number, meter_id,
-                payload.amount, rate, kwh, new_balance,
-            ))
-            txn_id = cur.fetchone()[0]
             conn.commit()
 
             sm_result = _credit_sm_sync(
@@ -209,8 +170,8 @@ def record_manual_payment(payload: ManualPayment):
                 "status": "ok",
                 "transaction_id": txn_id,
                 "amount": payload.amount,
-                "kwh": kwh,
-                "new_balance": new_balance,
+                "kwh": kwh_vended,
+                "balance_kwh": new_balance_kwh,
                 "sm_credit": sm_result,
             }
     except Exception as e:
@@ -260,6 +221,29 @@ def sm_credit_status():
     """Diagnostic: show which SM crediting platforms are configured."""
     from sparkmeter_credit import is_configured
     return is_configured()
+
+
+@router.get("/balance/{account_number}")
+def get_balance(account_number: str):
+    """Get the current kWh balance for an account.
+
+    Computes: last_transaction_balance_kwh - consumption_kwh_since.
+    Also returns the currency equivalent at current tariff.
+    """
+    try:
+        with get_connection() as conn:
+            balance_kwh, as_of = get_balance_kwh(conn, account_number)
+            rate = _get_tariff_rate(conn, account_number)
+            return {
+                "account_number": account_number,
+                "balance_kwh": balance_kwh,
+                "balance_currency": round(balance_kwh * rate, 2),
+                "tariff_rate": rate,
+                "as_of": as_of.isoformat() if as_of else None,
+            }
+    except Exception as e:
+        logger.error("Balance query failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/{account_number}")

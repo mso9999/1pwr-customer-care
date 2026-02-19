@@ -672,11 +672,16 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
 
     from customer_api import get_connection
 
-    def _ensure_naive(dt):
-        """Strip tzinfo for consistent comparisons (all times are UTC)."""
-        if dt and hasattr(dt, 'tzinfo') and dt.tzinfo is not None:
-            return dt.replace(tzinfo=None)
-        return dt
+    from country_config import UTC_OFFSET_HOURS
+    _LOCAL_OFFSET = timedelta(hours=UTC_OFFSET_HOURS)
+
+    def _to_local(dt):
+        """Convert a UTC-aware or naive-UTC datetime to local time (naive)."""
+        if dt is None:
+            return dt
+        if hasattr(dt, 'tzinfo') and dt.tzinfo is not None:
+            dt = dt.replace(tzinfo=None)
+        return dt + _LOCAL_OFFSET
 
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -731,7 +736,7 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
         for r in cursor.fetchall():
             kwh = float(r[1] or 0)
             lsl = float(r[2] or 0)
-            dt = _ensure_naive(r[3])
+            dt = _to_local(r[3])
             if latest_balance is None and r[4] is not None:
                 try:
                     latest_balance = float(r[4])
@@ -781,8 +786,9 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
         except Exception as e:
             logger.warning("Dashboard: failed to supplement from monthly_transactions: %s", e)
 
-        # Compute aggregates
-        now = datetime.utcnow()
+        # now_utc for DB queries, now_local for display boundaries
+        now_utc = datetime.utcnow()
+        now = now_utc + _LOCAL_OFFSET
         total_kwh = sum(r["kwh"] for r in history_rows)
         total_lsl = sum(r["lsl"] for r in history_rows)
 
@@ -818,7 +824,7 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
                 "LEFT JOIN meters m ON m.meter_id = h.meter_id "
                 "WHERE h.account_number = %s AND h.reading_hour >= %s "
                 "ORDER BY h.reading_hour",
-                (acct, now - timedelta(days=365)),
+                (acct, now_utc - timedelta(days=365)),
             )
             for row in cursor.fetchall():
                 dt_h = row[0]
@@ -831,7 +837,7 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
                             dt_h = datetime.fromisoformat(dt_h)
                         except ValueError:
                             continue
-                    dt_h = _ensure_naive(dt_h)
+                    dt_h = _to_local(dt_h)
                     day_str = dt_h.strftime("%Y-%m-%d")
                     source_daily[src][day_str] += kwh_h
                     if role != "check":
@@ -913,13 +919,13 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
         # Hourly consumption for last 24 hours, per source
         hourly_24h: list[dict] = []
         try:
-            cutoff_24h = now - timedelta(hours=24)
+            cutoff_24h_utc = now_utc - timedelta(hours=24)
             cursor.execute(
                 "SELECT h.reading_hour, h.kwh, h.source "
                 "FROM hourly_consumption h "
                 "WHERE h.account_number = %s AND h.reading_hour >= %s "
                 "ORDER BY h.reading_hour",
-                (acct, cutoff_24h),
+                (acct, cutoff_24h_utc),
             )
             source_labels_h = {
                 "thundercloud": "SparkMeter",
@@ -939,15 +945,16 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
                             dt_h = datetime.fromisoformat(dt_h)
                         except ValueError:
                             continue
-                    dt_h = _ensure_naive(dt_h)
+                    dt_h = _to_local(dt_h)
                     hour_str = dt_h.strftime("%Y-%m-%d %H:00")
                     label = source_labels_h.get(src, src)
                     hourly_by_src[label][hour_str] += kwh_h
 
             all_sources_h = sorted(hourly_by_src.keys())
+            cutoff_24h_local = now - timedelta(hours=24)
             for i in range(24):
-                h = cutoff_24h + timedelta(hours=i)
-                hour_str = _ensure_naive(h).strftime("%Y-%m-%d %H:00")
+                h = cutoff_24h_local + timedelta(hours=i)
+                hour_str = h.strftime("%Y-%m-%d %H:00")
                 pt: dict = {"hour": hour_str}
                 for src_label in all_sources_h:
                     pt[src_label] = round(
@@ -1087,6 +1094,8 @@ def employee_customer_data(
                 "ORDER BY transaction_date DESC",
                 (acct,),
             )
+            from country_config import UTC_OFFSET_HOURS as _TXN_UTC_OFF
+            _txn_offset = timedelta(hours=_TXN_UTC_OFF)
             for r in cursor.fetchall():
                 dt_raw = r[3]
                 dt_str = None
@@ -1095,12 +1104,16 @@ def employee_customer_data(
                         for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y"):
                             try:
                                 dt_parsed = datetime.strptime(dt_raw.strip(), fmt)
-                                dt_str = dt_parsed.strftime("%Y-%m-%d %H:%M:%S")
+                                dt_str = (dt_parsed + _txn_offset).strftime("%Y-%m-%d %H:%M:%S")
                                 break
                             except ValueError:
                                 continue
                     else:
-                        dt_str = dt_raw.strftime("%Y-%m-%d %H:%M:%S") if hasattr(dt_raw, "strftime") else str(dt_raw)
+                        if hasattr(dt_raw, "strftime"):
+                            local_dt = dt_raw.replace(tzinfo=None) + _txn_offset if hasattr(dt_raw, 'tzinfo') and dt_raw.tzinfo else dt_raw
+                            dt_str = local_dt.strftime("%Y-%m-%d %H:%M:%S")
+                        else:
+                            dt_str = str(dt_raw)
 
                 txn = {
                     "id": r[0],
@@ -1184,7 +1197,10 @@ def employee_customer_data(
         transactions.sort(key=_txn_sort_key, reverse=True)
 
         # --- Compute dashboard aggregates from transactions ---
-        now = datetime.utcnow()
+        from country_config import UTC_OFFSET_HOURS as _EMP_UTC_OFF
+        _emp_offset = timedelta(hours=_EMP_UTC_OFF)
+        now_utc = datetime.utcnow()
+        now = now_utc + _emp_offset
         total_kwh = sum(t["kwh"] for t in transactions)
         total_lsl = sum(t["amount_lsl"] for t in transactions)
 

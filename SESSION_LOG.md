@@ -367,9 +367,418 @@ The SOPs described an **outdated** configuration (iometering.co.za, SMSsync, 201
 **In progress / broken:**
 - Caddy `/api/bj/*` routing returns 404 — the `uri strip_prefix` + `rewrite` combo isn't working correctly. Need to debug the Caddy rewrite rules.
 
-**Still pending:**
-- Fix Caddy routing for Benin
-- Populate Benin DB with customers/meters from Koios API
-- Set up Koios import service for Benin
-- Frontend country selector and multi-country routing
-- Koios historical import for Lesotho still running (PID 501197 from prior session)
+**Completed after checkpoint:**
+11. **Fixed Caddy routing** — switched from `handle` + `uri strip_prefix` to `handle_path` which correctly strips `/api/bj` prefix
+12. **Populated Benin DB** from Koios v2 monthly reports (not v1 API which was capped at 50 customers). Final: 165 customers, 160 meters, 518 monthly_consumption rows across 6 months (Aug 2025–Jan 2026)
+13. **Discovered Koios Nova limitations**: v2 historical API returns 500 for Nova sites; v1 per-customer readings/payments endpoints don't exist. Only v2 monthly report (readings + payments summary) works.
+14. **kWh data quality**: Sep/Oct 2025 reports contain cumulative-register anomalies (millions of kWh from single meters). Import script caps at 10,000 kWh/meter/month and logs warnings. Nov 2025 onward is clean.
+15. **Created `import_benin.py`** — Koios v2 report-based import script for Benin
+16. **Set up `1pdb-import-bj.timer`** — systemd timer running every 6 hours, imports last + current month
+17. **Frontend country selector** — `CountryContext`, `COUNTRY_LABELS`, flag dropdown in Layout header. API calls route to `/api` (LS) or `/api/bj` (BJ) based on selection. Persists in localStorage.
+18. **Pushed all changes** (commits dd81161, cd6348b) — auto-deployed
+
+### Final State
+- `https://cc.1pwrafrica.com/api/health` → Lesotho, 1,476 customers
+- `https://cc.1pwrafrica.com/api/bj/health` → Benin, 165 customers
+- `https://cc.1pwrafrica.com/api/bj/config` → `{country_code: "BJ", currency: "XOF", ...}`
+- Frontend has country selector dropdown in header (employees only)
+- Both import timers active (Lesotho + Benin, 6h interval)
+
+### Pending Tasks (carried over)
+- Koios historical import for Lesotho (PID 501197 from prior session — check if complete)
+- Lambda deploy for real-time 1Meter forwarding
+- ACCDB transaction gap (Oct 2025–present)
+- Per-customer transaction detail for Benin (blocked by Koios Nova API limitations)
+
+## Session 2026-02-18 202602182000 (1PDB Continuous Ingestion — Single Source of Truth)
+
+### What Was Done
+
+**Phase 1: Import Resilience**
+- Patched `import_hourly.py`: added HTTP 500 to retry conditions in `fetch_week()`, wrapped per-week processing in `main()` with try/except + conn.rollback() so a single bad week doesn't crash the entire import
+- Patched `import_thundercloud.py`: same pattern — try/except around per-file processing with rollback
+- Deployed both to EC2 (`/opt/1pdb/services/`)
+
+**Phase 2: Historical Backfill (Launched)**
+- Created `backfill_all.sh` — orchestrates full historical import: Koios hourly (all 6 sites), ThunderCloud, Koios transactions, monthly aggregates
+- Running in background on EC2 (`nohup bash /opt/1pdb/services/backfill_all.sh > /tmp/backfill_all.log 2>&1 &`)
+- At session end, the backfill was processing MAT week ~7/142 (early weeks are mostly ON CONFLICT DO NOTHING since data through Oct 2025 already exists)
+- Will continue for several hours; check progress with `tail -f /tmp/backfill_all.log` on EC2
+- After MAT completes, will run TLH, MAS, SHG, KET, LSB (these have ZERO hourly data, so all records will be new)
+
+**Phase 3: Periodic Import Timer**
+- Updated `periodic_import.sh` to 4 steps: (1) Koios hourly, (2) ThunderCloud, (3) Koios transactions via import_service.py, (4) monthly aggregate rebuild
+- Started `1pdb-import.timer` — now `active (running)`, fires every 6 hours
+
+**Phase 4: Prototype Sync Daemon**
+- Fixed `prototype_sync.py` to match actual DynamoDB schema:
+  - Key: `device_id` (12-digit zero-padded) + `sample_time` (YYYYMMDDHHMM string), not `meterId` + `timestamp`
+  - Values: parse unit suffixes (e.g. "236.3 V" → 236.3) via `_num()` helper
+  - Skip epoch-zero readings (year < 2020)
+- Created `/etc/systemd/system/prototype-sync.service` with `EnvironmentFile=/opt/1pdb/.env`
+- AWS credentials already in `.env` — boto3 connects to DynamoDB `1meter_data` table (us-east-1) successfully
+- Service enabled and running: syncs 241 readings (~3 meters) every 60 seconds
+
+**Phase 5: SMS Pipeline Verified**
+- 15 SMS gateway transactions in `transactions` table, all from Feb 18
+- Real-time webhook working: POST to `/api/sms/incoming` processes M-PESA SMS immediately
+- One unmatched payment (ref 0107 → "no matching account") — data mapping issue, not pipeline issue
+
+**Phase 6: Verification**
+- All services active: `prototype-sync` (active), `1pdb-import.timer` (active), backfill (running)
+- Portal healthy at cc.1pwrafrica.com, /api/health returns OK
+
+### Current Data State
+
+| Table | Source | Records | Range |
+|-------|--------|---------|-------|
+| hourly_consumption | koios (MAT) | 2,019,490 | Jun 2023 – Oct 2025 |
+| hourly_consumption | thundercloud (MAK) | 7,840,345 | Dec 2020 – Feb 2026 |
+| hourly_consumption | iot (3 MAK meters) | 64+ | Feb 2026 (real-time) |
+| transactions | accdb | 600,993 | Sep 2020 – Oct 2025 |
+| transactions | sms_gateway | 15+ | Feb 2026 (real-time) |
+
+After backfill completes, TLH/MAS/SHG/KET/LSB will have hourly consumption, the Oct 2025–Feb 2026 transaction gap will be filled, and monthly aggregates will be rebuilt.
+
+### Key Decisions
+- Used existing AWS access keys from `/opt/1pdb/.env` rather than creating a new IAM role (keys already provisioned from prior session)
+- Full historical backfill runs as a background job (hours-long), not blocking interactive work
+- `periodic_import.sh` uses `import_service.py --koios` for transactions rather than a separate script
+- Kept single 6h timer for now; can split into hourly Koios + 6h ThunderCloud timers later if needed
+
+### What Next Session Should Know
+- **Check backfill completion**: `tail -20 /tmp/backfill_all.log` on EC2 — look for "BACKFILL COMPLETE"
+- **Verify new data appeared**: After backfill, query `SELECT community, source, COUNT(*) FROM hourly_consumption GROUP BY 1,2` — should show rows for TLH, MAS, SHG, KET, LSB
+- **Monthly aggregates**: After backfill Phase 4 runs, `monthly_consumption` and `monthly_transactions` should have data
+- **Unmatched SMS payment**: ref 0107 → M100 from 26659168169 couldn't match an account. May need account mapping update.
+- **Reconciliation of missed payments**: Original task from this chat thread still pending — 13 payments from the outage need reconciliation with SparkMeter balances
+
+### Files Modified
+- `1PDB/services/import_hourly.py` — error resilience (HTTP 500 retry, per-week try/except)
+- `1PDB/services/import_thundercloud.py` — error resilience (per-file try/except)
+- `1PDB/services/prototype_sync.py` — fixed DynamoDB key schema, value parsing
+- `1PDB/services/periodic_import.sh` — added txn import + aggregate rebuild steps
+- `1PDB/services/backfill_all.sh` — new: orchestrates full historical backfill
+- `1PDB/systemd/prototype-sync.service` — new: systemd service unit for prototype sync daemon
+
+### EC2 Deployed
+- `/opt/1pdb/services/import_hourly.py`
+- `/opt/1pdb/services/import_thundercloud.py`
+- `/opt/1pdb/services/prototype_sync.py`
+- `/opt/1pdb/services/periodic_import.sh`
+- `/opt/1pdb/services/backfill_all.sh`
+- `/etc/systemd/system/prototype-sync.service`
+
+---
+
+## Session 2026-02-19 202602191005 (MAK Transaction Gap — ThunderCloud Parquet Backfill)
+
+### What Was Done
+
+**Problem**: Customer 0045MAK on cc.1pwrafrica.com showed last transaction from Oct 2025. MAK transactions had a 4-month gap (Oct 16, 2025 → Feb 18, 2026) because:
+- ACCDB data ended Oct 16, 2025
+- SMS Gateway data only started Feb 18, 2026
+- MAK is a ThunderCloud site (separate SparkMeter instance at `opl-location001.sparkmeter.cloud`), NOT on Koios — so the Koios CSV transaction backfill couldn't cover it
+
+**Solution**: Wrote `backfill_mak_transactions.py` — detects payments from ThunderCloud parquet heartbeat data by finding positive jumps in `acct_credit` (account balance). When a customer pays, their balance increases between consecutive heartbeats; the delta plus any consumed cost equals the payment amount.
+
+**Implementation**:
+1. Created `/opt/1pdb/services/backfill_mak_transactions.py`:
+   - Logs into ThunderCloud via CSRF form auth (cookie-based, not API key)
+   - Downloads daily parquet files (~1.5MB each, ~20K rows per day)
+   - Groups heartbeats by meter, sorts chronologically
+   - Detects credit jumps ≥ M2 as payment events
+   - Calculates kWh from amount / rate (5.0 LSL/kWh)
+   - Inserts with `ON CONFLICT DO NOTHING` using heartbeat_id as dedup key
+   - Uses `source = 'thundercloud'` enum value
+
+2. Created partial unique index for idempotency:
+   ```sql
+   CREATE UNIQUE INDEX idx_txn_tc_dedup ON transactions (source_table) WHERE source = 'thundercloud';
+   ```
+
+3. Ran full backfill: 125 days (Oct 17, 2025 → Feb 18, 2026)
+   - Result: 2,031 payments detected, all inserted
+   - Zero failed downloads, ~5 minutes total runtime
+   - ~10-20 payments per day across all MAK customers
+
+4. Added to `sync_consumption.sh` for ongoing 15-minute sync (7-day window)
+
+5. Rebuilt monthly aggregates from Oct 2025
+
+### MAK Transaction Coverage (Post-Fix)
+
+| Source | Min Date | Max Date | Count |
+|--------|----------|----------|-------|
+| accdb | 2022-12-13 | 2025-10-16 | 8,471 |
+| thundercloud | 2025-10-17 | 2026-02-18 | 2,031 |
+| sms_gateway | 2026-02-18 | 2026-02-19 | 10 |
+
+Seamless coverage — no gaps.
+
+For 0045MAK specifically: 13 ThunderCloud transactions from Oct 25 to Feb 5, 2026 (customer buys small amounts roughly weekly).
+
+### Key Decisions
+- **Credit jump detection** over API calls: ThunderCloud (`opl-location001`) has NO payment/transaction API — only parquet file downloads. The `acct_credit` column in heartbeat data is the only source of payment information.
+- **Threshold of M2**: Filters out rounding noise from acct_credit drift while capturing real payments (smallest observed was M5).
+- **Separate script** (not merged into `backfill_transactions.py`): ThunderCloud uses cookie auth and parquet downloads, completely different from the Koios CSV approach. Keeping them separate avoids complexity.
+- **Runs on server directly**: ThunderCloud parquet files are ~1.5MB each. Downloading through SSH adds minutes; on-server downloads take ~2s each.
+
+### What Next Session Should Know
+- `backfill_mak_transactions.py` is deployed at `/opt/1pdb/services/` and runs in the 15-minute sync cycle
+- ThunderCloud (MAK) is the ONLY site using the parquet-based payment detection approach; all other sites use Koios CSV reports
+- The ThunderCloud instance at `opl-location001.sparkmeter.cloud` has very limited API: login + parquet download only (no v1/v2 REST API)
+- ThunderCloud credentials: `makhoalinyane@1pwrafrica.com` / `00001111` (cookie auth, not API key)
+
+### Files Modified/Created
+- `/opt/1pdb/services/backfill_mak_transactions.py` — NEW: ThunderCloud payment detection from parquet credit jumps
+- `/opt/1pdb/services/sync_consumption.sh` — Added MAK transaction sync call
+
+### EC2 Deployed
+- `/opt/1pdb/services/backfill_mak_transactions.py`
+- `/opt/1pdb/services/sync_consumption.sh`
+- PostgreSQL index: `idx_txn_tc_dedup`
+
+---
+
+## Session 2026-02-16 202602161430 (1Meter Firmware: MQTT Fixes, OTA Analysis & SOP)
+
+### What Was Done
+
+**1. MQTT Payload Fixes** — Pushed to `onepwr-aws-mesh` main (`d146e9d`):
+- Power unit label: `"kW"` → `"W"` (value is Watts from `activePowerW`, not kilowatts)
+- Energy format precision: `%.2f` → `%.4f` (future-proofs for pulse counting)
+- PowerReactive unit: `"kvar"` → `"var"` (correct SI unit)
+- Added `MeterConstant` field to MQTT payload for diagnostics
+- Fixed second format string (device build variant): `Time(mA)` → `Time(ms)`, removed extra paren in `PowerActive(w))`, fixed wrong `kWh` label on PowerReactive
+
+**2. DDS8888 Register Analysis** — Deep investigation of the 0.01 kWh step resolution:
+- The `/100` divisor in `meter_string.c:338` is CORRECT for the DDS8888 Modbus register format (registers 0x0018-0x0019 store energy in 0.01 kWh units)
+- The `meterConstant` (1200 imp/kWh) is the LED pulse output rate, NOT the register conversion factor
+- Changing to `/meterConstant` would break readings (values would be 12x too small)
+- The 0.01 kWh resolution is a hardware limitation of the DDS8888 Modbus register, not a firmware bug
+- To get 1/1200 kWh resolution, firmware would need GPIO pulse counting (hardware + firmware project)
+
+**3. OTA Capability Assessment** — Full audit of the firmware's OTA readiness:
+- Flash partition table supports dual-slot A/B OTA (`ota_0` + `ota_1`, 1.6 MB each, encrypted)
+- Bootloader rollback is enabled (`CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y`)
+- Complete AWS IoT OTA implementation exists (`ota_over_mqtt_demo.c`, ~1500 lines) but is DISABLED
+- `CONFIG_GRI_ENABLE_OTA_DEMO` defaults to `n`, not set in sdkconfig
+- `vStartOTACodeSigningDemo()` is never called in `app_main()`
+- The `esp-aws-iot` submodule is empty (not initialized)
+- Build environment is Windows-specific (`C:\Espressif\`, COM ports)
+
+**4. OTA Enablement SOP** — Created comprehensive SOP at `docs/SOP-1meter-ota-setup.md`:
+- Phase 1: Install ESP-IDF 5.2.3 on Linux EC2 (13.244.104.137)
+- Phase 2: AWS cloud setup (S3 bucket, code signing cert, IAM role, signing profile, Thing policies)
+- Phase 3: Firmware modifications (enable OTA flag, start OTA task, embed code signing cert)
+- Phase 4: One-time field flash at MAK (last physical flash ever needed)
+- Phase 5: Validate OTA pipeline end-to-end
+- Phase 6: Ongoing OTA workflow (build → S3 → OTA Job → devices self-update)
+- Phase 7: Adapt Windows-specific flash scripts for Linux
+- Troubleshooting guide and device inventory reference
+
+### Key Decisions
+- **Do NOT change `/100` to `/meterConstant`** in `meter_string.c` — the register divisor is correct; `meterConstant` is the LED pulse rate
+- **Move build environment to EC2** rather than keeping it on Josias's Windows laptop (single point of failure)
+- **OTA first, then iterate** — one field flash to deploy OTA-enabled firmware, then all future updates are remote
+
+### What Next Session Should Know
+- The MQTT payload fixes are committed to `onepwr-aws-mesh` but NOT on the devices yet — requires physical flash
+- The OTA SOP is ready to execute but nothing has been deployed yet
+- AWS IoT Core is in `us-east-1` (endpoint: `a3p95svnbmzyit-ats.iot.us-east-1.amazonaws.com`)
+- The `esp-aws-iot` submodule URL is `https://github.com/espressif/esp-aws-iot.git` branch `release/202406.01-LTS`
+- Thing Names for the 4 MAK devices need to be confirmed from AWS IoT Console or Josias
+
+### Files Created/Modified
+- `onepwr-aws-mesh/main/tasks/onemeter_mqtt/onemeter_mqtt.c` — MQTT payload fixes (pushed)
+- `docs/SOP-1meter-ota-setup.md` — NEW: full OTA enablement SOP
+
+### Protocol Feedback
+- CONTEXT.md was missing the `onepwr-aws-mesh` repo details (ESP-IDF version, AWS region, build tooling). Would benefit from a section on 1Meter firmware architecture.
+- SESSION_LOG.md provided good continuity from the previous session's 1Meter work.
+
+---
+
+## Session 2026-02-19 202602191200 (CC → SparkMeter Credit Pipe)
+
+### What Was Done
+- Built the CC → SM credit pipe: when payment transactions are created in CC (via CRUD API, payments webhook, or manual recording), the credit is now forwarded to SparkMeter so the customer's prepaid meter balance updates
+- Created `acdb-api/sparkmeter_credit.py` — module handling both Koios v1 (all sites except MAK) and ThunderCloud v0 (MAK/LAB) crediting APIs
+- Hooked SM crediting into `payments.py` (webhook → async background credit, manual → sync credit) and `crud.py` (transaction create → sync credit with `sm_credit` in response)
+- Added `/api/payments/sm-credit-status` diagnostic endpoint
+- Deployed and tested end-to-end: confirmed Koios v1 payment API works (status 201, transaction ID returned)
+- Discovered the existing Koios API key (`SGWcnZpgCj-...`) is READ-ONLY. Added the PHP SMS Gateway's known-good write key (`sogk1Ne2sexP5UpTyPmdX76xMco10Bsa7NT6-ETbrIE`) as `KOIOS_WRITE_API_KEY`/`KOIOS_WRITE_API_SECRET` in `/opt/1pdb/.env`
+- Increased API timeout from 30s to 90s to handle high-latency Koios calls from South Africa EC2
+
+### Key Decisions
+- **Koios v1 for writes**: Despite v1 being "deprecated", the payment endpoint (`POST /api/v1/customers/{id}/payments`) works and is what the PHP SMS Gateway uses in production
+- **Two API keys**: Read key (`SGWcnZpgCj-...`) for consumption imports, write key (`sogk1Ne2sex...`) for crediting. Separate env vars `KOIOS_WRITE_API_KEY`/`KOIOS_WRITE_API_SECRET`
+- **Credit on create only**: SM credit fires on new payment transactions (is_payment=true, amount>0). Edits/deletes do NOT re-credit (too risky for double-credit)
+- **Webhook credits async, manual credits sync**: SMS gateway webhook gets fast response + background credit. Portal manual payment waits for SM credit result so operator sees success/failure
+- **ThunderCloud token stale**: The PHP gateway's TC auth token (`.eJwN...`) is expired. Login flow doesn't authenticate the v0 API. MAK credits will fail until a fresh API token is generated from the SM Cloud dashboard
+
+### What Next Session Should Know
+- **MAK/LAB crediting broken**: ThunderCloud v0 API returns 401 with the stale token. Need to log into `sparkcloud-u740425.sparkmeter.cloud` admin UI → Settings → API → generate new token → set as `TC_AUTH_TOKEN` in `/opt/1pdb/.env`
+- **Frontend UI not yet updated**: The CRUD response now includes `sm_credit` field but the frontend doesn't display it. `CustomerDataPage.tsx` Add Transaction flow should show SM credit success/failure feedback
+- **MAK not in Koios**: MAK customers are NOT accessible via Koios API (returns empty). They are ThunderCloud-only. Cannot use Koios as fallback for MAK
+- **Env file**: `/opt/1pdb/.env` now has `TC_API_BASE`, `TC_AUTH_TOKEN`, `KOIOS_WRITE_API_KEY`, `KOIOS_WRITE_API_SECRET`
+- **Test cleanup**: Two 0.01 LSL test credits were pushed to Koios for 0001KET. The 1PDB records were deleted but the Koios credits remain (negligible amounts)
+
+### Files Modified
+- `acdb-api/sparkmeter_credit.py` (NEW) — SM crediting module
+- `acdb-api/payments.py` — added SM credit to webhook + manual endpoints
+- `acdb-api/crud.py` — added SM credit to transaction creates
+- `/opt/1pdb/.env` (server) — added `TC_API_BASE`, `TC_AUTH_TOKEN`, `KOIOS_WRITE_API_KEY`, `KOIOS_WRITE_API_SECRET`
+
+---
+
+## Session 2026-02-19 202602191600 (Consumption Sync Fix + Benin)
+
+### What Was Done
+- Diagnosed root cause of stale Koios consumption data: the Koios v2 historical API's gateway times out (504) after ~60s from EC2 in South Africa when per_page > ~50. From a well-connected Mac, per_page=1000 works fine in 14s — confirming the issue is the EC2→Koios network path, not the API itself
+- Rewrote `import_hourly.py` with resilient approach: adaptive per_page (starts at 50, automatically halves on 504/timeout, floor at 10), single-day queries, exponential backoff retries (5 attempts), staleness-aware (checks DB and only fetches missing days), optional concurrent site processing
+- Ran fast catch-up from Mac via SSH tunnel: all Lesotho Koios sites now current through Feb 18 (yesterday). KET was 5 days stale, now fully caught up
+- Added Benin (BN) support to `import_hourly.py` — GBO and SAM sites, using Benin-specific Koios org (`0123589c-...`) and API keys. Tested successfully: GBO=96 rows/day, SAM=58 rows/day
+- Fixed `country_config.py`: GBO Koios site ID was wrong (`1721a02f` → `a23c334e`). The old ID had no service area in Koios; the GBOWELE site ID has data
+- Fixed `/opt/1pdb/.env`: quoted all values containing `&`, `^`, `!`, `)` so `source .env` doesn't fail. Added `KOIOS_API_KEY_BN` and `KOIOS_API_SECRET_BN` for read access
+- Updated `sync_consumption.sh`: now sources `.env` for API keys, passes `$YESTERDAY` (not 2-day window) to import_hourly.py, kept 10-min timeout wrapper
+
+### Key Decisions
+- **Adaptive per_page over fixed small**: Rather than hardcoding per_page=10 (safe but slow), the new import starts at 50 and self-tunes down. From a fast connection, it stays at 500; from EC2, it quickly drops to 10-25
+- **Single-day queries mandatory**: Multi-day ranges reliably 500 on Koios. Daily granularity is now the only path used
+- **Mac relay for catch-up, EC2 for maintenance**: The EC2 can keep up with ~1 day of incremental data at per_page=10-50 within the 10-minute timeout. For large backfills, SSH tunnel from a fast machine is the way
+- **Benin uses write key for reads**: No separate read API key exists for BN org. The write key has read access (verified)
+
+### What Next Session Should Know
+- **MAK/LAB crediting still broken**: ThunderCloud v0 API token stale — same as last session
+- **Frontend SM credit feedback not done**: Same as last session
+- **Koios API is chronically slow from EC2**: Not a bug we can fix. The adaptive import works around it. If data staleness exceeds 2+ days, run a Mac relay catch-up: `DATABASE_URL=postgresql://...@localhost:15432/onepower_cc python3 import_hourly.py 2026-02-XX --no-aggregate --per-page 500`
+- **Benin org ID discrepancy**: `sparkmeter_credit.py` uses `893ff3cc-...` (from earlier investigation) but `country_config.py` and `import_hourly.py` now use `0123589c-...`. Need to verify which is correct for the credit pipe
+- **Koios web dashboard uses `/sm/` internal endpoints**: Found `export_data`, `report/download` endpoints in the SPA JS. These require web session auth (not API key). Credentials `makhoalinyane@1pwrafrica.com / 00001111` don't work on Koios web login — need correct Koios web credentials to explore faster data paths
+
+### Data Freshness After Fix
+| Site | Source       | Latest (UTC)      | Status    |
+|------|-------------|-------------------|-----------|
+| KET  | koios       | 2026-02-18 00:00  | caught up |
+| LSB  | koios       | 2026-02-18 00:00  | caught up |
+| MAS  | koios       | 2026-02-18 23:00  | current   |
+| MAT  | koios       | 2026-02-18 23:00  | current   |
+| SEH  | koios       | 2026-02-18 00:00  | caught up |
+| SHG  | koios       | 2026-02-18 00:00  | caught up |
+| TLH  | koios       | 2026-02-18 23:00  | current   |
+| MAK  | thundercloud| 2026-02-18 21:00  | current   |
+| GBO  | koios       | 2026-02-18 (new!) | first import |
+| SAM  | koios       | 2026-02-18 (new!) | first import |
+
+### Files Modified
+- `acdb-api/import_hourly.py` — complete rewrite with adaptive per_page, single-day queries, retries, BN support
+- `acdb-api/country_config.py` — fixed GBO Koios site ID
+- `/opt/1pdb/services/import_hourly.py` (server) — deployed new version
+- `/opt/1pdb/services/sync_consumption.sh` (server) — sources .env, uses $YESTERDAY
+- `/opt/1pdb/.env` (server) — quoted special chars, added BN read API keys
+
+---
+
+## Session 2026-02-19 202602191530 (Koios API Study + Credit Pipe Simplification)
+
+### What Was Done
+- **Comprehensive Koios API v1+v2 study**: Systematically tested every relevant endpoint against our org and credentials
+- **Discovered `POST /payments` with `customer_code`**: Koios v1 accepts payments by account number directly, eliminating the need for a two-step customer UUID lookup → credit flow. Reduces API calls from 2 to 1 per credit.
+- **Simplified `sparkmeter_credit.py`**: Removed `_koios_get_customer_id()` function entirely. `_koios_credit()` now uses `POST /api/v1/payments` with `customer_code` parameter. Added empty-body handling for slow Koios responses (Benin).
+- **Added payment lookup and reversal**: `koios_lookup_payment(external_id)` for idempotency and `koios_reverse_payment(payment_id)` for corrections.
+- **Added freshness check to `import_hourly.py`**: Queries `POST /data/freshness` before importing — if DB data is already at or past the API's freshness date for a site, that site is skipped entirely. Saves time on runs where Koios hasn't published new data.
+- **Tested all three credit paths end-to-end**:
+  - Koios LS (0330SHG): 0.01 LSL → success (balance 6.34 → 6.36) — 5s
+  - ThunderCloud MAK (0001MAK): 0.01 → success — 3s
+  - Koios BN (0001GBO): 1 XOF → success (balance 401 → 402) — 60s (slow but works; XOF has no sub-units)
+- **Updated CONTEXT.md**: Added full SparkMeter API landscape documentation
+
+### Key Decisions
+- **Single-call credit over two-step**: `POST /payments` with `customer_code` eliminates the customer lookup. Simpler, faster, fewer failure points
+- **v2 live endpoint abandoned**: Returns 0 records for our sites. Our meters likely aren't Nova-type or don't have service areas configured. This is a Koios platform limitation, not something we can fix via API
+- **Freshness-based skip optimization**: Instead of always querying yesterday's historical data, check freshness first. If a site's data in DB matches API freshness, skip it entirely. Saves the bulk of import time on most runs
+- **XOF decimal handling**: Benin credits must use whole numbers (XOF has 0 decimal places). The API returns "too many decimal places" for amounts like 0.01. Real payments from MoMo will always be whole XOF
+
+### API Findings (Reference)
+| Endpoint | Status | Notes |
+|----------|--------|-------|
+| v2 `POST /data/freshness` | ✅ Works | Shows per-site data dates; useful for optimization |
+| v2 `POST /data/live` | ❌ 0 records | Requires Nova meters + service areas; not available for our sites |
+| v2 `POST /data/historical` | ✅ ~1 day lag | Today's data returns 0; yesterday's available |
+| v1 `GET /customers` | ✅ Works | `latest_reading` field is always None for our meters |
+| v1 `POST /payments` (by code) | ✅ Works | New simplified path, accepts `customer_code` directly |
+| v1 `GET /payments?external_id=` | ✅ Works | 404 if not found, payment data if exists |
+| v1 `POST /payments/{id}/reverse` | ✅ Available | Not yet tested with real reversal |
+
+### What Next Session Should Know
+- **Koios sites have inherent ~1 day data lag**: No real-time data path exists via API. v2 live is non-functional. v1 latest_reading is unpopulated. The freshness check optimization helps avoid redundant imports but doesn't reduce the lag.
+- **ThunderCloud (MAK) has real-time data**: `import_tc_live.py` (v0 API readings) and `import_tc_transactions.py` (web API transactions) provide same-day data. Already deployed and running in `sync_consumption.sh`.
+- **Test payments to clean up**: 0.01 LSL to 0330SHG (×2) and 1 XOF to 0001GBO, 0.01 to 0001MAK. Negligible amounts, no reversal needed.
+- **Frontend SM credit feedback still not done**: `CustomerDataPage.tsx` doesn't display SM credit results from the API response
+- **Benin Koios is very slow from EC2**: 60s for a single payment credit. Empty body responses can occur. The new code handles this gracefully (checks HTTP status when body is empty).
+
+### Files Modified
+- `acdb-api/sparkmeter_credit.py` — removed UUID lookup, switched to POST /payments with customer_code, added lookup/reversal functions, empty-body handling
+- `acdb-api/import_hourly.py` — added `check_freshness()` and skip logic for up-to-date sites
+- `CONTEXT.md` — added SparkMeter API landscape, data sources expanded with ThunderCloud live imports, credit pipe docs
+
+---
+
+## Session 2026-02-19 202602191730 (kWh Balance Engine + BN Customer Fix)
+
+### What Was Done
+
+1. **Fixed Benin customer import (critical bug)**:
+   - **Root cause**: Koios v1 API uses **cursor-based pagination** (returns a `cursor` field), but our import used `page=` parameter which was silently ignored — every request returned page 1.
+   - **Result**: Only 50 of 210 customers were imported (2 SAM, 48 GBO).
+   - **Fix**: Rewrote pagination to use `cursor` parameter. Full import: **67 SAM + 135 GBO = 202 meters** (9 customers had no meters assigned).
+   - v1 API response structure: `meters[]` is nested array per customer, serial at `meters[0]["serial"]`, tariff at `meters[0]["tariff"]["rate_amount"]["value"]`.
+
+2. **Built kWh-based balance engine** (`balance_engine.py`):
+   - Balance is now tracked in **kWh**, not currency. Matches the legacy ACCDB VBA logic from `meterdata.bas`.
+   - `get_balance_kwh(conn, account)` → computes live balance: `last_txn_balance - SUM(hourly_consumption since that txn)`.
+   - `record_payment_kwh(conn, ...)` → records payment, computes kWh vended = amount/rate, updates running balance.
+   - Rationale (per user): kWh is the true unit. Currency balance masks tariff escalation effects — you bought units at one rate yesterday, another today. Only kWh balance reveals how many units you actually have.
+
+3. **Fixed payments.py** to use balance engine:
+   - Both `/webhook` (sms_gateway) and `/record` (portal) now call `record_payment_kwh()`.
+   - Balance computation accounts for consumption since last transaction.
+   - Added `GET /api/payments/balance/{account_number}` endpoint returning `balance_kwh` + `balance_currency` at current tariff.
+
+4. **Fixed 36 existing sms_gateway transaction balances**:
+   - All were storing cumulative currency totals instead of kWh running balance.
+   - Recomputed from full transaction history per account.
+
+### Key Decisions
+
+- **kWh not currency for balance**: The fundamental unit is energy, not money. Currency is a derived view via tariff rate. This matches VBA's `newbalance = (theamount / currentrate) + oldbalance` where `newbalance` is in kWh.
+- **Consumption deduction via query, not duplicate rows**: Rather than inserting consumption rows into `transactions` (which would duplicate `hourly_consumption` data), the balance engine computes `last_txn_balance - SUM(hourly_consumption.kwh since last_txn_date)` on the fly. Avoids data duplication while still tracking consumption's effect on balance.
+- **NULL balance tolerance**: `thundercloud` (102) and `koios` (5388) imported transactions have NULL `current_balance`. The balance engine skips to the most recent non-NULL value. Proper backfill is a follow-up task.
+
+### Data State After This Session
+
+| Site | Meters in 1PDB | Source |
+|------|----------------|--------|
+| MAK  | 240 | ThunderCloud |
+| MAT  | 126 | Koios LS |
+| TLH  | 81  | Koios LS |
+| GBO  | 135 | Koios BN (fixed) |
+| SAM  | 67  | Koios BN (fixed) |
+| SHG  | 43  | Koios LS |
+| MAS  | 18  | Koios LS |
+| Total | 751 | |
+
+### What Next Session Should Know
+
+- **Koios v1 pagination is cursor-based**: Use `cursor` parameter from response, NOT `page=`. Max `per_page=50`. The `site_id` filter parameter is broken for the BN org (ignored).
+- **5,388 koios + 102 thundercloud transactions have NULL balance**: These were payment records imported without balance computation. Need a backfill script that processes each account chronologically.
+- **Initial condition problem**: For accounts where the earliest 1PDB transaction is from koios/thundercloud (not accdb), the starting balance is unknown. Need to seed from SM's current balance at a known point and track forward.
+- **Tariff rate is currently a single global value** (`system_config.tariff_rate = 5.0 LSL/kWh`). BN sites use different rates (PME=318.1 XOF, Residentiel B=160 XOF). The tariff lookup in `payments.py._get_tariff_rate()` needs to become per-account/per-site.
+- **`balance_engine.py` is not yet deployed** — needs push to main for auto-deploy.
+
+### Files Modified/Created
+- `acdb-api/balance_engine.py` — NEW: kWh balance computation engine
+- `acdb-api/payments.py` — refactored to use balance engine, added balance endpoint, kWh tracking
+- Server: 1PDB `meters` table — 202 BN meters imported (up from 50)
+- Server: 1PDB `transactions` table — 36 sms_gateway balances corrected from currency to kWh

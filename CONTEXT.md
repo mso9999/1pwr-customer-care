@@ -55,7 +55,9 @@ The Linux EC2 runs everything: Caddy, FastAPI, PostgreSQL. No Windows EC2 depend
 
 ### Related Repos
 - **onepowerLS/1PDB** — Database schema, migration scripts, data pipeline services
-- **onepowerLS/SMS-Gateway-APP** — M-PESA/EcoCash payment bridge (webhook POST to 1PDB)
+- **onepowerLS/SMSComms** — Lesotho SMS Gateway (sms.1pwrafrica.com)
+- **onepowerLS/SMSComms-BN** — Benin SMS Gateway (smsbn.1pwrafrica.com)
+- **onepowerLS/SMS-Gateway-APP** — Android Medic Gateway app (phones → PHP gateways)
 - **onepowerLS/ingestion_gate** — Prototype meter IoT Lambda (DynamoDB)
 
 ## Key Files
@@ -162,10 +164,41 @@ meters dynamically from the DB (no hardcoded dicts).
 ### Data Sources
 | Source | Platform | Coverage | Ingestion |
 |--------|----------|----------|-----------|
-| Koios | SparkMeter Cloud | KET, LSB, MAS, MAT, SHG, TLH | `import_hourly.py` (batch) + systemd timer |
-| ThunderCloud | SparkMeter on-prem | MAK | `import_thundercloud.py` (batch) |
+| Koios v2 historical | SparkMeter Cloud | KET, LSB, MAS, MAT, SEH, SHG, TLH (LS) + GBO, SAM (BN) | `import_hourly.py` (batch, ~1 day lag) + systemd timer |
+| ThunderCloud parquet | SparkMeter on-prem | MAK | `import_thundercloud.py` (batch, ~1 day lag) |
+| ThunderCloud v0 live | SparkMeter on-prem | MAK | `import_tc_live.py` (real-time readings, 15-min intervals) |
+| ThunderCloud web API | SparkMeter on-prem | MAK | `import_tc_transactions.py` (live transactions) |
 | IoT / ingestion_gate | 1Meter prototype | MAK (3 meters) | Real-time Lambda → POST /api/meters/reading |
-| SMS Gateway | M-PESA payments | All sites | sms.1pwrafrica.com mirrors to POST /api/sms/incoming |
+| SMS Gateway (LS) | M-PESA payments | All LS sites | sms.1pwrafrica.com mirrors to POST /api/sms/incoming |
+| SMS Gateway (BN) | MTN MoMo payments | All BN sites | smsbn.1pwrafrica.com mirrors to POST /api/bn/sms/incoming |
+
+### SparkMeter API Landscape (as of 2026-02-19)
+
+**Koios v1 (management)**: `https://www.sparkmeter.cloud/api/v1/`
+- `POST /payments` — credit with `customer_code` directly (single call, no UUID lookup)
+- `GET /payments?external_id=X` — idempotency lookup
+- `POST /payments/{id}/reverse` — reverse a payment
+- `GET /customers?code=X` — customer lookup by account number
+- Auth: `X-API-KEY` + `X-API-SECRET` headers. Country-specific keys in `.env`
+
+**Koios v2 (data)**: `https://www.sparkmeter.cloud/api/v2/`
+- `POST /organizations/{org_id}/data/freshness` — per-site data availability dates
+- `POST /organizations/{org_id}/data/historical` — hourly readings, S3-backed, ~1 day lag
+- `POST /organizations/{org_id}/data/live` — **not functional for our sites** (returns 0 records; requires Nova meter type + service area config)
+- Org ID: `1cddcb07-6647-40aa-aaaa-70d762922029` (LS), `0123589c-7f1f-4eb4-8888-d8f8aa706ea4` (BN)
+- Filter format: `{"sites": [site_uuid], "date_range": {"from": "YYYY-MM-DD", "to": "YYYY-MM-DD"}}`
+- Rate limit: 3 req / 5 sec for data endpoints
+
+**ThunderCloud v0**: `https://sparkcloud-u740425.sparkmeter.cloud/api/v0/`
+- `GET /customers?reading_details=true` — live meter readings (15-min interval kWh)
+- `POST /transaction/` — credit customer meter balance
+- Auth: `Authentication-Token` header (obtain from SparkCloud dashboard → Users → Payment Gateway → View Credentials)
+
+### CC → SparkMeter Credit Pipe (`sparkmeter_credit.py`)
+Routes credits by site code:
+- **MAK/LAB** → ThunderCloud v0 `POST /transaction/` (requires customer UUID lookup first)
+- **All other sites** → Koios v1 `POST /payments` with `customer_code` (single call)
+- Integrated into `payments.py` (webhook + manual) and `crud.py` (generic create)
 
 ## ARPU Methodology
 
@@ -186,7 +219,7 @@ all API calls routed to the selected country's backend.
 ```
 cc.1pwrafrica.com (single React app)
   ├── Lesotho API  → cc-api-ls (1PDB-LS, LSL, M-PESA, Koios + ThunderCloud)
-  ├── Benin API    → cc-api-bj (1PDB-BJ, XOF, MTN MoMo, TBD metering)
+  ├── Benin API    → cc-api-bn (1PDB-BN, XOF, MTN MoMo, Koios Nova)
   └── Zambia API   → cc-api-zm (1PDB-ZM, ZMW, Airtel/MTN, TBD metering)
 ```
 
