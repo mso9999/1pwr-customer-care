@@ -19,12 +19,12 @@ interface CountryContextType {
 
 const COUNTRY_ROUTES: Record<string, string> = {
   LS: '/api',
-  BJ: '/api/bj',
+  BN: '/api/bn',
 };
 
 const COUNTRY_LABELS: Record<string, string> = {
   LS: 'Lesotho',
-  BJ: 'Benin',
+  BN: 'Benin',
 };
 
 const CountryContext = createContext<CountryContextType | null>(null);

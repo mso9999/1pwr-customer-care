@@ -4,7 +4,7 @@
 
 const COUNTRY_ROUTES: Record<string, string> = {
   LS: '/api',
-  BJ: '/api/bj',
+  BN: '/api/bn',
 };
 
 function getApiBase(): string {

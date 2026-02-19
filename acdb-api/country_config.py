@@ -6,7 +6,7 @@ dial code, Koios org ID, and other country-specific constants.
 
 Supported countries:
   LS  — Lesotho  (OnePower Lesotho, LSL, M-PESA)
-  BJ  — Benin    (MIONWA GENERATION, XOF, MTN MoMo)
+  BN  — Benin    (MIONWA GENERATION, XOF, MTN MoMo)
 """
 
 import os
@@ -76,7 +76,7 @@ LESOTHO = CountryConfig(
 )
 
 BENIN = CountryConfig(
-    code="BJ",
+    code="BN",
     name="Benin",
     currency="XOF",
     currency_symbol="CFA",
@@ -99,7 +99,7 @@ BENIN = CountryConfig(
 
 _REGISTRY: Dict[str, CountryConfig] = {
     "LS": LESOTHO,
-    "BJ": BENIN,
+    "BN": BENIN,
 }
 
 
