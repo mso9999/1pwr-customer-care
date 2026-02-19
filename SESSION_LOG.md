@@ -782,3 +782,49 @@ For 0045MAK specifically: 13 ThunderCloud transactions from Oct 25 to Feb 5, 202
 - `acdb-api/payments.py` — refactored to use balance engine, added balance endpoint, kWh tracking
 - Server: 1PDB `meters` table — 202 BN meters imported (up from 50)
 - Server: 1PDB `transactions` table — 36 sms_gateway balances corrected from currency to kWh
+
+---
+
+## Session 2026-02-19 202602191830 (Balance Engine v2 + Seeding + Tariff)
+
+### What Was Done
+
+1. **Deployed balance engine v1** (`fb27a67`): Pushed `balance_engine.py`, updated `payments.py`, import scripts, and country_config to main. Auto-deployed to cc.1pwrafrica.com.
+
+2. **Per-account tariff rates**: Added `default_tariff_rate` to `CountryConfig` (LS=5.0 LSL/kWh, BN=160.0 XOF/kWh). Updated `_get_tariff_rate()` in payments.py to look up account's community → country → rate, falling back to system_config. All BN tariff categories (Residentiel B, PME, Industriel, Social) are currently 160 XOF/kWh. Added `get_tariff_rate_for_site()` helper and `_SITE_TO_COUNTRY` mapping.
+
+3. **Backfilled 5,490 NULL transaction balances**: Ran chronological walk-forward per account, computing kWh running balance for 1,069 accounts (all koios + thundercloud source transactions). Zero NULLs remaining.
+
+4. **Upgraded to full-history balance engine** (`d9eb5fa`):
+   - v1 computed `last_txn_balance - consumption_since_last_txn` — this missed consumption between payments.
+   - v2 computes `SUM(payment kWh) - SUM(live consumption) - SUM(accdb consumption)` from scratch.
+   - This correctly accounts for all payments and all consumption regardless of ordering.
+   - Added DB indexes: `idx_hc_account` on `hourly_consumption(account_number)`, `idx_txn_account_payment` on `transactions(account_number, is_payment)`.
+
+5. **Seeded 377 accounts from SM current balances**:
+   - For each SM account, computed `seed = SM_balance_kwh - (our_payments - our_consumption)`.
+   - Positive seed = pre-import payments we don't have → inserted as `balance_seed` transaction at 2020-01-01.
+   - Added `balance_seed` to `transaction_source` enum.
+   - **Reconciliation after seeding**: 0145MAK delta=+0.02 kWh, 0001MAK/0007MAK/0024MAK delta=0.00 kWh. 1PDB independently matches SM to within 0.02 kWh.
+   - 33 accounts had negative seeds (consumption gap on our side — needs investigation).
+
+### Key Decisions
+
+- **Full-history computation over running totals**: Running totals accumulated errors when consumption happened between payments. SUM(all payments) - SUM(all consumption) is always correct.
+- **SM balance for bootstrapping only**: Seeds are a one-time operation to recover pre-import history. Going forward, 1PDB independently tracks balance from transactions + consumption without needing SM.
+- **Skip negative seeds**: Accounts where 1PDB balance > SM balance have a consumption tracking gap — better to investigate than blindly adjust downward.
+- **Koios LS read key**: The LS write key returns empty responses for customer list; use the read key instead.
+
+### What Next Session Should Know
+
+- **33 negative-seed accounts**: These accounts show 1PDB balance > SM. Likely cause: hourly_consumption data is incomplete for these meters (some consumption periods missing). Low priority for now.
+- **LS Koios customer fetch inconsistent**: Sometimes returns 215 customers, sometimes 131, sometimes 0 (504 errors, empty pages). The LS read API key is unreliable for full customer listings.
+- **`balance_seed` transactions**: 377 rows at 2020-01-01 with `source='balance_seed'`. These represent unrecoverable pre-import payment history.
+- **Balance endpoint live**: `GET /api/payments/balance/{account_number}` returns `balance_kwh`, `balance_currency`, `tariff_rate`.
+- **Existing `current_balance` column**: The backfilled values in transactions are from the OLD running-total approach (payment-only). The balance engine now ignores this column and computes from scratch. The column is still updated on new payments for quick lookups but is not the source of truth.
+
+### Files Modified
+- `acdb-api/balance_engine.py` — v2: full-history SUM computation (2 commits)
+- `acdb-api/payments.py` — per-account tariff, balance engine integration
+- `acdb-api/country_config.py` — `default_tariff_rate`, `get_tariff_rate_for_site()`, `_SITE_TO_COUNTRY`
+- Server DB: `balance_seed` enum value, 2 indexes, 377 seed rows, 5,490 backfilled balances
