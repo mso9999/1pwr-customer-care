@@ -299,7 +299,7 @@ export default function CustomerDashboardPage() {
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 text-center">
           <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Last Payment</p>
           <p className="text-2xl font-bold text-gray-900 mt-1">
-            LSL {data.last_payment.amount.toLocaleString('en-ZA', { minimumFractionDigits: 2 })}
+            {data.currency_code || 'LSL'} {data.last_payment.amount.toLocaleString('en-ZA', { minimumFractionDigits: 2 })}
           </p>
           <p className="text-sm text-gray-500">
             received {fmtDate(data.last_payment.date)}
@@ -342,7 +342,7 @@ export default function CustomerDashboardPage() {
         />
         <StatCard
           label="Total Purchases"
-          value={`LSL ${data.total_lsl_all_time.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          value={`${data.currency_code || 'LSL'} ${data.total_lsl_all_time.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
           sub="all time"
         />
       </div>

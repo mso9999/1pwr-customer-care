@@ -206,6 +206,8 @@ export interface HourlyPoint {
 
 export interface CustomerDashboard {
   balance_kwh: number;
+  balance_currency?: number;
+  currency_code?: string;
   last_payment: DashboardPayment | null;
   avg_kwh_per_day: number;
   estimated_recharge_seconds: number;

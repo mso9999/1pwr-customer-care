@@ -380,7 +380,7 @@ export default function CustomerDataPage() {
           {data.tariff && (
             <div className="flex items-center gap-2 text-xs bg-gray-50 border rounded-lg px-3 py-2">
               <span className="text-gray-500">Tariff:</span>
-              <span className="font-bold text-gray-800">{data.tariff.rate_lsl} LSL/kWh</span>
+              <span className="font-bold text-gray-800">{data.tariff.rate_lsl} {data.dashboard?.currency_code || 'LSL'}/kWh</span>
               <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
                 data.tariff.source === 'customer' ? 'bg-purple-100 text-purple-700' :
                 data.tariff.source === 'concession' ? 'bg-amber-100 text-amber-700' :
@@ -393,7 +393,12 @@ export default function CustomerDataPage() {
 
           {/* Stats row */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <Stat label="Balance" value={`${d.balance_kwh.toFixed(1)} kWh`} color="green" />
+            <Stat
+              label="Balance"
+              value={`${d.balance_kwh.toFixed(1)} kWh`}
+              sub={d.balance_currency != null ? `${d.currency_code || 'LSL'} ${d.balance_currency.toFixed(2)}` : undefined}
+              color="green"
+            />
             <Stat label="Avg Consumption" value={`${d.avg_kwh_per_day.toFixed(1)} kWh/day`} color="blue" />
             <Stat
               label="Est. Recharge"
@@ -402,7 +407,7 @@ export default function CustomerDataPage() {
             />
             <Stat
               label="Last Payment"
-              value={d.last_payment ? `LSL ${d.last_payment.amount.toFixed(0)}` : '--'}
+              value={d.last_payment ? `${d.currency_code || 'LSL'} ${d.last_payment.amount.toFixed(0)}` : '--'}
               sub={d.last_payment?.date || undefined}
               color="blue"
             />
@@ -411,7 +416,7 @@ export default function CustomerDataPage() {
           {/* Totals */}
           <div className="grid grid-cols-2 gap-3">
             <Stat label="Total Consumption (all time)" value={`${d.total_kwh_all_time.toFixed(0)} kWh`} color="blue" />
-            <Stat label="Total Purchases (all time)" value={`LSL ${d.total_lsl_all_time.toFixed(0)}`} color="green" />
+            <Stat label="Total Purchases (all time)" value={`${d.currency_code || 'LSL'} ${d.total_lsl_all_time.toFixed(0)}`} color="green" />
           </div>
 
           {/* Tabs */}

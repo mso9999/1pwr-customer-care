@@ -33,30 +33,23 @@ def get_balance_kwh(conn, account_number: str) -> tuple[float, datetime | None]:
     """
     cur = conn.cursor()
 
-    # Total kWh credited via payments
+    # Single scan of transactions: payment kWh credits and ACCDB consumption debits
     cur.execute("""
-        SELECT COALESCE(SUM(kwh_value), 0)
+        SELECT
+            COALESCE(SUM(CASE WHEN is_payment THEN kwh_value ELSE 0 END), 0),
+            COALESCE(SUM(CASE WHEN NOT is_payment THEN transaction_amount ELSE 0 END), 0)
         FROM transactions
-        WHERE account_number = %s AND is_payment = true
+        WHERE account_number = %s
     """, (account_number,))
-    total_payment_kwh = float(cur.fetchone()[0])
+    total_payment_kwh, total_accdb_consumption = (float(v) for v in cur.fetchone())
 
-    # Total kWh consumed from hourly_consumption (Koios/ThunderCloud live data)
+    # Live consumption from hourly_consumption (Koios/ThunderCloud imports)
     cur.execute("""
         SELECT COALESCE(SUM(kwh), 0)
         FROM hourly_consumption
         WHERE account_number = %s
     """, (account_number,))
     total_live_consumption = float(cur.fetchone()[0])
-
-    # Total kWh consumed from ACCDB consumption rows in transactions
-    # (accdb stores consumed kWh in transaction_amount for is_payment=false)
-    cur.execute("""
-        SELECT COALESCE(SUM(transaction_amount), 0)
-        FROM transactions
-        WHERE account_number = %s AND is_payment = false
-    """, (account_number,))
-    total_accdb_consumption = float(cur.fetchone()[0])
 
     balance = round(total_payment_kwh - total_live_consumption - total_accdb_consumption, 4)
     return balance, datetime.now(timezone.utc)

@@ -148,3 +148,11 @@ def get_tariff_rate_for_site(site_code: str) -> float:
     if cc:
         return _REGISTRY[cc].default_tariff_rate
     return COUNTRY.default_tariff_rate
+
+
+def get_currency_for_site(site_code: str) -> str:
+    """Return the ISO 4217 currency code for a given site code."""
+    cc = _SITE_TO_COUNTRY.get(site_code)
+    if cc:
+        return _REGISTRY[cc].currency
+    return COUNTRY.currency

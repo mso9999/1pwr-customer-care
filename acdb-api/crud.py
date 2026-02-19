@@ -724,11 +724,10 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
             pass
 
         history_rows = []
-        latest_balance = None
 
         cursor.execute(
             "SELECT account_number, kwh_value, transaction_amount, "
-            "transaction_date, current_balance "
+            "transaction_date "
             "FROM transactions WHERE account_number = %s "
             "ORDER BY transaction_date DESC",
             (acct,),
@@ -737,11 +736,6 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
             kwh = float(r[1] or 0)
             lsl = float(r[2] or 0)
             dt = _to_local(r[3])
-            if latest_balance is None and r[4] is not None:
-                try:
-                    latest_balance = float(r[4])
-                except (ValueError, TypeError):
-                    pass
             if dt is not None:
                 if isinstance(dt, str):
                     for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"):
@@ -854,16 +848,16 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
         days_with_data = len(daily)
         avg_kwh_per_day = sum(daily.values()) / max(days_with_data, 1)
 
-        # Balance: prefer actual current_balance from most recent transaction
-        if latest_balance is not None:
-            balance_kwh = max(0, latest_balance)
-        else:
-            total_purchased_kwh = sum(r["kwh"] for r in history_rows if r["lsl"] > 0)
-            total_consumed_kwh = sum(r["kwh"] for r in history_rows if r["lsl"] <= 0)
-            if total_consumed_kwh == 0:
-                balance_kwh = max(0, history_rows[0]["kwh"] if history_rows else 0)
-            else:
-                balance_kwh = max(0, total_purchased_kwh - abs(total_consumed_kwh))
+        # Balance via full-history balance engine
+        from balance_engine import get_balance_kwh as _be_balance
+        from country_config import get_tariff_rate_for_site, get_currency_for_site
+        import re as _re
+        _be_raw, _ = _be_balance(conn, acct)
+        balance_kwh = max(0, _be_raw)
+        _site_match = _re.search(r'[A-Z]{3}$', acct)
+        _site_code = _site_match.group(0) if _site_match else ""
+        _tariff_rate = get_tariff_rate_for_site(_site_code)
+        _currency_code = get_currency_for_site(_site_code)
 
         # Estimated time to recharge (seconds)
         if avg_kwh_per_day > 0 and balance_kwh > 0:
@@ -968,6 +962,8 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
 
         return {
             "balance_kwh": round(balance_kwh, 2),
+            "balance_currency": round(balance_kwh * _tariff_rate, 2),
+            "currency_code": _currency_code,
             "last_payment": last_payment,
             "avg_kwh_per_day": round(avg_kwh_per_day, 2),
             "estimated_recharge_seconds": estimated_seconds,
@@ -1228,18 +1224,14 @@ def employee_customer_data(
         days_with_data = len(daily)
         avg_kwh_per_day = sum(daily.values()) / max(days_with_data, 1)
 
-        # Balance
-        latest_balance = None
-        for t in transactions:
-            if t.get("balance") is not None:
-                latest_balance = t["balance"]
-                break
-        if latest_balance is not None:
-            balance_kwh = max(0, latest_balance)
-        else:
-            purchased = sum(t["kwh"] for t in transactions if t["amount_lsl"] > 0)
-            consumed = sum(t["kwh"] for t in transactions if t["amount_lsl"] <= 0)
-            balance_kwh = max(0, purchased - abs(consumed)) if consumed else max(0, transactions[0]["kwh"] if transactions else 0)
+        # Balance via full-history balance engine
+        from balance_engine import get_balance_kwh as _be_balance
+        from country_config import get_tariff_rate_for_site, get_currency_for_site
+        _be_raw, _ = _be_balance(conn, acct)
+        balance_kwh = max(0, _be_raw)
+        _emp_site = (meter_info or {}).get("community") or ""
+        _emp_tariff = get_tariff_rate_for_site(_emp_site)
+        _emp_currency = get_currency_for_site(_emp_site)
 
         if avg_kwh_per_day > 0 and balance_kwh > 0:
             est_seconds = int((balance_kwh / avg_kwh_per_day) * 86400)
@@ -1286,6 +1278,8 @@ def employee_customer_data(
             "tariff": tariff_info,
             "dashboard": {
                 "balance_kwh": round(balance_kwh, 2),
+                "balance_currency": round(balance_kwh * _emp_tariff, 2),
+                "currency_code": _emp_currency,
                 "last_payment": last_payment,
                 "avg_kwh_per_day": round(avg_kwh_per_day, 2),
                 "estimated_recharge_seconds": est_seconds,
