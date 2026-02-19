@@ -24,6 +24,7 @@ class CountryConfig:
     koios_org_id: str
     timezone: str                       # IANA timezone (e.g. Africa/Maseru)
     utc_offset_hours: int               # fixed offset for simple arithmetic
+    default_tariff_rate: float          # default currency/kWh for balance engine
     site_abbrev: Dict[str, str]         # site_code → full name
     site_districts: Dict[str, str]      # site_code → district/region
     koios_sites: Dict[str, str]         # site_code → Koios UUID
@@ -39,6 +40,7 @@ LESOTHO = CountryConfig(
     koios_org_id="1cddcb07-6647-40aa-aaaa-70d762922029",
     timezone="Africa/Maseru",
     utc_offset_hours=2,
+    default_tariff_rate=5.0,
     site_abbrev={
         "MAK": "Ha Makebe",
         "MAS": "Mashai",
@@ -88,6 +90,7 @@ BENIN = CountryConfig(
     koios_org_id="0123589c-7f1f-4eb4-8888-d8f8aa706ea4",
     timezone="Africa/Porto-Novo",
     utc_offset_hours=1,
+    default_tariff_rate=160.0,
     site_abbrev={
         "GBO": "Gbo",
         "SAM": "Sam",
@@ -131,3 +134,17 @@ CURRENCY: str = COUNTRY.currency
 CURRENCY_SYMBOL: str = COUNTRY.currency_symbol
 TIMEZONE: str = COUNTRY.timezone
 UTC_OFFSET_HOURS: int = COUNTRY.utc_offset_hours
+
+_SITE_TO_COUNTRY: Dict[str, str] = {}
+for _cc, _cfg in _REGISTRY.items():
+    for _site in _cfg.site_abbrev:
+        _SITE_TO_COUNTRY[_site] = _cc
+_SITE_TO_COUNTRY["MAK"] = "LS"
+
+
+def get_tariff_rate_for_site(site_code: str) -> float:
+    """Return the tariff rate (currency/kWh) for a given site code."""
+    cc = _SITE_TO_COUNTRY.get(site_code)
+    if cc:
+        return _REGISTRY[cc].default_tariff_rate
+    return COUNTRY.default_tariff_rate

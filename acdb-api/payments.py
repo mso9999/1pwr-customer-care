@@ -67,11 +67,26 @@ def _resolve_meter(conn, account_number: str, meter_id: Optional[str] = None) ->
 
 
 def _get_tariff_rate(conn, account_number: str) -> float:
-    """Get the applicable tariff rate (LSL/kWh) for an account."""
+    """Get the applicable tariff rate (currency/kWh) for an account.
+
+    Looks up the meter's community (site code) and returns the
+    country-specific tariff rate.  Falls back to system_config
+    then to the active country default.
+    """
+    from country_config import get_tariff_rate_for_site, COUNTRY
+
     cur = conn.cursor()
+    cur.execute(
+        "SELECT community FROM meters WHERE account_number = %s AND status = 'active' LIMIT 1",
+        (account_number,),
+    )
+    row = cur.fetchone()
+    if row and row[0]:
+        return get_tariff_rate_for_site(row[0])
+
     cur.execute("SELECT value FROM system_config WHERE key = 'tariff_rate' LIMIT 1")
     row = cur.fetchone()
-    return float(row[0]) if row else 5.0
+    return float(row[0]) if row else COUNTRY.default_tariff_rate
 
 
 @router.post("/webhook")

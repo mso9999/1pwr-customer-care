@@ -6,13 +6,12 @@ Balance is always in kWh, matching the legacy ACCDB VBA logic:
   - Payments credit kWh:  balance += payment_amount / tariff_rate
   - Consumption debits kWh: balance -= kwh_consumed
 
-The balance is derived from two tables:
-  - transactions.current_balance: kWh snapshot at time of each payment/ACCDB row
-  - hourly_consumption: kWh consumed per hour (from Koios/ThunderCloud imports)
+Balance = SUM(payment kWh from transactions)
+        - SUM(consumption kWh from hourly_consumption)
+        - SUM(consumption kWh from accdb transaction rows where is_payment=false)
 
-True live balance = last_txn_balance - SUM(consumption since that transaction)
-
-For reconciliation, kWh can be converted to currency via tariff rate at any point.
+This is a full-history computation — no running totals or seeds needed.
+For reconciliation, kWh can be converted to currency via tariff rate.
 """
 
 import logging
@@ -26,35 +25,40 @@ def get_balance_kwh(conn, account_number: str) -> tuple[float, datetime | None]:
 
     Returns (balance_kwh, as_of_timestamp).
 
-    Combines the last transaction snapshot with any consumption
-    recorded in hourly_consumption since that snapshot.
+    Uses a dual-source approach:
+    1. Payment credits from transactions (is_payment=true → kwh_value added)
+    2. Consumption debits from:
+       a) hourly_consumption table (Koios/ThunderCloud imports)
+       b) transactions where is_payment=false (legacy ACCDB consumption rows)
     """
     cur = conn.cursor()
 
+    # Total kWh credited via payments
     cur.execute("""
-        SELECT current_balance, transaction_date
+        SELECT COALESCE(SUM(kwh_value), 0)
         FROM transactions
-        WHERE account_number = %s AND current_balance IS NOT NULL
-        ORDER BY transaction_date DESC, id DESC
-        LIMIT 1
+        WHERE account_number = %s AND is_payment = true
     """, (account_number,))
-    row = cur.fetchone()
+    total_payment_kwh = float(cur.fetchone()[0])
 
-    if not row:
-        return 0.0, None
-
-    last_txn_balance = float(row[0])
-    last_txn_date = row[1]
-
+    # Total kWh consumed from hourly_consumption (Koios/ThunderCloud live data)
     cur.execute("""
         SELECT COALESCE(SUM(kwh), 0)
         FROM hourly_consumption
         WHERE account_number = %s
-          AND reading_hour > %s
-    """, (account_number, last_txn_date))
-    consumption_since = float(cur.fetchone()[0])
+    """, (account_number,))
+    total_live_consumption = float(cur.fetchone()[0])
 
-    balance = round(last_txn_balance - consumption_since, 4)
+    # Total kWh consumed from ACCDB consumption rows in transactions
+    # (accdb stores consumed kWh in transaction_amount for is_payment=false)
+    cur.execute("""
+        SELECT COALESCE(SUM(transaction_amount), 0)
+        FROM transactions
+        WHERE account_number = %s AND is_payment = false
+    """, (account_number,))
+    total_accdb_consumption = float(cur.fetchone()[0])
+
+    balance = round(total_payment_kwh - total_live_consumption - total_accdb_consumption, 4)
     return balance, datetime.now(timezone.utc)
 
 
@@ -70,8 +74,8 @@ def record_payment_kwh(
 ) -> tuple[int, float, float]:
     """Record a payment and return (txn_id, kwh_vended, new_balance_kwh).
 
-    The kWh balance is computed from the last transaction snapshot
-    minus any consumption since, then the new kWh are added.
+    Computes the current balance from full history, adds the new
+    payment's kWh, and stores the snapshot in current_balance.
     """
     cur = conn.cursor()
     ts = timestamp or datetime.now(timezone.utc)
