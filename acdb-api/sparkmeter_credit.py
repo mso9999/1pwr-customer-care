@@ -4,39 +4,85 @@ SparkMeter crediting module — the CC → SM pipe.
 Pushes payment credits to SparkMeter's billing systems so that meter
 balances actually update when payments are recorded in CC/1PDB.
 
-Two platforms:
-  - Koios v1 API  — sites on sparkmeter.cloud  (MAT, MAS, TLH, SHG, KET, …)
+Platforms:
+  - Koios v1 API  — all Koios-managed sites across countries
   - ThunderCloud v0 API — MAK/LAB on sparkcloud-u740425.sparkmeter.cloud
 
+Multi-country support:
+  Each country has its own Koios organisation and API key pair.
+  Credentials are resolved by site code → country → env vars:
+    KOIOS_WRITE_API_KEY_LS / KOIOS_WRITE_API_SECRET_LS  (Lesotho)
+    KOIOS_WRITE_API_KEY_BN / KOIOS_WRITE_API_SECRET_BN  (Benin)
+  Falls back to the un-suffixed KOIOS_WRITE_API_KEY / KOIOS_WRITE_API_SECRET
+  (which defaults to KOIOS_API_KEY / KOIOS_API_SECRET).
+
 Environment variables (set in /opt/1pdb/.env):
-  KOIOS_WRITE_API_KEY     — Koios API key with write (payment) scope
-  KOIOS_WRITE_API_SECRET  — matching secret
-  TC_API_BASE             — ThunderCloud API base URL
-  TC_AUTH_TOKEN           — ThunderCloud Authentication-Token (Flask session)
-  THUNDERCLOUD_USERNAME   — fallback: login credentials
-  THUNDERCLOUD_PASSWORD   — fallback: login credentials
+  KOIOS_WRITE_API_KEY[_XX]   — Koios write key (per-country or global)
+  KOIOS_WRITE_API_SECRET[_XX] — matching secret
+  TC_API_BASE                — ThunderCloud API base URL
+  TC_AUTH_TOKEN              — ThunderCloud Authentication-Token
+  THUNDERCLOUD_USERNAME      — fallback: login credentials
+  THUNDERCLOUD_PASSWORD      — fallback: login credentials
 """
 
 import logging
 import os
 import re
 import threading
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
+from typing import Dict, Optional, Tuple
 
 import requests
 
 logger = logging.getLogger("cc-api.sm-credit")
 
+# ---------------------------------------------------------------------------
+# Country → credentials map  (built once at import time)
+# ---------------------------------------------------------------------------
+
 KOIOS_BASE = os.environ.get("KOIOS_BASE_URL", "https://www.sparkmeter.cloud")
-KOIOS_WRITE_KEY = os.environ.get(
+
+_GLOBAL_WRITE_KEY = os.environ.get(
     "KOIOS_WRITE_API_KEY",
     os.environ.get("KOIOS_API_KEY", ""),
 )
-KOIOS_WRITE_SECRET = os.environ.get(
+_GLOBAL_WRITE_SECRET = os.environ.get(
     "KOIOS_WRITE_API_SECRET",
     os.environ.get("KOIOS_API_SECRET", ""),
 )
+
+
+def _build_site_country_map() -> Tuple[Dict[str, str], Dict[str, Tuple[str, str]]]:
+    """Build site_code→country_code map and country_code→(key,secret) map.
+
+    Imports country_config lazily to avoid circular deps at module level.
+    """
+    from country_config import LESOTHO, BENIN, _REGISTRY
+
+    site_to_country: Dict[str, str] = {}
+    for cc, cfg in _REGISTRY.items():
+        for site in cfg.site_abbrev:
+            site_to_country[site] = cc
+
+    country_creds: Dict[str, Tuple[str, str]] = {}
+    for cc in _REGISTRY:
+        key = os.environ.get(
+            f"KOIOS_WRITE_API_KEY_{cc}", _GLOBAL_WRITE_KEY,
+        )
+        secret = os.environ.get(
+            f"KOIOS_WRITE_API_SECRET_{cc}", _GLOBAL_WRITE_SECRET,
+        )
+        country_creds[cc] = (key, secret)
+
+    return site_to_country, country_creds
+
+
+_site_to_country, _country_creds = _build_site_country_map()
+
+
+# ---------------------------------------------------------------------------
+# ThunderCloud config
+# ---------------------------------------------------------------------------
 
 TC_API_BASE = os.environ.get(
     "TC_API_BASE", "https://sparkcloud-u740425.sparkmeter.cloud"
@@ -72,7 +118,6 @@ def _extract_site(account_number: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _tc_login() -> Optional[str]:
-    """Login to ThunderCloud and return the session token."""
     if not TC_USERNAME or not TC_PASSWORD:
         return None
     try:
@@ -174,22 +219,23 @@ def _tc_credit(
 
 
 # ---------------------------------------------------------------------------
-# Koios v1 helpers
+# Koios v1 helpers  (country-aware)
 # ---------------------------------------------------------------------------
 
-def _koios_headers() -> dict:
+def _koios_headers(country_code: str) -> dict:
+    key, secret = _country_creds.get(country_code, (_GLOBAL_WRITE_KEY, _GLOBAL_WRITE_SECRET))
     return {
         "Content-Type": "application/json",
-        "X-API-KEY": KOIOS_WRITE_KEY,
-        "X-API-SECRET": KOIOS_WRITE_SECRET,
+        "X-API-KEY": key,
+        "X-API-SECRET": secret,
     }
 
 
-def _koios_get_customer_id(account_code: str) -> Optional[str]:
+def _koios_get_customer_id(account_code: str, country_code: str) -> Optional[str]:
     r = requests.get(
         f"{KOIOS_BASE}/api/v1/customers",
         params={"code": account_code},
-        headers=_koios_headers(),
+        headers=_koios_headers(country_code),
         timeout=API_TIMEOUT,
     )
     r.raise_for_status()
@@ -198,7 +244,8 @@ def _koios_get_customer_id(account_code: str) -> Optional[str]:
 
 
 def _koios_credit(
-    customer_id: str, amount: float, memo: str = "", external_id: str = ""
+    customer_id: str, amount: float, country_code: str,
+    memo: str = "", external_id: str = "",
 ) -> CreditResult:
     payload: dict = {"amount": str(amount)}
     if memo:
@@ -209,7 +256,7 @@ def _koios_credit(
     r = requests.post(
         f"{KOIOS_BASE}/api/v1/customers/{customer_id}/payments",
         json=payload,
-        headers=_koios_headers(),
+        headers=_koios_headers(country_code),
         timeout=API_TIMEOUT,
     )
     body = r.json()
@@ -241,8 +288,8 @@ def credit_sparkmeter(
     """Credit a customer's SparkMeter prepaid balance.
 
     Routes to ThunderCloud v0 or Koios v1 based on the site code
-    extracted from the account number.  Returns a CreditResult with
-    success/failure info — the caller decides how to surface it.
+    extracted from the account number.  For Koios, selects the correct
+    country credentials automatically.
     """
     if amount <= 0:
         return CreditResult(
@@ -257,6 +304,13 @@ def credit_sparkmeter(
             error=f"Cannot determine site from '{account_number}'",
         )
 
+    country = _site_to_country.get(site)
+    if not country:
+        return CreditResult(
+            success=False, platform="unknown",
+            error=f"Site '{site}' not mapped to any country",
+        )
+
     try:
         if site in THUNDERCLOUD_SITES:
             cid = _tc_get_customer_id(account_number)
@@ -267,13 +321,13 @@ def credit_sparkmeter(
                 )
             return _tc_credit(cid, amount, external_id)
         else:
-            cid = _koios_get_customer_id(account_number)
+            cid = _koios_get_customer_id(account_number, country)
             if not cid:
                 return CreditResult(
                     success=False, platform="koios",
-                    error=f"Customer '{account_number}' not found on Koios",
+                    error=f"Customer '{account_number}' not found on Koios ({country})",
                 )
-            return _koios_credit(cid, amount, memo, external_id)
+            return _koios_credit(cid, amount, country, memo, external_id)
     except Exception as e:
         platform = "thundercloud" if site in THUNDERCLOUD_SITES else "koios"
         logger.error("SM credit failed for %s: %s", account_number, e)
@@ -282,7 +336,9 @@ def credit_sparkmeter(
 
 def is_configured() -> dict:
     """Return a dict summarising which platforms have credentials set."""
-    return {
-        "koios": bool(KOIOS_WRITE_KEY and KOIOS_WRITE_SECRET),
+    result: dict = {
         "thundercloud": bool(TC_AUTH_TOKEN or (TC_USERNAME and TC_PASSWORD)),
     }
+    for cc, (key, secret) in _country_creds.items():
+        result[f"koios_{cc}"] = bool(key and secret)
+    return result
