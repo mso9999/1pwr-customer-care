@@ -4,7 +4,7 @@ import {
   BarChart, Bar, LineChart, Line, Legend,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts';
-import { getMyDashboard, getMyProfile, type CustomerDashboard, type MeterInfo } from '../lib/api';
+import { getMyDashboard, getMyProfile, type CustomerDashboard, type MeterInfo, type HourlyPoint } from '../lib/api';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -346,6 +346,54 @@ export default function CustomerDashboardPage() {
           sub="all time"
         />
       </div>
+
+      {/* 24-Hour Bar Chart */}
+      {data.hourly_24h && data.hourly_24h.length > 0 && (() => {
+        const pts: HourlyPoint[] = data.hourly_24h;
+        const sources = Object.keys(pts[0] || {}).filter(k => k !== 'hour' && k !== 'kwh');
+        const isMulti = sources.length > 1;
+        const srcColors: Record<string, string> = { 'SparkMeter': CHART_BLUE, '1Meter Prototype': CHART_AMBER };
+        return (
+          <ChartCard title={isMulti ? 'Meter Comparison — Last 24 Hours (kWh / hour)' : 'Last 24 Hours (kWh / hour)'}>
+            {isMulti && (
+              <p className="text-xs text-gray-400 -mt-2 mb-3">Both meters measure the same load. Close agreement confirms accuracy.</p>
+            )}
+            <ResponsiveContainer width="100%" height={220}>
+              <BarChart data={pts} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                <XAxis
+                  dataKey="hour"
+                  tickFormatter={v => v.slice(11, 16)}
+                  tick={{ fontSize: 10, fill: '#9ca3af' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis
+                  tick={{ fontSize: 11, fill: '#9ca3af' }}
+                  axisLine={false}
+                  tickLine={false}
+                  width={40}
+                />
+                <Tooltip
+                  labelFormatter={(label: any) => String(label).slice(5)}
+                  formatter={(v: any, name: any) => [`${Number(v).toFixed(3)} kWh`, name]}
+                  contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', fontSize: 12 }}
+                />
+                {isMulti ? (
+                  <>
+                    <Legend />
+                    {sources.map(src => (
+                      <Bar key={src} dataKey={src} fill={srcColors[src] ?? '#6b7280'} radius={[3, 3, 0, 0]} maxBarSize={20} />
+                    ))}
+                  </>
+                ) : (
+                  <Bar dataKey={sources[0] ?? 'kwh'} fill={CHART_BLUE} radius={[4, 4, 0, 0]} maxBarSize={36} />
+                )}
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        );
+      })()}
 
       {/* 7-Day Bar Chart */}
       <ChartCard title="Last 7 Days (kWh / day)">

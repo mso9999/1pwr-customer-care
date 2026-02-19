@@ -2,9 +2,9 @@ import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Cell,
+  ResponsiveContainer, Cell, Legend,
 } from 'recharts';
-import { getCustomerData, createRecord, updateRecord, deleteRecord, type CustomerDataResponse, type Transaction } from '../lib/api';
+import { getCustomerData, createRecord, updateRecord, deleteRecord, type CustomerDataResponse, type Transaction, type HourlyPoint } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
 // ---------------------------------------------------------------------------
@@ -182,7 +182,7 @@ export default function CustomerDataPage() {
   const [data, setData] = useState<CustomerDataResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [tab, setTab] = useState<'transactions' | '7d' | '30d' | '12m'>('transactions');
+  const [tab, setTab] = useState<'transactions' | '24h' | '7d' | '30d' | '12m'>('transactions');
 
   // Transaction CRUD state
   const [showForm, setShowForm] = useState(false);
@@ -418,6 +418,7 @@ export default function CustomerDataPage() {
           <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
             {([
               ['transactions', `Transactions (${data.transaction_count})`],
+              ['24h', 'Last 24 Hours'],
               ['7d', 'Last 7 Days'],
               ['30d', 'Last 30 Days'],
               ['12m', 'Last 12 Months'],
@@ -560,6 +561,50 @@ export default function CustomerDataPage() {
               )}
             </div>
           )}
+
+          {tab === '24h' && (() => {
+            const pts: HourlyPoint[] = d.hourly_24h ?? [];
+            const sources = pts.length > 0
+              ? Object.keys(pts[0]).filter(k => k !== 'hour' && k !== 'kwh')
+              : [];
+            const isMulti = sources.length > 1;
+            const colors: Record<string, string> = { 'SparkMeter': '#3b82f6', '1Meter Prototype': '#f59e0b' };
+            return (
+              <div className="bg-white rounded-xl border p-5">
+                <h3 className="text-sm font-semibold text-gray-700 mb-1">
+                  Hourly Consumption — Last 24 Hours (kWh)
+                </h3>
+                {isMulti && (
+                  <p className="text-xs text-gray-400 mb-3">Both meters measure the same load. Close agreement confirms accuracy.</p>
+                )}
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={pts}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                    <XAxis dataKey="hour" tick={{ fontSize: 10 }} tickFormatter={v => v.slice(11, 16)} />
+                    <YAxis tick={{ fontSize: 11 }} />
+                    <Tooltip
+                      labelFormatter={v => String(v).slice(5)}
+                      formatter={(v, name) => [`${Number(v ?? 0).toFixed(3)} kWh`, name]}
+                    />
+                    {isMulti ? (
+                      <>
+                        <Legend />
+                        {sources.map(src => (
+                          <Bar key={src} dataKey={src} fill={colors[src] ?? '#6b7280'} radius={[3, 3, 0, 0]} />
+                        ))}
+                      </>
+                    ) : (
+                      <Bar dataKey={sources[0] ?? 'kwh'} radius={[4, 4, 0, 0]}>
+                        {pts.map((_, i) => (
+                          <Cell key={i} fill={i === pts.length - 1 ? '#3b82f6' : '#93c5fd'} />
+                        ))}
+                      </Bar>
+                    )}
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            );
+          })()}
 
           {tab === '7d' && (
             <div className="bg-white rounded-xl border p-5">

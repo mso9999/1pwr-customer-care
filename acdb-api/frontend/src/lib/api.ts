@@ -198,6 +198,12 @@ export interface MeterComparisonPoint {
   [source: string]: string | number;
 }
 
+export interface HourlyPoint {
+  hour: string;
+  kwh?: number;
+  [source: string]: string | number | undefined;
+}
+
 export interface CustomerDashboard {
   balance_kwh: number;
   last_payment: DashboardPayment | null;
@@ -210,6 +216,7 @@ export interface CustomerDashboard {
   monthly_12m: DashboardMonthPoint[];
   meters?: MeterInfo[];
   meter_comparison?: MeterComparisonPoint[];
+  hourly_24h?: HourlyPoint[];
 }
 
 export async function getMyDashboard(): Promise<CustomerDashboard> {

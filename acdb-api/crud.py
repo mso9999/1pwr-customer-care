@@ -847,6 +847,55 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
                     point[label] = round(daily_map.get(d, 0), 3)
                 meter_comparison.append(point)
 
+        # Hourly consumption for last 24 hours, per source
+        hourly_24h: list[dict] = []
+        try:
+            cutoff_24h = now - timedelta(hours=24)
+            cursor.execute(
+                "SELECT h.reading_hour, h.kwh, h.source "
+                "FROM hourly_consumption h "
+                "WHERE h.account_number = %s AND h.reading_hour >= %s "
+                "ORDER BY h.reading_hour",
+                (acct, cutoff_24h),
+            )
+            source_labels_h = {
+                "thundercloud": "SparkMeter",
+                "koios": "SparkMeter",
+                "iot": "1Meter Prototype",
+            }
+            hourly_by_src: dict[str, dict[str, float]] = defaultdict(
+                lambda: defaultdict(float)
+            )
+            for row in cursor.fetchall():
+                dt_h = row[0]
+                kwh_h = float(row[1] or 0)
+                src = row[2] or "unknown"
+                if kwh_h > 0 and dt_h is not None:
+                    if isinstance(dt_h, str):
+                        try:
+                            dt_h = datetime.fromisoformat(dt_h)
+                        except ValueError:
+                            continue
+                    dt_h = _ensure_naive(dt_h)
+                    hour_str = dt_h.strftime("%Y-%m-%d %H:00")
+                    label = source_labels_h.get(src, src)
+                    hourly_by_src[label][hour_str] += kwh_h
+
+            all_sources_h = sorted(hourly_by_src.keys())
+            for i in range(24):
+                h = cutoff_24h + timedelta(hours=i)
+                hour_str = _ensure_naive(h).strftime("%Y-%m-%d %H:00")
+                pt: dict = {"hour": hour_str}
+                for src_label in all_sources_h:
+                    pt[src_label] = round(
+                        hourly_by_src[src_label].get(hour_str, 0), 4
+                    )
+                if len(all_sources_h) == 1:
+                    pt["kwh"] = pt[all_sources_h[0]]
+                hourly_24h.append(pt)
+        except Exception as e:
+            logger.debug("Dashboard: hourly_24h query failed: %s", e)
+
         return {
             "balance_kwh": round(balance_kwh, 2),
             "last_payment": last_payment,
@@ -859,6 +908,7 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
             "monthly_12m": monthly_12m,
             "meters": meter_list,
             "meter_comparison": meter_comparison,
+            "hourly_24h": hourly_24h,
         }
 
 
