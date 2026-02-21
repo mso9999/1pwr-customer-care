@@ -18,7 +18,7 @@ export default function CustomerDetailPage() {
 
   useEffect(() => {
     if (!id) return;
-    getRecord('tblcustomer', id)
+    getRecord('customers', id)
       .then(({ record: r }) => {
         setRecord(r);
         const fd: Record<string, string> = {};
@@ -54,10 +54,10 @@ export default function CustomerDetailPage() {
         setEditing(false);
         return;
       }
-      await updateRecord('tblcustomer', id, changes);
+      await updateRecord('customers', id, changes);
       setEditing(false);
       // Refresh
-      const { record: r } = await getRecord('tblcustomer', id);
+      const { record: r } = await getRecord('customers', id);
       setRecord(r);
     } catch (e: any) {
       setError(e.message);
@@ -69,7 +69,7 @@ export default function CustomerDetailPage() {
   const handleDelete = async () => {
     if (!id || !confirm('Are you sure you want to delete this customer?')) return;
     try {
-      await deleteRecord('tblcustomer', id);
+      await deleteRecord('customers', id);
       navigate('/customers');
     } catch (e: any) {
       setError(e.message);
@@ -89,7 +89,7 @@ export default function CustomerDetailPage() {
       const result = await decommissionCustomer(parseInt(id, 10));
       alert(`Customer ${id} decommissioned (terminated ${result.terminated_date}). All records preserved.`);
       // Refresh customer record to reflect new terminated status
-      const { record: r } = await getRecord('tblcustomer', id);
+      const { record: r } = await getRecord('customers', id);
       setRecord(r);
       const fd: Record<string, string> = {};
       for (const [k, v] of Object.entries(r)) {

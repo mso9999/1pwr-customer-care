@@ -39,7 +39,7 @@ function fmtRecharge(seconds: number): string {
 // Transaction table name in ACCDB
 // ---------------------------------------------------------------------------
 
-const TXN_TABLE = 'tblaccounthistory1';
+const TXN_TABLE = 'transactions';
 
 // ---------------------------------------------------------------------------
 // Transaction form modal

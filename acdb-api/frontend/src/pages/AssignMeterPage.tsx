@@ -67,9 +67,9 @@ function GPSCapture({ lat, lng, onChange }: { lat: string; lng: string; onChange
 // ---------------------------------------------------------------------------
 
 async function getNextAccountNumber(siteCode: string): Promise<string> {
-  // Query tblmeter for highest account number in this community
+  // Query meters table for highest account number in this community
   try {
-    const resp = await listRows('tblmeter', {
+    const resp = await listRows('meters', {
       filter_col: 'community',
       filter_val: siteCode,
       sort: 'accountnumber',
@@ -79,23 +79,6 @@ async function getNextAccountNumber(siteCode: string): Promise<string> {
     if (resp.rows.length > 0) {
       const acct = String(resp.rows[0].accountnumber || '');
       // Account number format: NNNNXXX -- extract the numeric prefix
-      const numPart = acct.replace(/[A-Za-z]+$/, '');
-      const next = (parseInt(numPart, 10) || 0) + 1;
-      return String(next).padStart(4, '0') + siteCode.toUpperCase();
-    }
-  } catch { /* ignore */ }
-
-  // Also check Copy Of tblmeter for the highest
-  try {
-    const resp = await listRows('Copy Of tblmeter', {
-      filter_col: 'community',
-      filter_val: siteCode,
-      sort: 'accountnumber',
-      order: 'desc',
-      limit: 1,
-    });
-    if (resp.rows.length > 0) {
-      const acct = String(resp.rows[0].accountnumber || '');
       const numPart = acct.replace(/[A-Za-z]+$/, '');
       const next = (parseInt(numPart, 10) || 0) + 1;
       return String(next).padStart(4, '0') + siteCode.toUpperCase();
@@ -171,7 +154,7 @@ export default function AssignMeterPage() {
     let cancelled = false;
     setCustomerLoading(true);
     const timer = setTimeout(() => {
-      getRecord('tblcustomer', customerId.trim())
+      getRecord('customers', customerId.trim())
         .then(({ record }) => {
           if (!cancelled) {
             const first = record['FIRST NAME'] || '';
@@ -227,7 +210,7 @@ export default function AssignMeterPage() {
       if (latitude.trim()) meterData['latitude'] = latitude.trim();
       if (longitude.trim()) meterData['longitude'] = longitude.trim();
 
-      await createRecord('tblmeter', meterData);
+      await createRecord('meters', meterData);
 
       // 2. Insert into tblaccountnumbers
       const acctData: Record<string, unknown> = {
@@ -239,7 +222,7 @@ export default function AssignMeterPage() {
         'created by': 'CC Portal',
       };
 
-      await createRecord('tblaccountnumbers', acctData);
+      await createRecord('accounts', acctData);
 
       setSuccess(`Meter ${meterid} assigned to customer ${customerId} with account ${accountNumber}`);
 

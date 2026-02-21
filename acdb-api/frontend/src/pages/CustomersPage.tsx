@@ -21,7 +21,7 @@ export default function CustomersPage() {
 
   useEffect(() => {
     setLoading(true);
-    listRows('tblcustomer', {
+    listRows('customers', {
       page,
       limit: 50,
       search: search || undefined,

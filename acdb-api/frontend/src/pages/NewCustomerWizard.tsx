@@ -223,7 +223,7 @@ export default function NewCustomerWizard() {
       data['RECORD CREATED BY'] = 'CC Portal';
       data['COUNTRY'] = 'Lesotho';
 
-      await createRecord('tblcustomer', data);
+      await createRecord('customers', data);
       navigate('/customers', { replace: true });
     } catch (e: any) {
       setError(e.message || 'Failed to create customer');
