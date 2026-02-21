@@ -25,7 +25,7 @@ export default function CustomersPage() {
       page,
       limit: 50,
       search: search || undefined,
-      filter_col: filterSite ? 'Concession name' : undefined,
+      filter_col: filterSite ? 'community' : undefined,
       filter_val: filterSite || undefined,
     })
       .then(setData)
@@ -104,12 +104,12 @@ export default function CustomersPage() {
               </thead>
               <tbody className="divide-y">
                 {data.rows.map((row, i) => {
-                  const cid = String(row['CUSTOMER ID'] || '');
-                  const name = [row['FIRST NAME'], row['LAST NAME']].filter(Boolean).join(' ');
-                  const phone = String(row['PHONE'] || row['CELL PHONE 1'] || '');
-                  const site = String(row['Concession name'] || '');
-                  const district = String(row['DISTRICT'] || '');
-                  const terminated = row['DATE SERVICE TERMINATED'];
+                  const cid = String(row['customer_id_legacy'] || '');
+                  const name = [row['first_name'], row['last_name']].filter(Boolean).join(' ');
+                  const phone = String(row['phone'] || row['cell_phone_1'] || '');
+                  const site = String(row['community'] || '');
+                  const district = String(row['district'] || '');
+                  const terminated = row['date_service_terminated'];
                   return (
                     <tr key={i} className="hover:bg-gray-50">
                       <td className="px-4 py-2">
@@ -136,11 +136,11 @@ export default function CustomersPage() {
           {/* Mobile card list */}
           <div className="md:hidden space-y-2">
             {data.rows.map((row, i) => {
-              const cid = String(row['CUSTOMER ID'] || '');
-              const name = [row['FIRST NAME'], row['LAST NAME']].filter(Boolean).join(' ');
-              const phone = String(row['PHONE'] || row['CELL PHONE 1'] || '');
-              const site = String(row['Concession name'] || '');
-              const terminated = row['DATE SERVICE TERMINATED'];
+              const cid = String(row['customer_id_legacy'] || '');
+              const name = [row['first_name'], row['last_name']].filter(Boolean).join(' ');
+              const phone = String(row['phone'] || row['cell_phone_1'] || '');
+              const site = String(row['community'] || '');
+              const terminated = row['date_service_terminated'];
               return (
                 <Link key={i} to={`/customers/${cid}`} className="block bg-white rounded-lg shadow p-4 active:bg-gray-50">
                   <div className="flex items-start justify-between">

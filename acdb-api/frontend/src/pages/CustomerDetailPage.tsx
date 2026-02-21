@@ -109,8 +109,8 @@ export default function CustomerDetailPage() {
   const fields = Object.keys(record);
 
   // Determine commissioning status from customer record
-  const connectedVal = record['DATE SERVICE CONNECTED'];
-  const terminatedVal = record['DATE SERVICE TERMINATED'];
+  const connectedVal = record['date_service_connected'];
+  const terminatedVal = record['date_service_terminated'];
   const isConnected = connectedVal != null && String(connectedVal).trim() !== '';
   const isTerminated = terminatedVal != null && String(terminatedVal).trim() !== '';
   const isCommissioned = isConnected && !isTerminated;
