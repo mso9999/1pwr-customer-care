@@ -243,6 +243,7 @@ from tariff import router as tariff_router
 from registration import router as registration_router
 from payments import router as payments_router
 from ingest import router as ingest_router
+from meter_lifecycle import router as meter_lifecycle_router, ensure_meter_assignments_table
 
 from db_auth import init_auth_db
 init_auth_db()
@@ -264,6 +265,8 @@ app.include_router(customer_data_router)
 app.include_router(registration_router)
 app.include_router(payments_router)
 app.include_router(ingest_router)
+app.include_router(meter_lifecycle_router)
+ensure_meter_assignments_table()
 
 
 # ---- Country config ----

@@ -180,6 +180,44 @@ export async function restoreRecord(table: string, id: string) {
 }
 
 // ---------------------------------------------------------------------------
+// Meter lifecycle
+// ---------------------------------------------------------------------------
+
+export interface MeterAssignment {
+  id: number;
+  meter_id: string;
+  account_number: string;
+  community: string | null;
+  assigned_at: string;
+  removed_at: string | null;
+  removal_reason: string | null;
+  replaced_by: string | null;
+  notes: string | null;
+  current_status?: string;
+  platform?: string;
+}
+
+export async function decommissionMeter(
+  meterId: string,
+  body: { reason: string; replacement_meter_id?: string; notes?: string },
+) {
+  return request(`/meters/${encodeURIComponent(meterId)}/decommission`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getMeterHistory(meterId: string): Promise<{ meter_id: string; assignments: MeterAssignment[] }> {
+  return request(`/meters/${encodeURIComponent(meterId)}/history`);
+}
+
+export async function getAccountMeterHistory(
+  accountNumber: string,
+): Promise<{ account_number: string; meters: MeterAssignment[]; current_meter: string | null }> {
+  return request(`/meters/account/${encodeURIComponent(accountNumber)}/history`);
+}
+
+// ---------------------------------------------------------------------------
 // Customer self-service
 // ---------------------------------------------------------------------------
 
