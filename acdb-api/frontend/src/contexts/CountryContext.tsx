@@ -30,6 +30,7 @@ interface CountryContextType {
 const COUNTRY_ROUTES: Record<string, string> = {
   LS: '/api',
   BN: '/api/bn',
+  ZM: '/api/zm',
 };
 
 const FALLBACK_COUNTRIES: CountryEntry[] = [

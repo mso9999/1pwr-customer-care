@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LabelList } from 'recharts';
-import { listTables, getSiteSummary, type TableInfo, type SiteStat } from '../lib/api';
+import { listTables, listSites, getSiteSummary, type TableInfo, type SiteStat } from '../lib/api';
 import { useCountry } from '../contexts/CountryContext';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899', '#14b8a6', '#6366f1', '#84cc16', '#e11d48', '#0ea5e9', '#a855f7'];
@@ -24,9 +24,10 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    setLoading(true);
     Promise.all([
       listTables().catch(() => []),
-      fetch('/api/sites').then(r => r.ok ? r.json() : { sites: [] }).catch(() => ({ sites: [] })),
+      listSites().catch(() => ({ sites: [], total_sites: 0 })),
       getSiteSummary().catch(() => ({ sites: [], totals: { mwh: 0, lsl_thousands: 0 } })),
     ]).then(([t, sitesResp, stats]) => {
       setTables(t);
@@ -36,7 +37,7 @@ export default function DashboardPage() {
         statsMap.set(s.site, s);
       }
 
-      const merged: SiteRow[] = ((sitesResp.sites || []) as { concession: string; customer_count: number }[]).map(s => {
+      const merged: SiteRow[] = (sitesResp.sites || []).map(s => {
         const stat = statsMap.get(s.concession);
         return {
           concession: s.concession,
@@ -50,7 +51,7 @@ export default function DashboardPage() {
       const raw = stats.totals || { mwh: 0, lsl_thousands: 0 };
       setTotals({ mwh: raw.mwh, revenue_thousands: raw.lsl_thousands });
     }).finally(() => setLoading(false));
-  }, []);
+  }, [country]);
 
   const totalCustomers = siteData.reduce((sum, s) => sum + s.customer_count, 0);
   const totalTables = tables.length;

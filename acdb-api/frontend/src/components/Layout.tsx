@@ -56,7 +56,7 @@ export default function Layout() {
                 <div className="flex items-center gap-1.5">
                   <select
                     value={country}
-                    onChange={(e) => { setCountry(e.target.value); setPortfolio(null); window.location.reload(); }}
+                    onChange={(e) => { setCountry(e.target.value); setPortfolio(null); }}
                     className="text-sm border border-gray-200 rounded-md px-2 py-1 bg-white focus:ring-1 focus:ring-blue-400 focus:outline-none"
                   >
                     {countries.map((c) => (
