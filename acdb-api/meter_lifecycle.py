@@ -96,8 +96,18 @@ def ensure_meter_assignments_table():
 # Request models
 # ---------------------------------------------------------------------------
 
+# The meter_status enum in Postgres only allows: active, inactive, decommissioned, maintenance.
+# We map user-facing reasons to valid enum values and store the detail in special_notes.
+REASON_TO_ENUM: dict[str, str] = {
+    "faulty": "decommissioned",
+    "test": "inactive",
+    "decommissioned": "decommissioned",
+    "retired": "decommissioned",
+}
+
+
 class DecommissionRequest(BaseModel):
-    reason: str  # "faulty", "test", "decommissioned"
+    reason: str  # "faulty", "test", "decommissioned", "retired"
     replacement_meter_id: Optional[str] = None
     notes: Optional[str] = None
 
@@ -144,11 +154,14 @@ def decommission_meter(
             (now, req.reason.lower(), req.replacement_meter_id, req.notes, meter_id),
         )
 
-        # Update meter status
+        reason_lower = req.reason.lower()
+        db_status = REASON_TO_ENUM.get(reason_lower, "decommissioned")
+        notes_combined = f"[{reason_lower}] {req.notes}" if req.notes else f"[{reason_lower}]"
+
         cursor.execute(
-            "UPDATE meters SET status = %s, status_date = %s, status_set_by = %s "
-            "WHERE meter_id = %s",
-            (req.reason.lower(), now, user.user_id, meter_id),
+            "UPDATE meters SET status = %s, status_date = %s, status_set_by = %s, "
+            "special_notes = %s WHERE meter_id = %s",
+            (db_status, now, user.user_id, notes_combined, meter_id),
         )
 
         result = {
@@ -276,10 +289,12 @@ def batch_update_status(
                 if not cursor.fetchone():
                     results["not_found"] += 1
                     continue
+                db_status = REASON_TO_ENUM.get(new_status, "decommissioned")
+                notes_combined = f"[{new_status}] {notes}" if notes else f"[{new_status}]"
                 cursor.execute(
                     "UPDATE meters SET status = %s, status_date = %s, "
                     "status_set_by = %s, special_notes = %s WHERE meter_id = %s",
-                    (new_status, now, user.user_id, notes, mid),
+                    (db_status, now, user.user_id, notes_combined, mid),
                 )
                 cursor.execute(
                     "UPDATE meter_assignments SET removed_at = %s, removal_reason = %s, notes = %s "

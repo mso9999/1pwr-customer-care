@@ -4,7 +4,11 @@ import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Cell, Legend,
 } from 'recharts';
-import { getCustomerData, createRecord, updateRecord, deleteRecord, type CustomerDataResponse, type Transaction, type HourlyPoint } from '../lib/api';
+import {
+  getCustomerData, createRecord, updateRecord, deleteRecord,
+  getAccountMeterHistory,
+  type CustomerDataResponse, type Transaction, type HourlyPoint, type MeterAssignment,
+} from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
 // ---------------------------------------------------------------------------
@@ -192,6 +196,10 @@ export default function CustomerDataPage() {
   const [crudSuccess, setCrudSuccess] = useState('');
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // Meter history
+  const [meterHistory, setMeterHistory] = useState<MeterAssignment[]>([]);
+  const [showMeterHistory, setShowMeterHistory] = useState(false);
+
   // Fetch data when account changes (or after CRUD refresh)
   useEffect(() => {
     if (!account) return;
@@ -201,6 +209,9 @@ export default function CustomerDataPage() {
       .then(setData)
       .catch(e => setError(e.message || 'Failed to load customer data'))
       .finally(() => setLoading(false));
+    getAccountMeterHistory(account)
+      .then(res => setMeterHistory(res.meters || []))
+      .catch(() => setMeterHistory([]));
   }, [account, refreshKey]);
 
   // CRUD helpers
@@ -388,6 +399,72 @@ export default function CustomerDataPage() {
               }`}>
                 {data.tariff.source}{data.tariff.source_key ? `: ${data.tariff.source_key}` : ''}
               </span>
+            </div>
+          )}
+
+          {/* Meter history timeline */}
+          {meterHistory.length > 1 && (
+            <div className="bg-white rounded-xl border overflow-hidden">
+              <button
+                onClick={() => setShowMeterHistory(v => !v)}
+                className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-gray-50 transition"
+              >
+                <div className="flex items-center gap-2">
+                  <svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span className="text-sm font-medium text-gray-700">
+                    Meter History — {meterHistory.length} meter{meterHistory.length !== 1 ? 's' : ''} on this account
+                  </span>
+                </div>
+                <svg className={`w-4 h-4 text-gray-400 transition-transform ${showMeterHistory ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {showMeterHistory && (
+                <div className="px-4 pb-4">
+                  <p className="text-xs text-gray-400 mb-3">
+                    Consumption data from all meters is aggregated continuously under this account.
+                  </p>
+                  <div className="relative pl-6">
+                    <div className="absolute left-2.5 top-1 bottom-1 w-px bg-gray-200" />
+                    {meterHistory.map((a, i) => {
+                      const isActive = !a.removed_at;
+                      const fromDate = a.assigned_at ? new Date(a.assigned_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '?';
+                      const toDate = a.removed_at ? new Date(a.removed_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'present';
+                      return (
+                        <div key={a.id || i} className="relative mb-3 last:mb-0">
+                          <div className={`absolute -left-3.5 top-1.5 w-3 h-3 rounded-full border-2 ${
+                            isActive ? 'bg-green-500 border-green-300' : 'bg-gray-300 border-gray-200'
+                          }`} />
+                          <div className={`rounded-lg p-3 ${isActive ? 'bg-green-50 border border-green-200' : 'bg-gray-50 border border-gray-100'}`}>
+                            <div className="flex items-center justify-between">
+                              <span className="font-mono text-sm font-medium text-gray-800">{a.meter_id}</span>
+                              {a.removal_reason && (
+                                <span className={`px-2 py-0.5 text-[10px] rounded-full font-medium ${
+                                  a.removal_reason === 'faulty' ? 'bg-red-100 text-red-600' :
+                                  a.removal_reason === 'test' ? 'bg-orange-100 text-orange-600' :
+                                  'bg-gray-200 text-gray-600'
+                                }`}>
+                                  {a.removal_reason}
+                                </span>
+                              )}
+                              {isActive && (
+                                <span className="px-2 py-0.5 text-[10px] rounded-full font-medium bg-green-200 text-green-700">current</span>
+                              )}
+                            </div>
+                            <p className="text-xs text-gray-500 mt-1">{fromDate} — {toDate}</p>
+                            {a.platform && <p className="text-xs text-gray-400">{a.platform}</p>}
+                            {a.replaced_by && (
+                              <p className="text-xs text-gray-400 mt-0.5">Replaced by: <span className="font-mono">{a.replaced_by}</span></p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
