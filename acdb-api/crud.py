@@ -60,8 +60,10 @@ def _ensure_soft_delete_columns():
                     )
                     conn.commit()
                     logger.info("Added deleted_at/deleted_by to %s", tbl)
+                else:
+                    logger.info("Soft-delete columns already present on %s", tbl)
     except Exception as e:
-        logger.warning("soft-delete column init: %s", e)
+        logger.error("soft-delete column init FAILED: %s", e)
 
 
 def _has_deleted_at(conn, table_name: str) -> bool:
@@ -721,10 +723,20 @@ def delete_record(
         if not old_row:
             raise HTTPException(status_code=404, detail="Record not found")
 
-        soft = (
-            table_name.lower() in SOFT_DELETE_TABLES
-            and _has_deleted_at(conn, table_name)
-        )
+        soft = table_name.lower() in SOFT_DELETE_TABLES
+        if soft and not _has_deleted_at(conn, table_name):
+            try:
+                cursor.execute(
+                    f"ALTER TABLE {table_name} "
+                    "ADD COLUMN deleted_at TIMESTAMPTZ DEFAULT NULL, "
+                    "ADD COLUMN deleted_by TEXT DEFAULT NULL"
+                )
+                conn.commit()
+                logger.info("Inline-added deleted_at/deleted_by to %s", table_name)
+            except Exception as col_err:
+                conn.rollback()
+                logger.warning("Could not add soft-delete columns to %s: %s", table_name, col_err)
+                soft = False
 
         try:
             if soft:
