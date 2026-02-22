@@ -372,6 +372,14 @@ def get_record(
         cursor.execute(sql, (record_id,))
         row = cursor.fetchone()
 
+        # Fallback: for customers, try customer_id_legacy if PK lookup missed
+        if not row and table_name == "customers":
+            cursor.execute(
+                "SELECT * FROM customers WHERE customer_id_legacy = %s",
+                (record_id,),
+            )
+            row = cursor.fetchone()
+
         if not row:
             raise HTTPException(status_code=404, detail="Record not found")
 

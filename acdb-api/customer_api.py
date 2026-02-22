@@ -314,6 +314,7 @@ def health():
 
 # ---- Lookup by phone ----
 
+@app.get("/api/customers/by-phone/{phone}")
 @app.get("/customers/by-phone/{phone}")
 def customer_by_phone(phone: str):
     """Look up a customer by phone number."""
@@ -359,6 +360,7 @@ def customer_by_phone(phone: str):
 
 # ---- Lookup by customer ID ----
 
+@app.get("/api/customers/by-id/{customer_id}")
 @app.get("/customers/by-id/{customer_id}")
 def customer_by_id(customer_id: str):
     """Look up a customer by their legacy CUSTOMER ID."""
@@ -387,6 +389,7 @@ def customer_by_id(customer_id: str):
 
 # ---- Lookup by account number ----
 
+@app.get("/api/customers/by-account/{account_number}")
 @app.get("/customers/by-account/{account_number}")
 def customer_by_account(account_number: str):
     """Look up a customer by their account number."""
@@ -454,6 +457,7 @@ def customer_by_account(account_number: str):
 
 # ---- General search ----
 
+@app.get("/api/customers/search")
 @app.get("/customers/search")
 def customer_search(
     q: str = Query(..., min_length=2, description="Search query (name, village, plot number)"),
