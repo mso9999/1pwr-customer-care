@@ -10,6 +10,9 @@ import CustomerDetailPage from './pages/CustomerDetailPage';
 import NewCustomerWizard from './pages/NewCustomerWizard';
 import AssignMeterPage from './pages/AssignMeterPage';
 import CustomerDataPage from './pages/CustomerDataPage';
+import MetersPage from './pages/MetersPage';
+import AccountsPage from './pages/AccountsPage';
+import TransactionsPage from './pages/TransactionsPage';
 import TablesPage from './pages/TablesPage';
 import TableBrowserPage from './pages/TableBrowserPage';
 import ExportPage from './pages/ExportPage';
@@ -45,6 +48,9 @@ export default function App() {
             <Route path="customers" element={<ProtectedRoute requireEmployee><CustomersPage /></ProtectedRoute>} />
             <Route path="customers/new" element={<ProtectedRoute requireEmployee><NewCustomerWizard /></ProtectedRoute>} />
             <Route path="customers/:id" element={<ProtectedRoute requireEmployee><CustomerDetailPage /></ProtectedRoute>} />
+            <Route path="meters" element={<ProtectedRoute requireEmployee><MetersPage /></ProtectedRoute>} />
+            <Route path="accounts" element={<ProtectedRoute requireEmployee><AccountsPage /></ProtectedRoute>} />
+            <Route path="transactions" element={<ProtectedRoute requireEmployee><TransactionsPage /></ProtectedRoute>} />
             <Route path="assign-meter" element={<ProtectedRoute requireEmployee><AssignMeterPage /></ProtectedRoute>} />
             <Route path="customer-data" element={<ProtectedRoute requireEmployee><CustomerDataPage /></ProtectedRoute>} />
             <Route path="tables" element={<ProtectedRoute requireEmployee><TablesPage /></ProtectedRoute>} />

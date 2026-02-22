@@ -107,6 +107,9 @@ export default function Layout() {
                   {navLink('/om-report', 'O&M Report', true)}
                   {navLink('/financial', 'Financial', true)}
                   {navLink('/customers', 'Customers')}
+                  {navLink('/meters', 'Meters')}
+                  {navLink('/accounts', 'Accounts')}
+                  {navLink('/transactions', 'Transactions')}
                   {navLink('/customer-data', 'Customer Data')}
                   {navLink('/tables', 'Tables')}
                   {navLink('/export', 'Export')}
@@ -135,6 +138,9 @@ export default function Layout() {
                 {navLink('/om-report', 'O&M Report', true)}
                 {navLink('/financial', 'Financial', true)}
                 {navLink('/customers', 'Customers')}
+                {navLink('/meters', 'Meters')}
+                {navLink('/accounts', 'Accounts')}
+                {navLink('/transactions', 'Transactions')}
                 {navLink('/customer-data', 'Customer Data')}
                 {navLink('/tables', 'Tables')}
                 {navLink('/export', 'Export')}
