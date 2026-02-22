@@ -162,6 +162,23 @@ export async function deleteRecord(table: string, id: string) {
   });
 }
 
+export async function listColdStorage(
+  table: string,
+  params?: { page?: number; limit?: number },
+): Promise<PaginatedResponse> {
+  const q = new URLSearchParams();
+  if (params?.page) q.set('page', String(params.page));
+  if (params?.limit) q.set('limit', String(params.limit));
+  const qs = q.toString();
+  return request(`/tables/${encodeURIComponent(table)}/cold-storage${qs ? `?${qs}` : ''}`);
+}
+
+export async function restoreRecord(table: string, id: string) {
+  return request(`/tables/${encodeURIComponent(table)}/${encodeURIComponent(id)}/restore`, {
+    method: 'POST',
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Customer self-service
 // ---------------------------------------------------------------------------
@@ -281,6 +298,22 @@ export async function removeRole(employee_id: string) {
 
 export async function listSites() {
   return request<{ sites: { concession: string; customer_count: number }[]; total_sites: number }>('/sites');
+}
+
+export interface UGPConnection {
+  survey_id: string;
+  customer_type: string;
+  customer_code: string;
+  meter_serial: string;
+  gps_lat: number | null;
+  gps_lon: number | null;
+  status: string;
+}
+
+export async function listUGPConnections(site: string) {
+  return request<{ site: string; count: number; connections: UGPConnection[] }>(
+    `/sync/connections?site=${encodeURIComponent(site)}`,
+  );
 }
 
 // Stats
@@ -687,6 +720,25 @@ export interface CommissionRequest {
   commissioned_by?: string;
 }
 
+export interface UpstreamWarning {
+  node_1: string;
+  node_2: string;
+  type: string;
+  status_field: string;
+  status_value: number;
+  status_raw: string;
+  cable_size: string;
+  length: number;
+  subnet: string;
+}
+
+export interface UgpSyncResult {
+  updated: boolean;
+  survey_id: string;
+  upstream_warnings: UpstreamWarning[];
+  error: string | null;
+}
+
 export interface CommissionResult {
   status: string;
   customer_id: number;
@@ -695,6 +747,7 @@ export interface CommissionResult {
   en_filename: string;
   so_filename: string;
   sms_sent: boolean;
+  ugp_sync?: UgpSyncResult;
 }
 
 export async function executeCommission(data: CommissionRequest): Promise<CommissionResult> {
@@ -719,6 +772,19 @@ export interface DecommissionResult {
 
 export async function decommissionCustomer(customerId: number): Promise<DecommissionResult> {
   return request(`/commission/decommission/${customerId}`, { method: 'POST' });
+}
+
+export interface EnergizeUpstreamResult {
+  updated: number;
+  failed: number;
+  errors: string[];
+}
+
+export async function energizeUpstream(siteCode: string, lines: UpstreamWarning[]): Promise<EnergizeUpstreamResult> {
+  return request('/commission/energize-upstream', {
+    method: 'POST',
+    body: JSON.stringify({ site_code: siteCode, lines }),
+  });
 }
 
 // ---------------------------------------------------------------------------

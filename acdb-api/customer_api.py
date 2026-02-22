@@ -231,7 +231,7 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 from auth import router as auth_router
 from schema import router as schema_router
-from crud import router as crud_router, customer_router, customer_data_router
+from crud import router as crud_router, customer_router, customer_data_router, _ensure_soft_delete_columns
 from exports import router as export_router
 from admin import router as admin_router
 from stats import router as stats_router
@@ -250,6 +250,7 @@ init_auth_db()
 app.include_router(auth_router)
 app.include_router(schema_router)
 app.include_router(crud_router)
+_ensure_soft_delete_columns()
 app.include_router(customer_router)
 app.include_router(export_router)
 app.include_router(admin_router)

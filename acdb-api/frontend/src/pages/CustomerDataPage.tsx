@@ -74,15 +74,15 @@ function TransactionFormModal({ initial, accountNumber, meterId, defaultRate, on
     setError('');
 
     const data: Record<string, unknown> = {
-      'accountnumber': accountNumber,
-      'meterid': meterId,
-      'transaction date': txnDate.replace('T', ' '),
-      'transaction amount': parseFloat(amount || '0'),
-      'kwh value': parseFloat(kwh || '0'),
-      'rate used': parseFloat(rate || '0'),
-      'payment': isPayment ? 1 : 0,
+      'account_number': accountNumber,
+      'meter_id': meterId,
+      'transaction_date': txnDate.replace('T', ' '),
+      'transaction_amount': parseFloat(amount || '0'),
+      'kwh_value': parseFloat(kwh || '0'),
+      'rate_used': parseFloat(rate || '0'),
+      'is_payment': isPayment,
     };
-    if (balance.trim()) data['current balance'] = parseFloat(balance);
+    if (balance.trim()) data['current_balance'] = parseFloat(balance);
 
     try {
       if (isEdit && initial) {

@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { createRecord } from '../lib/api';
+import { createRecord, listUGPConnections, type UGPConnection } from '../lib/api';
 
 // ---------------------------------------------------------------------------
 // Wizard step definitions
@@ -9,11 +9,11 @@ import { createRecord } from '../lib/api';
 interface FieldDef {
   key: string;
   label: string;
-  type?: 'text' | 'tel' | 'date' | 'select' | 'gps';
+  type?: 'text' | 'tel' | 'date' | 'select' | 'gps' | 'ugp_picker';
   placeholder?: string;
   required?: boolean;
   options?: string[];
-  half?: boolean;            // take half width on tablet+
+  half?: boolean;
 }
 
 const CUSTOMER_TYPES = ['HH', 'SME', 'CHU', 'SCP', 'SCH', 'GOV', 'COM', 'IND'];
@@ -23,23 +23,24 @@ const steps: { title: string; description: string; fields: FieldDef[] }[] = [
     title: 'Personal Information',
     description: 'Customer name and contact details',
     fields: [
-      { key: 'FIRST NAME', label: 'First Name', required: true, half: true },
-      { key: 'LAST NAME', label: 'Last Name', required: true, half: true },
-      { key: 'MIDDLE NAME', label: 'Middle Name', half: true },
-      { key: 'GENDER', label: 'Gender', type: 'select', options: ['Male', 'Female'], half: true },
-      { key: 'ID NUMBER', label: 'National ID Number', placeholder: 'ID / Passport number' },
-      { key: 'PHONE', label: 'Phone', type: 'tel', placeholder: '+266 ...', half: true },
-      { key: 'CELL PHONE 1', label: 'Cell Phone', type: 'tel', placeholder: '+266 ...', half: true },
+      { key: 'first_name', label: 'First Name', required: true, half: true },
+      { key: 'last_name', label: 'Last Name', required: true, half: true },
+      { key: 'middle_name', label: 'Middle Name', half: true },
+      { key: 'gender', label: 'Gender', type: 'select', options: ['Male', 'Female'], half: true },
+      { key: 'national_id', label: 'National ID Number', placeholder: 'ID / Passport number' },
+      { key: 'phone', label: 'Phone', type: 'tel', placeholder: '+266 ...', half: true },
+      { key: 'cell_phone_1', label: 'Cell Phone', type: 'tel', placeholder: '+266 ...', half: true },
     ],
   },
   {
     title: 'Location',
-    description: 'Site, district, and GPS coordinates',
+    description: 'Pick from uGridPlan or enter manually',
     fields: [
-      { key: 'Concession name', label: 'Site (Concession)', type: 'select', options: [], required: true },
-      { key: 'DISTRICT', label: 'District', placeholder: 'e.g. Mafeteng' },
-      { key: 'PLOT NUMBER', label: 'Plot / Stand Number', placeholder: 'e.g. MAK 0001 HH' },
-      { key: 'STREET ADDRESS', label: 'Village / Street Address', placeholder: 'Village or street name' },
+      { key: '_ugp_picker', label: 'Import from uGridPlan', type: 'ugp_picker' },
+      { key: 'community', label: 'Site (Concession)', type: 'select', options: [], required: true },
+      { key: 'district', label: 'District', placeholder: 'e.g. Mafeteng' },
+      { key: 'plot_number', label: 'Plot / Stand Number', placeholder: 'e.g. MAK 0001 HH' },
+      { key: 'street_address', label: 'Village / Street Address', placeholder: 'Village or street name' },
       { key: 'GPS', label: 'GPS Coordinates', type: 'gps' },
     ],
   },
@@ -47,13 +48,200 @@ const steps: { title: string; description: string; fields: FieldDef[] }[] = [
     title: 'Service Details',
     description: 'Connection and metering information',
     fields: [
-      { key: 'CUSTOMER POSITION', label: 'Customer Type', type: 'select', options: CUSTOMER_TYPES, required: true },
-      { key: 'DATE SERVICE CONNECTED', label: 'Date Connected', type: 'date' },
+      { key: 'customer_position', label: 'Customer Type', type: 'select', options: CUSTOMER_TYPES, required: true },
+      { key: 'date_service_connected', label: 'Date Connected', type: 'date' },
     ],
   },
 ];
 
-const TOTAL_STEPS = steps.length + 1; // +1 for review
+const TOTAL_STEPS = steps.length + 1;
+
+// ---------------------------------------------------------------------------
+// uGridPlan Connection Picker Modal
+// ---------------------------------------------------------------------------
+
+interface UGPPickerProps {
+  sites: string[];
+  onSelect: (conn: UGPConnection, site: string) => void;
+  onClose: () => void;
+}
+
+function UGPConnectionPicker({ sites, onSelect, onClose }: UGPPickerProps) {
+  const [site, setSite] = useState('');
+  const [connections, setConnections] = useState<UGPConnection[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    if (!site) { setConnections([]); return; }
+    setLoading(true);
+    setError('');
+    listUGPConnections(site)
+      .then(d => setConnections(d.connections || []))
+      .catch(e => setError(e.message || 'Failed to load connections'))
+      .finally(() => setLoading(false));
+  }, [site]);
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return connections;
+    const q = search.toLowerCase();
+    return connections.filter(c =>
+      c.survey_id.toLowerCase().includes(q) ||
+      c.customer_type.toLowerCase().includes(q) ||
+      c.customer_code.toLowerCase().includes(q) ||
+      c.status.toLowerCase().includes(q)
+    );
+  }, [connections, search]);
+
+  const unassigned = useMemo(
+    () => filtered.filter(c => !c.customer_code),
+    [filtered],
+  );
+  const assigned = useMemo(
+    () => filtered.filter(c => !!c.customer_code),
+    [filtered],
+  );
+
+  const renderRow = (c: UGPConnection) => {
+    const hasGps = c.gps_lat != null && c.gps_lon != null;
+    return (
+      <button
+        key={c.survey_id}
+        onClick={() => onSelect(c, site)}
+        className="w-full text-left px-4 py-3 hover:bg-blue-50 active:bg-blue-100 transition flex items-center gap-3"
+      >
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-gray-800 truncate">{c.survey_id}</p>
+          <div className="flex gap-2 mt-0.5 text-xs text-gray-500">
+            {c.customer_type && <span className="px-1.5 py-0.5 bg-gray-100 rounded">{c.customer_type}</span>}
+            {c.customer_code && <span className="text-blue-600">Code: {c.customer_code}</span>}
+            {hasGps && (
+              <span className="text-green-600">
+                {c.gps_lat!.toFixed(4)}, {c.gps_lon!.toFixed(4)}
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {c.status && (
+            <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${
+              c.status.toLowerCase().includes('commission')
+                ? 'bg-green-100 text-green-700'
+                : 'bg-gray-100 text-gray-600'
+            }`}>
+              {c.status}
+            </span>
+          )}
+          <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </div>
+      </button>
+    );
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40" onClick={onClose}>
+      <div
+        className="bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[85vh] flex flex-col"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="px-5 pt-5 pb-3 border-b shrink-0">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+              </svg>
+              <h3 className="text-lg font-semibold text-gray-800">uGridPlan Connections</h3>
+            </div>
+            <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg transition">
+              <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          {/* Site selector */}
+          <select
+            value={site}
+            onChange={e => { setSite(e.target.value); setSearch(''); }}
+            className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm bg-white focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none appearance-none"
+          >
+            <option value="">Select a site...</option>
+            {sites.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+
+          {/* Search within connections */}
+          {connections.length > 0 && (
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Filter by Survey ID, type, code..."
+              className="w-full mt-2 px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none"
+            />
+          )}
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto">
+          {!site ? (
+            <div className="text-center py-12 text-gray-400 text-sm">
+              Select a site to browse connections
+            </div>
+          ) : loading ? (
+            <div className="text-center py-12 text-gray-400 text-sm flex items-center justify-center gap-2">
+              <span className="animate-spin inline-block w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full" />
+              Loading connections...
+            </div>
+          ) : error ? (
+            <div className="p-4">
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">{error}</div>
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="text-center py-12 text-gray-400 text-sm">
+              {search ? 'No matching connections' : 'No connections found for this site'}
+            </div>
+          ) : (
+            <div>
+              {/* Unassigned connections first */}
+              {unassigned.length > 0 && (
+                <div>
+                  <div className="px-4 py-2 bg-green-50 border-b">
+                    <p className="text-xs font-semibold text-green-700 uppercase tracking-wide">
+                      Available ({unassigned.length})
+                    </p>
+                  </div>
+                  <div className="divide-y">{unassigned.map(renderRow)}</div>
+                </div>
+              )}
+              {/* Already-assigned connections */}
+              {assigned.length > 0 && (
+                <div>
+                  <div className="px-4 py-2 bg-gray-50 border-b border-t">
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                      Already Assigned ({assigned.length})
+                    </p>
+                  </div>
+                  <div className="divide-y opacity-60">{assigned.map(renderRow)}</div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer count */}
+        {site && !loading && connections.length > 0 && (
+          <div className="px-4 py-2 border-t bg-gray-50 text-xs text-gray-500 text-center shrink-0">
+            {connections.length} connection{connections.length !== 1 ? 's' : ''} total
+            {search && ` · ${filtered.length} matching`}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // GPS capture component
@@ -167,8 +355,9 @@ export default function NewCustomerWizard() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [sites, setSites] = useState<string[]>([]);
+  const [showUGPPicker, setShowUGPPicker] = useState(false);
+  const [ugpLinked, setUgpLinked] = useState('');
 
-  // Load dynamic site list
   useEffect(() => {
     fetch('/api/sites')
       .then(r => r.json())
@@ -181,9 +370,20 @@ export default function NewCustomerWizard() {
 
   const set = (key: string, value: string) => setForm(prev => ({ ...prev, [key]: value }));
 
-  // Validate current step
+  const handleUGPSelect = (conn: UGPConnection, site: string) => {
+    setShowUGPPicker(false);
+
+    set('community', site);
+    if (conn.survey_id) set('plot_number', conn.survey_id);
+    if (conn.customer_type) set('customer_position', conn.customer_type);
+    if (conn.gps_lat != null) set('gps_lat', String(conn.gps_lat));
+    if (conn.gps_lon != null) set('gps_lon', String(conn.gps_lon));
+
+    setUgpLinked(conn.survey_id);
+  };
+
   const validateStep = (): string | null => {
-    if (step >= steps.length) return null; // review step
+    if (step >= steps.length) return null;
     const s = steps[step];
     for (const f of s.fields) {
       if (f.required && !form[f.key]?.trim()) {
@@ -195,10 +395,7 @@ export default function NewCustomerWizard() {
 
   const goNext = () => {
     const err = validateStep();
-    if (err) {
-      setError(err);
-      return;
-    }
+    if (err) { setError(err); return; }
     setError('');
     setStep(s => Math.min(s + 1, TOTAL_STEPS - 1));
   };
@@ -212,16 +409,13 @@ export default function NewCustomerWizard() {
     setSaving(true);
     setError('');
     try {
-      // Build the data payload - strip empty strings and synthetic keys
       const data: Record<string, unknown> = {};
-      const syntheticKeys = new Set(['GPS']); // GPS is split into GPS X / GPS Y
+      const syntheticKeys = new Set(['GPS', '_ugp_picker']);
       for (const [k, v] of Object.entries(form)) {
         if (v.trim() && !syntheticKeys.has(k)) data[k] = v.trim();
       }
-      // Add audit fields
-      data['RECORD CREATE DATE'] = new Date().toISOString().slice(0, 19).replace('T', ' ');
-      data['RECORD CREATED BY'] = 'CC Portal';
-      data['COUNTRY'] = 'Lesotho';
+      data['created_by'] = 'CC Portal';
+      data['country'] = 'Lesotho';
 
       await createRecord('customers', data);
       navigate('/customers', { replace: true });
@@ -237,16 +431,54 @@ export default function NewCustomerWizard() {
   // ---------------------------------------------------------------------------
 
   const renderField = (f: FieldDef) => {
+    if (f.type === 'ugp_picker') {
+      return (
+        <div key={f.key} className="col-span-2">
+          {ugpLinked ? (
+            <div className="flex items-center justify-between p-3 bg-blue-50 border border-blue-200 rounded-xl">
+              <div className="flex items-center gap-2 min-w-0">
+                <svg className="w-5 h-5 text-blue-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                </svg>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-blue-800 truncate">Linked to {ugpLinked}</p>
+                  <p className="text-xs text-blue-600">Site, GPS, and type populated from uGridPlan</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowUGPPicker(true)}
+                className="text-xs text-blue-700 font-medium hover:underline shrink-0 ml-2"
+              >
+                Change
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowUGPPicker(true)}
+              className="w-full py-3.5 bg-blue-50 border-2 border-dashed border-blue-300 rounded-xl text-sm font-medium text-blue-700 hover:bg-blue-100 active:bg-blue-200 transition flex items-center justify-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+              </svg>
+              Import from uGridPlan
+            </button>
+          )}
+        </div>
+      );
+    }
+
     if (f.type === 'gps') {
       return (
         <div key={f.key} className="col-span-2">
           <label className="block text-sm font-medium text-gray-700 mb-2">{f.label}</label>
           <GPSCapture
-            lat={form['GPS Y'] || ''}
-            lng={form['GPS X'] || ''}
+            lat={form['gps_lat'] || ''}
+            lng={form['gps_lon'] || ''}
             onChange={(lat, lng) => {
-              set('GPS Y', lat);
-              set('GPS X', lng);
+              set('gps_lat', lat);
+              set('gps_lon', lng);
             }}
           />
         </div>
@@ -254,7 +486,7 @@ export default function NewCustomerWizard() {
     }
 
     if (f.type === 'select') {
-      const opts = f.key === 'Concession name' ? sites : (f.options || []);
+      const opts = f.key === 'community' ? sites : (f.options || []);
       return (
         <div key={f.key} className={f.half ? '' : 'col-span-2 sm:col-span-1'}>
           <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -294,18 +526,29 @@ export default function NewCustomerWizard() {
 
   const renderReview = () => {
     const filledFields = steps.flatMap(s => s.fields).filter(f => {
-      if (f.type === 'gps') return form['GPS Y'] || form['GPS X'];
+      if (f.type === 'ugp_picker') return false;
+      if (f.type === 'gps') return form['gps_lat'] || form['gps_lon'];
       return form[f.key]?.trim();
     });
     return (
       <div className="space-y-4">
         <p className="text-gray-500 text-sm">Review the information below and tap <strong>Create Customer</strong> to save.</p>
+
+        {ugpLinked && (
+          <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-800">
+            <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+            </svg>
+            Linked to uGridPlan: <strong>{ugpLinked}</strong>
+          </div>
+        )}
+
         <div className="bg-gray-50 rounded-xl border divide-y">
           {filledFields.map(f => (
             <div key={f.key} className="flex justify-between items-start px-4 py-3">
               <span className="text-sm text-gray-500 shrink-0 mr-4">{f.label}</span>
               <span className="text-sm font-medium text-gray-800 text-right">
-                {f.type === 'gps' ? `${form['GPS Y'] || '--'}, ${form['GPS X'] || '--'}` : form[f.key]}
+                {f.type === 'gps' ? `${form['gps_lat'] || '--'}, ${form['gps_lon'] || '--'}` : form[f.key]}
               </span>
             </div>
           ))}
@@ -345,7 +588,6 @@ export default function NewCustomerWizard() {
 
       {/* Step content card */}
       <div className="bg-white rounded-2xl shadow-sm border p-5 sm:p-6 min-h-[320px]">
-        {/* Step title */}
         <div className="mb-5">
           <h2 className="text-lg font-semibold text-gray-800">
             {isReview ? 'Review & Submit' : currentStep!.title}
@@ -355,14 +597,12 @@ export default function NewCustomerWizard() {
           </p>
         </div>
 
-        {/* Fields */}
         {isReview ? renderReview() : (
           <div className="grid grid-cols-2 gap-4">
             {currentStep!.fields.map(renderField)}
           </div>
         )}
 
-        {/* Error */}
         {error && (
           <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
             {error}
@@ -370,7 +610,7 @@ export default function NewCustomerWizard() {
         )}
       </div>
 
-      {/* Navigation buttons - large touch targets */}
+      {/* Navigation buttons */}
       <div className="flex gap-3 mt-6">
         {step > 0 && (
           <button
@@ -402,6 +642,15 @@ export default function NewCustomerWizard() {
           </button>
         )}
       </div>
+
+      {/* uGridPlan picker modal */}
+      {showUGPPicker && (
+        <UGPConnectionPicker
+          sites={sites}
+          onSelect={handleUGPSelect}
+          onClose={() => setShowUGPPicker(false)}
+        />
+      )}
     </div>
   );
 }

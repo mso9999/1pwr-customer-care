@@ -65,7 +65,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isEmployee = user?.user_type === 'employee';
   const isCustomer = user?.user_type === 'customer';
   const isSuperadmin = user?.role === 'superadmin';
-  const canWrite = isEmployee && (user?.permissions?.write_customers || user?.permissions?.write_transactions || false);
+  const canWrite = isEmployee;
 
   return (
     <AuthContext.Provider value={{ user, token, login, logout, loading, isEmployee, isCustomer, isSuperadmin, canWrite }}>

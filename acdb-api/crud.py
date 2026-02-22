@@ -7,6 +7,7 @@ with role-based permission gating.
 
 import logging
 import math
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
@@ -30,10 +31,48 @@ router = APIRouter(prefix="/api/tables", tags=["crud"])
 # Tables that customers can read their own rows from
 CUSTOMER_READABLE_TABLES = {"customers", "accounts"}
 
+SOFT_DELETE_TABLES = {"customers"}
+COLD_STORAGE_DAYS = 30
+
 
 def _get_connection():
     from customer_api import get_connection
     return get_connection()
+
+
+def _ensure_soft_delete_columns():
+    """Add deleted_at / deleted_by columns to soft-delete tables if missing."""
+    try:
+        with _get_connection() as conn:
+            cursor = conn.cursor()
+            for tbl in SOFT_DELETE_TABLES:
+                cursor.execute(
+                    "SELECT column_name FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND table_name = %s "
+                    "AND column_name = 'deleted_at'",
+                    (tbl,),
+                )
+                if not cursor.fetchone():
+                    cursor.execute(
+                        f"ALTER TABLE {tbl} "
+                        "ADD COLUMN deleted_at TIMESTAMPTZ DEFAULT NULL, "
+                        "ADD COLUMN deleted_by TEXT DEFAULT NULL"
+                    )
+                    conn.commit()
+                    logger.info("Added deleted_at/deleted_by to %s", tbl)
+    except Exception as e:
+        logger.warning("soft-delete column init: %s", e)
+
+
+def _has_deleted_at(conn, table_name: str) -> bool:
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_schema = 'public' AND table_name = %s "
+        "AND column_name = 'deleted_at'",
+        (table_name,),
+    )
+    return cursor.fetchone() is not None
 
 
 def _row_to_dict(cursor, row) -> Dict[str, Any]:
@@ -115,8 +154,12 @@ def list_rows(
             raise HTTPException(status_code=404, detail=f"Table '{table_name}' not found")
 
         # Build WHERE clause
-        where_clauses = []
-        params = []
+        where_clauses: list[str] = []
+        params: list = []
+
+        # Exclude soft-deleted rows from normal listing
+        if table_name.lower() in SOFT_DELETE_TABLES and _has_deleted_at(conn, table_name):
+            where_clauses.append("deleted_at IS NULL")
 
         # Customer scope: only own records
         if user.user_type == UserType.customer:
@@ -171,6 +214,119 @@ def list_rows(
             limit=limit,
             pages=max(1, math.ceil(total / limit)),
         )
+
+
+# ---------------------------------------------------------------------------
+# Cold-storage endpoints (must be registered before /{record_id} catch-all)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{table_name}/cold-storage")
+def list_cold_storage(
+    table_name: str,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=500),
+    user: CurrentUser = Depends(require_employee),
+):
+    """List soft-deleted records awaiting purge."""
+    if table_name.lower() not in SOFT_DELETE_TABLES:
+        raise HTTPException(status_code=400, detail="Table does not support cold storage")
+
+    with _get_connection() as conn:
+        if not _has_deleted_at(conn, table_name):
+            return PaginatedResponse(rows=[], total=0, page=1, limit=limit, pages=1)
+
+        cursor = conn.cursor()
+        cursor.execute(
+            f"SELECT COUNT(*) FROM {table_name} WHERE deleted_at IS NOT NULL"
+        )
+        total = cursor.fetchone()[0]
+
+        offset = (page - 1) * limit
+        cursor.execute(
+            f"SELECT * FROM {table_name} WHERE deleted_at IS NOT NULL "
+            "ORDER BY deleted_at DESC LIMIT %s OFFSET %s",
+            (limit, offset),
+        )
+        rows = [_row_to_dict(cursor, r) for r in cursor.fetchall()]
+
+        return PaginatedResponse(
+            rows=rows,
+            total=total,
+            page=page,
+            limit=limit,
+            pages=max(1, math.ceil(total / limit)),
+        )
+
+
+@router.delete("/{table_name}/cold-storage/purge")
+def purge_expired(
+    table_name: str,
+    user: CurrentUser = Depends(require_employee),
+):
+    """Permanently delete cold-storage records older than COLD_STORAGE_DAYS."""
+    if user.role != CCRole.superadmin.value:
+        raise HTTPException(status_code=403, detail="Purge requires superadmin role")
+
+    if table_name.lower() not in SOFT_DELETE_TABLES:
+        raise HTTPException(status_code=400, detail="Table does not support cold storage")
+
+    with _get_connection() as conn:
+        if not _has_deleted_at(conn, table_name):
+            return {"purged": 0}
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=COLD_STORAGE_DAYS)
+        cursor = conn.cursor()
+        cursor.execute(
+            f"DELETE FROM {table_name} "
+            "WHERE deleted_at IS NOT NULL AND deleted_at < %s",
+            (cutoff.isoformat(),),
+        )
+        purged = cursor.rowcount
+        conn.commit()
+
+        logger.info("Purged %d expired records from %s", purged, table_name)
+        return {"purged": purged, "table": table_name, "cutoff": cutoff.isoformat()}
+
+
+@router.post("/{table_name}/{record_id}/restore")
+def restore_record(
+    table_name: str,
+    record_id: str,
+    user: CurrentUser = Depends(require_employee),
+):
+    """Restore a soft-deleted record from cold storage."""
+    if user.role not in (CCRole.superadmin.value, CCRole.onm_team.value):
+        raise HTTPException(status_code=403, detail="Restore requires superadmin or onm_team role")
+
+    if table_name.lower() not in SOFT_DELETE_TABLES:
+        raise HTTPException(status_code=400, detail="Table does not support cold storage")
+
+    with _get_connection() as conn:
+        pk = _get_primary_key(conn, table_name)
+        if not pk:
+            raise HTTPException(status_code=400, detail="Cannot determine primary key")
+
+        cursor = conn.cursor()
+        cursor.execute(
+            f"SELECT deleted_at FROM {table_name} WHERE {pk} = %s", (record_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Record not found")
+        if not row[0]:
+            raise HTTPException(status_code=400, detail="Record is not in cold storage")
+
+        cursor.execute(
+            f"UPDATE {table_name} SET deleted_at = NULL, deleted_by = NULL "
+            f"WHERE {pk} = %s",
+            (record_id,),
+        )
+        conn.commit()
+
+        log_mutation(user, "restore", table_name, record_id)
+
+        return {"message": "Record restored", "table": table_name, "id": record_id}
 
 
 # ---------------------------------------------------------------------------
@@ -544,7 +700,11 @@ def delete_record(
     record_id: str,
     user: CurrentUser = Depends(require_employee),
 ):
-    """Delete a record by primary key. Requires superadmin or onm_team role."""
+    """Delete a record by primary key. Requires superadmin or onm_team role.
+
+    For soft-delete tables (customers), records are moved to cold storage
+    for 30 days before permanent purge.
+    """
     if user.role not in (CCRole.superadmin.value, CCRole.onm_team.value):
         raise HTTPException(status_code=403, detail="Delete requires superadmin or onm_team role")
 
@@ -553,27 +713,67 @@ def delete_record(
         if not pk:
             raise HTTPException(status_code=400, detail="Cannot determine primary key")
 
-        # Capture old values before deletion
         cursor = conn.cursor()
         cursor.execute(f"SELECT * FROM {table_name} WHERE {pk} = %s", (record_id,))
         old_row = cursor.fetchone()
         old_values = _row_to_dict(cursor, old_row) if old_row else None
 
-        sql = f"DELETE FROM {table_name} WHERE {pk} = %s"
+        if not old_row:
+            raise HTTPException(status_code=404, detail="Record not found")
+
+        soft = (
+            table_name.lower() in SOFT_DELETE_TABLES
+            and _has_deleted_at(conn, table_name)
+        )
+
         try:
-            cursor.execute(sql, (record_id,))
-            conn.commit()
-            if cursor.rowcount == 0:
-                raise HTTPException(status_code=404, detail="Record not found")
+            if soft:
+                if old_values and old_values.get("deleted_at"):
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Record is already in cold storage",
+                    )
+                now = datetime.now(timezone.utc).isoformat()
+                cursor.execute(
+                    f"UPDATE {table_name} SET deleted_at = %s, deleted_by = %s "
+                    f"WHERE {pk} = %s",
+                    (now, user.user_id, record_id),
+                )
+                conn.commit()
+                log_mutation(
+                    user, "soft_delete", table_name, record_id,
+                    old_values=old_values,
+                )
+                purge_date = (
+                    datetime.now(timezone.utc) + timedelta(days=COLD_STORAGE_DAYS)
+                ).strftime("%Y-%m-%d")
+                return {
+                    "message": "Record moved to cold storage",
+                    "table": table_name,
+                    "id": record_id,
+                    "purge_after": purge_date,
+                }
+            else:
+                cursor.execute(
+                    f"DELETE FROM {table_name} WHERE {pk} = %s", (record_id,)
+                )
+                conn.commit()
+                if cursor.rowcount == 0:
+                    raise HTTPException(status_code=404, detail="Record not found")
+                log_mutation(
+                    user, "delete", table_name, record_id,
+                    old_values=old_values,
+                )
+                return {
+                    "message": "Record deleted",
+                    "table": table_name,
+                    "id": record_id,
+                }
         except HTTPException:
             raise
         except Exception as e:
             conn.rollback()
             raise HTTPException(status_code=400, detail=f"Delete failed: {e}")
-
-        log_mutation(user, "delete", table_name, record_id, old_values=old_values)
-
-        return {"message": "Record deleted", "table": table_name, "id": record_id}
 
 
 # ---------------------------------------------------------------------------

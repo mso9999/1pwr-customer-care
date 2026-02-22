@@ -72,12 +72,12 @@ async function getNextAccountNumber(siteCode: string): Promise<string> {
     const resp = await listRows('meters', {
       filter_col: 'community',
       filter_val: siteCode,
-      sort: 'accountnumber',
+      sort: 'account_number',
       order: 'desc',
       limit: 1,
     });
     if (resp.rows.length > 0) {
-      const acct = String(resp.rows[0].accountnumber || '');
+      const acct = String(resp.rows[0].account_number || '');
       // Account number format: NNNNXXX -- extract the numeric prefix
       const numPart = acct.replace(/[A-Za-z]+$/, '');
       const next = (parseInt(numPart, 10) || 0) + 1;
@@ -157,17 +157,15 @@ export default function AssignMeterPage() {
       getRecord('customers', customerId.trim())
         .then(({ record }) => {
           if (!cancelled) {
-            const first = record['FIRST NAME'] || '';
-            const last = record['LAST NAME'] || '';
+            const first = record['first_name'] || '';
+            const last = record['last_name'] || '';
             setCustomerName(`${first} ${last}`.trim() || `Customer #${customerId}`);
 
-            // Auto-fill community from customer's concession if not set
-            const conc = String(record['Concession name'] || '');
+            const conc = String(record['community'] || '');
             if (conc && !community) setCommunity(conc);
 
-            // Auto-fill GPS if available
-            const gx = String(record['GPS X'] || '');
-            const gy = String(record['GPS Y'] || '');
+            const gx = String(record['gps_lon'] || '');
+            const gy = String(record['gps_lat'] || '');
             if (gy && !latitude) setLatitude(gy);
             if (gx && !longitude) setLongitude(gx);
           }
@@ -195,31 +193,27 @@ export default function AssignMeterPage() {
     const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
     try {
-      // 1. Insert into tblmeter
       const meterData: Record<string, unknown> = {
-        'meterid': meterid.trim(),
+        'meter_id': meterid.trim(),
         'community': community.toUpperCase(),
-        'customer id': parseInt(customerId, 10),
-        'accountnumber': accountNumber.trim(),
-        'customer type': customerType,
-        'customer connect date': connectDate || now,
-        'RECORD CREATE DATE': now,
-        'RECORD CREATED BY': 'CC Portal',
+        'customer_id_legacy': parseInt(customerId, 10),
+        'account_number': accountNumber.trim(),
+        'customer_type': customerType,
+        'customer_connect_date': connectDate || now,
+        'created_by': 'CC Portal',
       };
-      if (villageName.trim()) meterData['Village name'] = villageName.trim();
+      if (villageName.trim()) meterData['village_name'] = villageName.trim();
       if (latitude.trim()) meterData['latitude'] = latitude.trim();
       if (longitude.trim()) meterData['longitude'] = longitude.trim();
 
       await createRecord('meters', meterData);
 
-      // 2. Insert into tblaccountnumbers
       const acctData: Record<string, unknown> = {
-        'accountnumber': accountNumber.trim(),
-        'meterid': meterid.trim(),
-        'customerid': parseInt(customerId, 10),
+        'account_number': accountNumber.trim(),
+        'meter_id': meterid.trim(),
+        'customer_id': parseInt(customerId, 10),
         'community': community.toUpperCase(),
-        'opened date': connectDate || now,
-        'created by': 'CC Portal',
+        'created_by': 'CC Portal',
       };
 
       await createRecord('accounts', acctData);
