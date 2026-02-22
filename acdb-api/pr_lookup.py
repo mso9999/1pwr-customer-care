@@ -1,18 +1,11 @@
 """
-PR System (Firestore) department lookup for CC portal role auto-mapping.
+PR System (Firestore) integration for CC portal.
 
-Loads ALL users from the PR Firestore `users` collection once on first call,
-building an in-memory map of email → department → CC role.
+1. Department lookup for role auto-mapping (email → department → CC role).
+2. Portfolio / organization list sourced from ``referenceData_organizations``.
 
-When employee_id cannot be resolved to an email by the HR portal, a local
-SQLite table (cc_employee_emails) provides a fallback mapping.
-
-Roles:
-  - onm_team:     O&M, Reticulation, Production, Engineering, EHS, PUECO,
-                  Asset Management, Fleet, Facilities
-  - finance_team: Finance, CFO
-  - superadmin:   manual assignment only (not auto-mapped)
-  - generic:      everything else or lookup failure
+Firebase Admin SDK authenticates via the service-account JSON referenced by
+``FIREBASE_SA_PATH`` (default: ``firebase-service-account.json`` next to this file).
 """
 
 import os
@@ -20,7 +13,11 @@ import sqlite3
 import logging
 from typing import Optional
 
+from fastapi import APIRouter
+
 logger = logging.getLogger("acdb-api.pr-lookup")
+
+router = APIRouter(prefix="/api/portfolios", tags=["portfolios"])
 
 # ---------------------------------------------------------------------------
 # Firebase initialisation (lazy)
@@ -237,3 +234,47 @@ def get_cc_role_for_employee_id(employee_id: str) -> Optional[str]:
         return None
 
     return get_cc_role_for_email(email)
+
+
+# ---------------------------------------------------------------------------
+# Portfolio / organization endpoint
+# ---------------------------------------------------------------------------
+
+_portfolio_cache: list[dict] | None = None
+
+
+@router.get("")
+def list_portfolios():
+    """Return active organizations from the PR system's Firestore."""
+    global _portfolio_cache
+
+    if _portfolio_cache is not None:
+        return _portfolio_cache
+
+    if not _ensure_firebase() or _firestore_db is None:
+        return []
+
+    try:
+        docs = (
+            _firestore_db.collection("referenceData_organizations")
+            .where("active", "==", True)
+            .stream()
+        )
+        result = []
+        for doc in docs:
+            d = doc.to_dict()
+            result.append({
+                "id": doc.id,
+                "name": d.get("name", doc.id),
+                "code": d.get("code"),
+                "country": d.get("country"),
+                "baseCurrency": d.get("baseCurrency", "USD"),
+                "allowedCurrencies": d.get("allowedCurrencies", []),
+            })
+
+        _portfolio_cache = result
+        logger.info("Loaded %d portfolios from PR Firestore", len(result))
+        return result
+    except Exception as e:
+        logger.error("Failed to fetch portfolios: %s", e)
+        return []

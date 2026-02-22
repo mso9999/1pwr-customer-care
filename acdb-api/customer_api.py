@@ -112,7 +112,7 @@ def _normalize_customer(row_dict: Dict[str, Any]) -> Dict[str, Any]:
         return str(v).strip() if v is not None else ""
 
     return {
-        "customer_id": _s("customer_id_legacy"),
+        "customer_id_legacy": _s("customer_id_legacy"),
         "first_name": _s("first_name"),
         "middle_name": _s("middle_name"),
         "last_name": _s("last_name"),
@@ -174,11 +174,14 @@ def _resolve_accounts_for_customer(cursor, customer_id_legacy: str) -> List[str]
     except Exception:
         pass
 
-    # 2. meters table
+    # 2. meters table — resolve via account_number from accounts
+    # (meters.customer_id_legacy is deprecated)
     try:
         cursor.execute(
-            "SELECT account_number FROM meters "
-            "WHERE customer_id_legacy = %s AND account_number IS NOT NULL",
+            "SELECT DISTINCT m.account_number FROM meters m "
+            "JOIN accounts a ON m.account_number = a.account_number "
+            "JOIN customers c ON a.customer_id = c.id "
+            "WHERE c.customer_id_legacy = %s AND m.account_number IS NOT NULL",
             (int(cid),),
         )
         for r in cursor.fetchall():
@@ -244,6 +247,7 @@ from registration import router as registration_router
 from payments import router as payments_router
 from ingest import router as ingest_router
 from meter_lifecycle import router as meter_lifecycle_router, ensure_meter_assignments_table
+from pr_lookup import router as portfolio_router
 
 from db_auth import init_auth_db
 init_auth_db()
@@ -266,6 +270,7 @@ app.include_router(registration_router)
 app.include_router(payments_router)
 app.include_router(ingest_router)
 app.include_router(meter_lifecycle_router)
+app.include_router(portfolio_router)
 ensure_meter_assignments_table()
 
 
@@ -343,7 +348,7 @@ def customer_by_phone(phone: str):
             customers = [_normalize_customer(_row_to_dict(cursor, row)) for row in rows]
 
             for cust in customers:
-                cid = cust["customer_id"]
+                cid = cust["customer_id_legacy"]
                 if cid:
                     cust["account_numbers"] = _resolve_accounts_for_customer(cursor, cid)
                 else:
@@ -412,20 +417,22 @@ def customer_by_account(account_number: str):
             except Exception:
                 pass
 
-            # 2. meters table
+            # 2. Derive from plot_number if accounts table didn't resolve
             if not cust_id:
-                try:
-                    cursor.execute(
-                        "SELECT c.id FROM meters m "
-                        "JOIN customers c ON m.customer_id_legacy = c.customer_id_legacy "
-                        "WHERE m.account_number = %s",
-                        (acct,),
-                    )
-                    r = cursor.fetchone()
-                    if r and r[0]:
-                        cust_id = r[0]
-                except Exception:
-                    pass
+                import re as _re_acct
+                m = _re_acct.match(r"^(\d{3,4})([A-Za-z]{2,4})$", acct)
+                if m:
+                    num_part, comm = m.group(1), m.group(2).upper()
+                    try:
+                        cursor.execute(
+                            "SELECT id FROM customers WHERE plot_number LIKE %s AND community = %s LIMIT 1",
+                            (f"{comm} {num_part}%", comm),
+                        )
+                        r = cursor.fetchone()
+                        if r and r[0]:
+                            cust_id = r[0]
+                    except Exception:
+                        pass
 
             if not cust_id:
                 raise HTTPException(
@@ -443,7 +450,7 @@ def customer_by_account(account_number: str):
 
             cust = _normalize_customer(_row_to_dict(cursor, row))
             cust["account_numbers"] = _resolve_accounts_for_customer(
-                cursor, cust["customer_id"]
+                cursor, cust["customer_id_legacy"]
             )
 
             return {"customer": cust}
@@ -476,6 +483,7 @@ def customer_search(
            OR city ILIKE %s
            OR district ILIKE %s
            OR customer_id_legacy::text LIKE %s
+           OR EXISTS (SELECT 1 FROM accounts a WHERE a.customer_id = customers.id AND a.account_number ILIKE %s)
         LIMIT %s
     """
 
@@ -484,7 +492,7 @@ def customer_search(
             cursor = conn.cursor()
             cursor.execute(sql, (
                 pattern, pattern, pattern, pattern, pattern,
-                pattern, pattern, pattern, limit,
+                pattern, pattern, pattern, pattern, limit,
             ))
             rows = cursor.fetchall()
             customers = [_normalize_customer(_row_to_dict(cursor, row)) for row in rows]

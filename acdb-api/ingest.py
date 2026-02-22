@@ -31,9 +31,12 @@ import requests as http_requests
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 from pydantic import BaseModel
 
+from country_config import UTC_OFFSET_HOURS
 from customer_api import get_connection
 
 logger = logging.getLogger("cc-api.ingest")
+
+_METER_TZ = timezone(timedelta(hours=UTC_OFFSET_HOURS))
 
 router = APIRouter(tags=["ingest"])
 
@@ -218,6 +221,7 @@ class MeterReading(BaseModel):
     meter_id: str
     timestamp: str            # YYYYMMDDHHMM
     energy_active: float = 0
+    energy_integrated: Optional[float] = None
     power_active: float = 0
     voltage: float = 0
     current: float = 0
@@ -231,7 +235,8 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
         raise HTTPException(status_code=403, detail="Invalid IoT key")
 
     try:
-        ts = datetime.strptime(reading.timestamp, "%Y%m%d%H%M").replace(tzinfo=timezone.utc)
+        ts = datetime.strptime(reading.timestamp, "%Y%m%d%H%M").replace(
+            tzinfo=_METER_TZ).astimezone(timezone.utc)
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Bad timestamp format: {reading.timestamp}")
 
@@ -253,9 +258,14 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
             row = cur.fetchone()
             prev_energy = float(row[0]) if row else None
 
+            energy_for_delta = (
+                reading.energy_integrated
+                if reading.energy_integrated is not None
+                else reading.energy_active
+            )
             delta_kwh = 0.0
-            if prev_energy is not None and reading.energy_active >= prev_energy:
-                delta_kwh = reading.energy_active - prev_energy
+            if prev_energy is not None and energy_for_delta >= prev_energy:
+                delta_kwh = energy_for_delta - prev_energy
 
             cur.execute("""
                 INSERT INTO meter_readings
@@ -289,7 +299,7 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
                     last_seen_at = EXCLUDED.last_seen_at,
                     last_synced_at = NOW()
             """, (
-                meter_id, account, reading.energy_active,
+                meter_id, account, energy_for_delta,
                 reading.relay, ts,
             ))
 

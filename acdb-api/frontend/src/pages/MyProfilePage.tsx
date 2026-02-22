@@ -30,13 +30,13 @@ export default function MyProfilePage() {
           </div>
           <div>
             <h2 className="text-xl font-semibold">{name || 'Customer'}</h2>
-            <p className="text-gray-500 text-sm">{String(customer.customer_id || '')}</p>
+            <p className="text-gray-500 text-sm">{String(customer.account_number || customer.customer_id_legacy || '')}</p>
           </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {[
-            ['Customer ID', customer.customer_id],
+            ['Account', customer.account_number || customer.customer_id_legacy],
             ['First Name', customer.first_name],
             ['Middle Name', customer.middle_name],
             ['Last Name', customer.last_name],

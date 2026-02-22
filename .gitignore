@@ -10,3 +10,4 @@ auth_info_baileys/
 *.log
 .DS_Store
 .dropbox_cache/
+firebase-service-account.json

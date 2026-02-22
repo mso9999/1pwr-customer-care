@@ -48,7 +48,7 @@ def _get_connection():
 # ---------------------------------------------------------------------------
 
 class CommissionRequest(BaseModel):
-    customer_id: int
+    customer_id: Optional[int] = None
     account_number: str
     site_code: str                          # concession code (MAK, LEB, ...)
     customer_type: str                      # HH, SME, CHU, SCP, etc.
@@ -61,72 +61,102 @@ class CommissionRequest(BaseModel):
     last_name: Optional[str] = None
     gps_lat: Optional[str] = None
     gps_lng: Optional[str] = None
+    survey_id: Optional[str] = None         # UGP connection binding (from picker)
     customer_signature: str                 # base64 JPEG from tablet canvas
     commissioned_by: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
-# GET /api/commission/customer/{customer_id}
+# GET /api/commission/customer/{identifier}
+# Accepts account_number (e.g. 0045MAK) or legacy numeric customer_id.
 # ---------------------------------------------------------------------------
 
-@router.get("/api/commission/customer/{customer_id}")
-async def get_commission_data(customer_id: int, user: CurrentUser = Depends(require_employee)):
-    """Fetch customer + meter + account data for pre-populating the commission form."""
+def _resolve_customer_for_commission(cursor, identifier: str):
+    """Resolve a customer by account_number or legacy ID. Returns (customer_dict, meter_dict, account_number)."""
+    import re
+    customer = None
+    meter = None
+    account_number = ""
 
-    with _get_connection() as conn:
-        cursor = conn.cursor()
+    is_account = bool(re.match(r"^\d{3,4}[A-Za-z]{2,4}$", identifier.strip()))
 
-        # Customer basics
+    if is_account:
+        account_number = identifier.strip().upper()
         cursor.execute(
-            "SELECT * FROM customers WHERE customer_id_legacy = %s", (customer_id,)
+            "SELECT c.* FROM accounts a "
+            "JOIN customers c ON a.customer_id = c.id "
+            "WHERE a.account_number = %s LIMIT 1",
+            (account_number,),
         )
         row = cursor.fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="Customer not found")
+        if row:
+            cols = [d[0] for d in cursor.description]
+            customer = dict(zip(cols, row))
+    else:
+        cursor.execute(
+            "SELECT * FROM customers WHERE customer_id_legacy = %s", (int(identifier),)
+        )
+        row = cursor.fetchone()
+        if row:
+            cols = [d[0] for d in cursor.description]
+            customer = dict(zip(cols, row))
 
-        cols = [desc[0] for desc in cursor.description]
-        customer = dict(zip(cols, row))
+    if not customer:
+        return None, None, ""
 
-        # Meter info (most recent)
-        meter = None
+    legacy_id = customer.get("customer_id_legacy")
+
+    # Resolve account_number if not already known
+    if not account_number:
         try:
             cursor.execute(
-                "SELECT * FROM meters WHERE customer_id_legacy = %s "
+                "SELECT a.account_number FROM accounts a "
+                "JOIN customers c ON a.customer_id = c.id "
+                "WHERE c.customer_id_legacy = %s ORDER BY a.opened_date DESC NULLS LAST LIMIT 1",
+                (legacy_id,),
+            )
+            arow = cursor.fetchone()
+            if arow:
+                account_number = str(arow[0])
+        except Exception:
+            pass
+
+    # Meter info via account_number
+    if account_number:
+        try:
+            cursor.execute(
+                "SELECT * FROM meters WHERE account_number = %s "
                 "ORDER BY customer_connect_date DESC NULLS LAST LIMIT 1",
-                (customer_id,),
+                (account_number,),
             )
             mrow = cursor.fetchone()
             if mrow:
-                mcols = [desc[0] for desc in cursor.description]
+                mcols = [d[0] for d in cursor.description]
                 meter = dict(zip(mcols, mrow))
         except Exception:
             pass
 
-        # Account number
-        account_number = ""
-        if meter:
-            account_number = str(meter.get("account_number", ""))
-        if not account_number:
-            try:
-                cursor.execute(
-                    "SELECT account_number FROM accounts "
-                    "WHERE customer_id = %s ORDER BY opened_date DESC NULLS LAST LIMIT 1",
-                    (customer_id,),
-                )
-                arow = cursor.fetchone()
-                if arow:
-                    account_number = str(arow[0])
-            except Exception:
-                pass
+    return customer, meter, account_number
 
-    # Check for existing contracts on disk
+
+@router.get("/api/commission/customer/{identifier}")
+async def get_commission_data(identifier: str, user: CurrentUser = Depends(require_employee)):
+    """Fetch customer + meter + account data for pre-populating the commission form.
+    Accepts account_number (e.g. 0045MAK) or legacy numeric customer_id.
+    """
+    with _get_connection() as conn:
+        cursor = conn.cursor()
+        customer, meter, account_number = _resolve_customer_for_commission(cursor, identifier)
+        if not customer:
+            raise HTTPException(status_code=404, detail="Customer not found")
+
     existing_contracts = []
     if account_number:
         existing_contracts = list_customer_contracts(account_number)
 
     return {
         "customer": {
-            "customer_id": customer_id,
+            "customer_id_legacy": customer.get("customer_id_legacy"),
             "first_name": customer.get("first_name", ""),
             "last_name": customer.get("last_name", ""),
             "phone": customer.get("phone", "") or customer.get("cell_phone_1", ""),
@@ -162,19 +192,17 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        # Fetch current customer to get names if not provided
-        cursor.execute(
-            "SELECT first_name, last_name FROM customers WHERE customer_id_legacy = %s",
-            (req.customer_id,),
+        # Resolve customer: prefer account_number, fall back to legacy customer_id
+        customer, _, resolved_acct = _resolve_customer_for_commission(
+            cursor, req.account_number or str(req.customer_id or "")
         )
-        row = cursor.fetchone()
-        if not row:
+        if not customer:
             raise HTTPException(status_code=404, detail="Customer not found")
+        legacy_id = customer["customer_id_legacy"]
 
-        first_name = req.first_name or str(row[0] or "")
-        last_name = req.last_name or str(row[1] or "")
+        first_name = req.first_name or str(customer.get("first_name") or "")
+        last_name = req.last_name or str(customer.get("last_name") or "")
 
-        # Build UPDATE
         updates: Dict[str, Any] = {
             "date_service_connected": req.connection_date,
             "customer_position": req.customer_type,
@@ -187,15 +215,15 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
 
         if updates:
             set_clause = ", ".join(f"{k} = %s" for k in updates)
-            values = list(updates.values()) + [req.customer_id]
+            values = list(updates.values()) + [legacy_id]
             cursor.execute(
                 f"UPDATE customers SET {set_clause} WHERE customer_id_legacy = %s",
                 values,
             )
             conn.commit()
             logger.info(
-                "Updated customers for customer %d: %s",
-                req.customer_id,
+                "Updated customers for %s (legacy %s): %s",
+                resolved_acct or req.account_number, legacy_id,
                 list(updates.keys()),
             )
 
@@ -236,15 +264,87 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
     except Exception as exc:
         logger.warning("SMS delivery failed: %s", exc)
 
-    return {
+    # ----- Phase 4: Sync to uGridPLAN ----- #
+    ugp_sync_result: Optional[Dict[str, Any]] = None
+    survey_id: Optional[str] = None
+    try:
+        from sync_ugridplan import sync_commission_to_ugp
+
+        # Prefer explicit picker selection, fall back to resolution chain
+        survey_id = (req.survey_id or "").strip() or None
+        if not survey_id:
+            survey_id = _resolve_ugp_survey_id(
+                legacy_id, req.account_number, req.site_code
+            )
+        if survey_id:
+            # Look up meter serial for the connection update
+            meter_serial = ""
+            with _get_connection() as conn2:
+                cursor2 = conn2.cursor()
+                try:
+                    cursor2.execute(
+                        "SELECT meter_id FROM meters WHERE account_number = %s "
+                        "ORDER BY updated_at DESC NULLS LAST LIMIT 1",
+                        (req.account_number,),
+                    )
+                    mrow = cursor2.fetchone()
+                    if mrow:
+                        meter_serial = str(mrow[0] or "")
+                except Exception:
+                    pass
+
+            ugp_sync_result = sync_commission_to_ugp(
+                site_code=req.site_code,
+                survey_id=survey_id,
+                connection_date=req.connection_date,
+                account_number=req.account_number,
+                meter_serial=meter_serial,
+            )
+            logger.info(
+                "UGP sync for %s (survey=%s): updated=%s, upstream_warnings=%d",
+                req.account_number, survey_id,
+                ugp_sync_result.get("ugp_updated"),
+                len(ugp_sync_result.get("upstream_warnings", [])),
+            )
+
+            # Persist the binding on the account row
+            try:
+                with _get_connection() as conn3:
+                    cursor3 = conn3.cursor()
+                    cursor3.execute(
+                        "UPDATE accounts SET survey_id = %s "
+                        "WHERE account_number = %s AND (survey_id IS NULL OR survey_id = '')",
+                        (survey_id, req.account_number),
+                    )
+                    conn3.commit()
+            except Exception as pe:
+                logger.warning("Could not persist survey_id binding for %s: %s", req.account_number, pe)
+        else:
+            logger.info(
+                "No UGP Survey_ID found for %s (legacy %s) — skipping UGP sync",
+                req.account_number, legacy_id,
+            )
+    except Exception as exc:
+        logger.warning("UGP sync failed (non-blocking): %s", exc)
+
+    response: Dict[str, Any] = {
         "status": "ok",
-        "customer_id": req.customer_id,
+        "customer_id": legacy_id,
+        "account_number": resolved_acct or req.account_number,
         "contract_en_url": en_url,
         "contract_so_url": so_url,
         "en_filename": result["en_filename"],
         "so_filename": result["so_filename"],
         "sms_sent": sms_sent,
     }
+    if ugp_sync_result:
+        response["ugp_sync"] = {
+            "updated": ugp_sync_result.get("ugp_updated", False),
+            "survey_id": survey_id,
+            "upstream_warnings": ugp_sync_result.get("upstream_warnings", []),
+            "error": ugp_sync_result.get("error"),
+        }
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -296,8 +396,11 @@ async def decommission_customer(customer_id: int, user: CurrentUser = Depends(re
 
         try:
             cursor.execute(
-                "SELECT meter_id, account_number, community "
-                "FROM meters WHERE customer_id_legacy = %s",
+                "SELECT m.meter_id, m.account_number, m.community "
+                "FROM meters m "
+                "JOIN accounts a ON m.account_number = a.account_number "
+                "JOIN customers c ON a.customer_id = c.id "
+                "WHERE c.customer_id_legacy = %s",
                 (customer_id,),
             )
             for mrow in cursor.fetchall():
@@ -373,34 +476,26 @@ async def download_contract(site_code: str, filename: str):
 # GET /api/commission/contracts/{customer_id}  (authenticated)
 # ---------------------------------------------------------------------------
 
-@router.get("/api/commission/contracts/{customer_id}")
-async def list_contracts_for_customer(customer_id: int, user: CurrentUser = Depends(require_employee)):
+@router.get("/api/commission/contracts/{identifier}")
+async def list_contracts_for_customer(identifier: str, user: CurrentUser = Depends(require_employee)):
     """List all contract files on disk for a given customer.
-    Used by the customer detail page to show available contracts.
+    Accepts account_number (e.g. 0045MAK) or legacy numeric customer_id.
     """
+    import re
+    is_account = bool(re.match(r"^\d{3,4}[A-Za-z]{2,4}$", identifier.strip()))
 
-    # Look up account number for this customer
-    account_number = ""
-    with _get_connection() as conn:
-        cursor = conn.cursor()
-        try:
-            cursor.execute(
-                "SELECT account_number FROM accounts "
-                "WHERE customer_id = %s ORDER BY opened_date DESC NULLS LAST LIMIT 1",
-                (customer_id,),
-            )
-            row = cursor.fetchone()
-            if row:
-                account_number = str(row[0])
-        except Exception:
-            pass
-
-        # Also try meters
-        if not account_number:
+    if is_account:
+        account_number = identifier.strip().upper()
+    else:
+        account_number = ""
+        customer_id = int(identifier)
+        with _get_connection() as conn:
+            cursor = conn.cursor()
             try:
                 cursor.execute(
-                    "SELECT account_number FROM meters "
-                    "WHERE customer_id_legacy = %s ORDER BY customer_connect_date DESC NULLS LAST LIMIT 1",
+                    "SELECT a.account_number FROM accounts a "
+                    "JOIN customers c ON a.customer_id = c.id "
+                    "WHERE c.customer_id_legacy = %s ORDER BY a.opened_date DESC NULLS LAST LIMIT 1",
                     (customer_id,),
                 )
                 row = cursor.fetchone()
@@ -408,6 +503,18 @@ async def list_contracts_for_customer(customer_id: int, user: CurrentUser = Depe
                     account_number = str(row[0])
             except Exception:
                 pass
+            if not account_number:
+                try:
+                    cursor.execute(
+                        "SELECT account_number FROM meters "
+                        "WHERE customer_id_legacy = %s ORDER BY customer_connect_date DESC NULLS LAST LIMIT 1",
+                        (customer_id,),
+                    )
+                    row = cursor.fetchone()
+                    if row:
+                        account_number = str(row[0])
+                except Exception:
+                    pass
 
     if not account_number:
         return {"contracts": [], "account_number": ""}
@@ -495,3 +602,106 @@ def bulk_update_commissioning_status(
         "errors": errors,
         "total_requested": len(req.updates),
     }
+
+
+# ---------------------------------------------------------------------------
+# UGP Survey_ID resolution
+# ---------------------------------------------------------------------------
+
+def _resolve_ugp_survey_id(
+    customer_id: int, account_number: str, site_code: str
+) -> Optional[str]:
+    """Resolve the uGridPLAN Survey_ID for a customer.
+
+    Tries in order:
+    0. Explicit binding in accounts.survey_id (source of truth)
+    1. cc_customer_metadata SQLite table (from previous sync)
+    2. Derive from plot_number in PostgreSQL (e.g. "MAK 0045 HH" format)
+    3. Derive from account_number (e.g. "0045MAK" → "MAK 0045")
+    """
+    from db_auth import get_auth_db
+    import re
+
+    # Strategy 0: Explicit binding stored on the account row
+    if account_number:
+        try:
+            with _get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT survey_id FROM accounts "
+                    "WHERE account_number = %s AND survey_id IS NOT NULL",
+                    (account_number,),
+                )
+                row = cursor.fetchone()
+                if row and row[0]:
+                    return str(row[0]).strip()
+        except Exception:
+            pass
+
+    # Strategy 1: SQLite metadata from previous UGP sync
+    try:
+        with get_auth_db() as auth_conn:
+            row = auth_conn.execute(
+                "SELECT ugp_survey_id FROM cc_customer_metadata "
+                "WHERE customer_id = ? AND ugp_survey_id IS NOT NULL",
+                (str(customer_id),),
+            ).fetchone()
+            if row and row["ugp_survey_id"]:
+                return row["ugp_survey_id"]
+    except Exception:
+        pass
+
+    # Strategy 2: Derive from plot_number in PostgreSQL
+    try:
+        with _get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT plot_number FROM customers WHERE customer_id_legacy = %s",
+                (customer_id,),
+            )
+            row = cursor.fetchone()
+            if row and row[0]:
+                plot = str(row[0]).strip()
+                if plot and plot.lower() != "none":
+                    return plot
+    except Exception:
+        pass
+
+    # Strategy 3: Derive from account_number (e.g. "0045MAK" → "MAK 0045 HH")
+    if account_number and site_code:
+        m = re.match(r"^(\d{3,4})([A-Za-z]{2,4})$", account_number.strip())
+        if m:
+            number = m.group(1)
+            code = m.group(2).upper()
+            return f"{code} {number} HH"
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# POST /api/commission/energize-upstream
+# ---------------------------------------------------------------------------
+
+class EnergizeUpstreamRequest(BaseModel):
+    site_code: str
+    lines: List[Dict[str, str]]
+
+
+@router.post("/api/commission/energize-upstream")
+async def energize_upstream(
+    req: EnergizeUpstreamRequest,
+    user: CurrentUser = Depends(require_employee),
+):
+    """Energize upstream conductors that were flagged during commissioning.
+
+    Accepts the list of non-energized lines returned by the commission
+    execute endpoint and sets their status to energized (St_code_4 = 5)
+    in uGridPLAN.
+    """
+    from sync_ugridplan import energize_upstream_lines
+
+    result = energize_upstream_lines(
+        site_code=req.site_code,
+        line_ids=req.lines,
+    )
+    return result

@@ -248,7 +248,7 @@ export default function CustomerDashboardPage() {
       .then(([dash, prof]) => {
         setData(dash);
         const c = prof.customer;
-        setAcct(String(c.account_number || c.customer_id || ''));
+        setAcct(String(c.account_number || c.customer_id_legacy || ''));
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));

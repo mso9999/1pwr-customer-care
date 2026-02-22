@@ -244,29 +244,19 @@ def resolve_customer_rate(
             except Exception:
                 pass
         else:
-            # Account number -> resolve to customer ID via meters
+            # Account number -> resolve community via accounts table
             try:
                 cursor.execute(
-                    "SELECT customer_id_legacy FROM meters WHERE account_number = %s",
+                    "SELECT c.community FROM accounts a "
+                    "JOIN customers c ON a.customer_id = c.id "
+                    "WHERE a.account_number = %s LIMIT 1",
                     (cust_id,),
                 )
                 row = cursor.fetchone()
                 if row and row[0]:
-                    cust_id = str(row[0]).strip()
+                    concession = str(row[0]).strip().upper()
             except Exception:
                 pass
-
-            if cust_id and cust_id.isdigit():
-                try:
-                    cursor.execute(
-                        "SELECT community FROM customers WHERE customer_id_legacy = %s",
-                        (cust_id,),
-                    )
-                    row = cursor.fetchone()
-                    if row and row[0]:
-                        concession = str(row[0]).strip().upper()
-                except Exception:
-                    pass
 
         result = resolve_rate(cursor, customer_id=cust_id, concession=concession)
         result["customer_id"] = cust_id

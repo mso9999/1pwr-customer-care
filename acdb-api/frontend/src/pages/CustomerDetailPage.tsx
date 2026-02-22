@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getRecord, updateRecord, deleteRecord, getCustomerContracts, getCustomerWithAccounts, decommissionCustomer, type CommissionContract } from '../lib/api';
+import { getRecord, updateRecord, deleteRecord, getCustomerContracts, decommissionCustomer, type CommissionContract } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function CustomerDetailPage() {
-  const { id } = useParams<{ id: string }>();
+  const { id: urlParam } = useParams<{ id: string }>();
   const [record, setRecord] = useState<Record<string, unknown> | null>(null);
+  const [pgId, setPgId] = useState<string>('');
+  const [accountNumber, setAccountNumber] = useState<string>('');
   const [editing, setEditing] = useState(false);
   const [formData, setFormData] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
@@ -17,47 +19,84 @@ export default function CustomerDetailPage() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (!id) return;
-    getRecord('customers', id)
-      .then(({ record: r }) => {
-        setRecord(r);
-        const fd: Record<string, string> = {};
-        for (const [k, v] of Object.entries(r)) {
-          fd[k] = v != null ? String(v) : '';
-        }
-        setFormData(fd);
+    if (!urlParam) return;
+
+    const isAccountNumber = /^[0-9]{3,4}[A-Z]{2,4}$/i.test(urlParam);
+
+    if (isAccountNumber) {
+      setAccountNumber(urlParam.toUpperCase());
+      fetch(`/api/customers/by-account/${encodeURIComponent(urlParam)}`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('cc_token') || ''}` },
       })
-      .catch((e) => setError(e.message));
-    // Resolve account numbers from all sources
-    getCustomerWithAccounts(id)
-      .then(({ customer }) => setAccountNumbers(customer.account_numbers || []))
-      .catch(() => {});
-    // Also fetch contracts
-    getCustomerContracts(parseInt(id, 10))
-      .then(({ contracts: c }) => setContracts(c))
-      .catch(() => {});
-  }, [id]);
+        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+        .then(data => {
+          const cust = data.customer;
+          const accts: string[] = cust.account_numbers || [];
+          setAccountNumbers(accts);
+          if (!accts.includes(urlParam.toUpperCase())) accts.push(urlParam.toUpperCase());
+
+          const legacyId = String(cust.customer_id_legacy || '');
+          if (legacyId) {
+            return getRecord('customers', legacyId).then(({ record: r }) => {
+              setRecord(r);
+              setPgId(String(r['id'] ?? legacyId));
+              const fd: Record<string, string> = {};
+              for (const [k, v] of Object.entries(r)) fd[k] = v != null ? String(v) : '';
+              setFormData(fd);
+            });
+          }
+        })
+        .catch((e) => setError(e.message));
+
+      getCustomerContracts(urlParam.toUpperCase())
+        .then(({ contracts: c }) => setContracts(c))
+        .catch(() => {});
+    } else {
+      getRecord('customers', urlParam)
+        .then(({ record: r }) => {
+          setRecord(r);
+          setPgId(String(r['id'] ?? urlParam));
+          const fd: Record<string, string> = {};
+          for (const [k, v] of Object.entries(r)) fd[k] = v != null ? String(v) : '';
+          setFormData(fd);
+        })
+        .catch((e) => setError(e.message));
+
+      fetch(`/api/customers/by-id/${encodeURIComponent(urlParam)}`, {
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('cc_token') || ''}` },
+      })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (data?.customer) {
+            setAccountNumbers(data.customer.account_numbers || []);
+            if (data.customer.account_numbers?.[0]) {
+              setAccountNumber(data.customer.account_numbers[0]);
+            }
+          }
+        })
+        .catch(() => {});
+
+      getCustomerContracts(parseInt(urlParam, 10))
+        .then(({ contracts: c }) => setContracts(c))
+        .catch(() => {});
+    }
+  }, [urlParam]);
+
+  const recordId = pgId || urlParam || '';
 
   const handleSave = async () => {
-    if (!id) return;
+    if (!recordId) return;
     setSaving(true);
     setError('');
     try {
-      // Only send changed fields
       const changes: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(formData)) {
-        if (record && String(record[k] ?? '') !== v) {
-          changes[k] = v;
-        }
+        if (record && String(record[k] ?? '') !== v) changes[k] = v;
       }
-      if (Object.keys(changes).length === 0) {
-        setEditing(false);
-        return;
-      }
-      await updateRecord('customers', id, changes);
+      if (Object.keys(changes).length === 0) { setEditing(false); return; }
+      await updateRecord('customers', recordId, changes);
       setEditing(false);
-      // Refresh
-      const { record: r } = await getRecord('customers', id);
+      const { record: r } = await getRecord('customers', recordId);
       setRecord(r);
     } catch (e: any) {
       setError(e.message);
@@ -67,9 +106,9 @@ export default function CustomerDetailPage() {
   };
 
   const handleDelete = async () => {
-    if (!id || !confirm('Are you sure you want to delete this customer?')) return;
+    if (!recordId || !confirm('Are you sure you want to delete this customer?')) return;
     try {
-      await deleteRecord('customers', id);
+      await deleteRecord('customers', recordId);
       navigate('/customers');
     } catch (e: any) {
       setError(e.message);
@@ -77,24 +116,23 @@ export default function CustomerDetailPage() {
   };
 
   const handleDecommission = async () => {
-    if (!id) return;
+    const legacyId = record?.['customer_id_legacy'];
+    if (!legacyId) return;
+    const displayName = accountNumber || urlParam;
     const msg =
-      'Decommission customer ' + id + '?\n\n' +
+      'Decommission customer ' + displayName + '?\n\n' +
       'This sets DATE SERVICE TERMINATED to today.\n' +
       'All meter, account, and transaction history is preserved.';
     if (!confirm(msg)) return;
     setDecommissioning(true);
     setError('');
     try {
-      const result = await decommissionCustomer(parseInt(id, 10));
-      alert(`Customer ${id} decommissioned (terminated ${result.terminated_date}). All records preserved.`);
-      // Refresh customer record to reflect new terminated status
-      const { record: r } = await getRecord('customers', id);
+      const result = await decommissionCustomer(Number(legacyId));
+      alert(`Customer ${displayName} decommissioned (terminated ${result.terminated_date}). All records preserved.`);
+      const { record: r } = await getRecord('customers', recordId);
       setRecord(r);
       const fd: Record<string, string> = {};
-      for (const [k, v] of Object.entries(r)) {
-        fd[k] = v != null ? String(v) : '';
-      }
+      for (const [k, v] of Object.entries(r)) fd[k] = v != null ? String(v) : '';
       setFormData(fd);
     } catch (e: any) {
       setError(e.message);
@@ -107,8 +145,7 @@ export default function CustomerDetailPage() {
   if (!record) return <div className="text-center py-8 text-gray-400">Loading...</div>;
 
   const fields = Object.keys(record);
-
-  // Determine commissioning status from customer record
+  const displayTitle = accountNumber || urlParam || '';
   const connectedVal = record['date_service_connected'];
   const terminatedVal = record['date_service_terminated'];
   const isConnected = connectedVal != null && String(connectedVal).trim() !== '';
@@ -119,7 +156,7 @@ export default function CustomerDetailPage() {
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div className="flex items-center gap-3 min-w-0">
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-800 truncate">Customer: {id}</h1>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-800 truncate">Customer: {displayTitle}</h1>
           {isTerminated && (
             <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-medium rounded-full shrink-0">Terminated</span>
           )}
@@ -132,7 +169,7 @@ export default function CustomerDetailPage() {
             <>
               <button onClick={() => setEditing(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Edit</button>
               <button
-                onClick={() => navigate(`/customer-data?account=${accountNumbers[0] || id}`)}
+                onClick={() => navigate(`/customer-data?account=${accountNumbers[0] || accountNumber || urlParam}`)}
                 className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700"
               >View Data</button>
               {isCommissioned ? (
@@ -145,8 +182,8 @@ export default function CustomerDetailPage() {
                 </button>
               ) : (
                 <>
-                  <button onClick={() => navigate(`/assign-meter?customer=${id}`)} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700">Assign Meter</button>
-                  <button onClick={() => navigate(`/commission?customer=${id}`)} className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700">Commission</button>
+                  <button onClick={() => navigate(`/assign-meter?customer=${accountNumber || urlParam}`)} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700">Assign Meter</button>
+                  <button onClick={() => navigate(`/commission?customer=${accountNumber || urlParam}`)} className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700">Commission</button>
                 </>
               )}
             </>
@@ -167,7 +204,6 @@ export default function CustomerDetailPage() {
 
       {error && <p className="text-red-600 text-sm bg-red-50 p-2 rounded">{error}</p>}
 
-      {/* Account numbers */}
       {accountNumbers.length > 0 && (
         <div className="bg-white rounded-lg shadow p-4">
           <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Account Numbers</h2>
@@ -207,7 +243,6 @@ export default function CustomerDetailPage() {
         </div>
       </div>
 
-      {/* Contracts section */}
       {contracts.length > 0 && (
         <div className="bg-white rounded-lg shadow p-4 sm:p-5">
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">Contracts</h2>

@@ -95,11 +95,11 @@ function UGPConnectionPicker({ sites, onSelect, onClose }: UGPPickerProps) {
   }, [connections, search]);
 
   const unassigned = useMemo(
-    () => filtered.filter(c => !c.customer_code),
+    () => filtered.filter(c => !c.bound_account && !c.customer_code),
     [filtered],
   );
   const assigned = useMemo(
-    () => filtered.filter(c => !!c.customer_code),
+    () => filtered.filter(c => !!c.bound_account || !!c.customer_code),
     [filtered],
   );
 
@@ -115,7 +115,8 @@ function UGPConnectionPicker({ sites, onSelect, onClose }: UGPPickerProps) {
           <p className="text-sm font-medium text-gray-800 truncate">{c.survey_id}</p>
           <div className="flex gap-2 mt-0.5 text-xs text-gray-500">
             {c.customer_type && <span className="px-1.5 py-0.5 bg-gray-100 rounded">{c.customer_type}</span>}
-            {c.customer_code && <span className="text-blue-600">Code: {c.customer_code}</span>}
+            {c.bound_account && <span className="text-amber-600">Bound: {c.bound_account}</span>}
+            {!c.bound_account && c.customer_code && <span className="text-blue-600">Code: {c.customer_code}</span>}
             {hasGps && (
               <span className="text-green-600">
                 {c.gps_lat!.toFixed(4)}, {c.gps_lon!.toFixed(4)}

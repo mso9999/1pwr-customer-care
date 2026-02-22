@@ -60,7 +60,8 @@ ORGS = {
             "KET": ("a075cbc1-e920-455e-9d5a-8595061dfec0", "2024-06-01"),
             "LSB": ("ed0766c4-9270-4254-a107-eb4464a96ed9", "2025-06-01"),
             "SEH": ("0a4fdca5-2d78-4979-8051-10f21a216b16", "2025-06-01"),
-            "RIB": ("10f0846e-d541-4340-81d1-e667cb5026ba", "2025-06-01"),
+            # RIB not yet operational — skip until site is commissioned
+            # "RIB": ("10f0846e-d541-4340-81d1-e667cb5026ba", "2025-06-01"),
             "TOS": ("b564c8d6-a6c1-43d4-98d1-87ed8cd8ffd7", "2025-06-01"),
         },
     },
@@ -85,11 +86,23 @@ INITIAL_PER_PAGE = 50
 MIN_PER_PAGE = 10
 MAX_RETRIES = 5
 BASE_TIMEOUT = 90
+INTER_REQUEST_DELAY = 2.0  # seconds between API calls (rate limit: 3 req / 5 sec)
+
+
+class RateLimitExhausted(Exception):
+    """Raised when the Koios daily API quota is exhausted (HTTP 429)."""
+    pass
+
+
+class IncompleteDay(Exception):
+    """Raised when pagination fails partway through, discarding partial results."""
+    pass
 
 
 def fetch_day(session, org_cfg, site_id, date_str, per_page):
     """Fetch all readings for one site on one day. Returns (records, per_page_used).
-    Adaptively reduces per_page on timeout/504."""
+    Adaptively reduces per_page on timeout/504.
+    Raises RateLimitExhausted on HTTP 429 (daily quota hit)."""
     url = f"{KOIOS_BASE}/api/v2/organizations/{org_cfg['org_id']}/data/historical"
     all_data = []
     cursor = None
@@ -109,7 +122,18 @@ def fetch_day(session, org_cfg, site_id, date_str, per_page):
         for attempt in range(MAX_RETRIES):
             wait = min(5 * (2 ** attempt), 60)
             try:
+                time.sleep(INTER_REQUEST_DELAY)
                 r = session.post(url, json=body, timeout=BASE_TIMEOUT)
+
+                if r.status_code == 429:
+                    msg = ""
+                    try:
+                        msg = r.json().get("message", "")
+                    except Exception:
+                        msg = r.text[:200]
+                    log.error("    HTTP 429 — daily rate limit exhausted: %s", msg)
+                    raise RateLimitExhausted(msg)
+
                 if r.status_code in (500, 502, 503, 504):
                     if pp > MIN_PER_PAGE:
                         pp = max(pp // 2, MIN_PER_PAGE)
@@ -126,6 +150,8 @@ def fetch_day(session, org_cfg, site_id, date_str, per_page):
                     return all_data, pp
                 r.raise_for_status()
                 break
+            except RateLimitExhausted:
+                raise
             except requests.exceptions.ReadTimeout:
                 if pp > MIN_PER_PAGE:
                     pp = max(pp // 2, MIN_PER_PAGE)
@@ -142,8 +168,13 @@ def fetch_day(session, org_cfg, site_id, date_str, per_page):
                 time.sleep(wait)
                 continue
         else:
+            if all_data:
+                log.warning("    Gave up on %s %s after %d attempts — DISCARDING %d partial records",
+                            site_id[:8], date_str, MAX_RETRIES, len(all_data))
+                raise IncompleteDay(
+                    f"{site_id[:8]} {date_str}: pagination failed after {len(all_data)} records")
             log.warning("    Gave up on %s %s after %d attempts", site_id[:8], date_str, MAX_RETRIES)
-            return all_data, pp
+            return [], pp
 
         resp = r.json()
         batch = resp.get("data", [])
@@ -153,7 +184,6 @@ def fetch_day(session, org_cfg, site_id, date_str, per_page):
         cursor = pag.get("cursor")
         if not pag.get("has_more") or not cursor or not batch:
             break
-        time.sleep(0.5)
 
     return all_data, pp
 
@@ -203,6 +233,72 @@ def bin_to_hourly(records):
     ]
 
 
+def find_incomplete_days(conn, all_sites):
+    """Find all days needing repair: partial (< 24 hours) AND completely
+    missing (no data) within each site's expected date range.
+    Returns {site_code: [day_str, ...]} sorted newest-first."""
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT community, reading_hour::date AS day,
+               COUNT(DISTINCT date_part('hour', reading_hour)) AS hours
+        FROM hourly_consumption
+        WHERE source = 'koios'
+        GROUP BY community, reading_hour::date
+    """)
+    existing = defaultdict(dict)
+    for comm, day, hours in cur.fetchall():
+        existing[comm][day.strftime("%Y-%m-%d")] = hours
+    cur.close()
+
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today = datetime.strptime(today_str, "%Y-%m-%d")
+    result = {}
+    for sc, (cc, org_cfg, sid, start_str) in all_sites.items():
+        site_existing = existing.get(sc, {})
+        d = datetime.strptime(start_str, "%Y-%m-%d")
+        incomplete = []
+        while d <= today:
+            ds = d.strftime("%Y-%m-%d")
+            hours = site_existing.get(ds)
+            if hours is None or hours < 24:
+                incomplete.append(ds)
+            d += timedelta(days=1)
+        if incomplete:
+            incomplete.sort(reverse=True)
+            result[sc] = incomplete
+    return result
+
+
+def api_health_probe(org_cfg, site_id, date_str):
+    """Probe the Koios API to check if it returns interval data (healthy)
+    or daily aggregates (degraded). Returns the number of distinct hours
+    found in a sample fetch, or -1 on error."""
+    url = f"{KOIOS_BASE}/api/v2/organizations/{org_cfg['org_id']}/data/historical"
+    body = {
+        "filters": {"sites": [site_id], "date_range": {"from": date_str, "to": date_str}},
+        "per_page": 50,
+    }
+    try:
+        time.sleep(INTER_REQUEST_DELAY)
+        r = requests.post(url, json=body,
+                          headers={"X-API-KEY": org_cfg["api_key"],
+                                   "X-API-SECRET": org_cfg["api_secret"]},
+                          timeout=60)
+        if r.status_code != 200:
+            return -1
+        records = r.json().get("data", [])
+        if not records:
+            return 0
+        hours = set()
+        for rec in records:
+            ts = rec.get("timestamp", "")
+            if len(ts) > 13:
+                hours.add(ts[11:13])
+        return len(hours)
+    except Exception:
+        return -1
+
+
 def get_staleness(conn, sites_to_run):
     """Return {site_code: latest_date_str} for koios-sourced data."""
     cur = conn.cursor()
@@ -221,9 +317,11 @@ def get_staleness(conn, sites_to_run):
 
 
 def check_freshness(org_cfg):
-    """Query Koios v2 freshness endpoint. Returns {site_id: date_str} or empty on failure."""
+    """Query Koios v2 freshness endpoint. Returns {site_id: date_str} or empty on failure.
+    Raises RateLimitExhausted on 429."""
     url = f"{KOIOS_BASE}/api/v2/organizations/{org_cfg['org_id']}/data/freshness"
     try:
+        time.sleep(INTER_REQUEST_DELAY)
         r = requests.post(
             url,
             json={},
@@ -234,6 +332,10 @@ def check_freshness(org_cfg):
             },
             timeout=30,
         )
+        if r.status_code == 429:
+            msg = r.text[:200]
+            log.error("Freshness check: 429 rate limit exhausted: %s", msg)
+            raise RateLimitExhausted(msg)
         if r.status_code != 200:
             log.warning("Freshness check failed: HTTP %d", r.status_code)
             return {}
@@ -243,19 +345,33 @@ def check_freshness(org_cfg):
             if val and isinstance(val, dict) and val.get("reading"):
                 result[sid] = val["reading"][:10]
         return result
+    except RateLimitExhausted:
+        raise
     except Exception as e:
         log.warning("Freshness check error: %s", e)
         return {}
 
 
+MIN_METERS_FOR_DEGRADATION_CHECK = 20
+
+
 def import_site_day(session, org_cfg, site_code, site_id, date_str, meter_map, per_page):
-    """Fetch and return processed batch for one site on one day."""
+    """Fetch and return processed batch for one site on one day.
+    Detects API degradation: if many meters but only 1 hour, the API
+    is returning daily aggregates instead of interval data — skip."""
     raw, pp_used = fetch_day(session, org_cfg, site_id, date_str, per_page)
     if not raw:
         return [], pp_used
 
     hourly = bin_to_hourly(raw)
     if not hourly:
+        return [], pp_used
+
+    distinct_hours = len(set(h for _, _, h, _ in hourly))
+    distinct_meters = len(set(s for s, _, _, _ in hourly))
+    if distinct_hours == 1 and distinct_meters >= MIN_METERS_FOR_DEGRADATION_CHECK:
+        log.warning("    API degraded: %d meters but only %d hour — daily aggregates, skipping",
+                    distinct_meters, distinct_hours)
         return [], pp_used
 
     batch = []
@@ -278,10 +394,14 @@ def day_range(start_date, end_date):
 
 
 def process_site(site_code, org_cfg, site_id, site_start_str,
-                 start, end, meter_map, latest_dates, per_page):
-    """Process all days for one site. Returns (site_code, total_inserted, batch_list)."""
+                 start, end, meter_map, latest_dates, per_page,
+                 no_skip=False, conn=None, reverse=False,
+                 stop_if_exists=False, specific_days=None):
+    """Process all days for one site with incremental commits.
+    Returns (site_code, total_rows, per_page_used).
+    Raises RateLimitExhausted if the daily quota is hit."""
     site_start = max(start, datetime.strptime(site_start_str, "%Y-%m-%d"))
-    latest = latest_dates.get(site_code)
+    latest = None if no_skip else latest_dates.get(site_code)
 
     session = requests.Session()
     session.headers.update({
@@ -289,28 +409,80 @@ def process_site(site_code, org_cfg, site_id, site_start_str,
         "X-API-SECRET": org_cfg["api_secret"],
     })
 
-    all_batches = []
+    total_rows = 0
+    incomplete_days = 0
+    consecutive_empty = 0
+    max_consecutive_empty = 10
     pp = per_page
+    cur = conn.cursor() if conn else None
 
-    for ds in day_range(site_start, end):
+    if specific_days is not None:
+        days = specific_days
+    else:
+        days = list(day_range(site_start, end))
+        if reverse:
+            days = days[::-1]
+
+    for ds in days:
         if latest and ds < latest:
             continue
+
+        if stop_if_exists and cur:
+            cur.execute("""
+                SELECT 1 FROM hourly_consumption
+                WHERE community = %s AND source = 'koios'
+                  AND reading_hour >= %s::timestamp
+                  AND reading_hour < (%s::date + 1)::timestamp
+                LIMIT 1
+            """, (site_code, ds, ds))
+            if cur.fetchone():
+                log.info("  %s %s — data exists (converged). Stopping.", site_code, ds)
+                break
+
         log.info("  %s %s (per_page=%d)", site_code, ds, pp)
         try:
             batch, pp = import_site_day(session, org_cfg, site_code, site_id, ds, meter_map, pp)
             if batch:
-                all_batches.append(batch)
+                if cur:
+                    psycopg2.extras.execute_batch(cur, """
+                        INSERT INTO hourly_consumption
+                            (account_number, meter_id, reading_hour, kwh, community, source)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (meter_id, reading_hour) DO NOTHING
+                    """, batch, page_size=500)
+                    conn.commit()
+                total_rows += len(batch)
+                consecutive_empty = 0
                 log.info("    +%d rows", len(batch))
             else:
+                consecutive_empty += 1
                 log.info("    (empty)")
+                if specific_days and consecutive_empty >= max_consecutive_empty:
+                    log.warning("  %s: %d consecutive empty days — API likely degraded, stopping site",
+                                site_code, consecutive_empty)
+                    break
+        except IncompleteDay as e:
+            incomplete_days += 1
+            consecutive_empty += 1
+            log.warning("  %s %s — incomplete fetch, skipping commit: %s", site_code, ds, e)
+            if specific_days and consecutive_empty >= max_consecutive_empty:
+                log.warning("  %s: %d consecutive failures — stopping site", site_code, consecutive_empty)
+                break
+        except RateLimitExhausted:
+            session.close()
+            raise
         except Exception as e:
             log.error("  %s %s failed: %s", site_code, ds, e)
 
     session.close()
-    return site_code, all_batches, pp
+    if incomplete_days:
+        log.warning("--- %s: %d days skipped due to incomplete pagination ---", site_code, incomplete_days)
+    return site_code, total_rows, pp
 
 
 def main():
+    global INTER_REQUEST_DELAY
+
     parser = argparse.ArgumentParser(description="Import Koios hourly consumption")
     parser.add_argument("from_date", nargs="?", default=None)
     parser.add_argument("to_date", nargs="?",
@@ -324,7 +496,17 @@ def main():
                         help="Concurrent site workers (default 1)")
     parser.add_argument("--per-page", type=int, default=INITIAL_PER_PAGE,
                         help=f"Initial per_page (auto-reduces on failure, default {INITIAL_PER_PAGE})")
+    parser.add_argument("--no-skip", action="store_true",
+                        help="Ignore staleness check — re-fetch all days in range (for gap-filling)")
+    parser.add_argument("--stop-if-exists", action="store_true",
+                        help="Stop processing a site when a day with existing data is encountered (convergence)")
+    parser.add_argument("--delay", type=float, default=INTER_REQUEST_DELAY,
+                        help=f"Seconds between API calls (default {INTER_REQUEST_DELAY})")
+    parser.add_argument("--repair", action="store_true",
+                        help="Find days with < 24 hours of data and re-fetch only those")
     args = parser.parse_args()
+
+    INTER_REQUEST_DELAY = args.delay
 
     if args.from_date is None:
         start = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=1)
@@ -352,13 +534,6 @@ def main():
         log.error("Unknown site: %s", args.site)
         sys.exit(1)
 
-    log.info("=" * 60)
-    log.info("HOURLY CONSUMPTION IMPORT FROM KOIOS")
-    log.info("Range: %s to %s", start.strftime("%Y-%m-%d"), args.to_date)
-    log.info("Sites: %s", ", ".join(sorted(all_sites)))
-    log.info("Workers: %d, initial per_page: %d", args.workers, args.per_page)
-    log.info("=" * 60)
-
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
     cur.execute("SELECT meter_id, account_number, community FROM meters")
@@ -367,16 +542,108 @@ def main():
         for r in cur.fetchall()
     }
 
+    # ── Repair mode: find and re-fetch partial days ──────────────────
+    if args.repair:
+        partial = find_incomplete_days(conn, all_sites)
+        if not partial:
+            log.info("No incomplete days found — all data is complete.")
+            conn.close()
+            return
+
+        # Probe the API to detect degradation before wasting calls.
+        # Use a known-good recent date from a site we're about to repair.
+        probe_cur = conn.cursor()
+        site_list = list(all_sites.keys())
+        probe_cur.execute("""
+            SELECT community, reading_hour::date AS day
+            FROM hourly_consumption
+            WHERE source = 'koios' AND community = ANY(%s)
+            GROUP BY community, reading_hour::date
+            HAVING COUNT(DISTINCT date_part('hour', reading_hour)) = 24
+            ORDER BY day DESC LIMIT 1
+        """, (site_list,))
+        probe_row = probe_cur.fetchone()
+        probe_cur.close()
+        if probe_row:
+            probe_site, probe_date = probe_row[0], probe_row[1].strftime("%Y-%m-%d")
+            if probe_site in all_sites:
+                _, org_cfg_p, sid_p, _ = all_sites[probe_site]
+                log.info("API health probe: %s %s ...", probe_site, probe_date)
+                probe_hours = api_health_probe(org_cfg_p, sid_p, probe_date)
+                if probe_hours == -1:
+                    log.warning("API health probe FAILED (HTTP error). API is unreachable.")
+                    log.warning("Aborting repair — re-run when API is reachable.")
+                    conn.close()
+                    return
+                elif probe_hours <= 1:
+                    log.warning("API health probe: only %d hour(s) returned for a known 24-hr day.", probe_hours)
+                    log.warning("API is returning daily aggregates (DEGRADED). Repair will be ineffective.")
+                    log.warning("Aborting repair — re-run when API returns interval data.")
+                    conn.close()
+                    return
+                else:
+                    log.info("API health probe: %d hours — API is returning interval data (healthy).", probe_hours)
+
+        total_incomplete = sum(len(v) for v in partial.values())
+        log.info("=" * 60)
+        log.info("REPAIR MODE — %d incomplete days across %d sites (newest first)",
+                 total_incomplete, len(partial))
+        for sc, days in sorted(partial.items()):
+            log.info("  %s: %d days (%s → %s)", sc, len(days), days[0], days[-1])
+        log.info("=" * 60)
+
+        grand_total = 0
+        rate_limited_orgs = set()
+        for sc in sorted(partial.keys()):
+            if sc not in all_sites:
+                log.warning("  %s has partial days but is not in site list — skipping", sc)
+                continue
+            cc, org_cfg, sid, ss = all_sites[sc]
+            oid = org_cfg["org_id"]
+            if oid in rate_limited_orgs:
+                log.warning("  Skipping %s — daily rate limit exhausted for org %s", sc, cc)
+                continue
+            try:
+                _, site_rows, _ = process_site(
+                    sc, org_cfg, sid, ss, start, end, meter_map, {}, args.per_page,
+                    no_skip=True, conn=conn, specific_days=partial[sc],
+                )
+            except RateLimitExhausted:
+                log.warning("  RATE LIMIT HIT on %s — stopping for org %s", sc, cc)
+                rate_limited_orgs.add(oid)
+                continue
+            grand_total += site_rows
+            log.info("--- %s repaired: %d new rows ---", sc, site_rows)
+
+        log.info("=" * 60)
+        log.info("REPAIR TOTAL: %d new hourly records", grand_total)
+        log.info("=" * 60)
+        conn.close()
+        return
+
+    # ── Normal import mode ───────────────────────────────────────────
+    log.info("=" * 60)
+    log.info("HOURLY CONSUMPTION IMPORT FROM KOIOS")
+    log.info("Range: %s to %s", start.strftime("%Y-%m-%d"), args.to_date)
+    log.info("Sites: %s", ", ".join(sorted(all_sites)))
+    log.info("Workers: %d, initial per_page: %d", args.workers, args.per_page)
+    log.info("=" * 60)
+
     latest_dates = get_staleness(conn, all_sites)
     for sc, dt in sorted(latest_dates.items()):
         log.info("  %s latest in DB: %s", sc, dt)
 
     freshness_by_org = {}
+    freshness_rate_limited_orgs = set()
     for sc, (cc, org_cfg, sid, ss) in all_sites.items():
         oid = org_cfg["org_id"]
         if oid not in freshness_by_org:
-            freshness_by_org[oid] = check_freshness(org_cfg)
-            time.sleep(1)
+            try:
+                freshness_by_org[oid] = check_freshness(org_cfg)
+            except RateLimitExhausted:
+                log.warning("Rate limit hit on freshness check for %s — proceeding without freshness data", cc)
+                freshness_by_org[oid] = {}
+                freshness_rate_limited_orgs.add(oid)
 
     skipped = []
     for sc in list(all_sites.keys()):
@@ -396,53 +663,32 @@ def main():
         return
 
     grand_total = 0
+    rate_limited_orgs = set()
 
-    if args.workers <= 1:
-        for sc in sorted(all_sites, key=lambda s: latest_dates.get(s, "0000")):
-            cc, org_cfg, sid, ss = all_sites[sc]
-            _, batches, _ = process_site(
-                sc, org_cfg, sid, ss, start, end, meter_map, latest_dates, args.per_page
+    sorted_sites = sorted(all_sites, key=lambda s: latest_dates.get(s, "0000"))
+    for sc in sorted_sites:
+        cc, org_cfg, sid, ss = all_sites[sc]
+        oid = org_cfg["org_id"]
+        if oid in rate_limited_orgs:
+            log.warning("  Skipping %s — daily rate limit exhausted for org %s", sc, cc)
+            continue
+        try:
+            _, site_rows, _ = process_site(
+                sc, org_cfg, sid, ss, start, end, meter_map, latest_dates, args.per_page,
+                no_skip=args.no_skip, conn=conn,
+                reverse=args.reverse, stop_if_exists=args.stop_if_exists,
             )
-            for batch in batches:
-                psycopg2.extras.execute_batch(cur, """
-                    INSERT INTO hourly_consumption
-                        (account_number, meter_id, reading_hour, kwh, community, source)
-                    VALUES (%s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (meter_id, reading_hour) DO NOTHING
-                """, batch, page_size=500)
-                conn.commit()
-                grand_total += len(batch)
-    else:
-        with ThreadPoolExecutor(max_workers=args.workers) as pool:
-            sorted_sites = sorted(all_sites, key=lambda s: latest_dates.get(s, "0000"))
-            futures = {}
-            for sc in sorted_sites:
-                cc, org_cfg, sid, ss = all_sites[sc]
-                f = pool.submit(
-                    process_site,
-                    sc, org_cfg, sid, ss, start, end, meter_map, latest_dates, args.per_page,
-                )
-                futures[f] = sc
-
-            for f in as_completed(futures):
-                sc = futures[f]
-                try:
-                    _, batches, _ = f.result()
-                    for batch in batches:
-                        psycopg2.extras.execute_batch(cur, """
-                            INSERT INTO hourly_consumption
-                                (account_number, meter_id, reading_hour, kwh, community, source)
-                            VALUES (%s, %s, %s, %s, %s, %s)
-                            ON CONFLICT (meter_id, reading_hour) DO NOTHING
-                        """, batch, page_size=500)
-                        conn.commit()
-                        grand_total += len(batch)
-                    log.info("--- %s done: %d rows ---", sc, sum(len(b) for b in batches))
-                except Exception as e:
-                    log.error("--- %s failed: %s ---", sc, e)
+        except RateLimitExhausted:
+            log.warning("  RATE LIMIT HIT on %s — stopping Koios requests for org %s", sc, cc)
+            rate_limited_orgs.add(oid)
+            continue
+        grand_total += site_rows
+        log.info("--- %s done: %d rows ---", sc, site_rows)
 
     log.info("=" * 60)
     log.info("GRAND TOTAL: %d hourly records", grand_total)
+    if rate_limited_orgs:
+        log.warning("NOTE: Daily rate limit was exhausted for org(s) — some sites were skipped")
     log.info("=" * 60)
 
     if not args.no_aggregate and not args.site:

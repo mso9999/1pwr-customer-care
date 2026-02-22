@@ -828,3 +828,281 @@ For 0045MAK specifically: 13 ThunderCloud transactions from Oct 25 to Feb 5, 202
 - `acdb-api/payments.py` — per-account tariff, balance engine integration
 - `acdb-api/country_config.py` — `default_tariff_rate`, `get_tariff_rate_for_site()`, `_SITE_TO_COUNTRY`
 - Server DB: `balance_seed` enum value, 2 indexes, 377 seed rows, 5,490 backfilled balances
+
+---
+
+## Session 2026-02-19 202602192030 (API Rate Limit Fix + Cumulative Register Import)
+
+### What Was Done
+
+1. **Diagnosed Koios 429 rate limiting (root cause)**:
+   - Probed the Koios v2 API and discovered the real rate limit: **30,000 requests per day per org** (not just 3 req/5 sec burst).
+   - The old pipeline ran every 15 min, firing requests at all 11 sites in rapid succession. With 96 cycles/day, this burned through the daily budget by mid-morning, leaving all non-MAK sites unable to import consumption data.
+   - Rate limit is **per-org**: LS (org `1cddcb07...`) and BN (org `0123589c...`) have separate quotas.
+
+2. **Fixed `import_hourly.py` — rate limit awareness**:
+   - Added `RateLimitExhausted` exception class for clean 429 handling.
+   - `fetch_day()` now raises immediately on HTTP 429 instead of retrying.
+   - Added `INTER_REQUEST_DELAY = 2.0s` between all API calls to stay under burst limit.
+   - Rate limiting is tracked **per-org**: hitting 429 on LS skips remaining LS sites but still processes BN.
+   - `check_freshness()` also handles 429 gracefully.
+   - Freshness-based skipping prevents unnecessary requests when DB is already current.
+
+3. **Rewrote `import_tc_live.py` — cumulative register approach (non-lossy)**:
+   - Old approach: stored only `latest_reading.kilowatt_hours` (interval delta). If a 15-min cycle was missed, that consumption was permanently lost.
+   - New approach: stores `total_cycle_energy` as cumulative Wh register in `meter_readings` table, then computes hourly consumption by differencing consecutive cumulative readings.
+   - If a cycle is missed, the next reading's cumulative diff captures the full gap.
+   - Falls back to interval-based rows for meters without cumulative data (0 of 264 active meters needed fallback).
+   - Uses `ON CONFLICT DO UPDATE SET kwh = GREATEST(existing, new)` to refine partial hours.
+   - Confirmed working: 264 cumulative readings stored, 112 hourly rows computed from diffs.
+
+4. **Fixed `import_thundercloud.py` (parquet) — gap-filling**:
+   - Changed `ON CONFLICT (meter_id, reading_hour) DO NOTHING` to `DO UPDATE SET kwh = EXCLUDED.kwh`.
+   - Parquet files represent authoritative daily data and now overwrite any partial live-capture data.
+   - This closes the gap where TC live missed readings during outages and parquet couldn't overwrite them.
+
+5. **Updated `sync_consumption.sh`**:
+   - Reduced Koios timeout from 600s to 300s (rate limit stops it faster anyway).
+   - Better phased architecture: TC first (fast, no rate limits), then Koios (rate-limit-aware).
+
+6. **Probed ThunderCloud v0 API endpoints**:
+   - Discovered rich meter data: `current_daily_energy`, `total_cycle_energy`, `last_energy`, `last_energy_datetime`.
+   - Confirmed no historical readings API exists — only parquet files via session auth.
+   - Confirmed `/api/v0/meter`, `/api/v0/reading`, `/api/v0/system_status` all return 404.
+   - `/api/v0/customer` and `/api/v0/transaction` return 405 (GET not allowed, need specific format).
+   - Koios v2 `/data/live` endpoint times out — confirmed non-functional for our sites.
+
+### Key Decisions
+
+- **Per-org rate limit tracking**: The 30k/day limit is per Koios org, so LS and BN rate limits are independent. The code tracks `rate_limited_orgs` as a set of org IDs, not a single boolean.
+- **Cumulative register > interval deltas**: `total_cycle_energy` from TC v0 gives a monotonically increasing energy counter. Differencing it is mathematically equivalent to summing intervals, but tolerant of missed readings. This is the same principle as utility billing (read the meter, compute delta).
+- **Parquet as ground truth**: When parquet files and live readings disagree, parquet wins (`DO UPDATE`). Parquet files are generated from SparkMeter's internal database and are authoritative.
+- **No parallel workers for Koios**: Removed ThreadPoolExecutor code path; serial processing with 2s delays is the only way to stay under rate limits with 11 sites sharing one org's quota.
+
+### What Next Session Should Know
+
+- **Koios daily limit resets at unknown time**: Likely midnight UTC but not confirmed. The first Koios requests after midnight (UTC) should succeed. If they don't, the limit may reset at a different time.
+- **The 30k/day budget is generous if used correctly**: With staleness checks, most 15-min cycles should make 0-2 Koios requests (freshness only). Only cycles where new data is available trigger actual historical fetches. Expected usage: ~100-200 requests/day.
+- **`backfill_transactions.py` uses the v2 report CSV endpoint**: This appears to share the same 30k/day budget. The 404s it gets for recent dates are expected (report not yet generated). It doesn't currently handle 429 — consider adding.
+- **BN Koios works fine**: GBO and SAM imported successfully (154 rows) — BN has its own rate limit pool.
+- **TC cumulative register data**: 264 of 308 TC customers (86%) have `total_cycle_energy` available. The remaining ~44 are inactive (no recent readings).
+- **RIB freshness date is 2025-12-15**: RIB shows very stale data in the Koios freshness endpoint. This may indicate the site is offline or the meters aren't reporting to Koios. Worth investigating.
+
+### Files Modified
+- `acdb-api/import_hourly.py` — rate limit handling, per-org tracking, inter-request delays
+- `acdb-api/import_tc_live.py` — complete rewrite: cumulative register approach
+- `CONTEXT.md` — updated API landscape with rate limits and TC v0 details
+- Server: `/opt/1pdb/services/import_hourly.py` — deployed
+- Server: `/opt/1pdb/services/import_tc_live.py` — deployed
+- Server: `/opt/1pdb/services/import_thundercloud.py` — `ON CONFLICT DO UPDATE`
+- Server: `/opt/1pdb/services/sync_consumption.sh` — phased architecture, reduced timeout
+
+### Protocol Feedback
+- CONTEXT.md was missing the actual Koios rate limit (30k/day) — the documented "3 req / 5 sec" was only the burst limit. Fixed.
+- CONTEXT.md was missing TC v0 meter-level fields (current_daily_energy, total_cycle_energy). Fixed.
+- The session log from the prior conversation provided excellent context on the TC outage/data loss problem, which directly motivated the cumulative register fix.
+
+---
+
+## Session 2026-02-19 202602192133 (Balance Seeding + Gap-Fill + Pipeline Hardening)
+
+### What Was Done
+
+1. **Seeded all Koios+ThunderCloud customer balances** (`seed_balances.py`):
+   - Wrote and deployed `seed_balances.py` — fetches SM balance for every customer (Koios v1 for LS/BN, ThunderCloud v0 for MAK), computes 1PDB balance via balance_engine logic, inserts `balance_seed` transaction for the delta.
+   - **1,416 unique accounts** now seeded across all sites: MAK (254), SHG (306), MAT (258), MAS (182), KET (151), GBO (99), TLH (76), SAM (59), LSB (24), SEH (7), LAB (3).
+   - Discovered and cleaned up 120 duplicate balance_seed rows from previous sessions (MAK accounts appearing in both TC and Koios customer lists). Fixed by adding MAK exclusion in the Koios section of the seed script.
+
+2. **Added 429 rate-limit handling to `backfill_transactions.py`**:
+   - Added `RateLimitExhausted` exception, retry logic with exponential backoff, and immediate cessation on 429 (same pattern as `import_hourly.py`).
+
+3. **Marked RIB as not-yet-operational**:
+   - Commented out RIB from `import_hourly.py` Koios sites list. RIB has zero operational data and no active meters.
+   - TOS also confirmed as zero data in 1PDB — likely not operational either.
+
+4. **Audited historical consumption coverage**:
+   - Identified gaps: SHG missing Apr-Jun 2025, MAS missing Dec 2025-Jan 2026, KET/MAT thin in Jan 2026.
+   - GBO and SAM (Benin) are newly provisioned — only have today's data.
+
+5. **Fixed `import_hourly.py` incremental commits**:
+   - **Critical bug**: `process_site()` accumulated all batches in memory and returned them — data was only committed AFTER the function returned. If the process was killed mid-run (as happened with SHG gap-fill), all data was lost.
+   - **Fix**: Refactored to pass the DB connection into `process_site()` and commit each day's batch immediately after insertion.
+   - Added `--no-skip` flag for gap-filling (bypasses staleness check that would skip historical dates already covered by newer data).
+
+6. **Launched gap-fill imports** (running in background):
+   - SHG: Apr 1 – Jun 30, 2025 (~91 days, ~140 rows/day)
+   - MAS: Dec 1, 2025 – Jan 31, 2026 (~62 days)
+   - KET: Jan 1-31, 2026 (~31 days)
+   - MAT: Jan 1-31, 2026 (~31 days)
+   - All running sequentially with incremental commits.
+
+### Key Decisions
+- **Seed from SM balance, not recompute**: The balance_seed transaction is the delta between SM's current credit balance and 1PDB's computed balance. Going forward, both systems track the same payments and consumption independently.
+- **MAK excluded from Koios seeding**: MAK customers exist in both ThunderCloud AND the Koios LS customer list. To prevent double-seeding, the Koios section of `seed_balances.py` explicitly skips `*MAK` account codes.
+- **Incremental commits over batch**: Changed `import_hourly.py` to commit per-day instead of accumulating all data and committing at the end. Prevents data loss on process interruption.
+- **RIB and TOS skipped**: Neither site has operational data. RIB commented out; TOS remains configured but has no data to import.
+
+### What Next Session Should Know
+- **Gap-fill still running**: The sequential gap-fill job (SHG→MAS→KET→MAT) was launched at ~23:26 UTC on 2026-02-19. Check terminal output or query `hourly_consumption` to verify completion. Expected runtime: 3-5 hours total.
+- **Benin sites (GBO, SAM) thin**: Only have a single day of consumption data. Historical coverage depends on when these sites were commissioned. May need separate investigation.
+- **TOS zero data**: Configured in Koios but has zero meters, transactions, and consumption in 1PDB. May need to be added to the skip list alongside RIB.
+- **33 negative-seed accounts**: Still pending investigation from prior session. These are accounts where 1PDB balance > SM balance, indicating a consumption tracking gap.
+- **`seed_balances.py`**: Deployed at `/opt/1pdb/services/seed_balances.py`. Requires `set -a && source /opt/1pdb/.env` to pick up TC_AUTH_TOKEN. Can be re-run safely — it skips already-seeded accounts unless `--force` is used.
+- **Monthly aggregates**: The gap-fills run with `--no-aggregate`. After all gap-fills complete, run a full import without `--no-aggregate` to rebuild `monthly_consumption` and `monthly_transactions`.
+
+### Files Modified
+- `acdb-api/seed_balances.py` — new file: balance seeding from Koios + ThunderCloud
+- `acdb-api/backfill_transactions.py` — added 429 handling, retry logic
+- `acdb-api/import_hourly.py` — incremental commits, `--no-skip` flag, RIB commented out
+- `CONTEXT.md` — RIB/TOS status, updated import_hourly description
+- Server: all above deployed to `/opt/1pdb/services/`
+
+---
+
+## Session 2026-02-20 202602201102 (Hourly Consumption RCA — Partial Day Bug & API Degradation)
+
+### What Was Done
+
+#### Root Cause Analysis: "Missing" Hourly Consumption Data
+Investigation triggered by user's observation that Koios shouldn't be missing data. Through systematic API probing and DB analysis, identified **two distinct failure modes**:
+
+1. **API Degradation (primary cause)**: The Koios v2 historical API intermittently returns **daily aggregates** (1 reading per meter at hour 00:00) instead of interval data (readings every 15-30 min across 24 hours). When degraded, the API returns HTTP 200 with `has_more=False` — looks like a complete response but contains ~1/24th of the data. This produced **1,002 partial days** across all sites where only hour 00 was stored.
+
+2. **Pagination Failure (secondary)**: When the API returns 504/502 during pagination, `fetch_day` was returning whatever partial records it had collected (bug). Days where even page 1 failed appear as complete gaps (0 records).
+
+Key evidence:
+- MAS Dec 2025: 154 rows × 1 hour in DB. Direct API test confirmed 154 records with `has_more=False` — API genuinely returning only daily aggregates.
+- KET Feb 18: DB has 3,240 rows (135 × 24 hrs, imported when API was healthy). Same date queried today: 268 records, 1 hour only.
+- MAS Nov 1 2025: DB has 2,832 rows (24 hrs). Today's API returns 118 records (1 hr).
+- Pattern: days imported during healthy API periods have full hourly data; days imported during degradation have only hour 00.
+
+#### Fixes Implemented in `import_hourly.py`
+
+1. **`IncompleteDay` exception**: `fetch_day` now raises `IncompleteDay` instead of returning partial data when pagination fails mid-way. Prevents committing truncated results. `process_site` catches this and skips the day.
+
+2. **Degradation guard in `import_site_day`**: If `bin_to_hourly` produces data for only 1 distinct hour but ≥20 meters, the API is returning daily aggregates — batch is discarded with a warning instead of committed.
+
+3. **`--repair` mode**: New flag that queries the DB for days with < 24 hours of data, then re-fetches only those. Includes an API health probe at startup that tests a known-good 24-hour date; if the API returns daily aggregates, repair aborts with a clear message.
+
+4. **`api_health_probe` function**: Fetches a single page for a known 24-hour date and checks if the response contains multiple distinct hours. Used by `--repair` to avoid wasting API calls during degradation.
+
+### Key Decisions
+- **Don't delete partial data**: Hour-00 data is valid (just incomplete). `ON CONFLICT DO NOTHING` means re-importing will add hours 1-23 without duplicating hour 0.
+- **Abort repair during degradation**: Running repair when the API returns daily aggregates would waste API quota (30K/day) with zero benefit. The health probe prevents this.
+- **`MIN_METERS_FOR_DEGRADATION_CHECK = 20`**: Small/early sites with few meters legitimately have 1 reading per day. The degradation guard only triggers for sites with ≥20 meters.
+
+### What Next Session Should Know
+- **~1,002 partial days need repair** across all Koios sites. Run `python3 import_hourly.py --repair` when the API is returning interval data. The health probe will tell you.
+- **Koios API is currently degraded** (as of 2026-02-20 ~12:45 UTC). Returning daily aggregates instead of interval data, with frequent 504/502 errors. This is a SparkMeter backend issue, not ours.
+- **Gap-fill orchestrator (`gap_fill.py`) was killed**. Two stale workers for KET/MAT were terminated. The orchestrator is not needed now — `--repair` mode is more targeted.
+- **Cron job is protected**: The degradation guard means the daily cron won't pollute the DB with 1-hour data during API instability. It will log the warning and skip.
+- **After repair completes**, run a full import without `--no-aggregate` to rebuild monthly aggregates.
+
+### Files Modified
+- `acdb-api/import_hourly.py` — Added `IncompleteDay` exception, degradation guard, `--repair` mode, `api_health_probe`, `find_partial_days`
+- Server: deployed to `/opt/1pdb/services/import_hourly.py`
+
+## Session 2026-02-16 202602162035 (1Meter Timezone Fix & Power Integration)
+
+### What Was Done
+
+**Part 1: Timezone Correction (SAST → UTC)**
+- Fixed `acdb-api/ingest.py`: Line 234 now parses 1Meter timestamps as SAST (UTC+2) and converts to UTC before storage, using `UTC_OFFSET_HOURS` from `country_config.py`
+- Fixed `1PDB/services/prototype_sync.py`: `_parse_sample_time()` now parses DynamoDB `sample_time` as SAST → UTC. Also fixed the DynamoDB query cutoff to convert UTC `last_synced_at` to SAST before string comparison
+- Created `acdb-api/fix_iot_timestamps.py`: One-time migration script to shift all `source='iot'` historical data back by 2 hours (`--dry-run` default, `--apply` to execute)
+- Verified that `crud.py`'s `_to_local()` already correctly converts UTC → SAST for display — no frontend changes needed
+
+**Part 2: Finer Energy Resolution (Power Integration)**
+- Analyzed 1Meter_PCB KiCad schematic: confirmed DDS8888 connects via RS485 only, no GPIO for pulse counting — LED pulse counting requires hardware mod
+- Implemented firmware power integration in `onepwr-aws-mesh`:
+  - `onemeter_modbus.h`: Added `integratedEnergyKWh` field to `DDS8888_Data_t`
+  - `meter_string.c`: Trapezoidal integration of `activePowerW` over time, with re-anchoring to Modbus register when drift > 0.02 kWh
+  - `onemeter_mqtt.c`: New `EnergyIntegrated` field in MQTT payload (6 decimal places)
+- Updated backend to parse `EnergyIntegrated`:
+  - `ingest.py`: `MeterReading` model accepts optional `energy_integrated`, used for finer delta_kwh when available
+  - `prototype_sync.py`: Parses `EnergyIntegrated` from DynamoDB items, uses for delta when present
+- Documented PCB design note in CONTEXT.md: route DDS8888 CF pin to ESP32 GPIO w/ PCNT for next revision
+
+### Key Decisions
+- Used `country_config.UTC_OFFSET_HOURS` for timezone offset (works for both Lesotho=2 and Benin=1)
+- Power integration re-anchors to Modbus register at ±0.02 kWh drift to prevent cumulative error
+- `EnergyIntegrated` is backward-compatible: `None`/absent → falls back to `EnergyActive`
+- `meter_readings.wh_reading` always stores the Modbus register value; integrated energy only used for delta calculations
+
+### What Next Session Should Know
+- `fix_iot_timestamps.py` needs to be run on the EC2 with `--apply` BEFORE deploying the fixed `prototype_sync.py`
+- `prototype_sync.py` changes are in local Dropbox (`/Users/mattmso/Dropbox/AI Projects/1PDB/services/`), need commit+push to `onepowerLS/1PDB` repo and deploy to EC2
+- Firmware changes in `onepwr-aws-mesh` need to be built and tested before OTA deployment — OTA itself hasn't been tested yet
+- The `ingest.py` changes will auto-deploy to production when pushed to `main` (CC repo)
+
+### Files Modified
+- `acdb-api/ingest.py` — SAST→UTC fix, `energy_integrated` field support
+- `acdb-api/fix_iot_timestamps.py` — NEW, one-time historical data migration
+- `acdb-api/CONTEXT.md` — Documented 1Meter energy resolution and timestamp handling
+- `/Users/mattmso/Dropbox/AI Projects/1PDB/services/prototype_sync.py` — SAST→UTC fix, `EnergyIntegrated` parsing, cutoff conversion
+- `/Users/mattmso/Dropbox/AI Projects/onepwr-aws-mesh/main/onemeter/onemeter_modbus.h` — `integratedEnergyKWh` field
+- `/Users/mattmso/Dropbox/AI Projects/onepwr-aws-mesh/main/onemeter/meter_string.c` — Power integration logic
+- `/Users/mattmso/Dropbox/AI Projects/onepwr-aws-mesh/main/tasks/onemeter_mqtt/onemeter_mqtt.c` — `EnergyIntegrated` in MQTT payload
+
+---
+
+## Session 2026-02-21 202602212100 (1Meter Assembly SOP + OTA Infrastructure + Field SOPs)
+
+### What Was Done
+
+**Part 1: 1Meter Assembly SOP**
+- Located and analyzed DDS8888 documentation: manual PDF, Modbus register map XLSX, DWG mechanical drawing
+- Created comprehensive SOP `docs/SOP-1Meter-Assembly.md` covering mechanical assembly, electrical wiring, RS485 Modbus, power verification, pulse output (CF pin) modification with pull-up resistor, and firmware sequencing
+- Used SparkMeter SOP as structural template; embedded user-provided 1M.png meter drawing
+
+**Part 2: OTA Infrastructure Setup**
+- Diagnosed deployed fleet: OTA was NOT enabled on any device (zero IoT Jobs, empty S3 bucket, no EnergyIntegrated field)
+- Confirmed 7 active devices at MAK (not 4 as originally documented): serials 23022628, 23022696, 23022673, 23022613, 23022646, 23022684, 23022667
+- Set up full AWS OTA pipeline:
+  - S3 bucket `1pwr-ota-firmware` with versioning enabled
+  - ECDSA P-256 code signing certificate generated, imported to ACM (`arn:aws:acm:us-east-1:758201218523:certificate/2826aa0d-ff83-46df-b552-1f7daf186702`)
+  - IAM role `1pwr-ota-service-role` with S3/CodeSign/IoT policies
+  - Signing profile `1PWR_OTA_ESP32`
+  - DevicePolicy already had OTA topic permissions (Jobs + Streams)
+
+**Part 3: Firmware v1.0.0 Build**
+- Fixed build issues for OTA-enabled firmware:
+  - Removed non-existent `mqtt_voltage_energy_polling_task.c` from CMakeLists
+  - Added `vStartOTACodeSigningDemo()` call in `app_main()` after `mqtt_meter_start()`
+  - Enabled `CONFIG_GRI_ENABLE_OTA_DEMO=y` with version 1.0.0
+- Built successfully on EC2: 1.06 MB binary, 34% flash free
+- Downloaded binaries to `firmware-builds/` folder; uploaded app binary to S3
+- Committed and pushed to `onepwr-aws-mesh` main (commit `6d68d97`)
+
+**Part 4: Field SOPs**
+- Discovered critical constraint: `CONFIG_GRI_THING_NAME` is compiled into each binary, so per-device builds are required (not a single universal binary)
+- Created three fresh SOPs in `docs/`:
+  1. `SOP-MAK-Firmware-Update-v1.0.0.md` — Pre-visit prep + onsite flash procedure with two paths (Josias's laptop vs EC2 pre-builds)
+  2. `SOP-Post-Flash-Verification.md` — Per-device verification matrix, remote/onsite checks, acceptance criteria
+  3. `SOP-OTA-Remote-Update.md` — Complete workflow for future remote OTA pushes
+
+### Key Decisions
+- Per-device binaries required because Thing Name is compiled in (not read from NVS or cert CN)
+- Flash command intentionally skips 0xD000 (esp_secure_cert partition) to preserve existing TLS certificates
+- OTA data partition (0x19000) must be flashed to set factory image marker for dual-OTA scheme
+- Gateway device (23022667) should be flashed LAST to maintain mesh connectivity during update
+
+### What Next Session Should Know
+- **Critical blocker:** Thing Name ↔ DDS8888 serial mapping is unknown. Team must determine this before building per-device binaries or during site visit via serial monitor
+- **3 unmapped serials:** 23022613, 23022646, 23022684 — not in original deployment docs; need account assignments
+- **The code signing private key** (`ota_signer_key.pem`) is on the EC2 at `~/esp/onepwr-aws-mesh/main/certs/` and in `/tmp/` locally — should be stored securely (Secrets Manager or encrypted backup) and deleted from EC2 once archived
+- **IoT Rule may need updating:** If DynamoDB doesn't capture `EnergyIntegrated`, the IoT Rule SELECT query needs modification
+- **PCNT pulse counting firmware** is not yet written — this is the next firmware feature after v1.0.0 is deployed and the CF pin wiring is done
+- `fix_iot_timestamps.py` STILL needs to be run on EC2 with `--apply` (from previous session — not yet done)
+- `prototype_sync.py` changes STILL need commit+push to 1PDB repo (from previous session — not yet done)
+
+### Files Created/Modified
+- `docs/SOP-1Meter-Assembly.md` — NEW: full assembly SOP with pulse output modification
+- `docs/SOP-MAK-Firmware-Update-v1.0.0.md` — NEW: field firmware flash procedure
+- `docs/SOP-Post-Flash-Verification.md` — NEW: verification checklist and acceptance criteria
+- `docs/SOP-OTA-Remote-Update.md` — NEW: remote OTA workflow for future updates
+- `firmware-builds/` — NEW folder with v1.0.0 binaries (bootloader, partition-table, ota_data, app)
+- `firmware-builds/FLASH-INSTRUCTIONS.md` — NEW: quick-reference flash command
+- `onepwr-aws-mesh/main/CMakeLists.txt` — Removed missing mqtt_voltage_energy_polling_task.c
+- `onepwr-aws-mesh/main/main.c` — Added vStartOTACodeSigningDemo() call
+- `onepwr-aws-mesh/sdkconfig.defaults` — Enabled OTA demo with v1.0.0

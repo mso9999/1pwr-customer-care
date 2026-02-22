@@ -278,12 +278,11 @@ async function lookupCustomerByPhone(phone) {
 // ============================================================
 // TICKET CREATION
 // ============================================================
-async function createTicket(siteId, faultDescription, customerId, reportedBy, phone, classification) {
+async function createTicket(siteId, faultDescription, accountNumber, reportedBy, phone, classification) {
     await ensureUgridplanAuth();
 
     classification = classification || {};
 
-    // Map AI category to equipment_category where applicable
     var equipCat = "unknown";
     if (classification.category === "meter-issue") equipCat = "meter";
     else if (classification.category === "equipment-failure") equipCat = "electrical";
@@ -291,7 +290,7 @@ async function createTicket(siteId, faultDescription, customerId, reportedBy, ph
     else if (classification.category === "vegetation") equipCat = "civil";
 
     var ticketData = {
-        site_id: siteId || "LSB",       // default to Lesotho Sandbox if unknown
+        site_id: siteId || "LSB",
         fault_description: faultDescription,
         reported_by: reportedBy || ("WhatsApp: " + phone),
         equipment_category: equipCat,
@@ -299,8 +298,8 @@ async function createTicket(siteId, faultDescription, customerId, reportedBy, ph
         priority: classification.priority || "P3",
     };
 
-    if (customerId) {
-        ticketData.customer_id = customerId;
+    if (accountNumber) {
+        ticketData.account_number = accountNumber;
     }
 
     try {
@@ -379,9 +378,12 @@ function classifyWithAI(customerInfo, messageText, conversationHistory) {
     return new Promise(function(resolve, reject) {
         var customerContext = "";
         if (customerInfo) {
+            var acctDisplay = (customerInfo.account_numbers && customerInfo.account_numbers.length > 0)
+                ? customerInfo.account_numbers[0]
+                : (customerInfo.customer_id_legacy || "");
             customerContext = "KNOWN CUSTOMER:\n"
                 + "  Name: " + customerInfo.first_name + " " + customerInfo.last_name + "\n"
-                + "  Customer ID: " + customerInfo.customer_id + "\n"
+                + "  Account: " + acctDisplay + "\n"
                 + "  Concession: " + customerInfo.concession + "\n"
                 + "  Plot: " + customerInfo.plot_number + "\n";
         } else {
@@ -714,10 +716,14 @@ async function processQueue() {
                 ? (customer.first_name + " " + customer.last_name + " (WhatsApp)")
                 : ("WhatsApp: " + chatName + " (" + phone + ")");
 
+            var custAcct = null;
+            if (customer && customer.account_numbers && customer.account_numbers.length > 0) {
+                custAcct = customer.account_numbers[0];
+            }
             var ticket = await createTicket(
                 siteId,
                 faultDesc,
-                customer ? customer.customer_id : null,
+                custAcct,
                 reportedBy,
                 phone,
                 classification

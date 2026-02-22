@@ -351,12 +351,11 @@ export default function CustomerDataPage() {
                     </h2>
                     <p className="text-sm text-gray-400 truncate mt-0.5">
                       <button
-                        onClick={() => p?.customer_id && navigate(`/customers/${String(p.customer_id)}`)}
+                        onClick={() => navigate(`/customers/${account}`)}
                         className="font-mono font-medium text-blue-600 hover:text-blue-800 hover:underline"
                       >
                         {account}
                       </button>
-                      {p?.customer_id ? <> &middot; ID: <span className="font-mono">{String(p.customer_id)}</span></> : null}
                       {data.meter?.community ? <> &middot; Site: {String(data.meter.community)}</> : null}
                     </p>
                   </>
@@ -364,15 +363,14 @@ export default function CustomerDataPage() {
                   <>
                     <h2 className="text-lg font-semibold text-gray-800 truncate">
                       <button
-                        onClick={() => p?.customer_id && navigate(`/customers/${String(p.customer_id)}`)}
+                        onClick={() => navigate(`/customers/${account}`)}
                         className="text-blue-600 hover:text-blue-800 hover:underline"
                       >
                         {account}
                       </button>
                     </h2>
                     <p className="text-sm text-gray-400 truncate mt-0.5">
-                      {p?.customer_id ? <>ID: <span className="font-mono">{String(p.customer_id)}</span></> : null}
-                      {data.meter?.community ? <>{p?.customer_id ? ' \u00b7 ' : ''}Site: {String(data.meter.community)}</> : null}
+                      {data.meter?.community ? <>Site: {String(data.meter.community)}</> : null}
                     </p>
                   </>
                 )}

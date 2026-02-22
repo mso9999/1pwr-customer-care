@@ -161,12 +161,25 @@ Three 1Meter prototypes are installed at MAK in series with SparkMeters for vali
 New meters are registered with one `INSERT INTO meters` row — the ingest API resolves
 meters dynamically from the DB (no hardcoded dicts).
 
+**Energy resolution**: The DDS8888 Modbus register reports energy in 0.01 kWh (10 Wh) steps.
+Firmware implements power integration (trapezoidal rule on `activePowerW`) to get ~0.8 Wh
+resolution, published as `EnergyIntegrated` alongside `EnergyActive` in the MQTT payload.
+Backend uses `EnergyIntegrated` for delta calculations when available.
+
+**Timestamps**: 1Meters report in SAST (UTC+2). `ingest.py` and `prototype_sync.py` convert
+to UTC before storing. The CC portal's `_to_local()` converts back to SAST for display.
+
+**PCB design note for next revision**: Route the DDS8888 CF (pulse output) pin to an ESP32
+GPIO with PCNT support. This would enable hardware-accurate pulse counting at 1200 imp/kWh
+(0.83 Wh resolution) without the drift inherent in power integration. Current PCB (v2.2)
+connects to DDS8888 exclusively via RS485 Modbus.
+
 ### Data Sources
 | Source | Platform | Coverage | Ingestion |
 |--------|----------|----------|-----------|
-| Koios v2 historical | SparkMeter Cloud | KET, LSB, MAS, MAT, SEH, SHG, TLH (LS) + GBO, SAM (BN) | `import_hourly.py` (batch, ~1 day lag) + systemd timer |
-| ThunderCloud parquet | SparkMeter on-prem | MAK | `import_thundercloud.py` (batch, ~1 day lag) |
-| ThunderCloud v0 live | SparkMeter on-prem | MAK | `import_tc_live.py` (real-time readings, 15-min intervals) |
+| Koios v2 historical | SparkMeter Cloud | KET, LSB, MAS, MAT, SEH, SHG, TLH (LS) + GBO, SAM (BN). RIB/TOS not yet operational. | `import_hourly.py` (incremental commits, `--no-skip` for gap-filling) + systemd timer |
+| ThunderCloud parquet | SparkMeter on-prem | MAK | `import_thundercloud.py` (batch, ~1 day lag, `ON CONFLICT DO UPDATE` for gap-fill) |
+| ThunderCloud v0 live | SparkMeter on-prem | MAK | `import_tc_live.py` (cumulative register diffs, non-lossy, 15-min intervals) |
 | ThunderCloud web API | SparkMeter on-prem | MAK | `import_tc_transactions.py` (live transactions) |
 | IoT / ingestion_gate | 1Meter prototype | MAK (3 meters) | Real-time Lambda → POST /api/meters/reading |
 | SMS Gateway (LS) | M-PESA payments | All LS sites | sms.1pwrafrica.com mirrors to POST /api/sms/incoming |
@@ -184,15 +197,25 @@ meters dynamically from the DB (no hardcoded dicts).
 **Koios v2 (data)**: `https://www.sparkmeter.cloud/api/v2/`
 - `POST /organizations/{org_id}/data/freshness` — per-site data availability dates
 - `POST /organizations/{org_id}/data/historical` — hourly readings, S3-backed, ~1 day lag
-- `POST /organizations/{org_id}/data/live` — **not functional for our sites** (returns 0 records; requires Nova meter type + service area config)
+- `POST /organizations/{org_id}/data/live` — **not functional for our sites** (times out; requires Nova meter type + service area config)
 - Org ID: `1cddcb07-6647-40aa-aaaa-70d762922029` (LS), `0123589c-7f1f-4eb4-8888-d8f8aa706ea4` (BN)
 - Filter format: `{"sites": [site_uuid], "date_range": {"from": "YYYY-MM-DD", "to": "YYYY-MM-DD"}}`
-- Rate limit: 3 req / 5 sec for data endpoints
+- Rate limits: **30,000 requests per day per org** (hard daily budget), plus burst limit ~3 req/5 sec
+- Rate limit is per-org: LS and BN have independent quotas
+- `import_hourly.py` handles 429 gracefully: stops immediately, skips remaining sites for that org
 
 **ThunderCloud v0**: `https://sparkcloud-u740425.sparkmeter.cloud/api/v0/`
-- `GET /customers?reading_details=true` — live meter readings (15-min interval kWh)
+- `GET /customers?reading_details=true` — live meter readings + cumulative energy registers
+  - Per-customer: `code`, `credit_balance`, `debt_balance`, `meters[]`
+  - Per-meter: `serial`, `current_daily_energy`, `total_cycle_energy`, `last_energy`, `last_energy_datetime`, `latest_reading{}`
+  - Per-reading: `kilowatt_hours` (interval), `avg_true_power`, `avg_voltage`, `cost`, `timestamp`
+- `GET /customers?customers_only=true&reading_details=false` — lightweight customer list
+- `GET /customer/{code}` — single customer lookup (POST only? returns 405 on GET)
 - `POST /transaction/` — credit customer meter balance
 - Auth: `Authentication-Token` header (obtain from SparkCloud dashboard → Users → Payment Gateway → View Credentials)
+- Parquet file access via session auth: `GET /history/list.json` → `GET /history/download/{filename}`
+- **No separate historical readings endpoint** — historical data only available via daily parquet files
+- No rate limiting observed on TC v0 API
 
 ### CC → SparkMeter Credit Pipe (`sparkmeter_credit.py`)
 Routes credits by site code:

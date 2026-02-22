@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LabelList } from 'recharts';
 import { listTables, getSiteSummary, type TableInfo, type SiteStat } from '../lib/api';
+import { useCountry } from '../contexts/CountryContext';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899', '#14b8a6', '#6366f1', '#84cc16', '#e11d48', '#0ea5e9', '#a855f7'];
 
@@ -9,13 +10,17 @@ interface SiteRow {
   concession: string;
   customer_count: number;
   mwh: number;
-  lsl_thousands: number;
+  revenue_thousands: number;
 }
 
 export default function DashboardPage() {
+  const { country, portfolio, countries } = useCountry();
+  const currentCountry = countries.find((c) => c.code === country);
+  const currency = currentCountry?.baseCurrency ?? 'LSL';
+
   const [tables, setTables] = useState<TableInfo[]>([]);
   const [siteData, setSiteData] = useState<SiteRow[]>([]);
-  const [totals, setTotals] = useState({ mwh: 0, lsl_thousands: 0 });
+  const [totals, setTotals] = useState({ mwh: 0, revenue_thousands: 0 });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -26,7 +31,6 @@ export default function DashboardPage() {
     ]).then(([t, sitesResp, stats]) => {
       setTables(t);
 
-      // Merge customer counts with MWh/LSL stats by site code
       const statsMap = new Map<string, SiteStat>();
       for (const s of (stats.sites || [])) {
         statsMap.set(s.site, s);
@@ -38,12 +42,13 @@ export default function DashboardPage() {
           concession: s.concession,
           customer_count: s.customer_count,
           mwh: stat?.mwh ?? 0,
-          lsl_thousands: stat?.lsl_thousands ?? 0,
+          revenue_thousands: stat?.lsl_thousands ?? 0,
         };
       });
 
       setSiteData(merged);
-      setTotals(stats.totals || { mwh: 0, lsl_thousands: 0 });
+      const raw = stats.totals || { mwh: 0, lsl_thousands: 0 };
+      setTotals({ mwh: raw.mwh, revenue_thousands: raw.lsl_thousands });
     }).finally(() => setLoading(false));
   }, []);
 
@@ -52,15 +57,24 @@ export default function DashboardPage() {
 
   if (loading) return <div className="text-center py-16 text-gray-400">Loading dashboard...</div>;
 
-  // Chart data with callout labels
   const barData = siteData.map(s => ({
     ...s,
-    label: `${s.mwh.toFixed(1)} MWh / ${s.lsl_thousands.toFixed(1)}k LSL`,
+    label: `${s.mwh.toFixed(1)} MWh / ${s.revenue_thousands.toFixed(1)}k ${currency}`,
   }));
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Dashboard</h1>
+      <div className="flex items-baseline gap-3 flex-wrap">
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Dashboard</h1>
+        {portfolio && (
+          <span className="text-sm font-medium text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-full">
+            {portfolio.name}
+          </span>
+        )}
+        {currentCountry && (
+          <span className="text-xs text-gray-400">{currentCountry.flag} {currentCountry.name} &middot; {currency}</span>
+        )}
+      </div>
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
@@ -73,8 +87,8 @@ export default function DashboardPage() {
           <p className="text-2xl sm:text-3xl font-bold text-green-700">{totals.mwh.toLocaleString(undefined, { maximumFractionDigits: 1 })}</p>
         </div>
         <div className="bg-white rounded-lg shadow p-4 sm:p-5">
-          <p className="text-xs sm:text-sm text-gray-500">'000 LSL Sold</p>
-          <p className="text-2xl sm:text-3xl font-bold text-amber-700">{totals.lsl_thousands.toLocaleString(undefined, { maximumFractionDigits: 1 })}</p>
+          <p className="text-xs sm:text-sm text-gray-500">'000 {currency} Sold</p>
+          <p className="text-2xl sm:text-3xl font-bold text-amber-700">{totals.revenue_thousands.toLocaleString(undefined, { maximumFractionDigits: 1 })}</p>
         </div>
         <div className="bg-white rounded-lg shadow p-4 sm:p-5">
           <p className="text-xs sm:text-sm text-gray-500">Sites</p>
@@ -161,7 +175,7 @@ export default function DashboardPage() {
                   <th className="px-3 py-2 text-left font-medium text-gray-600">Site</th>
                   <th className="px-3 py-2 text-right font-medium text-gray-600">Customers</th>
                   <th className="px-3 py-2 text-right font-medium text-gray-600">MWh</th>
-                  <th className="px-3 py-2 text-right font-medium text-gray-600">'000 LSL</th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-600">'000 {currency}</th>
                   <th className="px-3 py-2 text-right font-medium text-gray-600">MWh/Customer</th>
                 </tr>
               </thead>
@@ -171,7 +185,7 @@ export default function DashboardPage() {
                     <td className="px-3 py-2 font-medium">{s.concession}</td>
                     <td className="px-3 py-2 text-right">{s.customer_count.toLocaleString()}</td>
                     <td className="px-3 py-2 text-right">{s.mwh.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
-                    <td className="px-3 py-2 text-right">{s.lsl_thousands.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
+                    <td className="px-3 py-2 text-right">{s.revenue_thousands.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
                     <td className="px-3 py-2 text-right text-gray-500">
                       {s.customer_count > 0 ? (s.mwh / s.customer_count).toFixed(2) : '--'}
                     </td>
@@ -183,7 +197,7 @@ export default function DashboardPage() {
                   <td className="px-3 py-2">Total</td>
                   <td className="px-3 py-2 text-right">{totalCustomers.toLocaleString()}</td>
                   <td className="px-3 py-2 text-right">{totals.mwh.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
-                  <td className="px-3 py-2 text-right">{totals.lsl_thousands.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
+                  <td className="px-3 py-2 text-right">{totals.revenue_thousands.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
                   <td className="px-3 py-2 text-right text-gray-500">
                     {totalCustomers > 0 ? (totals.mwh / totalCustomers).toFixed(2) : '--'}
                   </td>

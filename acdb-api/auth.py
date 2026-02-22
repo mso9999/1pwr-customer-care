@@ -261,29 +261,24 @@ def _validate_account_exists(account_number: str) -> dict:
                            f"Enter your account number as it appears on your payment receipt (e.g. 0045MAK).",
                 )
 
-            result = {"account_number": acct, "customer_id": None, "name": acct}
+            result = {"account_number": acct, "customer_id_legacy": None, "name": acct}
 
-            # Resolve to a customer record via meters table
+            # Resolve to a customer record via accounts table
             try:
                 cursor.execute(
-                    "SELECT customer_id_legacy FROM meters WHERE account_number = %s",
+                    "SELECT c.* FROM accounts a "
+                    "JOIN customers c ON a.customer_id = c.id "
+                    "WHERE a.account_number = %s LIMIT 1",
                     (acct,),
                 )
-                meter_row = cursor.fetchone()
-                if meter_row and meter_row[0]:
-                    cust_id = str(meter_row[0])
-                    result["customer_id"] = cust_id
-                    cursor.execute(
-                        "SELECT * FROM customers WHERE customer_id_legacy = %s",
-                        (int(cust_id),),
-                    )
-                    cust_row = cursor.fetchone()
-                    if cust_row:
-                        cust = _normalize_customer(_row_to_dict(cursor, cust_row))
-                        fname = cust.get("first_name", "")
-                        lname = cust.get("last_name", "")
-                        result["name"] = f"{fname} {lname}".strip() or acct
-                        result["customer"] = cust
+                cust_row = cursor.fetchone()
+                if cust_row:
+                    cust = _normalize_customer(_row_to_dict(cursor, cust_row))
+                    result["customer_id_legacy"] = cust.get("customer_id_legacy")
+                    fname = cust.get("first_name", "")
+                    lname = cust.get("last_name", "")
+                    result["name"] = f"{fname} {lname}".strip() or acct
+                    result["customer"] = cust
             except Exception as e:
                 logger.debug("Could not resolve account %s to customer: %s", acct, e)
 

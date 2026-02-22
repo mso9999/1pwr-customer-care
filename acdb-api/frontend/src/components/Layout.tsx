@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import { Link, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { useCountry, COUNTRY_LABELS } from '../contexts/CountryContext';
-
-const FLAG: Record<string, string> = { LS: '\u{1F1F1}\u{1F1F8}', BN: '\u{1F1E7}\u{1F1EF}' };
+import { useCountry } from '../contexts/CountryContext';
 
 export default function Layout() {
   const { user, logout, isEmployee, isCustomer, isSuperadmin } = useAuth();
-  const { country, setCountry } = useCountry();
+  const { country, setCountry, countries, portfolio, setPortfolio } = useCountry();
+  const currentCountry = countries.find((c) => c.code === country);
+  const countryPortfolios = currentCountry?.portfolios ?? [];
   const navigate = useNavigate();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -53,15 +53,32 @@ export default function Layout() {
             {/* Right: country selector + user info + hamburger */}
             <div className="flex items-center gap-3">
               {isEmployee && (
-                <select
-                  value={country}
-                  onChange={(e) => { setCountry(e.target.value); window.location.reload(); }}
-                  className="text-sm border border-gray-200 rounded-md px-2 py-1 bg-white focus:ring-1 focus:ring-blue-400 focus:outline-none"
-                >
-                  {Object.entries(COUNTRY_LABELS).map(([code, name]) => (
-                    <option key={code} value={code}>{FLAG[code] || ''} {name}</option>
-                  ))}
-                </select>
+                <div className="flex items-center gap-1.5">
+                  <select
+                    value={country}
+                    onChange={(e) => { setCountry(e.target.value); setPortfolio(null); window.location.reload(); }}
+                    className="text-sm border border-gray-200 rounded-md px-2 py-1 bg-white focus:ring-1 focus:ring-blue-400 focus:outline-none"
+                  >
+                    {countries.map((c) => (
+                      <option key={c.code} value={c.code}>{c.flag} {c.name}</option>
+                    ))}
+                  </select>
+                  {countryPortfolios.length > 0 && (
+                    <select
+                      value={portfolio?.id ?? ''}
+                      onChange={(e) => {
+                        const p = countryPortfolios.find((x) => x.id === e.target.value) ?? null;
+                        setPortfolio(p);
+                      }}
+                      className="text-sm border border-gray-200 rounded-md px-2 py-1 bg-white focus:ring-1 focus:ring-blue-400 focus:outline-none max-w-[180px] truncate"
+                    >
+                      <option value="">All portfolios</option>
+                      {countryPortfolios.map((p) => (
+                        <option key={p.id} value={p.id}>{p.name}</option>
+                      ))}
+                    </select>
+                  )}
+                </div>
               )}
               {user && (
                 <div className="hidden sm:flex items-center gap-3">

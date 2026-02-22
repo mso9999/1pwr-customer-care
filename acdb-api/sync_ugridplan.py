@@ -532,6 +532,52 @@ class UGPClient:
             return {"saved": False, "error": resp.text[:300]}
         return resp.json()
 
+    def create_connection(
+        self,
+        project_id: str,
+        survey_id: str,
+        gps_x: float,
+        gps_y: float,
+        customer_type: str = "",
+        customer_code: str = "",
+    ) -> Dict[str, Any]:
+        """Create a new connection element in the loaded UGP project.
+
+        Uses GPS coordinates to place the element and assigns the given
+        Survey_ID.  Returns the adapter response dict (contains updated
+        visualization payload on success).
+        """
+        self._ensure_auth()
+        payload: Dict[str, Any] = {
+            "project_id": project_id,
+            "element_type": "connection",
+            "element_data": {
+                "surveyId": survey_id,
+                "customerType": customer_type,
+                "customerCode": customer_code,
+            },
+            "viewport": {"cx": gps_x, "cy": gps_y, "isGps": True},
+        }
+        resp = self.session.post(
+            f"{self.base}/project/create-element",
+            json=payload,
+            timeout=60,
+        )
+        if resp.status_code == 401:
+            self.authenticate()
+            resp = self.session.post(
+                f"{self.base}/project/create-element",
+                json=payload,
+                timeout=60,
+            )
+        if resp.status_code != 200:
+            logger.warning(
+                "create_connection failed for %s: %s",
+                survey_id, resp.text[:300],
+            )
+            return {"status": "error", "error": resp.text[:300]}
+        return resp.json()
+
 
 # Singleton client
 _ugp_client: Optional[UGPClient] = None
@@ -1009,6 +1055,25 @@ def _load_meter_data(cursor, site_code: str) -> List[Dict[str, Any]]:
     return meters
 
 
+def _load_accounts_survey_id_index(cursor, site_code: str) -> Dict[str, str]:
+    """Build {survey_id -> account_number} index from the accounts table for a site."""
+    index: Dict[str, str] = {}
+    try:
+        cursor.execute(
+            "SELECT survey_id, account_number FROM accounts "
+            "WHERE community = %s AND survey_id IS NOT NULL AND survey_id != ''",
+            (site_code,),
+        )
+        for row in cursor.fetchall():
+            sid = str(row[0]).strip()
+            acct = str(row[1]).strip()
+            if sid and acct:
+                index[sid] = acct
+    except Exception as e:
+        logger.warning("Could not load accounts survey_id index: %s", e)
+    return index
+
+
 # ---------------------------------------------------------------------------
 # Matching logic
 # ---------------------------------------------------------------------------
@@ -1032,23 +1097,31 @@ def _match_customers(
     ugp_connections: List[Dict[str, Any]],
     accdb_customers: List[Dict[str, Any]],
     accdb_meters: Optional[List[Dict[str, Any]]] = None,
+    accounts_by_survey_id: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Match uGridPLAN connections to customers.
 
     Matching strategies (tried in order):
+      0. accounts.survey_id binding (explicit 1:1 mapping)
       1. Customer_Code (uGP) == customer_id (DB)
       2. Survey_ID (uGP) == plot_number (DB)  — exact match
       3. Plot prefix (uGP) == plot prefix (DB) — ignoring type suffix
          e.g. "MAK 0029 HH" matches "MAK 0029 SME" (DB type wins)
       4. GPS proximity via meter table (within GPS_MATCH_RADIUS_M)
 
+    Args:
+        accounts_by_survey_id: {survey_id -> account_number} from accounts table.
+
     Returns match results with proposed sync actions.
     """
-    # Index customers by customer_id
+    if accounts_by_survey_id is None:
+        accounts_by_survey_id = {}
+
+    # Index customers by customer_id_legacy
     accdb_by_id: Dict[str, Dict] = {}
     for c in accdb_customers:
-        cid = str(c.get("customer_id", "")).strip()
+        cid = str(c.get("customer_id_legacy") or c.get("customer_id", "")).strip()
         if cid:
             accdb_by_id[cid] = c
 
@@ -1086,6 +1159,14 @@ def _match_customers(
             if mid:
                 meters_by_meterid[mid] = m
 
+    # Index customers by account_number (for survey_id binding lookups)
+    accdb_by_acct: Dict[str, Dict] = {}
+    for c in accdb_customers:
+        for an in (c.get("account_numbers") or []):
+            acct_str = str(an).strip()
+            if acct_str:
+                accdb_by_acct[acct_str] = c
+
     matched = []
     unmatched_ugp = []
     unmatched_accdb = set(accdb_by_id.keys())
@@ -1106,9 +1187,19 @@ def _match_customers(
 
         match_method = None
         accdb_match = None
+        bound_acct = None  # account_number from explicit binding
+
+        # Strategy 0: Explicit survey_id binding from accounts table
+        if survey_id and survey_id in accounts_by_survey_id:
+            bound_acct = accounts_by_survey_id[survey_id]
+            if bound_acct in accdb_by_acct:
+                accdb_match = accdb_by_acct[bound_acct]
+                match_method = "survey_id_binding"
+                cid = str(accdb_match.get("customer_id_legacy") or accdb_match.get("customer_id", "")).strip()
+                unmatched_accdb.discard(cid)
 
         # Strategy 1: Match by Customer_Code == CUSTOMER ID
-        if customer_code and customer_code in accdb_by_id:
+        if not accdb_match and customer_code and customer_code in accdb_by_id:
             accdb_match = accdb_by_id[customer_code]
             match_method = "customer_code"
             unmatched_accdb.discard(customer_code)
@@ -1158,7 +1249,7 @@ def _match_customers(
                     unmatched_accdb.discard(cid)
 
         if accdb_match:
-            cid = str(accdb_match.get("customer_id", "")).strip()
+            cid = str(accdb_match.get("customer_id_legacy") or accdb_match.get("customer_id", "")).strip()
 
             # Look up meter data (source of truth)
             meter = meters_by_cust.get(cid, {})
@@ -1197,8 +1288,10 @@ def _match_customers(
             phone = accdb_match.get("cell_phone_1") or accdb_match.get("phone", "")
             plot = accdb_match.get("plot_number", "")
 
-            if not customer_code and cid:
-                accdb_to_ugp["Customer_Code"] = cid
+            acct = bound_acct or _survey_id_to_account_number(survey_id)
+            if not customer_code or customer_code != (acct or ""):
+                if acct:
+                    accdb_to_ugp["Customer_Code"] = acct
             if accdb_customer_type and accdb_customer_type != ugp_customer_type:
                 accdb_to_ugp["Customer_Type"] = accdb_customer_type
             if accdb_meter_serial and accdb_meter_serial != ugp_meter_serial:
@@ -1209,6 +1302,7 @@ def _match_customers(
             matched.append({
                 "survey_id": survey_id,
                 "customer_id": cid,
+                "account_number": acct or "",
                 "match_method": match_method,
                 "customer_type": final_customer_type,
                 "meter_serial": final_meter_serial,
@@ -1462,6 +1556,26 @@ def list_connections(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"uGridPLAN fetch failed: {e}")
 
+    # Load existing survey_id bindings for this site
+    from customer_api import get_connection as get_pg_connection
+    site_code = site.upper()
+    bound_accounts: Dict[str, str] = {}
+    try:
+        with get_pg_connection() as pg_conn:
+            pg_cursor = pg_conn.cursor()
+            bound_accounts = _load_accounts_survey_id_index(pg_cursor, site_code)
+    except Exception:
+        pass
+
+    import re as _re
+
+    # Collect all survey_ids first to detect split families
+    all_sids: set = set()
+    for c in raw:
+        sid = c.get("Survey_ID") or c.get("survey_id") or c.get("Name", "")
+        if sid:
+            all_sids.add(sid)
+
     connections = []
     for c in raw:
         sid = c.get("Survey_ID") or c.get("survey_id") or c.get("Name", "")
@@ -1473,7 +1587,13 @@ def list_connections(
         except (ValueError, TypeError):
             gps_x = gps_y = None
 
-        connections.append({
+        # Detect split family: suffix like "-B", "-C" indicates a split child
+        split_parent = None
+        m = _re.match(r"^(.+)-[A-Z]$", sid) if sid else None
+        if m and m.group(1) in all_sids:
+            split_parent = m.group(1)
+
+        conn_obj: Dict[str, Any] = {
             "survey_id": sid,
             "customer_type": (
                 c.get("Customer_Type") or c.get("customer_type") or ""
@@ -1489,12 +1609,175 @@ def list_connections(
             "status": (
                 c.get("Status") or c.get("status") or ""
             ).strip(),
-        })
+            "bound_account": bound_accounts.get(sid),
+        }
+        if split_parent:
+            conn_obj["split_parent"] = split_parent
+        connections.append(conn_obj)
 
     return {
         "site": site.upper(),
         "count": len(connections),
         "connections": connections,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Split a colocated connection element
+# ---------------------------------------------------------------------------
+
+class SplitConnectionRequest(BaseModel):
+    site: str
+    parent_survey_id: str
+    account_number: str
+
+
+@router.post("/split-connection")
+def split_connection(
+    req: SplitConnectionRequest,
+    user: CurrentUser = Depends(require_employee),
+):
+    """Create a suffixed sub-element when multiple accounts share a location.
+
+    Determines the next available suffix (B, C, D ...), creates a new
+    connection element in uGridPLAN at the same GPS coordinates, persists
+    the project, and binds the new survey_id to the target account.
+    """
+    site_code = req.site.upper()
+
+    # --- Resolve project ---
+    with get_auth_db() as conn:
+        row = conn.execute(
+            "SELECT project_id FROM cc_site_projects WHERE site_code = ?",
+            (site_code,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"No project for site '{site_code}'")
+
+    project_name = row["project_id"]
+
+    try:
+        client = _get_ugp_client()
+        session_id = _load_project_for_site(client, project_name)
+        raw = client.get_connections(session_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"uGridPLAN fetch failed: {e}")
+
+    # --- Find parent connection ---
+    parent = None
+    for c in raw:
+        sid = c.get("Survey_ID") or c.get("survey_id") or c.get("Name", "")
+        if sid == req.parent_survey_id:
+            parent = c
+            break
+    if not parent:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Parent connection '{req.parent_survey_id}' not found in UGP",
+        )
+
+    gps_x = parent.get("GPS_X") or parent.get("gps_x") or parent.get("longitude")
+    gps_y = parent.get("GPS_Y") or parent.get("gps_y") or parent.get("latitude")
+    try:
+        gps_x = float(gps_x) if gps_x else None
+        gps_y = float(gps_y) if gps_y else None
+    except (ValueError, TypeError):
+        gps_x = gps_y = None
+
+    if gps_x is None or gps_y is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Parent connection '{req.parent_survey_id}' has no GPS coordinates",
+        )
+
+    # --- Determine next suffix ---
+    base_sid = req.parent_survey_id.rstrip()
+    # Strip an existing suffix if the parent is itself a split (e.g. "MAK 0045 HH-B")
+    import re as _re
+    base_match = _re.match(r"^(.+)-[A-Z]$", base_sid)
+    if base_match:
+        base_sid = base_match.group(1)
+
+    existing_suffixes: set = set()
+    from customer_api import get_connection as get_pg_connection
+    try:
+        with get_pg_connection() as pg_conn:
+            cur = pg_conn.cursor()
+            cur.execute(
+                "SELECT survey_id FROM accounts WHERE survey_id LIKE %s",
+                (f"{base_sid}-%",),
+            )
+            for r in cur.fetchall():
+                s = str(r[0]).strip()
+                m = _re.match(r"^.+-([A-Z])$", s)
+                if m:
+                    existing_suffixes.add(m.group(1))
+    except Exception:
+        pass
+    # Also check the UGP side for suffixed elements not yet in accounts
+    for c in raw:
+        sid = c.get("Survey_ID") or c.get("survey_id") or c.get("Name", "")
+        if sid and sid.startswith(base_sid + "-"):
+            m = _re.match(r"^.+-([A-Z])$", sid)
+            if m:
+                existing_suffixes.add(m.group(1))
+
+    next_letter = "B"
+    for ch in "BCDEFGHIJKLMNOPQRSTUVWXYZ":
+        if ch not in existing_suffixes:
+            next_letter = ch
+            break
+
+    new_survey_id = f"{base_sid}-{next_letter}"
+
+    # --- Create element in UGP ---
+    parent_type = (
+        parent.get("Customer_Type") or parent.get("customer_type") or ""
+    ).strip()
+    create_result = client.create_connection(
+        project_id=session_id,
+        survey_id=new_survey_id,
+        gps_x=gps_x,
+        gps_y=gps_y,
+        customer_type=parent_type,
+        customer_code=req.account_number,
+    )
+    if create_result.get("status") == "error":
+        raise HTTPException(
+            status_code=502,
+            detail=f"UGP create-element failed: {create_result.get('error', 'unknown')}",
+        )
+
+    # --- Save UGP project ---
+    try:
+        save_result = client.save_project(session_id, user_id="cc-split")
+        if save_result.get("error"):
+            logger.warning("UGP save after split returned error: %s", save_result)
+    except Exception as e:
+        logger.warning("UGP save after split failed: %s", e)
+
+    # --- Bind to account ---
+    try:
+        with get_pg_connection() as pg_conn:
+            cur = pg_conn.cursor()
+            cur.execute(
+                "UPDATE accounts SET survey_id = %s "
+                "WHERE account_number = %s AND (survey_id IS NULL OR survey_id = '')",
+                (new_survey_id, req.account_number),
+            )
+            pg_conn.commit()
+    except Exception as e:
+        logger.warning("Could not bind survey_id %s to %s: %s", new_survey_id, req.account_number, e)
+
+    return {
+        "survey_id": new_survey_id,
+        "parent_survey_id": req.parent_survey_id,
+        "base_survey_id": base_sid,
+        "account_number": req.account_number,
+        "customer_type": parent_type,
+        "gps_lat": gps_y,
+        "gps_lon": gps_x,
+        "bound_account": req.account_number,
     }
 
 
@@ -1551,8 +1834,11 @@ def sync_preview(
         # Also load meter data for this site (community = site code)
         accdb_meters = _load_meter_data(cursor, site_code)
 
+        # Build accounts survey_id index for this site
+        accounts_by_survey_id = _load_accounts_survey_id_index(cursor, site_code)
+
     # Run matching
-    results = _match_customers(ugp_connections, accdb_customers, accdb_meters)
+    results = _match_customers(ugp_connections, accdb_customers, accdb_meters, accounts_by_survey_id)
     results["site"] = site_code
     results["project_name"] = project_name
     results["ugp_connection_count"] = len(ugp_connections)
@@ -1626,7 +1912,30 @@ def sync_execute(
 
         accdb_meters = _load_meter_data(cursor, site_code)
 
-    match_results = _match_customers(ugp_connections, accdb_customers, accdb_meters)
+        # Build accounts survey_id index for this site
+        accounts_by_survey_id = _load_accounts_survey_id_index(cursor, site_code)
+
+    match_results = _match_customers(ugp_connections, accdb_customers, accdb_meters, accounts_by_survey_id)
+
+    # Detect binding mismatches: stored survey_id differs from matched UGP connection
+    stored_sid_by_acct: Dict[str, str] = {acct: sid for sid, acct in accounts_by_survey_id.items()}
+    binding_mismatches: List[Dict[str, str]] = []
+    for m in match_results["matched"]:
+        acct = m.get("account_number", "")
+        matched_sid = m.get("survey_id", "")
+        if acct and acct in stored_sid_by_acct:
+            stored_sid = stored_sid_by_acct[acct]
+            if stored_sid and matched_sid and stored_sid != matched_sid:
+                binding_mismatches.append({
+                    "account_number": acct,
+                    "stored_survey_id": stored_sid,
+                    "matched_survey_id": matched_sid,
+                    "match_method": m.get("match_method", ""),
+                })
+                logger.warning(
+                    "Binding mismatch for %s: stored=%s matched=%s (method=%s)",
+                    acct, stored_sid, matched_sid, m.get("match_method"),
+                )
 
     # Fetch per-connection voltages via voltage-drop analysis
     vdrop_voltages: Dict[str, float] = {}
@@ -1685,6 +1994,31 @@ def sync_execute(
                     ),
                 )
                 sqlite_written += 1
+
+    # ---------------------------------------------------------------
+    # Backfill: persist survey_id on accounts that matched but lack it
+    # ---------------------------------------------------------------
+    survey_id_backfilled = 0
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            for m in match_results["matched"]:
+                sid = m.get("survey_id")
+                acct = m.get("account_number")
+                if not sid or not acct:
+                    continue
+                if sid in accounts_by_survey_id:
+                    continue  # already bound
+                cursor.execute(
+                    "UPDATE accounts SET survey_id = %s "
+                    "WHERE account_number = %s AND (survey_id IS NULL OR survey_id = '')",
+                    (sid, acct),
+                )
+                if cursor.rowcount and cursor.rowcount > 0:
+                    survey_id_backfilled += 1
+            conn.commit()
+    except Exception as e:
+        logger.warning("Could not backfill survey_id on accounts: %s", e)
 
     # ---------------------------------------------------------------
     # GPS write-back: uGridPLAN GPS -> customers gps_lat/gps_lon
@@ -1831,13 +2165,14 @@ def sync_execute(
                 except Exception as e:
                     logger.error("UGP save_project call failed: %s", e)
 
-    return {
+    result: Dict[str, Any] = {
         "site": req.site.upper(),
         "matched": match_results["matched_count"],
         "sqlite_written": sqlite_written,
         "ugp_updated": ugp_updated,
         "ugp_saved": ugp_saved,
         "gps_written": gps_written,
+        "survey_id_backfilled": survey_id_backfilled,
         "load_a_computed": load_a_computed,
         "load_a_via_vdrop": load_a_via_vdrop,
         "load_a_via_default": load_a_via_default,
@@ -1847,6 +2182,9 @@ def sync_execute(
         "unmatched_ugp": match_results["unmatched_ugp_count"],
         "unmatched_accdb": match_results["unmatched_accdb_count"],
     }
+    if binding_mismatches:
+        result["binding_mismatches"] = binding_mismatches
+    return result
 
 
 # ---------------------------------------------------------------------------

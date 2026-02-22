@@ -180,15 +180,25 @@ export default function CustomersPage() {
   );
 
   // --- Shared row rendering ---
+  const deriveAccountNumber = (row: Record<string, any>): string => {
+    const plot = String(row['plot_number'] || '').trim();
+    const site = String(row['community'] || '').trim().toUpperCase();
+    const m = plot.match(/^[A-Za-z]{2,4}\s+(\d{3,4})/);
+    if (m && site) return `${m[1].padStart(4, '0')}${site}`;
+    return '';
+  };
+
   const renderDesktopRow = (row: Record<string, any>, i: number) => {
     const rowId = String(row['id'] ?? row['customer_id_legacy'] ?? '');
-    const cid = String(row['customer_id_legacy'] || '');
+    const acct = deriveAccountNumber(row);
+    const displayId = acct || String(row['customer_id_legacy'] || '');
     const name = [row['first_name'], row['last_name']].filter(Boolean).join(' ');
     const phone = String(row['phone'] || row['cell_phone_1'] || '');
     const site = String(row['community'] || '');
     const district = String(row['district'] || '');
     const terminated = row['date_service_terminated'];
     const isSelected = selected.has(rowId);
+    const linkTarget = acct || String(row['customer_id_legacy'] || rowId);
 
     return (
       <tr key={i} className={`hover:bg-gray-50 ${isSelected ? 'bg-blue-50' : ''}`}>
@@ -204,9 +214,9 @@ export default function CustomersPage() {
         )}
         <td className="px-4 py-2">
           {tab === 'active' ? (
-            <Link to={`/customers/${cid}`} className="text-blue-600 hover:underline font-medium">{cid}</Link>
+            <Link to={`/customers/${linkTarget}`} className="text-blue-600 hover:underline font-medium font-mono">{displayId}</Link>
           ) : (
-            <span className="font-medium text-gray-500">{cid}</span>
+            <span className="font-medium text-gray-500 font-mono">{displayId}</span>
           )}
         </td>
         <td className="px-4 py-2">{name}</td>
@@ -230,17 +240,19 @@ export default function CustomersPage() {
 
   const renderMobileCard = (row: Record<string, any>, i: number) => {
     const rowId = String(row['id'] ?? row['customer_id_legacy'] ?? '');
-    const cid = String(row['customer_id_legacy'] || '');
+    const acct = deriveAccountNumber(row);
+    const displayId = acct || String(row['customer_id_legacy'] || '');
     const name = [row['first_name'], row['last_name']].filter(Boolean).join(' ');
     const phone = String(row['phone'] || row['cell_phone_1'] || '');
     const site = String(row['community'] || '');
     const terminated = row['date_service_terminated'];
     const isSelected = selected.has(rowId);
+    const linkTarget = acct || String(row['customer_id_legacy'] || rowId);
 
     const cardContent = (
       <div className="flex items-start justify-between">
         <div className="min-w-0">
-          <p className={`font-medium text-sm ${tab === 'active' ? 'text-blue-700' : 'text-gray-500'}`}>{cid}</p>
+          <p className={`font-medium text-sm font-mono ${tab === 'active' ? 'text-blue-700' : 'text-gray-500'}`}>{displayId}</p>
           <p className="text-gray-800 font-medium truncate">{name || '--'}</p>
           <p className="text-gray-500 text-sm">{phone}</p>
         </div>
@@ -271,7 +283,7 @@ export default function CustomersPage() {
             />
           )}
           {tab === 'active' ? (
-            <Link to={`/customers/${cid}`} className="flex-1 min-w-0 active:opacity-70">
+            <Link to={`/customers/${linkTarget}`} className="flex-1 min-w-0 active:opacity-70">
               {cardContent}
             </Link>
           ) : (
@@ -443,7 +455,7 @@ export default function CustomersPage() {
                       />
                     </th>
                   )}
-                  <th className="px-4 py-3 text-left font-medium text-gray-600">Customer ID</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">Account</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Name</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Phone</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">Site</th>

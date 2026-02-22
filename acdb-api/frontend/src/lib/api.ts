@@ -346,12 +346,27 @@ export interface UGPConnection {
   gps_lat: number | null;
   gps_lon: number | null;
   status: string;
+  bound_account: string | null;
+  split_parent?: string;
 }
 
 export async function listUGPConnections(site: string) {
   return request<{ site: string; count: number; connections: UGPConnection[] }>(
     `/sync/connections?site=${encodeURIComponent(site)}`,
   );
+}
+
+export interface SplitConnectionRequest {
+  site: string;
+  parent_survey_id: string;
+  account_number: string;
+}
+
+export async function splitConnection(data: SplitConnectionRequest) {
+  return request<UGPConnection>('/sync/split-connection', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
 }
 
 // Stats
@@ -710,7 +725,7 @@ export async function getCustomerData(accountNumber: string): Promise<CustomerDa
 // ---------------------------------------------------------------------------
 
 export interface CommissionCustomer {
-  customer_id: number;
+  customer_id_legacy: number;
   first_name: string;
   last_name: string;
   phone: string;
@@ -741,7 +756,7 @@ export async function getCommissionData(customerId: string): Promise<CommissionD
 }
 
 export interface CommissionRequest {
-  customer_id: number;
+  customer_id?: number;
   account_number: string;
   site_code: string;
   customer_type: string;
@@ -754,6 +769,7 @@ export interface CommissionRequest {
   last_name?: string;
   gps_lat?: string;
   gps_lng?: string;
+  survey_id?: string;
   customer_signature: string;
   commissioned_by?: string;
 }
@@ -780,6 +796,7 @@ export interface UgpSyncResult {
 export interface CommissionResult {
   status: string;
   customer_id: number;
+  account_number: string;
   contract_en_url: string;
   contract_so_url: string;
   en_filename: string;
@@ -795,8 +812,8 @@ export async function executeCommission(data: CommissionRequest): Promise<Commis
   });
 }
 
-export async function getCustomerContracts(customerId: number): Promise<{ contracts: CommissionContract[]; account_number: string }> {
-  return request(`/commission/contracts/${customerId}`);
+export async function getCustomerContracts(customerId: number | string): Promise<{ contracts: CommissionContract[]; account_number: string }> {
+  return request(`/commission/contracts/${encodeURIComponent(customerId)}`);
 }
 
 export interface DecommissionResult {
@@ -946,7 +963,7 @@ export async function getTariffHistory(params?: {
 // ---------------------------------------------------------------------------
 
 export interface CustomerLookupResult {
-  customer_id: string;
+  customer_id_legacy: string;
   first_name: string;
   last_name: string;
   account_numbers: string[];

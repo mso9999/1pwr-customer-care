@@ -179,7 +179,8 @@ def list_rows(
             where_clauses.append(f"{filter_col} = %s")
             params.append(filter_val)
 
-        # Text search across all text columns
+        # Text search across text columns + numeric IDs + joined account_number
+        search_join = ""
         if search:
             cursor.execute(
                 "SELECT column_name FROM information_schema.columns "
@@ -188,15 +189,45 @@ def list_rows(
                 (table_name,)
             )
             text_cols = [r[0] for r in cursor.fetchall()]
-            if text_cols:
-                search_parts = [f"{c} ILIKE %s" for c in text_cols[:10]]
-                where_clauses.append(f"({' OR '.join(search_parts)})")
-                params.extend([f"%{search}%"] * len(search_parts))
+            search_parts = [f"{table_name}.{c} ILIKE %s" for c in text_cols[:10]]
+            search_param_count = len(search_parts)
 
+            # Include numeric ID columns cast to text
+            cursor.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = %s "
+                "AND data_type IN ('integer', 'bigint', 'smallint') "
+                "AND column_name LIKE '%%id%%'",
+                (table_name,)
+            )
+            id_cols = [r[0] for r in cursor.fetchall()]
+            for ic in id_cols:
+                search_parts.append(f"CAST({table_name}.{ic} AS TEXT) ILIKE %s")
+                search_param_count += 1
+
+            # For customers table: also search accounts.account_number
+            if table_name.lower() == "customers":
+                search_join = (
+                    " LEFT JOIN accounts _srch_acct "
+                    "ON _srch_acct.customer_id = customers.id"
+                )
+                search_parts.append("_srch_acct.account_number ILIKE %s")
+                search_param_count += 1
+
+            if search_parts:
+                where_clauses.append(f"({' OR '.join(search_parts)})")
+                params.extend([f"%{search}%"] * search_param_count)
+
+        all_joins = f"{soft_join}{search_join}"
         where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
-        # Count total
-        cursor.execute(f"SELECT COUNT(*) FROM {table_name}{soft_join}{where_sql}", params)
+        # Count total (DISTINCT avoids inflation from 1:N account join)
+        cursor.execute(
+            f"SELECT COUNT(DISTINCT {table_name}.id) FROM {table_name}{all_joins}{where_sql}"
+            if search_join
+            else f"SELECT COUNT(*) FROM {table_name}{all_joins}{where_sql}",
+            params,
+        )
         total = cursor.fetchone()[0]
 
         # Sort
@@ -204,10 +235,23 @@ def list_rows(
         if sort:
             order_sql = f" ORDER BY {sort} {order.upper()}"
 
-        # Paginate with LIMIT/OFFSET
+        # Paginate with LIMIT/OFFSET (DISTINCT ON id to deduplicate account join)
         offset = (page - 1) * limit
-        sql = f"SELECT {table_name}.* FROM {table_name}{soft_join}{where_sql}{order_sql} LIMIT %s OFFSET %s"
-        cursor.execute(sql, params + [limit, offset])
+        if search_join:
+            sql = (
+                f"SELECT DISTINCT ON ({table_name}.id) {table_name}.* "
+                f"FROM {table_name}{all_joins}{where_sql} "
+                f"ORDER BY {table_name}.id"
+            )
+            # Wrap to apply custom sort + pagination on the deduplicated set
+            if sort:
+                sql = f"SELECT * FROM ({sql}) _dedup ORDER BY {sort} {order.upper()} LIMIT %s OFFSET %s"
+            else:
+                sql = f"SELECT * FROM ({sql}) _dedup LIMIT %s OFFSET %s"
+            cursor.execute(sql, params + [limit, offset])
+        else:
+            sql = f"SELECT {table_name}.* FROM {table_name}{all_joins}{where_sql}{order_sql} LIMIT %s OFFSET %s"
+            cursor.execute(sql, params + [limit, offset])
 
         rows = [_row_to_dict(cursor, row) for row in cursor.fetchall()]
 
@@ -372,13 +416,23 @@ def get_record(
         cursor.execute(sql, (record_id,))
         row = cursor.fetchone()
 
-        # Fallback: for customers, try customer_id_legacy if PK lookup missed
+        # Fallback: for customers, try account_number resolution
         if not row and table_name == "customers":
-            cursor.execute(
-                "SELECT * FROM customers WHERE customer_id_legacy = %s",
-                (record_id,),
-            )
-            row = cursor.fetchone()
+            import re as _re_fallback
+            if _re_fallback.match(r"^\d{3,4}[A-Za-z]{2,4}$", record_id):
+                cursor.execute(
+                    "SELECT c.* FROM accounts a "
+                    "JOIN customers c ON a.customer_id = c.id "
+                    "WHERE a.account_number = %s LIMIT 1",
+                    (record_id.upper(),),
+                )
+                row = cursor.fetchone()
+            elif record_id.isdigit():
+                cursor.execute(
+                    "SELECT * FROM customers WHERE customer_id_legacy = %s",
+                    (record_id,),
+                )
+                row = cursor.fetchone()
 
         if not row:
             raise HTTPException(status_code=404, detail="Record not found")
@@ -826,39 +880,36 @@ def my_profile(user: CurrentUser = Depends(get_current_user)):
 
         cust: dict = {
             "account_number": acct,
-            "customer_id": None,
+            "customer_id_legacy": None,
             "first_name": "",
             "last_name": "",
             "account_numbers": [acct],
         }
 
-        # Resolve account -> customer via meters table
+        # Resolve account -> customer via accounts table
         try:
             cursor.execute(
-                "SELECT customer_id_legacy FROM meters WHERE account_number = %s",
+                "SELECT c.* FROM accounts a "
+                "JOIN customers c ON a.customer_id = c.id "
+                "WHERE a.account_number = %s LIMIT 1",
                 (acct,),
             )
-            meter_row = cursor.fetchone()
-            if meter_row and meter_row[0]:
-                cust_id = str(meter_row[0])
-                cursor.execute(
-                    "SELECT * FROM customers WHERE customer_id_legacy = %s",
-                    (cust_id,),
-                )
-                cust_row = cursor.fetchone()
-                if cust_row:
-                    cust = _normalize_customer(_row_to_dict(cursor, cust_row))
-                    cust["account_number"] = acct
-                    cust["account_numbers"] = [acct]
+            cust_row = cursor.fetchone()
+            if cust_row:
+                cust = _normalize_customer(_row_to_dict(cursor, cust_row))
+                cust["account_number"] = acct
+                cust["account_numbers"] = [acct]
         except Exception:
             pass
 
         # Also check accounts table for any additional accounts
-        if cust.get("customer_id"):
+        if cust.get("customer_id_legacy"):
             try:
                 cursor.execute(
-                    "SELECT account_number FROM accounts WHERE customer_id = %s",
-                    (cust["customer_id"],),
+                    "SELECT a.account_number FROM accounts a "
+                    "JOIN customers c ON a.customer_id = c.id "
+                    "WHERE c.customer_id_legacy = %s",
+                    (cust["customer_id_legacy"],),
                 )
                 extra = [str(r[0]).strip() for r in cursor.fetchall() if r[0]]
                 if extra:
@@ -1241,13 +1292,28 @@ def employee_customer_data(
         # --- Resolve customer profile ---
         profile: dict = {
             "account_number": acct,
-            "customer_id": None,
+            "customer_id_legacy": None,
             "first_name": "",
             "last_name": "",
         }
         meter_info: dict = {}
 
-        # Try meters table (single table — tblmeter and Copy Of tblmeter merged)
+        # Resolve customer via accounts table
+        try:
+            cursor.execute(
+                "SELECT c.* FROM accounts a "
+                "JOIN customers c ON a.customer_id = c.id "
+                "WHERE a.account_number = %s LIMIT 1",
+                (acct,),
+            )
+            crow = cursor.fetchone()
+            if crow:
+                profile = _normalize_customer(_row_to_dict(cursor, crow))
+                profile["account_number"] = acct
+        except Exception:
+            pass
+
+        # Meter info for this account
         try:
             cursor.execute(
                 "SELECT * FROM meters WHERE account_number = %s",
@@ -1256,22 +1322,12 @@ def employee_customer_data(
             mrow = cursor.fetchone()
             if mrow:
                 meter_info = _row_to_dict(cursor, mrow)
-                cust_id = meter_info.get("customer_id_legacy")
-                if cust_id:
-                    cursor.execute(
-                        "SELECT * FROM customers WHERE customer_id_legacy = %s",
-                        (str(cust_id),),
-                    )
-                    crow = cursor.fetchone()
-                    if crow:
-                        profile = _normalize_customer(_row_to_dict(cursor, crow))
-                        profile["account_number"] = acct
         except Exception:
             pass
 
         # If meters didn't find the customer, try reverse-deriving
         # from plot_number: account 0045MAK -> plot like 'MAK 0045%'
-        if not profile.get("customer_id") and acct_match:
+        if not profile.get("customer_id_legacy") and acct_match:
             num_part, comm = acct_match.group(1), acct_match.group(2).upper()
             plot_pattern = f"{comm} {num_part}%"
             try:
@@ -1481,7 +1537,7 @@ def employee_customer_data(
         tariff_info = None
         try:
             from tariff import resolve_rate
-            cust_id = profile.get("customer_id") or ""
+            cust_id = profile.get("customer_id_legacy") or ""
             conc = profile.get("concession") or meter_info.get("community") or ""
             tariff_info = resolve_rate(cursor, customer_id=cust_id, concession=conc)
         except Exception as e:
