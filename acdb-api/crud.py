@@ -40,41 +40,35 @@ def _get_connection():
     return get_connection()
 
 
-def _ensure_soft_delete_columns():
-    """Add deleted_at / deleted_by columns to soft-delete tables if missing."""
+def _ensure_soft_delete_table():
+    """Create the soft_deletes tracking table if it doesn't exist."""
     try:
         with _get_connection() as conn:
             cursor = conn.cursor()
-            for tbl in SOFT_DELETE_TABLES:
-                cursor.execute(
-                    "SELECT column_name FROM information_schema.columns "
-                    "WHERE table_schema = 'public' AND table_name = %s "
-                    "AND column_name = 'deleted_at'",
-                    (tbl,),
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS soft_deletes (
+                    table_name  TEXT NOT NULL,
+                    record_id   TEXT NOT NULL,
+                    deleted_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    deleted_by  TEXT,
+                    PRIMARY KEY (table_name, record_id)
                 )
-                if not cursor.fetchone():
-                    cursor.execute(
-                        f"ALTER TABLE {tbl} "
-                        "ADD COLUMN deleted_at TIMESTAMPTZ DEFAULT NULL, "
-                        "ADD COLUMN deleted_by TEXT DEFAULT NULL"
-                    )
-                    conn.commit()
-                    logger.info("Added deleted_at/deleted_by to %s", tbl)
-                else:
-                    logger.info("Soft-delete columns already present on %s", tbl)
+            """)
+            conn.commit()
+            logger.info("soft_deletes table ready")
     except Exception as e:
-        logger.error("soft-delete column init FAILED: %s", e)
+        logger.error("soft_deletes table init FAILED: %s", e)
 
 
-def _has_deleted_at(conn, table_name: str) -> bool:
+def _is_soft_deleted(conn, table_name: str, record_id: str) -> Optional[str]:
+    """Return deleted_at timestamp if record is soft-deleted, else None."""
     cursor = conn.cursor()
     cursor.execute(
-        "SELECT 1 FROM information_schema.columns "
-        "WHERE table_schema = 'public' AND table_name = %s "
-        "AND column_name = 'deleted_at'",
-        (table_name,),
+        "SELECT deleted_at FROM soft_deletes WHERE table_name = %s AND record_id = %s",
+        (table_name, record_id),
     )
-    return cursor.fetchone() is not None
+    row = cursor.fetchone()
+    return str(row[0]) if row else None
 
 
 def _row_to_dict(cursor, row) -> Dict[str, Any]:
@@ -159,9 +153,17 @@ def list_rows(
         where_clauses: list[str] = []
         params: list = []
 
-        # Exclude soft-deleted rows from normal listing
-        if table_name.lower() in SOFT_DELETE_TABLES and _has_deleted_at(conn, table_name):
-            where_clauses.append("deleted_at IS NULL")
+        # Exclude soft-deleted rows via the soft_deletes tracking table
+        soft_join = ""
+        if table_name.lower() in SOFT_DELETE_TABLES:
+            pk = _get_primary_key(conn, table_name)
+            if pk:
+                soft_join = (
+                    f" LEFT JOIN soft_deletes sd "
+                    f"ON sd.table_name = '{table_name}' "
+                    f"AND sd.record_id = CAST({table_name}.{pk} AS TEXT)"
+                )
+                where_clauses.append("sd.record_id IS NULL")
 
         # Customer scope: only own records
         if user.user_type == UserType.customer:
@@ -194,7 +196,7 @@ def list_rows(
         where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
         # Count total
-        cursor.execute(f"SELECT COUNT(*) FROM {table_name}{where_sql}", params)
+        cursor.execute(f"SELECT COUNT(*) FROM {table_name}{soft_join}{where_sql}", params)
         total = cursor.fetchone()[0]
 
         # Sort
@@ -204,7 +206,7 @@ def list_rows(
 
         # Paginate with LIMIT/OFFSET
         offset = (page - 1) * limit
-        sql = f"SELECT * FROM {table_name}{where_sql}{order_sql} LIMIT %s OFFSET %s"
+        sql = f"SELECT {table_name}.* FROM {table_name}{soft_join}{where_sql}{order_sql} LIMIT %s OFFSET %s"
         cursor.execute(sql, params + [limit, offset])
 
         rows = [_row_to_dict(cursor, row) for row in cursor.fetchall()]
@@ -235,20 +237,26 @@ def list_cold_storage(
         raise HTTPException(status_code=400, detail="Table does not support cold storage")
 
     with _get_connection() as conn:
-        if not _has_deleted_at(conn, table_name):
+        pk = _get_primary_key(conn, table_name)
+        if not pk:
             return PaginatedResponse(rows=[], total=0, page=1, limit=limit, pages=1)
 
         cursor = conn.cursor()
         cursor.execute(
-            f"SELECT COUNT(*) FROM {table_name} WHERE deleted_at IS NOT NULL"
+            f"SELECT COUNT(*) FROM {table_name} t "
+            f"INNER JOIN soft_deletes sd ON sd.table_name = %s "
+            f"AND sd.record_id = CAST(t.{pk} AS TEXT)",
+            (table_name,),
         )
         total = cursor.fetchone()[0]
 
         offset = (page - 1) * limit
         cursor.execute(
-            f"SELECT * FROM {table_name} WHERE deleted_at IS NOT NULL "
-            "ORDER BY deleted_at DESC LIMIT %s OFFSET %s",
-            (limit, offset),
+            f"SELECT t.*, sd.deleted_at, sd.deleted_by FROM {table_name} t "
+            f"INNER JOIN soft_deletes sd ON sd.table_name = %s "
+            f"AND sd.record_id = CAST(t.{pk} AS TEXT) "
+            "ORDER BY sd.deleted_at DESC LIMIT %s OFFSET %s",
+            (table_name, limit, offset),
         )
         rows = [_row_to_dict(cursor, r) for r in cursor.fetchall()]
 
@@ -274,21 +282,35 @@ def purge_expired(
         raise HTTPException(status_code=400, detail="Table does not support cold storage")
 
     with _get_connection() as conn:
-        if not _has_deleted_at(conn, table_name):
+        pk = _get_primary_key(conn, table_name)
+        if not pk:
             return {"purged": 0}
 
         cutoff = datetime.now(timezone.utc) - timedelta(days=COLD_STORAGE_DAYS)
         cursor = conn.cursor()
         cursor.execute(
-            f"DELETE FROM {table_name} "
-            "WHERE deleted_at IS NOT NULL AND deleted_at < %s",
-            (cutoff.isoformat(),),
+            "SELECT record_id FROM soft_deletes "
+            "WHERE table_name = %s AND deleted_at < %s",
+            (table_name, cutoff.isoformat()),
         )
-        purged = cursor.rowcount
+        expired_ids = [r[0] for r in cursor.fetchall()]
+
+        if not expired_ids:
+            return {"purged": 0, "table": table_name, "cutoff": cutoff.isoformat()}
+
+        placeholders = ",".join(["%s"] * len(expired_ids))
+        cursor.execute(
+            f"DELETE FROM {table_name} WHERE CAST({pk} AS TEXT) IN ({placeholders})",
+            expired_ids,
+        )
+        cursor.execute(
+            f"DELETE FROM soft_deletes WHERE table_name = %s AND record_id IN ({placeholders})",
+            [table_name] + expired_ids,
+        )
         conn.commit()
 
-        logger.info("Purged %d expired records from %s", purged, table_name)
-        return {"purged": purged, "table": table_name, "cutoff": cutoff.isoformat()}
+        logger.info("Purged %d expired records from %s", len(expired_ids), table_name)
+        return {"purged": len(expired_ids), "table": table_name, "cutoff": cutoff.isoformat()}
 
 
 @router.post("/{table_name}/{record_id}/restore")
@@ -305,24 +327,18 @@ def restore_record(
         raise HTTPException(status_code=400, detail="Table does not support cold storage")
 
     with _get_connection() as conn:
-        pk = _get_primary_key(conn, table_name)
-        if not pk:
-            raise HTTPException(status_code=400, detail="Cannot determine primary key")
-
         cursor = conn.cursor()
         cursor.execute(
-            f"SELECT deleted_at FROM {table_name} WHERE {pk} = %s", (record_id,)
+            "SELECT deleted_at FROM soft_deletes WHERE table_name = %s AND record_id = %s",
+            (table_name, record_id),
         )
         row = cursor.fetchone()
         if not row:
-            raise HTTPException(status_code=404, detail="Record not found")
-        if not row[0]:
             raise HTTPException(status_code=400, detail="Record is not in cold storage")
 
         cursor.execute(
-            f"UPDATE {table_name} SET deleted_at = NULL, deleted_by = NULL "
-            f"WHERE {pk} = %s",
-            (record_id,),
+            "DELETE FROM soft_deletes WHERE table_name = %s AND record_id = %s",
+            (table_name, record_id),
         )
         conn.commit()
 
@@ -724,32 +740,19 @@ def delete_record(
             raise HTTPException(status_code=404, detail="Record not found")
 
         soft = table_name.lower() in SOFT_DELETE_TABLES
-        if soft and not _has_deleted_at(conn, table_name):
-            try:
-                cursor.execute(
-                    f"ALTER TABLE {table_name} "
-                    "ADD COLUMN deleted_at TIMESTAMPTZ DEFAULT NULL, "
-                    "ADD COLUMN deleted_by TEXT DEFAULT NULL"
-                )
-                conn.commit()
-                logger.info("Inline-added deleted_at/deleted_by to %s", table_name)
-            except Exception as col_err:
-                conn.rollback()
-                logger.warning("Could not add soft-delete columns to %s: %s", table_name, col_err)
-                soft = False
 
         try:
             if soft:
-                if old_values and old_values.get("deleted_at"):
+                if _is_soft_deleted(conn, table_name, record_id):
                     raise HTTPException(
                         status_code=400,
                         detail="Record is already in cold storage",
                     )
                 now = datetime.now(timezone.utc).isoformat()
                 cursor.execute(
-                    f"UPDATE {table_name} SET deleted_at = %s, deleted_by = %s "
-                    f"WHERE {pk} = %s",
-                    (now, user.user_id, record_id),
+                    "INSERT INTO soft_deletes (table_name, record_id, deleted_at, deleted_by) "
+                    "VALUES (%s, %s, %s, %s)",
+                    (table_name, record_id, now, user.user_id),
                 )
                 conn.commit()
                 log_mutation(
