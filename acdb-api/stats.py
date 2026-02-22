@@ -33,22 +33,24 @@ def _extract_site(account_number: str) -> str:
 @router.get("/site-summary")
 def site_summary(user: CurrentUser = Depends(require_employee)):
     """
-    Aggregate MWh consumed and '000 LSL revenue per site.
+    Aggregate MWh consumed and revenue per site.
 
-    Queries the transactions table directly.
-    Site code is extracted from the last 3 chars of account_number.
+    Primary source: ``transactions`` (detailed per-txn rows, typical for LS).
+    Fallback: ``monthly_consumption`` + ``monthly_transactions`` (aggregate
+    tables populated by Koios import, typical for BN and new countries).
     """
-    results: Dict[str, Dict[str, float]] = {}  # site -> {mwh, lsl_thousands}
+    results: Dict[str, Dict[str, float]] = {}
     source_table = "transactions"
 
     with _get_connection() as conn:
         cursor = conn.cursor()
 
+        # --- Strategy 1: detailed transactions table ---
         try:
             cursor.execute("""
                 SELECT account_number,
                        SUM(kwh_value) AS total_kwh,
-                       SUM(transaction_amount) AS total_lsl
+                       SUM(transaction_amount) AS total_amt
                 FROM transactions
                 GROUP BY account_number
             """)
@@ -59,23 +61,50 @@ def site_summary(user: CurrentUser = Depends(require_employee)):
                 site = _extract_site(acct)
                 if not site or len(site) < 2:
                     continue
-
                 if site not in results:
                     results[site] = {"mwh": 0.0, "lsl_thousands": 0.0}
-
-                kwh = float(row[1] or 0)
-                lsl = float(row[2] or 0)
-                results[site]["mwh"] += kwh / 1000.0  # kWh -> MWh
-                results[site]["lsl_thousands"] += lsl / 1000.0  # LSL -> '000 LSL
+                results[site]["mwh"] += float(row[1] or 0) / 1000.0
+                results[site]["lsl_thousands"] += float(row[2] or 0) / 1000.0
 
         except Exception as e:
             logger.warning("Failed to query transactions: %s", e)
 
-    # Totals
+        # --- Strategy 2: monthly aggregates (fallback) ---
+        if not results:
+            source_table = "monthly_consumption+monthly_transactions"
+            try:
+                cursor.execute("""
+                    SELECT community, SUM(kwh)
+                    FROM monthly_consumption
+                    WHERE community IS NOT NULL
+                    GROUP BY community
+                """)
+                for row in cursor.fetchall():
+                    site = str(row[0]).strip().upper()
+                    if site:
+                        results.setdefault(site, {"mwh": 0.0, "lsl_thousands": 0.0})
+                        results[site]["mwh"] += float(row[1] or 0) / 1000.0
+            except Exception as e:
+                logger.warning("Failed to query monthly_consumption: %s", e)
+
+            try:
+                cursor.execute("""
+                    SELECT community, SUM(amount_lsl)
+                    FROM monthly_transactions
+                    WHERE community IS NOT NULL
+                    GROUP BY community
+                """)
+                for row in cursor.fetchall():
+                    site = str(row[0]).strip().upper()
+                    if site:
+                        results.setdefault(site, {"mwh": 0.0, "lsl_thousands": 0.0})
+                        results[site]["lsl_thousands"] += float(row[1] or 0) / 1000.0
+            except Exception as e:
+                logger.warning("Failed to query monthly_transactions: %s", e)
+
     total_mwh = sum(s["mwh"] for s in results.values())
     total_lsl = sum(s["lsl_thousands"] for s in results.values())
 
-    # Build per-site list sorted by site name
     sites = []
     for site_code in sorted(results.keys()):
         data = results[site_code]
