@@ -507,6 +507,31 @@ class UGPClient:
             return {"updated": 0, "error": resp.text[:300]}
         return resp.json()
 
+    def save_project(self, project_id: str, user_id: str = "cc-sync") -> Dict[str, Any]:
+        """Save the current project state as a new snapshot/delta version.
+
+        Must be called after batch_update_connections to persist changes
+        into the UGP delta storage system.
+        """
+        self._ensure_auth()
+        payload = {"projectId": project_id, "userId": user_id}
+        resp = self.session.post(
+            f"{self.base}/project/save-in-place",
+            json=payload,
+            timeout=120,
+        )
+        if resp.status_code == 401:
+            self.authenticate()
+            resp = self.session.post(
+                f"{self.base}/project/save-in-place",
+                json=payload,
+                timeout=120,
+            )
+        if resp.status_code != 200:
+            logger.warning("Project save failed: %s", resp.text[:300])
+            return {"saved": False, "error": resp.text[:300]}
+        return resp.json()
+
 
 # Singleton client
 _ugp_client: Optional[UGPClient] = None
@@ -633,7 +658,7 @@ def sync_commission_to_ugp(
 ) -> Dict[str, Any]:
     """Push commissioning status to uGridPLAN for a connection element.
 
-    Updates the connection's Commissioning_Date and optionally Customer_Code
+    Updates the connection's Comm_Date and optionally Customer_Code
     and Meter_Serial.  Also traces upstream conductors and returns any that
     are not yet energized so the caller can prompt the user.
 
@@ -663,7 +688,7 @@ def sync_commission_to_ugp(
 
     # Build connection update payload
     conn_updates: Dict[str, Any] = {
-        "Commissioning_Date": connection_date,
+        "Comm_Date": connection_date,
     }
     if account_number:
         conn_updates["Customer_Code"] = account_number
@@ -675,6 +700,11 @@ def sync_commission_to_ugp(
         result["ugp_updated"] = ok
         if not ok:
             result["error"] = f"uGridPLAN update_connection returned failure for {survey_id}"
+        else:
+            try:
+                client.save_project(session_id, user_id="cc-commission")
+            except Exception as se:
+                logger.warning("UGP save after commission update failed: %s", se)
     except Exception as e:
         result["error"] = f"uGridPLAN update failed for {survey_id}: {e}"
         logger.warning(result["error"])
@@ -822,6 +852,53 @@ def _survey_id_to_account_number(survey_id: str) -> Optional[str]:
     if not number.isdigit():
         return None
     return f"{number}{site_code}"
+
+
+# ---------------------------------------------------------------------------
+# Commissioning date computation
+# ---------------------------------------------------------------------------
+
+def _compute_commissioning_date(cursor, account_number: str) -> Optional[str]:
+    """
+    Compute the commissioning date for a customer account.
+
+    Definition: the date of the earliest energy flow (hourly_consumption)
+    that occurs on or after the customer's first transaction (payment).
+    This represents when the customer actually started consuming after
+    being connected.
+
+    Returns ISO date string (YYYY-MM-DD) or None if insufficient data.
+    """
+    try:
+        # First transaction date for this account
+        cursor.execute(
+            "SELECT MIN(transaction_date) FROM transactions "
+            "WHERE account_number = %s AND transaction_date IS NOT NULL",
+            (account_number,),
+        )
+        row = cursor.fetchone()
+        if not row or not row[0]:
+            return None
+        first_txn = row[0]
+
+        # Earliest consumption on or after first transaction
+        cursor.execute(
+            "SELECT MIN(reading_hour) FROM hourly_consumption "
+            "WHERE account_number = %s AND reading_hour >= %s AND kwh > 0",
+            (account_number, first_txn),
+        )
+        row = cursor.fetchone()
+        if not row or not row[0]:
+            return None
+
+        comm_date = row[0]
+        if hasattr(comm_date, "date"):
+            comm_date = comm_date.date()
+        return str(comm_date)
+
+    except Exception as e:
+        logger.debug("Commissioning date computation failed for %s: %s", account_number, e)
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -1565,6 +1642,7 @@ def sync_execute(
     load_a_computed = 0
     load_a_via_vdrop = 0
     load_a_via_default = 0
+    comm_date_set = 0
 
     # Pull: uGridPLAN -> SQLite (customer_type, meter_serial, GPS)
     if req.pull_to_sqlite:
@@ -1680,6 +1758,19 @@ def sync_execute(
                 # Derive account number from Survey_ID for consumption lookup
                 acct = _survey_id_to_account_number(sid)
                 if acct:
+                    # Commissioning date: earliest energy flow post first transaction
+                    comm_dt = _compute_commissioning_date(cursor, acct)
+                    if comm_dt:
+                        ugp_conn = ugp_conn_by_sid.get(sid, {})
+                        existing_comm = (
+                            ugp_conn.get("Comm_Date")
+                            or ugp_conn.get("Commissioning_Date")
+                            or ugp_conn.get("commissioning_date")
+                        )
+                        if not existing_comm or str(existing_comm).strip() != comm_dt:
+                            updates["Comm_Date"] = comm_dt
+                            comm_date_set += 1
+
                     avg_kwh = _compute_avg_kwh_per_day(cursor, acct)
                     if avg_kwh is not None and avg_kwh > 0:
                         vdrop_v = vdrop_voltages.get(sid)
@@ -1708,8 +1799,13 @@ def sync_execute(
                     batch_updates[sid] = updates
 
         # Push ALL updates to uGridPLAN in a single batch call
+        ugp_saved = False
         if batch_updates:
-            logger.info("Pushing %d updates to uGridPLAN via batch endpoint", len(batch_updates))
+            logger.info(
+                "Pushing %d updates to uGridPLAN via batch endpoint "
+                "(%d with Commissioning_Date)",
+                len(batch_updates), comm_date_set,
+            )
             try:
                 batch_result = client.batch_update_connections(session_id, batch_updates)
                 ugp_updated = batch_result.get("updated", 0)
@@ -1723,15 +1819,29 @@ def sync_execute(
                 logger.error("Batch update call failed: %s", e)
                 ugp_updated = 0
 
+            # Persist changes as a new snapshot/delta version in UGP
+            if ugp_updated > 0:
+                try:
+                    save_result = client.save_project(session_id, user_id="cc-sync")
+                    ugp_saved = not save_result.get("error")
+                    if ugp_saved:
+                        logger.info("UGP project saved (new version created)")
+                    else:
+                        logger.warning("UGP save returned error: %s", save_result)
+                except Exception as e:
+                    logger.error("UGP save_project call failed: %s", e)
+
     return {
         "site": req.site.upper(),
         "matched": match_results["matched_count"],
         "sqlite_written": sqlite_written,
         "ugp_updated": ugp_updated,
+        "ugp_saved": ugp_saved,
         "gps_written": gps_written,
         "load_a_computed": load_a_computed,
         "load_a_via_vdrop": load_a_via_vdrop,
         "load_a_via_default": load_a_via_default,
+        "commissioning_dates_set": comm_date_set,
         "vdrop_voltages_available": len(vdrop_voltages),
         "default_voltage": SYNC_LV_VOLTAGE,
         "unmatched_ugp": match_results["unmatched_ugp_count"],
