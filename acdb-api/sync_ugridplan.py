@@ -137,34 +137,64 @@ class UGPClient:
         # Nothing matched – return as-is and let the caller handle the 404
         return name_or_code
 
+    # uGridPLAN registry uses composite keys: CODE_type (e.g. "MAK_minigrid").
+    # Bare codes ("MAK") and display names ("Ha Makebe") are resolved automatically.
+    REGISTRY_SUFFIXES = ("_minigrid", "_ci", "_ipp")
+
     def load_project(self, project_name: str) -> str:
         """Load a project by registry key (code) and return the session projectId (UUID).
 
-        If ``project_name`` is a display name (e.g. "Ha Makebe") rather than the
-        registry key (e.g. "MAK"), it is automatically resolved via the project list.
+        The uGridPLAN project registry uses composite keys of the form
+        ``CODE_type`` (e.g. ``MAK_minigrid``).  This method tries, in order:
+
+        1. The literal ``project_name`` as given.
+        2. Composite keys ``{project_name}_{type}`` for each known type.
+        3. Resolution via the project list (display-name → code lookup).
+        4. Composite keys of the resolved code.
         """
         self._ensure_auth()
-        resp = self.session.post(
-            f"{self.base}/projects/{project_name}/load",
-            json={},  # Empty body required by Pydantic LoadProjectRequest
-        )
-        if resp.status_code == 401:
-            self.authenticate()
-            resp = self.session.post(
-                f"{self.base}/projects/{project_name}/load",
+
+        def _try_load(key: str) -> Optional[requests.Response]:
+            r = self.session.post(
+                f"{self.base}/projects/{key}/load",
                 json={},
             )
-        # If 404, the caller may have passed a display name instead of the
-        # registry key.  Try resolving via the project list.
-        if resp.status_code == 404:
-            resolved = self._resolve_project_key(project_name)
-            if resolved != project_name:
-                resp = self.session.post(
-                    f"{self.base}/projects/{resolved}/load",
+            if r.status_code == 401:
+                self.authenticate()
+                r = self.session.post(
+                    f"{self.base}/projects/{key}/load",
                     json={},
                 )
-        if resp.status_code != 200:
-            raise RuntimeError(f"Failed to load project '{project_name}' ({resp.status_code}): {resp.text[:200]}")
+            return r if r.status_code == 200 else None
+
+        # 1. Try as-is
+        resp = _try_load(project_name)
+
+        # 2. Try composite keys (CODE_minigrid, CODE_ci, CODE_ipp)
+        if resp is None:
+            for suffix in self.REGISTRY_SUFFIXES:
+                if not project_name.endswith(suffix):
+                    resp = _try_load(f"{project_name}{suffix}")
+                    if resp is not None:
+                        break
+
+        # 3. Resolve via project list (display name → code)
+        if resp is None:
+            resolved = self._resolve_project_key(project_name)
+            if resolved != project_name:
+                resp = _try_load(resolved)
+                # 4. Try composite keys of the resolved code
+                if resp is None:
+                    for suffix in self.REGISTRY_SUFFIXES:
+                        if not resolved.endswith(suffix):
+                            resp = _try_load(f"{resolved}{suffix}")
+                            if resp is not None:
+                                break
+
+        if resp is None:
+            raise RuntimeError(
+                f"Failed to load project '{project_name}': not found under any registry key variant"
+            )
         data = resp.json()
         pid = data.get("projectId") or data.get("project_id") or data.get("id", "")
         if not pid:
@@ -211,6 +241,79 @@ class UGPClient:
             page += 1
 
         return all_rows
+
+    def get_lines(self, project_id: str, page_size: int = 1000) -> List[Dict[str, Any]]:
+        """Fetch all line elements (MV, LV, Drop) for a project."""
+        self._ensure_auth()
+        all_rows: List[Dict[str, Any]] = []
+        page = 1
+        while True:
+            resp = self.session.get(
+                f"{self.base}/project/table-data",
+                params={
+                    "projectId": project_id,
+                    "elementType": "line",
+                    "page": page,
+                    "pageSize": page_size,
+                },
+            )
+            if resp.status_code == 401:
+                self.authenticate()
+                resp = self.session.get(
+                    f"{self.base}/project/table-data",
+                    params={
+                        "projectId": project_id,
+                        "elementType": "line",
+                        "page": page,
+                        "pageSize": page_size,
+                    },
+                )
+            if resp.status_code != 200:
+                raise RuntimeError(f"Failed to fetch lines ({resp.status_code}): {resp.text[:200]}")
+
+            data = resp.json()
+            rows = data.get("rows", [])
+            all_rows.extend(rows)
+
+            total = data.get("total", len(rows))
+            if len(all_rows) >= total or not rows:
+                break
+            page += 1
+
+        return all_rows
+
+    def update_line(self, project_id: str, node1: str, node2: str, updates: Dict[str, Any]) -> bool:
+        """Update a line element's properties.
+
+        The uGridPLAN API identifies lines by their ``node1`` (from-pole) and
+        ``node2`` (to-pole/connection) endpoints, passed as separate fields.
+        """
+        self._ensure_auth()
+        payload = {
+            "projectId": project_id,
+            "elementType": "line",
+            "node1": node1,
+            "node2": node2,
+            "updates": updates,
+        }
+        resp = self.session.post(
+            f"{self.base}/project/update",
+            json=payload,
+        )
+        if resp.status_code == 401:
+            self.authenticate()
+            resp = self.session.post(
+                f"{self.base}/project/update",
+                json=payload,
+            )
+        if resp.status_code != 200:
+            logger.warning("Line update failed for %s|%s: %s", node1, node2, resp.text[:200])
+            return False
+        body = resp.json()
+        if body.get("status") == "error":
+            logger.warning("Line update error for %s|%s: %s", node1, node2, body.get("message", ""))
+            return False
+        return True
 
     # Voltage sanity bounds — only LV pole voltages are meaningful for
     # the Amps calculation.  MV poles (11kV), negative artifacts, and
@@ -337,6 +440,42 @@ class UGPClient:
             return False
         return True
 
+    def batch_update_lines(
+        self, project_id: str, updates: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """Batch-update line properties in a single HTTP call (no viz recompute).
+
+        Args:
+            project_id: The loaded project session ID.
+            updates: List of dicts, each with ``node1``, ``node2``, plus
+                     property keys to update (e.g. ``{"node1": "P1", "node2": "P2", "St_code_4": 5}``).
+
+        Returns:
+            Server response dict (``updated``, ``not_found``, ``total_requested``).
+        """
+        self._ensure_auth()
+        payload = {"projectId": project_id, "updates": updates}
+        resp = self.session.post(
+            f"{self.base}/project/batch-line-update",
+            json=payload,
+            timeout=180,
+        )
+        if resp.status_code == 401:
+            self.authenticate()
+            resp = self.session.post(
+                f"{self.base}/project/batch-line-update",
+                json=payload,
+                timeout=180,
+            )
+        if resp.status_code != 200:
+            logger.warning("Batch line update failed: %s", resp.text[:300])
+            return {"updated": 0, "error": resp.text[:300]}
+        body = resp.json()
+        if body.get("status") == "error":
+            logger.warning("Batch line update error: %s", body.get("message", ""))
+            return {"updated": 0, "error": body.get("message", "")}
+        return body
+
     def batch_update_connections(
         self, project_id: str, updates: Dict[str, Dict[str, Any]]
     ) -> Dict[str, Any]:
@@ -378,6 +517,273 @@ def _get_ugp_client() -> UGPClient:
     if _ugp_client is None:
         _ugp_client = UGPClient()
     return _ugp_client
+
+
+# ---------------------------------------------------------------------------
+# Commission → uGridPLAN sync helpers
+# ---------------------------------------------------------------------------
+
+# Status code field names vary across projects (canonical vs legacy).
+# We check multiple aliases to find the actual field in the data.
+_LINE_STATUS_ALIASES = ("St_code_4", "Status C04", "Status_Code_4", "status_code_4")
+_CONN_STATUS_ALIASES = ("St_code_3", "Status C03", "Status_Code_3", "status_code_3")
+
+# Energized threshold: line St_code_4 value 5 = "Line energized"
+_LINE_ENERGIZED_VALUE = 5
+# Commissioned threshold: connection St_code_3 value 9 = "Connection commissioned"
+_CONN_COMMISSIONED_VALUE = 9
+
+
+def _parse_status_int(raw_value: Any) -> int:
+    """Extract integer status from a value that may be int, float, or label string.
+
+    Handles formats like: 5, 5.0, "5 - Line energized", "0 - uGridNET output".
+    """
+    if raw_value is None:
+        return 0
+    if isinstance(raw_value, (int, float)):
+        return int(raw_value)
+    s = str(raw_value).strip()
+    if not s:
+        return 0
+    parts = s.split("-", 1)
+    try:
+        return int(parts[0].strip())
+    except (ValueError, TypeError):
+        return 0
+
+
+def _get_line_status(line: Dict[str, Any]) -> Tuple[str, int]:
+    """Return (field_name, integer_value) for the line status field."""
+    for alias in _LINE_STATUS_ALIASES:
+        if alias in line:
+            return alias, _parse_status_int(line[alias])
+    return "", 0
+
+
+def _get_conn_status(conn: Dict[str, Any]) -> Tuple[str, int]:
+    """Return (field_name, integer_value) for the connection status field."""
+    for alias in _CONN_STATUS_ALIASES:
+        if alias in conn:
+            return alias, _parse_status_int(conn[alias])
+    return "", 0
+
+
+def trace_upstream_conductors(
+    survey_id: str,
+    lines: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Trace upstream conductors from a connection and return non-energized ones.
+
+    Chain: Connection (Survey_ID) ← Drop line (Node 2=Survey_ID, Node 1=Pole)
+           ← LV/MV lines touching that Pole.
+
+    Returns list of dicts with line identification and current status for any
+    upstream conductor that is NOT yet energized (St_code_4 < 5).
+    """
+    # Step 1: Find drop line(s) whose Node 2 = this connection's Survey_ID
+    drop_poles: set = set()
+    for line in lines:
+        if line.get("Node 2", "") == survey_id:
+            pole = line.get("Node 1", "")
+            if pole:
+                drop_poles.add(pole)
+
+    if not drop_poles:
+        return []
+
+    # Step 2: Find all LV/MV lines touching any of those poles
+    non_energized: List[Dict[str, Any]] = []
+    for line in lines:
+        node1 = line.get("Node 1", "")
+        node2 = line.get("Node 2", "")
+        line_type = str(line.get("Type", "")).upper()
+
+        # Skip drop lines themselves (they connect pole→connection)
+        if node2 == survey_id:
+            continue
+
+        # Check if this line touches one of our drop poles
+        if node1 not in drop_poles and node2 not in drop_poles:
+            continue
+
+        status_field, status_val = _get_line_status(line)
+        if status_val < _LINE_ENERGIZED_VALUE:
+            non_energized.append({
+                "node_1": node1,
+                "node_2": node2,
+                "type": line_type,
+                "status_field": status_field,
+                "status_value": status_val,
+                "status_raw": line.get(status_field, ""),
+                "cable_size": line.get("Cable_size", ""),
+                "length": line.get("Length", 0),
+                "subnet": line.get("SubNetwork", ""),
+            })
+
+    return non_energized
+
+
+def sync_commission_to_ugp(
+    site_code: str,
+    survey_id: str,
+    connection_date: str,
+    account_number: str = "",
+    meter_serial: str = "",
+) -> Dict[str, Any]:
+    """Push commissioning status to uGridPLAN for a connection element.
+
+    Updates the connection's Commissioning_Date and optionally Customer_Code
+    and Meter_Serial.  Also traces upstream conductors and returns any that
+    are not yet energized so the caller can prompt the user.
+
+    Returns:
+        {
+            "ugp_updated": bool,
+            "upstream_warnings": [...],  # non-energized upstream lines
+            "project_id": str,           # session ID for follow-up updates
+            "error": str | None,
+        }
+    """
+    result: Dict[str, Any] = {
+        "ugp_updated": False,
+        "upstream_warnings": [],
+        "project_id": "",
+        "error": None,
+    }
+
+    try:
+        client = _get_ugp_client()
+        session_id = client.load_project(site_code)
+        result["project_id"] = session_id
+    except Exception as e:
+        result["error"] = f"Could not load uGridPLAN project for {site_code}: {e}"
+        logger.warning(result["error"])
+        return result
+
+    # Build connection update payload
+    conn_updates: Dict[str, Any] = {
+        "Commissioning_Date": connection_date,
+    }
+    if account_number:
+        conn_updates["Customer_Code"] = account_number
+    if meter_serial:
+        conn_updates["Meter_Serial"] = meter_serial
+
+    try:
+        ok = client.update_connection(session_id, survey_id, conn_updates)
+        result["ugp_updated"] = ok
+        if not ok:
+            result["error"] = f"uGridPLAN update_connection returned failure for {survey_id}"
+    except Exception as e:
+        result["error"] = f"uGridPLAN update failed for {survey_id}: {e}"
+        logger.warning(result["error"])
+
+    # Trace upstream conductors
+    try:
+        all_lines = client.get_lines(session_id)
+        warnings = trace_upstream_conductors(survey_id, all_lines)
+        result["upstream_warnings"] = warnings
+    except Exception as e:
+        logger.warning("Could not trace upstream conductors for %s: %s", survey_id, e)
+
+    return result
+
+
+def energize_upstream_lines(
+    site_code: str,
+    line_ids: List[Dict[str, str]],
+) -> Dict[str, Any]:
+    """Set upstream lines to energized status (St_code_4 = 5).
+
+    Uses the batch-line-update endpoint for efficiency (single HTTP call,
+    no per-line visualization recompute).  Falls back to individual
+    ``update_line`` calls if the batch endpoint is unavailable.
+
+    Args:
+        site_code: Site code (e.g. "MAK").
+        line_ids: List of {"node_1": ..., "node_2": ..., "status_field": ...}
+                  identifying lines to update.
+
+    Returns:
+        {"updated": int, "failed": int, "errors": [...]}
+    """
+    result: Dict[str, Any] = {"updated": 0, "failed": 0, "errors": []}
+
+    try:
+        client = _get_ugp_client()
+        session_id = client.load_project(site_code)
+    except Exception as e:
+        result["errors"].append(f"Could not load project: {e}")
+        return result
+
+    # Build batch payload
+    batch_updates: List[Dict[str, Any]] = []
+    for lid in line_ids:
+        status_field = lid.get("status_field", "") or "St_code_4"
+        node1 = lid.get("node_1", "")
+        node2 = lid.get("node_2", "")
+        if node1 and node2:
+            batch_updates.append({
+                "node1": node1,
+                "node2": node2,
+                status_field: _LINE_ENERGIZED_VALUE,
+            })
+
+    if not batch_updates:
+        return result
+
+    # Try batch first
+    try:
+        batch_result = client.batch_update_lines(session_id, batch_updates)
+        batch_ok = batch_result.get("updated", 0)
+        if batch_ok > 0:
+            result["updated"] = batch_ok
+            result["failed"] = len(batch_updates) - batch_ok
+            not_found = batch_result.get("not_found", [])
+            if not_found:
+                result["errors"].extend(
+                    [f"Not found: {nf}" for nf in not_found[:10]]
+                )
+            logger.info(
+                "Batch line update for %s: %d updated, %d not found",
+                site_code, batch_ok, len(not_found),
+            )
+            return result
+        if "error" in batch_result:
+            logger.warning(
+                "Batch line update failed for %s, falling back to individual: %s",
+                site_code, batch_result["error"][:200],
+            )
+    except Exception as e:
+        logger.warning(
+            "Batch line update unavailable for %s, falling back to individual: %s",
+            site_code, e,
+        )
+
+    # Fallback: individual updates
+    for lid in line_ids:
+        status_field = lid.get("status_field", "") or "St_code_4"
+        node1 = lid.get("node_1", "")
+        node2 = lid.get("node_2", "")
+        line_key = f"{node1}|{node2}"
+        try:
+            ok = client.update_line(
+                session_id,
+                node1,
+                node2,
+                {status_field: _LINE_ENERGIZED_VALUE},
+            )
+            if ok:
+                result["updated"] += 1
+            else:
+                result["failed"] += 1
+                result["errors"].append(f"Update failed for line {line_key}")
+        except Exception as e:
+            result["failed"] += 1
+            result["errors"].append(f"Error updating {line_key}: {e}")
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -945,6 +1351,76 @@ def discover_projects(user: CurrentUser = Depends(require_employee)):
 
 # ---------------------------------------------------------------------------
 # Preview (dry run)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/connections")
+def list_connections(
+    site: str = Query(..., description="Site code (e.g. MAK)"),
+    user: CurrentUser = Depends(require_employee),
+):
+    """Return connection elements from uGridPlan for a site.
+
+    Used by the New Customer wizard to pick an existing connection and
+    auto-fill Survey ID, GPS, and customer type.
+    """
+    with get_auth_db() as conn:
+        row = conn.execute(
+            "SELECT project_id FROM cc_site_projects WHERE site_code = ?",
+            (site.upper(),),
+        ).fetchone()
+
+    if not row:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No uGridPLAN project configured for site '{site}'.",
+        )
+
+    project_name = row["project_id"]
+
+    try:
+        client = _get_ugp_client()
+        session_id = _load_project_for_site(client, project_name)
+        raw = client.get_connections(session_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"uGridPLAN fetch failed: {e}")
+
+    connections = []
+    for c in raw:
+        sid = c.get("Survey_ID") or c.get("survey_id") or c.get("Name", "")
+        gps_x = c.get("GPS_X") or c.get("gps_x") or c.get("longitude")
+        gps_y = c.get("GPS_Y") or c.get("gps_y") or c.get("latitude")
+        try:
+            gps_x = float(gps_x) if gps_x else None
+            gps_y = float(gps_y) if gps_y else None
+        except (ValueError, TypeError):
+            gps_x = gps_y = None
+
+        connections.append({
+            "survey_id": sid,
+            "customer_type": (
+                c.get("Customer_Type") or c.get("customer_type") or ""
+            ).strip(),
+            "customer_code": (
+                c.get("Customer_Code") or c.get("customer_code") or ""
+            ).strip(),
+            "meter_serial": (
+                c.get("Meter_Serial") or c.get("meter_serial") or ""
+            ).strip(),
+            "gps_lat": gps_y,
+            "gps_lon": gps_x,
+            "status": (
+                c.get("Status") or c.get("status") or ""
+            ).strip(),
+        })
+
+    return {
+        "site": site.upper(),
+        "count": len(connections),
+        "connections": connections,
+    }
+
+
 # ---------------------------------------------------------------------------
 
 @router.get("/preview")
