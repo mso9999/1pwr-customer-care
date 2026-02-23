@@ -16,7 +16,7 @@ interface FieldDef {
   half?: boolean;
 }
 
-const CUSTOMER_TYPES = ['HH', 'SME', 'CHU', 'SCP', 'SCH', 'GOV', 'COM', 'IND'];
+const CUSTOMER_TYPES = ['HH1', 'HH2', 'HH3', 'SME', 'CHU', 'SCP', 'SCH', 'HC', 'PWH', 'GOV', 'COM', 'IND'];
 
 const steps: { title: string; description: string; fields: FieldDef[] }[] = [
   {

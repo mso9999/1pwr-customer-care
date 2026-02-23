@@ -36,6 +36,24 @@ from country_config import (
 )
 
 
+def _matches_customer_type(ctype: str, filter_type: str) -> bool:
+    """Check if a customer type matches a filter, treating HH as aggregate of HH1+HH2+HH3."""
+    ct = ctype.upper()
+    ft = filter_type.upper()
+    if ft == "HH":
+        return ct.startswith("HH")
+    return ct == ft
+
+
+# SQL fragment to build account -> customer_type from the customers table
+_ACCT_CTYPE_SQL = """
+    SELECT a.account_number, c.customer_type
+    FROM accounts a
+    JOIN customers c ON a.customer_id = c.id
+    WHERE c.customer_type IS NOT NULL AND c.customer_type <> ''
+"""
+
+
 def _get_connection():
     from customer_api import get_connection
     return get_connection()
@@ -605,12 +623,9 @@ def load_curves_by_type(
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        # 1. Build account -> customer_type mapping from meters
+        # 1. Build account -> customer_type mapping from customers table
         acct_type: Dict[str, str] = {}
-        cursor.execute(
-            "SELECT account_number, customer_type FROM meters "
-            "WHERE customer_type IS NOT NULL AND customer_type <> ''"
-        )
+        cursor.execute(_ACCT_CTYPE_SQL)
         for row in cursor.fetchall():
             acct = str(row[0] or "").strip()
             ctype = str(row[1] or "").strip()
@@ -621,7 +636,7 @@ def load_curves_by_type(
             return {
                 "curves": [],
                 "quarterly": [],
-                "note": "No customer type data found in meters table.",
+                "note": "No customer type data found.",
             }
 
         # 2. Query transactions
@@ -731,28 +746,41 @@ def daily_load_profiles(
 
         from country_config import UTC_OFFSET_HOURS
 
-        # 1. Build account/meter → customer_type mapping from meters
+        # 1. Build account → customer_type from customers table, then
+        #    extend to meter_id via meters.account_number
         acct_type: Dict[str, str] = {}
         meter_type: Dict[str, str] = {}
-        site_filter_sql = " AND community = %s" if site else ""
-        site_params = (site.upper(),) if site else ()
+
+        site_filter_sql = ""
+        site_params: tuple = ()
+        if site:
+            site_filter_sql = " AND a.account_number LIKE %s"
+            site_params = (f"%{site.upper()}",)
 
         cursor.execute(
-            "SELECT meter_id, account_number, customer_type FROM meters "
-            "WHERE customer_type IS NOT NULL AND customer_type <> ''"
+            "SELECT a.account_number, c.customer_type "
+            "FROM accounts a "
+            "JOIN customers c ON a.customer_id = c.id "
+            "WHERE c.customer_type IS NOT NULL AND c.customer_type <> ''"
             + site_filter_sql,
             site_params,
         )
         for row in cursor.fetchall():
-            mid = str(row[0] or "").strip()
-            acct = str(row[1] or "").strip()
-            ctype = str(row[2] or "").strip()
-            if customer_type and ctype.upper() != customer_type.upper():
+            acct = str(row[0] or "").strip()
+            ctype = str(row[1] or "").strip()
+            if customer_type and not _matches_customer_type(ctype, customer_type):
                 continue
-            if mid:
-                meter_type[mid] = ctype
             if acct:
                 acct_type[acct] = ctype
+
+        # Map meter_ids to customer types via account_number
+        if acct_type:
+            cursor.execute("SELECT meter_id, account_number FROM meters")
+            for row in cursor.fetchall():
+                mid = str(row[0] or "").strip()
+                acct = str(row[1] or "").strip()
+                if mid and acct in acct_type:
+                    meter_type[mid] = acct_type[acct]
 
         if not meter_type and not acct_type:
             return {
@@ -1275,32 +1303,34 @@ def consumption_by_tenure(
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        # -- Fetch all meter data in one query --
-        cursor.execute(
-            "SELECT meter_id, account_number, customer_type FROM meters"
-        )
+        # -- Build account -> customer_type from customers table --
+        acct_type: Dict[str, str] = {}
+        cursor.execute(_ACCT_CTYPE_SQL)
+        for row in cursor.fetchall():
+            acct = str(row[0] or "").strip()
+            ctype = str(row[1] or "").strip()
+            if acct and ctype:
+                acct_type[acct] = ctype
+
+        # -- Fetch meter -> account mapping --
+        cursor.execute("SELECT meter_id, account_number FROM meters")
         all_meter_rows = cursor.fetchall()
 
-        # -- Build mappings from meters table --
-        acct_type: Dict[str, str] = {}
         meter_type_map: Dict[str, str] = {}
         meter_to_acct: Dict[str, str] = {}
 
         for row in all_meter_rows:
             mid = str(row[0] or "").strip()
             acct = str(row[1] or "").strip()
-            ctype = str(row[2] or "").strip()
 
             if mid and acct:
                 meter_to_acct[mid] = acct
                 meter_to_acct[mid.upper()] = acct
 
+            ctype = acct_type.get(acct, "")
             if mid and ctype:
                 meter_type_map[mid] = ctype
                 meter_type_map[mid.upper()] = ctype
-
-            if acct and ctype and acct not in acct_type:
-                acct_type[acct] = ctype
 
         # Enrich acct_type for accounts without a direct type, via JSON
         for row in all_meter_rows:
@@ -1626,11 +1656,14 @@ def meter_data_export(
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        # -- 1. Build meter_id -> (customer_type, community) mapping --
+        # -- 1. Build meter_id -> (customer_type, community) mapping via customers --
         meter_info: Dict[str, Dict[str, str]] = {}
         cursor.execute(
-            "SELECT meter_id, customer_type, community FROM meters "
-            "WHERE customer_type IS NOT NULL AND customer_type <> ''"
+            "SELECT m.meter_id, c.customer_type, m.community "
+            "FROM meters m "
+            "JOIN accounts a ON m.account_number = a.account_number "
+            "JOIN customers c ON a.customer_id = c.id "
+            "WHERE c.customer_type IS NOT NULL AND c.customer_type <> ''"
         )
         for row in cursor.fetchall():
             mid = str(row[0] or "").strip()
@@ -1673,7 +1706,7 @@ def meter_data_export(
             ctype = info["type"]
             community = info["site"]
 
-            if customer_type and ctype != customer_type.upper():
+            if customer_type and not _matches_customer_type(ctype, customer_type):
                 continue
 
             dt_val = row[1]

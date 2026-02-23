@@ -807,6 +807,9 @@ export default function FinancialPage() {
               onChange={(e) => setSelectedTenureType(e.target.value)}
               className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none"
             >
+              {tenureData.customer_types.some(t => t.startsWith('HH')) && (
+                <option value="HH">All HH (HH1+HH2+HH3)</option>
+              )}
               {tenureData.customer_types.map((ctype) => {
                 const stat = tenureData.type_stats?.find((s) => s.type === ctype);
                 return (

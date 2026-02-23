@@ -6,7 +6,7 @@ import { createRecord, getRecord, listRows, listSites } from '../lib/api';
 // Types & constants
 // ---------------------------------------------------------------------------
 
-const CUSTOMER_TYPES = ['HH', 'SME', 'CHU', 'SCP', 'SCH', 'GOV', 'COM', 'IND'];
+const CUSTOMER_TYPES = ['HH1', 'HH2', 'HH3', 'SME', 'CHU', 'SCP', 'SCH', 'HC', 'PWH', 'GOV', 'COM', 'IND'];
 
 interface SiteOption {
   code: string;

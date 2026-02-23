@@ -1549,7 +1549,7 @@ def employee_customer_data(
             "meter": {
                 "meter_id": meter_info.get("meter_id"),
                 "community": meter_info.get("community"),
-                "customer_type": meter_info.get("customer_type"),
+                "customer_type": profile.get("customer_type") or meter_info.get("customer_type"),
                 "village": meter_info.get("village_name"),
                 "status": meter_info.get("status"),
                 "connect_date": str(meter_info.get("customer_connect_date") or ""),

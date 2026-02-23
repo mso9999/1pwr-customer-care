@@ -777,6 +777,9 @@ export default function OMReportPage() {
               className="border rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-300 focus:outline-none bg-white"
             >
               <option value="">All Types</option>
+              {allProfileTypes.some(t => t.startsWith('HH')) && (
+                <option value="HH">All HH (HH1+HH2+HH3)</option>
+              )}
               {allProfileTypes.map(t => (
                 <option key={t} value={t}>{t}</option>
               ))}
