@@ -672,8 +672,11 @@ export interface LoadProfileResponse {
   note?: string;
 }
 
-export async function getDailyLoadProfiles(site?: string): Promise<LoadProfileResponse> {
-  const qs = site ? `?site=${encodeURIComponent(site)}` : '';
+export async function getDailyLoadProfiles(site?: string, customerType?: string): Promise<LoadProfileResponse> {
+  const params = new URLSearchParams();
+  if (site) params.set('site', site);
+  if (customerType) params.set('customer_type', customerType);
+  const qs = params.toString() ? `?${params}` : '';
   return request(`/om-report/daily-load-profiles${qs}`);
 }
 

@@ -15,6 +15,7 @@ import type {
   SiteConsumption, CumulativeTrend, AvgConsumptionTrend, SiteOverviewItem,
   LoadCurve, LoadCurveResponse, LoadProfileResponse,
 } from '../lib/api';
+import { useCountry } from '../contexts/CountryContext';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 
@@ -102,7 +103,11 @@ async function exportSingleFigure(el: HTMLElement, title: string) {
   pdf.save(`${title.replace(/\s+/g, '_')}.pdf`);
 }
 
-async function exportAllFigures(figures: { el: HTMLElement; title: string }[]) {
+async function exportAllFigures(
+  figures: { el: HTMLElement; title: string }[],
+  pdfPortfolioLabel: string,
+  pdfOrgLabel: string,
+) {
   const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pageW = pdf.internal.pageSize.getWidth();
   const pageH = pdf.internal.pageSize.getHeight();
@@ -115,10 +120,10 @@ async function exportAllFigures(figures: { el: HTMLElement; title: string }[]) {
   pdf.text('Quarterly Report', pageW / 2, 75, { align: 'center' });
   pdf.setFontSize(14);
   pdf.setTextColor(100, 100, 100);
-  pdf.text('Sotho Minigrid Portfolio (SMP)', pageW / 2, 95, { align: 'center' });
+  pdf.text(pdfPortfolioLabel, pageW / 2, 95, { align: 'center' });
   pdf.text(`Generated: ${new Date().toLocaleDateString()}`, pageW / 2, 110, { align: 'center' });
   pdf.setFontSize(12);
-  pdf.text('OnePower Lesotho', pageW / 2, 130, { align: 'center' });
+  pdf.text(pdfOrgLabel, pageW / 2, 130, { align: 'center' });
 
   for (let i = 0; i < figures.length; i++) {
     pdf.addPage();
@@ -196,6 +201,12 @@ function Figure({
 // ---------------------------------------------------------------------------
 
 export default function OMReportPage() {
+  const { config, country } = useCountry();
+  const currency = config?.currency || 'LSL';
+  const siteCodes = Object.keys(config?.sites || {}).sort();
+  const portfolioLabel = country === 'BN' ? 'Benin Minigrid Portfolio' : 'Sotho Minigrid Portfolio (SMP)';
+  const orgLabel = country === 'BN' ? 'MIONWA GENERATION' : 'OnePower Lesotho';
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [exporting, setExporting] = useState(false);
@@ -216,6 +227,8 @@ export default function OMReportPage() {
   const [loadProfiles, setLoadProfiles] = useState<Record<string, unknown>[]>([]);
   const [loadProfileTypes, setLoadProfileTypes] = useState<string[]>([]);
   const [profileSite, setProfileSite] = useState<string>('');
+  const [profileType, setProfileType] = useState<string>('');
+  const [allProfileTypes, setAllProfileTypes] = useState<string[]>([]);
   const [profileLoading, setProfileLoading] = useState(false);
 
   // Figure refs for PDF export
@@ -255,21 +268,24 @@ export default function OMReportPage() {
         setLoadCurveTypes(lc.customer_types || []);
         setLoadProfiles(lp.chart_data || []);
         setLoadProfileTypes(lp.customer_types || []);
+        setAllProfileTypes(lp.customer_types || []);
       } catch (e: any) {
         setError(e.message);
       } finally {
         setLoading(false);
       }
     }
+    setProfileSite('');
+    setProfileType('');
     loadAll();
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [country]);
 
-  // Site filter for load profiles
-  const handleProfileSiteChange = async (site: string) => {
-    setProfileSite(site);
+  // Shared reload for load profile filters (site + customer type)
+  const reloadProfiles = async (site: string, ctype: string) => {
     setProfileLoading(true);
     try {
-      const lp = await getDailyLoadProfiles(site || undefined);
+      const lp = await getDailyLoadProfiles(site || undefined, ctype || undefined);
       setLoadProfiles(lp.chart_data || []);
       setLoadProfileTypes(lp.customer_types || []);
     } catch {
@@ -280,8 +296,18 @@ export default function OMReportPage() {
     }
   };
 
-  // Known site codes for the dropdown
-  const SITE_CODES = ['MAK', 'MAS', 'SHG', 'LEB', 'SEH', 'MAT', 'TLH', 'TOS', 'SEB', 'RIB', 'KET', 'RTE', 'PTA', 'FSI', 'MTK'];
+  const handleProfileSiteChange = (site: string) => {
+    setProfileSite(site);
+    reloadProfiles(site, profileType);
+  };
+
+  const handleProfileTypeChange = (ctype: string) => {
+    setProfileType(ctype);
+    reloadProfiles(profileSite, ctype);
+  };
+
+  // Site codes come from the country config (/api/config → sites)
+  // so the dropdown always reflects the selected country/portfolio.
 
   const handleExportFigure = (key: string, title: string) => () => {
     const el = figRefs.current[key];
@@ -294,7 +320,7 @@ export default function OMReportPage() {
       const figures = Object.entries(figRefs.current)
         .filter(([, el]) => el !== null)
         .map(([key, el]) => ({ el: el!, title: key }));
-      await exportAllFigures(figures);
+      await exportAllFigures(figures, portfolioLabel, orgLabel);
     } finally {
       setExporting(false);
     }
@@ -333,8 +359,25 @@ export default function OMReportPage() {
   const salesBarData = (sales as any[]).map((s: any) => ({
     name: s.site,
     fullName: s.name,
-    lsl: Math.round(s.total_lsl || s.total_kwh || 0),
+    revenue: Math.round(s.total_lsl || s.total_kwh || 0),
   }));
+
+  // Enforce monotonicity on cumulative values (guard against negative quarterly amounts)
+  const cumulativeMonotonic = (() => {
+    let maxKwh = 0;
+    let maxLsl = 0;
+    return cumulative.map((point) => {
+      maxKwh = Math.max(maxKwh, point.cumulative_kwh);
+      maxLsl = Math.max(maxLsl, point.cumulative_lsl);
+      return { ...point, cumulative_kwh: maxKwh, cumulative_lsl: maxLsl };
+    });
+  })();
+
+  // Dynamic figure / table counters — increment only when a section renders
+  let _fig = 0;
+  let _tbl = 0;
+  const fig = () => ++_fig;
+  const tbl = () => ++_tbl;
 
   return (
     <div>
@@ -343,7 +386,7 @@ export default function OMReportPage() {
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold">Operations & Maintenance Report</h1>
-            <p className="text-blue-200 mt-1">Sotho Minigrid Portfolio (SMP)</p>
+            <p className="text-blue-200 mt-1">{portfolioLabel}</p>
             <p className="text-blue-300 text-sm mt-1">Auto-generated from Customer Care Portal data</p>
           </div>
           <button
@@ -373,7 +416,7 @@ export default function OMReportPage() {
             <p className="text-xs text-gray-400 mt-1">consumed all-time</p>
           </div>
           <div className="bg-white rounded-xl shadow p-4 border-l-4 border-amber-500">
-            <p className="text-xs text-gray-500 uppercase font-medium">&apos;000 LSL Revenue</p>
+            <p className="text-xs text-gray-500 uppercase font-medium">&apos;000 {currency} Revenue</p>
             <p className="text-2xl sm:text-3xl font-bold text-gray-800 mt-1">{overview.total_lsl_thousands.toLocaleString()}</p>
             <p className="text-xs text-gray-400 mt-1">sold all-time</p>
           </div>
@@ -389,7 +432,7 @@ export default function OMReportPage() {
       {siteOverview.length > 0 && (
         <Figure
           id="fig-site-overview"
-          title="Table 1: Portfolio Site Overview"
+          title={`Table ${tbl()}: Portfolio Site Overview`}
           subtitle="List of minigrids and PIH clinics with districts"
           figureRef={setFigRef('site-overview')}
           onExport={handleExportFigure('site-overview', 'Site_Overview')}
@@ -431,7 +474,7 @@ export default function OMReportPage() {
       {customerStats.length > 0 && (
         <Figure
           id="fig-customer-stats"
-          title="Figure 1: Customer Statistics by Concession"
+          title={`Figure ${fig()}: Customer Statistics by Concession`}
           subtitle={`Total: ${customerTotals.total?.toLocaleString()} customers, ${customerTotals.active?.toLocaleString()} active (${overview ? Math.round(customerTotals.active / customerTotals.total * 100) : 0}% activation)`}
           figureRef={setFigRef('customer-stats')}
           onExport={handleExportFigure('customer-stats', 'Customer_Statistics')}
@@ -459,7 +502,7 @@ export default function OMReportPage() {
       {growth.length > 0 && (
         <Figure
           id="fig-customer-growth"
-          title="Figure 2: Customer Connection Growth"
+          title={`Figure ${fig()}: Customer Connection Growth`}
           subtitle="Quarterly new connections and cumulative total since first site commissioned"
           figureRef={setFigRef('customer-growth')}
           onExport={handleExportFigure('customer-growth', 'Customer_Growth')}
@@ -483,7 +526,7 @@ export default function OMReportPage() {
       {consumptionBarData.length > 0 && (
         <Figure
           id="fig-consumption-site"
-          title="Figure 3: Electricity Consumption by Site"
+          title={`Figure ${fig()}: Electricity Consumption by Site`}
           subtitle={`Total: ${Math.round(consumption.reduce((a, s) => a + s.total_kwh, 0)).toLocaleString()} kWh`}
           figureRef={setFigRef('consumption-site')}
           onExport={handleExportFigure('consumption-site', 'Consumption_By_Site')}
@@ -512,8 +555,8 @@ export default function OMReportPage() {
       {salesBarData.length > 0 && (
         <Figure
           id="fig-sales-site"
-          title="Figure 4: Revenue by Site"
-          subtitle={`Total: LSL ${Math.round(salesBarData.reduce((a, s) => a + s.lsl, 0)).toLocaleString()}`}
+          title={`Figure ${fig()}: Revenue by Site`}
+          subtitle={`Total: ${currency} ${Math.round(salesBarData.reduce((a, s) => a + s.revenue, 0)).toLocaleString()}`}
           figureRef={setFigRef('sales-site')}
           onExport={handleExportFigure('sales-site', 'Revenue_By_Site')}
         >
@@ -524,10 +567,10 @@ export default function OMReportPage() {
               <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(v)} />
               <Tooltip
                 contentStyle={{ borderRadius: '8px', fontSize: '12px' }}
-                formatter={(value: any) => [`LSL ${Number(value).toLocaleString()}`, 'Revenue']}
+                formatter={(value: any) => [`${currency} ${Number(value).toLocaleString()}`, 'Revenue']}
                 labelFormatter={(label: any, payload: any) => payload?.[0]?.payload?.fullName || label}
               />
-              <Bar dataKey="lsl" name="LSL Revenue" radius={[4, 4, 0, 0]}>
+              <Bar dataKey="revenue" name={`${currency} Revenue`} radius={[4, 4, 0, 0]}>
                 {salesBarData.map((_, i) => (
                   <Cell key={i} fill={COLORS[i % COLORS.length]} />
                 ))}
@@ -538,16 +581,16 @@ export default function OMReportPage() {
       )}
 
       {/* Cumulative Consumption (Figure 3 in report) */}
-      {cumulative.length > 0 && (
+      {cumulativeMonotonic.length > 0 && (
         <Figure
           id="fig-cumulative-consumption"
-          title="Figure 5: Cumulative Electricity Consumed"
+          title={`Figure ${fig()}: Cumulative Electricity Consumed`}
           subtitle="Running total since first site was commissioned"
           figureRef={setFigRef('cumulative-consumption')}
           onExport={handleExportFigure('cumulative-consumption', 'Cumulative_Consumption')}
         >
           <ResponsiveContainer width="100%" height={350}>
-            <AreaChart data={cumulative} margin={{ top: 5, right: 20, left: 0, bottom: 60 }}>
+            <AreaChart data={cumulativeMonotonic} margin={{ top: 5, right: 20, left: 0, bottom: 60 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="quarter" angle={-35} textAnchor="end" tick={{ fontSize: 10 }} interval={0} />
               <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => `${(v/1000).toFixed(0)}k`} />
@@ -564,26 +607,26 @@ export default function OMReportPage() {
       )}
 
       {/* Cumulative Sales (Figure 4 in report) */}
-      {cumulative.length > 0 && (
+      {cumulativeMonotonic.length > 0 && (
         <Figure
           id="fig-cumulative-sales"
-          title="Figure 6: Cumulative Electricity Sales"
+          title={`Figure ${fig()}: Cumulative Electricity Sales`}
           subtitle="Running total revenue since first site was commissioned"
           figureRef={setFigRef('cumulative-sales')}
           onExport={handleExportFigure('cumulative-sales', 'Cumulative_Sales')}
         >
           <ResponsiveContainer width="100%" height={350}>
-            <AreaChart data={cumulative} margin={{ top: 5, right: 20, left: 0, bottom: 60 }}>
+            <AreaChart data={cumulativeMonotonic} margin={{ top: 5, right: 20, left: 0, bottom: 60 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="quarter" angle={-35} textAnchor="end" tick={{ fontSize: 10 }} interval={0} />
               <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => `${(v/1000).toFixed(0)}k`} />
               <Tooltip
                 contentStyle={{ borderRadius: '8px', fontSize: '12px' }}
-                formatter={(value: any) => [`LSL ${Number(value).toLocaleString()}`, '']}
+                formatter={(value: any) => [`${currency} ${Number(value).toLocaleString()}`, '']}
               />
               <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '8px' }} />
-              <Area dataKey="cumulative_lsl" name="Cumulative LSL" stroke="#d97706" fill="#fde68a" fillOpacity={0.4} strokeWidth={2} />
-              <Area dataKey="lsl" name="Quarterly LSL" stroke="#ea580c" fill="#fed7aa" fillOpacity={0.3} strokeWidth={1.5} />
+              <Area dataKey="cumulative_lsl" name={`Cumulative ${currency}`} stroke="#d97706" fill="#fde68a" fillOpacity={0.4} strokeWidth={2} />
+              <Area dataKey="lsl" name={`Quarterly ${currency}`} stroke="#ea580c" fill="#fed7aa" fillOpacity={0.3} strokeWidth={1.5} />
             </AreaChart>
           </ResponsiveContainer>
         </Figure>
@@ -593,7 +636,7 @@ export default function OMReportPage() {
       {cumulative.length > 0 && (
         <Figure
           id="fig-quarterly-consumption"
-          title="Figure 7: Quarterly Consumption"
+          title={`Figure ${fig()}: Quarterly Consumption`}
           subtitle="Total electricity consumed per quarter"
           figureRef={setFigRef('quarterly-consumption')}
           onExport={handleExportFigure('quarterly-consumption', 'Quarterly_Consumption')}
@@ -617,7 +660,7 @@ export default function OMReportPage() {
       {cumulative.length > 0 && (
         <Figure
           id="fig-quarterly-sales"
-          title="Figure 8: Quarterly Sales"
+          title={`Figure ${fig()}: Quarterly Sales`}
           subtitle="Total revenue per quarter"
           figureRef={setFigRef('quarterly-sales')}
           onExport={handleExportFigure('quarterly-sales', 'Quarterly_Sales')}
@@ -629,9 +672,9 @@ export default function OMReportPage() {
               <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => `${(v/1000).toFixed(0)}k`} />
               <Tooltip
                 contentStyle={{ borderRadius: '8px', fontSize: '12px' }}
-                formatter={(value: any) => [`LSL ${Number(value).toLocaleString()}`, 'Revenue']}
+                formatter={(value: any) => [`${currency} ${Number(value).toLocaleString()}`, 'Revenue']}
               />
-              <Bar dataKey="lsl" name="LSL" fill="#d97706" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="lsl" name={currency} fill="#d97706" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </Figure>
@@ -641,7 +684,7 @@ export default function OMReportPage() {
       {avgTrend.length > 0 && (
         <Figure
           id="fig-avg-consumption"
-          title="Figure 9: Average Daily Consumption per Customer"
+          title={`Figure ${fig()}: Average Daily Consumption per Customer`}
           subtitle="Trend in average daily kWh consumption per customer over time"
           figureRef={setFigRef('avg-consumption')}
           onExport={handleExportFigure('avg-consumption', 'Avg_Consumption_Trend')}
@@ -665,8 +708,8 @@ export default function OMReportPage() {
       {avgTrend.length > 0 && (
         <Figure
           id="fig-avg-sales"
-          title="Figure 10: Average Daily Sales per Customer"
-          subtitle="Trend in average daily LSL revenue per customer over time"
+          title={`Figure ${fig()}: Average Daily Revenue per Customer`}
+          subtitle={`Trend in average daily ${currency} revenue per customer over time`}
           figureRef={setFigRef('avg-sales')}
           onExport={handleExportFigure('avg-sales', 'Avg_Sales_Trend')}
         >
@@ -674,12 +717,12 @@ export default function OMReportPage() {
             <ComposedChart data={avgTrend} margin={{ top: 5, right: 20, left: 0, bottom: 60 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="quarter" angle={-35} textAnchor="end" tick={{ fontSize: 10 }} interval={0} />
-              <YAxis yAxisId="left" tick={{ fontSize: 11 }} label={{ value: 'LSL/day/customer', angle: -90, position: 'insideLeft', style: { fontSize: 10 } }} />
+              <YAxis yAxisId="left" tick={{ fontSize: 11 }} label={{ value: `${currency}/day/customer`, angle: -90, position: 'insideLeft', style: { fontSize: 10 } }} />
               <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 11 }} label={{ value: 'Customers', angle: 90, position: 'insideRight', style: { fontSize: 10 } }} />
               <Tooltip contentStyle={{ borderRadius: '8px', fontSize: '12px' }} />
               <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '8px' }} />
               <Bar yAxisId="right" dataKey="customers" name="Customers" fill="#e2e8f0" radius={[4, 4, 0, 0]} />
-              <Line yAxisId="left" dataKey="avg_daily_lsl_per_customer" name="Avg LSL/day" stroke="#d97706" strokeWidth={2.5} dot={{ r: 3 }} />
+              <Line yAxisId="left" dataKey="avg_daily_lsl_per_customer" name={`Avg ${currency}/day`} stroke="#d97706" strokeWidth={2.5} dot={{ r: 3 }} />
             </ComposedChart>
           </ResponsiveContainer>
         </Figure>
@@ -691,24 +734,39 @@ export default function OMReportPage() {
 
       <Figure
         id="fig-daily-load-profiles"
-        title="Figure 11: Average Daily Load Curves by Customer Type"
+        title={`Figure ${fig()}: Average Daily Load Curves by Customer Type`}
         subtitle="Average power demand (kW) by hour of day, derived from 10-minute meter readings"
         figureRef={setFigRef('daily-load-profiles')}
         onExport={handleExportFigure('daily-load-profiles', 'Daily_Load_Profiles')}
       >
-        {/* Site filter dropdown */}
-        <div className="flex items-center gap-3 mb-4">
-          <label className="text-sm font-medium text-gray-600">Site:</label>
-          <select
-            value={profileSite}
-            onChange={e => handleProfileSiteChange(e.target.value)}
-            className="border rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-300 focus:outline-none bg-white"
-          >
-            <option value="">All Sites</option>
-            {SITE_CODES.map(s => (
-              <option key={s} value={s}>{s}</option>
-            ))}
-          </select>
+        {/* Site + customer type filter dropdowns */}
+        <div className="flex flex-wrap items-center gap-4 mb-4">
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium text-gray-600">Site:</label>
+            <select
+              value={profileSite}
+              onChange={e => handleProfileSiteChange(e.target.value)}
+              className="border rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-300 focus:outline-none bg-white"
+            >
+              <option value="">All Sites</option>
+              {siteCodes.map(s => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-sm font-medium text-gray-600">Customer Type:</label>
+            <select
+              value={profileType}
+              onChange={e => handleProfileTypeChange(e.target.value)}
+              className="border rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-blue-300 focus:outline-none bg-white"
+            >
+              <option value="">All Types</option>
+              {allProfileTypes.map(t => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+          </div>
           {profileLoading && (
             <div className="animate-spin w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full" />
           )}
@@ -755,7 +813,7 @@ export default function OMReportPage() {
           {/* Average Daily Consumption by Customer Type (bar chart) */}
           <Figure
             id="fig-consumption-by-type"
-            title="Figure 11: Average Daily Consumption by Customer Type"
+            title={`Figure ${fig()}: Average Daily Consumption by Customer Type`}
             subtitle={`Based on ${loadCurves.reduce((a, c) => a + c.customer_count, 0)} typed customers from uGridPLAN sync`}
             figureRef={setFigRef('consumption-by-type')}
             onExport={handleExportFigure('consumption-by-type', 'Consumption_By_Type')}
@@ -789,7 +847,7 @@ export default function OMReportPage() {
           {/* Consumption share by type (pie-like horizontal bar) */}
           <Figure
             id="fig-consumption-share"
-            title="Figure 12: Total Consumption by Customer Type"
+            title={`Figure ${fig()}: Total Consumption by Customer Type`}
             subtitle="Electricity consumed (kWh) and revenue (LSL) by end-user category"
             figureRef={setFigRef('consumption-share')}
             onExport={handleExportFigure('consumption-share', 'Consumption_Share_By_Type')}
@@ -823,7 +881,7 @@ export default function OMReportPage() {
                     <th className="px-3 py-2 text-left font-medium text-gray-600">Type</th>
                     <th className="px-3 py-2 text-right font-medium text-gray-600">Customers</th>
                     <th className="px-3 py-2 text-right font-medium text-gray-600">Total kWh</th>
-                    <th className="px-3 py-2 text-right font-medium text-gray-600">Total LSL</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">Total {currency}</th>
                     <th className="px-3 py-2 text-right font-medium text-gray-600">Avg kWh/day</th>
                   </tr>
                 </thead>
@@ -851,7 +909,7 @@ export default function OMReportPage() {
       {loadCurveQuarterly.length > 0 && loadCurveTypes.length > 0 && (
         <Figure
           id="fig-quarterly-by-type"
-          title="Figure 13: Quarterly Consumption by Customer Type"
+          title={`Figure ${fig()}: Quarterly Consumption by Customer Type`}
           subtitle="Stacked breakdown of electricity consumed per quarter by end-user category"
           figureRef={setFigRef('quarterly-by-type')}
           onExport={handleExportFigure('quarterly-by-type', 'Quarterly_By_Type')}

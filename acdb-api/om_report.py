@@ -466,8 +466,8 @@ def cumulative_trends(user: CurrentUser = Depends(require_employee)):
         for q in sorted_quarters:
             kwh = quarterly_kwh.get(q, 0)
             lsl = quarterly_lsl.get(q, 0)
-            cum_kwh += kwh
-            cum_lsl += lsl
+            cum_kwh += max(kwh, 0)
+            cum_lsl += max(lsl, 0)
             result.append({
                 "quarter": q,
                 "kwh": round(kwh, 2),
@@ -720,6 +720,7 @@ def load_curves_by_type(
 @router.get("/daily-load-profiles")
 def daily_load_profiles(
     site: Optional[str] = Query(None, description="Filter to site code (e.g. MAK)"),
+    customer_type: Optional[str] = Query(None, description="Filter to customer type (e.g. HH, SME)"),
     user: CurrentUser = Depends(require_employee),
 ):
     """
@@ -748,11 +749,15 @@ def daily_load_profiles(
             mid = str(row[0] or "").strip()
             ctype = str(row[1] or "").strip()
             if mid and ctype:
+                if customer_type and ctype.upper() != customer_type.upper():
+                    continue
                 meter_type[mid] = ctype
 
         if not meter_type:
             return {
                 "profiles": [],
+                "chart_data": [],
+                "customer_types": [],
                 "note": "No customer type data found in meters table.",
             }
 
