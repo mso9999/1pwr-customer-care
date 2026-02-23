@@ -24,10 +24,15 @@ def _get_connection():
 
 
 def _extract_site(account_number: str) -> str:
-    """Extract site code from the last 3 chars of account number (e.g. 0003MAS -> MAS)."""
+    """Extract site code from the last 3 chars of account number (e.g. 0003MAS -> MAS).
+
+    Only returns a value if it matches a known site code.
+    """
+    from country_config import KNOWN_SITES
     if not account_number:
         return ""
-    return account_number.strip()[-3:].upper()
+    candidate = account_number.strip()[-3:].upper()
+    return candidate if candidate in KNOWN_SITES else ""
 
 
 @router.get("/site-summary")
@@ -101,6 +106,9 @@ def site_summary(user: CurrentUser = Depends(require_employee)):
                         results[site]["lsl_thousands"] += float(row[1] or 0) / 1000.0
             except Exception as e:
                 logger.warning("Failed to query monthly_transactions: %s", e)
+
+    from country_config import KNOWN_SITES
+    results = {k: v for k, v in results.items() if k in KNOWN_SITES}
 
     total_mwh = sum(s["mwh"] for s in results.values())
     total_lsl = sum(s["lsl_thousands"] for s in results.values())

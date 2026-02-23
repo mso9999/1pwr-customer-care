@@ -509,6 +509,8 @@ def customer_search(
 @app.get("/api/sites")
 def list_sites():
     """List all distinct concession names (sites) in the customer database."""
+    from country_config import KNOWN_SITES
+
     sql = """
         SELECT community, COUNT(*) AS customer_count
         FROM customers
@@ -525,7 +527,7 @@ def list_sites():
 
             sites = [
                 {"concession": row[0], "customer_count": row[1]}
-                for row in rows if row[0]
+                for row in rows if row[0] and row[0] in KNOWN_SITES
             ]
 
             return {"sites": sites, "total_sites": len(sites)}
