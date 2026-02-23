@@ -104,7 +104,7 @@ def report_overview(user: CurrentUser = Depends(require_employee)):
         terminated = 0
         seen_sites: set = set()
         for row in cursor.fetchall():
-            comm = str(row[0] or "").strip()
+            comm = str(row[0] or "").strip().upper()
             if comm not in KNOWN_SITES:
                 continue
             total_customers += 1
@@ -188,7 +188,7 @@ def customer_stats_by_site(
         sites: Dict[str, Dict[str, int]] = defaultdict(lambda: {"total": 0, "active": 0, "new": 0})
 
         for row in rows:
-            concession = str(row[0] or "").strip()
+            concession = str(row[0] or "").strip().upper()
             if not concession or concession not in KNOWN_SITES:
                 continue
 
@@ -356,7 +356,7 @@ def sales_by_site(
                     acct = str(r[0] or "").strip()
                     ym = str(r[1] or "").strip()
                     lsl = float(r[2] or 0)
-                    community = str(r[3] or "").strip()
+                    community = str(r[3] or "").strip().upper()
                     if acct and ym and lsl > 0:
                         try:
                             y, m = int(ym[:4]), int(ym[5:7])
@@ -395,7 +395,7 @@ def sales_by_site(
         site_totals: Dict[str, float] = defaultdict(float)
 
         for acct, dt_or_ym, lsl, community in rows:
-            site = community if community else _extract_site(acct)
+            site = (community.upper() if community else "") or _extract_site(acct)
             if not site or site not in KNOWN_SITES:
                 continue
             q = _date_to_quarter(dt_or_ym) if dt_or_ym else "Unknown"
@@ -575,7 +575,7 @@ def site_overview(user: CurrentUser = Depends(require_employee)):
 
         sites = []
         for row in rows:
-            name = str(row[0]).strip()
+            name = str(row[0]).strip().upper()
             if name not in KNOWN_SITES:
                 continue
             count = row[1]
@@ -813,44 +813,57 @@ def daily_load_profiles(
         except Exception as e:
             logger.warning("meter_readings query failed: %s", e)
 
-        # 3. Fallback: hourly_consumption (hourly kWh → avg kW)
-        if not type_hour_kw:
-            data_source = "hourly_consumption"
-            try:
-                cursor.execute(
-                    "SELECT account_number, reading_hour, kwh FROM hourly_consumption "
-                    "WHERE kwh IS NOT NULL AND kwh > 0"
-                    + (" AND community = %s" if site else ""),
-                    (site.upper(),) if site else (),
-                )
-                for row in cursor.fetchall():
-                    acct = str(row[0] or "").strip()
-                    ctype = acct_type.get(acct)
-                    if not ctype:
+        # 3. Also pull hourly_consumption for accounts not already covered
+        #    by meter_readings. This is the primary data source for most LS
+        #    accounts and the sole source for BN.
+        mr_accounts = set()
+        for accts in type_meter_count.values():
+            mr_accounts.update(accts)
+
+        hc_source = False
+        try:
+            cursor.execute(
+                "SELECT account_number, reading_hour, kwh FROM hourly_consumption "
+                "WHERE kwh IS NOT NULL AND kwh > 0"
+                + (" AND community = %s" if site else ""),
+                (site.upper(),) if site else (),
+            )
+            for row in cursor.fetchall():
+                acct = str(row[0] or "").strip()
+                if acct in mr_accounts:
+                    continue
+                ctype = acct_type.get(acct)
+                if not ctype:
+                    continue
+                dt = row[1]
+                kwh = row[2]
+                if dt is None or kwh is None:
+                    continue
+                try:
+                    kw_val = float(kwh)
+                except (ValueError, TypeError):
+                    continue
+                try:
+                    if hasattr(dt, 'hour'):
+                        local_dt = dt.replace(tzinfo=None) + timedelta(hours=UTC_OFFSET_HOURS) if hasattr(dt, 'tzinfo') and dt.tzinfo else dt + timedelta(hours=UTC_OFFSET_HOURS)
+                        hour = local_dt.hour
+                    elif isinstance(dt, str):
+                        hour = (int(dt.split(" ")[1].split(":")[0]) + UTC_OFFSET_HOURS) % 24
+                    else:
                         continue
-                    dt = row[1]
-                    kwh = row[2]
-                    if dt is None or kwh is None:
-                        continue
-                    try:
-                        kw_val = float(kwh)
-                    except (ValueError, TypeError):
-                        continue
-                    try:
-                        if hasattr(dt, 'hour'):
-                            local_dt = dt.replace(tzinfo=None) + timedelta(hours=UTC_OFFSET_HOURS) if hasattr(dt, 'tzinfo') and dt.tzinfo else dt + timedelta(hours=UTC_OFFSET_HOURS)
-                            hour = local_dt.hour
-                        elif isinstance(dt, str):
-                            hour = (int(dt.split(" ")[1].split(":")[0]) + UTC_OFFSET_HOURS) % 24
-                        else:
-                            continue
-                    except (IndexError, ValueError, AttributeError):
-                        continue
-                    type_hour_kw[ctype][hour].append(kw_val)
-                    type_meter_count[ctype].add(acct)
-                    total_readings += 1
-            except Exception as e:
-                logger.warning("hourly_consumption query failed: %s", e)
+                except (IndexError, ValueError, AttributeError):
+                    continue
+                type_hour_kw[ctype][hour].append(kw_val)
+                type_meter_count[ctype].add(acct)
+                total_readings += 1
+                hc_source = True
+        except Exception as e:
+            logger.warning("hourly_consumption query failed: %s", e)
+
+        if hc_source:
+            data_source = ("meter_readings+hourly_consumption"
+                           if data_source == "meter_readings"
+                           else "hourly_consumption")
 
         if not type_hour_kw:
             return {
@@ -939,7 +952,7 @@ def arpu_time_series(user: CurrentUser = Depends(require_employee)):
                     acct = str(row[0] or "").strip()
                     ym = str(row[1] or "").strip()
                     lsl = float(row[2] or 0)
-                    community = str(row[3] or "").strip()
+                    community = str(row[3] or "").strip().upper()
                     if not acct or not ym or lsl <= 0:
                         continue
                     try:
@@ -981,10 +994,10 @@ def arpu_time_series(user: CurrentUser = Depends(require_employee)):
                 acct = str(row[0] or "").strip()
                 q = _date_to_quarter(row[1])
                 lsl = float(row[2] or 0)
-                community = row[3] if len(row) > 3 else ""
+                community = str(row[3] or "").strip().upper() if len(row) > 3 else ""
                 if not q or not acct:
                     continue
-                site = community if community else _extract_site(acct)
+                site = community or _extract_site(acct)
 
                 q_revenue[q] += lsl
                 if site and len(site) >= 2:
@@ -1094,7 +1107,7 @@ def monthly_arpu_time_series(user: CurrentUser = Depends(require_employee)):
                     acct = str(row[0] or "").strip()
                     ym = str(row[1] or "").strip()
                     lsl = float(row[2] or 0)
-                    community = str(row[3] or "").strip()
+                    community = str(row[3] or "").strip().upper()
                     if acct and ym and lsl > 0:
                         txn_rows.append((acct, ym, lsl, community))
                 if txn_rows:
@@ -1132,7 +1145,7 @@ def monthly_arpu_time_series(user: CurrentUser = Depends(require_employee)):
         acct_site: Dict[str, str] = {}
 
         for acct, m, lsl, community in txn_rows:
-            site = community if community else _extract_site(acct)
+            site = (community.upper() if community else "") or _extract_site(acct)
             m_revenue[m] += lsl
             if site and len(site) >= 2:
                 m_site_revenue[m][site] += lsl

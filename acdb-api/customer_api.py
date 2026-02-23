@@ -526,8 +526,8 @@ def list_sites():
             rows = cursor.fetchall()
 
             sites = [
-                {"concession": row[0], "customer_count": row[1]}
-                for row in rows if row[0] and row[0] in KNOWN_SITES
+                {"concession": row[0].strip().upper(), "customer_count": row[1]}
+                for row in rows if row[0] and row[0].strip().upper() in KNOWN_SITES
             ]
 
             return {"sites": sites, "total_sites": len(sites)}
