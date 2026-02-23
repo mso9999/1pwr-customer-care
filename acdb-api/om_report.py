@@ -725,35 +725,40 @@ def daily_load_profiles(
 ):
     """
     Average 24-hour load profiles by customer type.
-    Returns average kW for each hour (0-23) per type, derived from
-    10-minute meter readings in meter_readings.
+
+    Data source priority:
+      1. meter_readings (10-min interval power_kw) — LS via ThunderCloud
+      2. hourly_consumption (hourly kWh from Koios CSV) — BN fallback
     """
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        # 1. Build meter_id -> customer_type mapping from meters
+        from country_config import UTC_OFFSET_HOURS
+
+        # 1. Build account/meter → customer_type mapping from meters
+        acct_type: Dict[str, str] = {}
         meter_type: Dict[str, str] = {}
-        if site:
-            cursor.execute(
-                "SELECT meter_id, customer_type FROM meters "
-                "WHERE customer_type IS NOT NULL AND customer_type <> '' "
-                "AND community = %s",
-                (site.upper(),),
-            )
-        else:
-            cursor.execute(
-                "SELECT meter_id, customer_type FROM meters "
-                "WHERE customer_type IS NOT NULL AND customer_type <> ''"
-            )
+        site_filter_sql = " AND community = %s" if site else ""
+        site_params = (site.upper(),) if site else ()
+
+        cursor.execute(
+            "SELECT meter_id, account_number, customer_type FROM meters "
+            "WHERE customer_type IS NOT NULL AND customer_type <> ''"
+            + site_filter_sql,
+            site_params,
+        )
         for row in cursor.fetchall():
             mid = str(row[0] or "").strip()
-            ctype = str(row[1] or "").strip()
-            if mid and ctype:
-                if customer_type and ctype.upper() != customer_type.upper():
-                    continue
+            acct = str(row[1] or "").strip()
+            ctype = str(row[2] or "").strip()
+            if customer_type and ctype.upper() != customer_type.upper():
+                continue
+            if mid:
                 meter_type[mid] = ctype
+            if acct:
+                acct_type[acct] = ctype
 
-        if not meter_type:
+        if not meter_type and not acct_type:
             return {
                 "profiles": [],
                 "chart_data": [],
@@ -761,44 +766,37 @@ def daily_load_profiles(
                 "note": "No customer type data found in meters table.",
             }
 
-        # 2. Query meter_readings for timestamped readings
-        try:
-            if site:
-                cursor.execute(
-                    "SELECT meter_id, reading_time, power_kw FROM meter_readings "
-                    "WHERE community = %s AND power_kw IS NOT NULL",
-                    (site.upper(),),
-                )
-            else:
-                cursor.execute(
-                    "SELECT meter_id, reading_time, power_kw FROM meter_readings "
-                    "WHERE power_kw IS NOT NULL"
-                )
+        # 2. Try meter_readings first (10-min interval power data)
+        type_hour_kw: Dict[str, Dict[int, List[float]]] = defaultdict(
+            lambda: defaultdict(list)
+        )
+        type_meter_count: Dict[str, set] = defaultdict(set)
+        total_readings = 0
+        data_source = "meter_readings"
 
-            type_hour_kw: Dict[str, Dict[int, List[float]]] = defaultdict(
-                lambda: defaultdict(list)
+        try:
+            cursor.execute(
+                "SELECT meter_id, reading_time, power_kw FROM meter_readings "
+                "WHERE power_kw IS NOT NULL" + (
+                    " AND community = %s" if site else ""
+                ),
+                (site.upper(),) if site else (),
             )
-            type_meter_count: Dict[str, set] = defaultdict(set)
-            total_readings = 0
 
             for row in cursor.fetchall():
                 mid = str(row[0] or "").strip()
                 ctype = meter_type.get(mid)
                 if not ctype:
                     continue
-
                 dt = row[1]
                 kw = row[2]
                 if dt is None or kw is None:
                     continue
-
                 try:
                     kw_val = float(kw)
                 except (ValueError, TypeError):
                     continue
-
                 try:
-                    from country_config import UTC_OFFSET_HOURS
                     if hasattr(dt, 'hour'):
                         local_dt = dt.replace(tzinfo=None) + timedelta(hours=UTC_OFFSET_HOURS) if hasattr(dt, 'tzinfo') and dt.tzinfo else dt + timedelta(hours=UTC_OFFSET_HOURS)
                         hour = local_dt.hour
@@ -808,61 +806,101 @@ def daily_load_profiles(
                         continue
                 except (IndexError, ValueError, AttributeError):
                     continue
-
                 type_hour_kw[ctype][hour].append(kw_val)
                 type_meter_count[ctype].add(mid)
                 total_readings += 1
 
-            if not type_hour_kw:
-                return {
-                    "profiles": [],
-                    "note": "No timestamped meter readings found.",
-                }
+        except Exception as e:
+            logger.warning("meter_readings query failed: %s", e)
 
-            # 3. Build 24-hour profiles
-            profiles = []
-            for ctype in sorted(type_hour_kw.keys()):
-                hourly = []
-                for h in range(24):
-                    readings = type_hour_kw[ctype].get(h, [])
-                    avg_kw = sum(readings) / len(readings) if readings else 0
-                    hourly.append({
-                        "hour": h,
-                        "avg_kw": round(avg_kw, 4),
-                        "readings": len(readings),
-                    })
+        # 3. Fallback: hourly_consumption (hourly kWh → avg kW)
+        if not type_hour_kw:
+            data_source = "hourly_consumption"
+            try:
+                cursor.execute(
+                    "SELECT account_number, reading_hour, kwh FROM hourly_consumption "
+                    "WHERE kwh IS NOT NULL AND kwh > 0"
+                    + (" AND community = %s" if site else ""),
+                    (site.upper(),) if site else (),
+                )
+                for row in cursor.fetchall():
+                    acct = str(row[0] or "").strip()
+                    ctype = acct_type.get(acct)
+                    if not ctype:
+                        continue
+                    dt = row[1]
+                    kwh = row[2]
+                    if dt is None or kwh is None:
+                        continue
+                    try:
+                        kw_val = float(kwh)
+                    except (ValueError, TypeError):
+                        continue
+                    try:
+                        if hasattr(dt, 'hour'):
+                            local_dt = dt.replace(tzinfo=None) + timedelta(hours=UTC_OFFSET_HOURS) if hasattr(dt, 'tzinfo') and dt.tzinfo else dt + timedelta(hours=UTC_OFFSET_HOURS)
+                            hour = local_dt.hour
+                        elif isinstance(dt, str):
+                            hour = (int(dt.split(" ")[1].split(":")[0]) + UTC_OFFSET_HOURS) % 24
+                        else:
+                            continue
+                    except (IndexError, ValueError, AttributeError):
+                        continue
+                    type_hour_kw[ctype][hour].append(kw_val)
+                    type_meter_count[ctype].add(acct)
+                    total_readings += 1
+            except Exception as e:
+                logger.warning("hourly_consumption query failed: %s", e)
 
-                profiles.append({
-                    "type": ctype,
-                    "meter_count": len(type_meter_count[ctype]),
-                    "hourly": hourly,
-                    "peak_hour": max(range(24), key=lambda h: sum(type_hour_kw[ctype].get(h, [0])) / max(len(type_hour_kw[ctype].get(h, [1])), 1)),
-                    "peak_kw": round(max(
-                        sum(type_hour_kw[ctype].get(h, [0])) / max(len(type_hour_kw[ctype].get(h, [1])), 1)
-                        for h in range(24)
-                    ), 4),
-                })
-
-            chart_data = []
-            for h in range(24):
-                point: Dict[str, Any] = {"hour": f"{h:02d}:00"}
-                for ctype in sorted(type_hour_kw.keys()):
-                    readings = type_hour_kw[ctype].get(h, [])
-                    point[ctype] = round(sum(readings) / len(readings), 4) if readings else 0
-                chart_data.append(point)
-
+        if not type_hour_kw:
             return {
-                "profiles": profiles,
-                "chart_data": chart_data,
-                "customer_types": sorted(type_hour_kw.keys()),
-                "total_readings": total_readings,
-                "meter_source": "meters",
-                "site_filter": site,
+                "profiles": [],
+                "chart_data": [],
+                "customer_types": [],
+                "note": "No meter reading data found.",
             }
 
-        except Exception as e:
-            logger.warning("Failed to query meter_readings for load profiles: %s", e)
-            return {"profiles": [], "error": str(e)}
+        # 4. Build 24-hour profiles
+        profiles = []
+        for ctype in sorted(type_hour_kw.keys()):
+            hourly = []
+            for h in range(24):
+                readings = type_hour_kw[ctype].get(h, [])
+                avg_kw = sum(readings) / len(readings) if readings else 0
+                hourly.append({
+                    "hour": h,
+                    "avg_kw": round(avg_kw, 4),
+                    "readings": len(readings),
+                })
+
+            profiles.append({
+                "type": ctype,
+                "meter_count": len(type_meter_count[ctype]),
+                "hourly": hourly,
+                "peak_hour": max(range(24), key=lambda h: sum(type_hour_kw[ctype].get(h, [0])) / max(len(type_hour_kw[ctype].get(h, [1])), 1)),
+                "peak_kw": round(max(
+                    sum(type_hour_kw[ctype].get(h, [0])) / max(len(type_hour_kw[ctype].get(h, [1])), 1)
+                    for h in range(24)
+                ), 4),
+            })
+
+        chart_data = []
+        for h in range(24):
+            point: Dict[str, Any] = {"hour": f"{h:02d}:00"}
+            for ctype in sorted(type_hour_kw.keys()):
+                readings = type_hour_kw[ctype].get(h, [])
+                point[ctype] = round(sum(readings) / len(readings), 4) if readings else 0
+            chart_data.append(point)
+
+        return {
+            "profiles": profiles,
+            "chart_data": chart_data,
+            "customer_types": sorted(type_hour_kw.keys()),
+            "total_readings": total_readings,
+            "data_source": data_source,
+            "site_filter": site,
+            "customer_type_filter": customer_type,
+        }
 
 
 # ---------------------------------------------------------------------------
