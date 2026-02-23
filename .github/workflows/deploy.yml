@@ -96,24 +96,38 @@ jobs:
               sudo -u cc_api venv/bin/pip install -r requirements.txt --quiet 2>/dev/null
             fi
 
-            # Restart the API service
+            # Restart both API services (LS on :8100, BN on :8101)
             sudo systemctl restart 1pdb-api
-            echo "Backend deployed and service restarted"
+            sudo systemctl restart 1pdb-api-bn
+            echo "Backend deployed and both services restarted"
           DEPLOY_SCRIPT
 
-      - name: Health check
+      - name: Health check (LS)
         run: |
-          echo "Waiting for service to start..."
+          echo "Waiting for services to start..."
           sleep 8
           for i in 1 2 3; do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://cc.1pwrafrica.com/api/health)
-            echo "Health check attempt $i: HTTP $STATUS"
+            echo "LS health check attempt $i: HTTP $STATUS"
             if [ "$STATUS" = "200" ]; then
-              # Fetch and display health details
               curl -s https://cc.1pwrafrica.com/api/health | python3 -m json.tool
               exit 0
             fi
             sleep 5
           done
-          echo "WARNING: Health check failed after 3 attempts"
+          echo "WARNING: LS health check failed after 3 attempts"
+          exit 1
+
+      - name: Health check (BN)
+        run: |
+          for i in 1 2 3; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://cc.1pwrafrica.com/api/bn/health)
+            echo "BN health check attempt $i: HTTP $STATUS"
+            if [ "$STATUS" = "200" ]; then
+              curl -s https://cc.1pwrafrica.com/api/bn/health | python3 -m json.tool
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "WARNING: BN health check failed after 3 attempts"
           exit 1

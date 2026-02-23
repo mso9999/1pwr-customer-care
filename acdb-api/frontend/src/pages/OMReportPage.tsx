@@ -13,7 +13,7 @@ import {
 import type {
   OMOverview, CustomerSiteStat, CustomerGrowthPoint,
   SiteConsumption, CumulativeTrend, AvgConsumptionTrend, SiteOverviewItem,
-  LoadCurve, LoadCurveResponse, LoadProfileResponse,
+  LoadCurve, LoadCurveResponse, LoadProfile, LoadProfileResponse,
 } from '../lib/api';
 import { useCountry } from '../contexts/CountryContext';
 import html2canvas from 'html2canvas';
@@ -226,6 +226,8 @@ export default function OMReportPage() {
   const [loadCurveTypes, setLoadCurveTypes] = useState<string[]>([]);
   const [loadProfiles, setLoadProfiles] = useState<Record<string, unknown>[]>([]);
   const [loadProfileTypes, setLoadProfileTypes] = useState<string[]>([]);
+  const [loadProfileMeta, setLoadProfileMeta] = useState<LoadProfile[]>([]);
+  const [loadProfileReadings, setLoadProfileReadings] = useState<number>(0);
   const [profileSite, setProfileSite] = useState<string>('');
   const [profileType, setProfileType] = useState<string>('');
   const [allProfileTypes, setAllProfileTypes] = useState<string[]>([]);
@@ -269,6 +271,8 @@ export default function OMReportPage() {
         setLoadProfiles(lp.chart_data || []);
         setLoadProfileTypes(lp.customer_types || []);
         setAllProfileTypes(lp.customer_types || []);
+        setLoadProfileMeta(lp.profiles || []);
+        setLoadProfileReadings(lp.total_readings || 0);
       } catch (e: any) {
         setError(e.message);
       } finally {
@@ -288,9 +292,13 @@ export default function OMReportPage() {
       const lp = await getDailyLoadProfiles(site || undefined, ctype || undefined);
       setLoadProfiles(lp.chart_data || []);
       setLoadProfileTypes(lp.customer_types || []);
+      setLoadProfileMeta(lp.profiles || []);
+      setLoadProfileReadings(lp.total_readings || 0);
     } catch {
       setLoadProfiles([]);
       setLoadProfileTypes([]);
+      setLoadProfileMeta([]);
+      setLoadProfileReadings(0);
     } finally {
       setProfileLoading(false);
     }
@@ -735,7 +743,14 @@ export default function OMReportPage() {
       <Figure
         id="fig-daily-load-profiles"
         title={`Figure ${fig()}: Average Daily Load Curves by Customer Type`}
-        subtitle="Average power demand (kW) by hour of day, derived from 10-minute meter readings"
+        subtitle={(() => {
+          const totalMeters = loadProfileMeta.reduce((sum, p) => sum + p.meter_count, 0);
+          const parts = ['Average power demand (kW) by hour of day, derived from 10-minute meter readings'];
+          if (totalMeters > 0) {
+            parts.push(`n = ${totalMeters} meters across ${loadProfileMeta.length} type${loadProfileMeta.length !== 1 ? 's' : ''}; ${loadProfileReadings.toLocaleString()} datapoints`);
+          }
+          return parts.join('. ');
+        })()}
         figureRef={setFigRef('daily-load-profiles')}
         onExport={handleExportFigure('daily-load-profiles', 'Daily_Load_Profiles')}
       >
@@ -773,30 +788,42 @@ export default function OMReportPage() {
         </div>
 
         {loadProfiles.length > 0 && loadProfileTypes.length > 0 ? (
-          <ResponsiveContainer width="100%" height={400}>
-            <LineChart data={loadProfiles} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-              <XAxis dataKey="hour" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} label={{ value: 'Avg kW', angle: -90, position: 'insideLeft', style: { fontSize: 10 } }} />
-              <Tooltip
-                contentStyle={{ borderRadius: '8px', fontSize: '12px' }}
-                formatter={(value: any, name: any) => [`${Number(value).toFixed(4)} kW`, name]}
-              />
-              <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '8px' }} />
-              {loadProfileTypes.map((t, i) => (
-                <Line
-                  key={t}
-                  type="monotone"
-                  dataKey={t}
-                  name={t}
-                  stroke={COLORS[i % COLORS.length]}
-                  strokeWidth={2.5}
-                  dot={false}
-                  activeDot={{ r: 4 }}
+          <>
+            <ResponsiveContainer width="100%" height={400}>
+              <LineChart data={loadProfiles} margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="hour" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} label={{ value: 'Avg kW', angle: -90, position: 'insideLeft', style: { fontSize: 10 } }} />
+                <Tooltip
+                  contentStyle={{ borderRadius: '8px', fontSize: '12px' }}
+                  formatter={(value: any, name: any) => [`${Number(value).toFixed(4)} kW`, name]}
                 />
-              ))}
-            </LineChart>
-          </ResponsiveContainer>
+                <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '8px' }} />
+                {loadProfileTypes.map((t, i) => (
+                  <Line
+                    key={t}
+                    type="monotone"
+                    dataKey={t}
+                    name={t}
+                    stroke={COLORS[i % COLORS.length]}
+                    strokeWidth={2.5}
+                    dot={false}
+                    activeDot={{ r: 4 }}
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+            {loadProfileMeta.length > 0 && (
+              <div className="flex flex-wrap gap-x-6 gap-y-1 justify-center mt-2 text-xs text-gray-500">
+                {loadProfileMeta.map((p, i) => (
+                  <span key={p.type}>
+                    <span className="inline-block w-2.5 h-2.5 rounded-full mr-1" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
+                    {p.type}: n={p.meter_count}
+                  </span>
+                ))}
+              </div>
+            )}
+          </>
         ) : (
           <div className="text-center py-8 text-gray-400 text-sm">
             {profileLoading ? 'Loading meter data...' : 'No meter reading data available for the selected site.'}

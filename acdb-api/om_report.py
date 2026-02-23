@@ -776,7 +776,8 @@ def daily_load_profiles(
 
         try:
             cursor.execute(
-                "SELECT meter_id, reading_time, power_kw FROM meter_readings "
+                "SELECT meter_id, reading_time, power_kw, account_number "
+                "FROM meter_readings "
                 "WHERE power_kw IS NOT NULL" + (
                     " AND community = %s" if site else ""
                 ),
@@ -786,6 +787,9 @@ def daily_load_profiles(
             for row in cursor.fetchall():
                 mid = str(row[0] or "").strip()
                 ctype = meter_type.get(mid)
+                if not ctype:
+                    acct = str(row[3] or "").strip()
+                    ctype = acct_type.get(acct) if acct else None
                 if not ctype:
                     continue
                 dt = row[1]
