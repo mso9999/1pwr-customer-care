@@ -96,25 +96,24 @@ def report_overview(user: CurrentUser = Depends(require_employee)):
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        cursor.execute("SELECT COUNT(*) FROM customers")
-        total_customers = cursor.fetchone()[0]
-
-        try:
-            cursor.execute(
-                "SELECT COUNT(*) FROM customers "
-                "WHERE date_service_terminated IS NOT NULL"
-            )
-            terminated = cursor.fetchone()[0]
-        except Exception:
-            terminated = 0
-
-        active_customers = total_customers - terminated
-
         cursor.execute(
-            "SELECT DISTINCT community FROM customers "
+            "SELECT community, date_service_terminated FROM customers "
             "WHERE community IS NOT NULL AND community <> ''"
         )
-        sites = [str(r[0]).strip() for r in cursor.fetchall() if r[0]]
+        total_customers = 0
+        terminated = 0
+        seen_sites: set = set()
+        for row in cursor.fetchall():
+            comm = str(row[0] or "").strip()
+            if comm not in KNOWN_SITES:
+                continue
+            total_customers += 1
+            seen_sites.add(comm)
+            if row[1] is not None:
+                terminated += 1
+
+        active_customers = total_customers - terminated
+        sites = sorted(seen_sites)
 
         total_kwh = 0.0
         total_lsl = 0.0
@@ -190,7 +189,7 @@ def customer_stats_by_site(
 
         for row in rows:
             concession = str(row[0] or "").strip()
-            if not concession:
+            if not concession or concession not in KNOWN_SITES:
                 continue
 
             connected_date = row[2]
@@ -397,7 +396,7 @@ def sales_by_site(
 
         for acct, dt_or_ym, lsl, community in rows:
             site = community if community else _extract_site(acct)
-            if not site or len(site) < 2:
+            if not site or site not in KNOWN_SITES:
                 continue
             q = _date_to_quarter(dt_or_ym) if dt_or_ym else "Unknown"
             if quarter and q != quarter:
@@ -577,16 +576,13 @@ def site_overview(user: CurrentUser = Depends(require_employee)):
         sites = []
         for row in rows:
             name = str(row[0]).strip()
+            if name not in KNOWN_SITES:
+                continue
             count = row[1]
-            abbrev = ""
-            for code, full_name in SITE_ABBREV.items():
-                if full_name.lower() == name.lower() or code.lower() in name.lower():
-                    abbrev = code
-                    break
             sites.append({
                 "concession": name,
-                "abbreviation": abbrev,
-                "district": SITE_DISTRICTS.get(abbrev, ""),
+                "abbreviation": name,
+                "district": SITE_DISTRICTS.get(name, ""),
                 "customer_count": count,
             })
 
