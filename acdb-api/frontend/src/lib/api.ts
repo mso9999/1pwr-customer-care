@@ -1072,6 +1072,7 @@ export async function getConsumptionByTenure(): Promise<ConsumptionByTenureRespo
 // ---------------------------------------------------------------------------
 
 export interface CheckMeterPairStats {
+  total_deviation_pct: number;
   mean_deviation_pct: number;
   stddev_deviation_pct: number;
   mean_sm_kwh: number;

@@ -1888,6 +1888,9 @@ def check_meter_comparison(
                     m1_vals.append(m1)
 
             n = len(deviations)
+            total_sm = sum(sm_vals)
+            total_1m = sum(m1_vals)
+
             if n > 0:
                 mean_dev = sum(deviations) / n
                 stddev_dev = (
@@ -1895,19 +1898,24 @@ def check_meter_comparison(
                     if n > 1
                     else 0
                 )
-                mean_sm = sum(sm_vals) / n
-                mean_1m = sum(m1_vals) / n
+                mean_sm = total_sm / n
+                mean_1m = total_1m / n
             else:
                 mean_dev = stddev_dev = mean_sm = mean_1m = 0.0
 
+            total_dev_pct = (
+                (total_1m - total_sm) / total_sm * 100 if total_sm > 0 else 0
+            )
+
             pair["stats"] = {
+                "total_deviation_pct": round(total_dev_pct, 2),
                 "mean_deviation_pct": round(mean_dev, 2),
                 "stddev_deviation_pct": round(stddev_dev, 2),
                 "mean_sm_kwh": round(mean_sm, 4),
                 "mean_1m_kwh": round(mean_1m, 4),
                 "n_matched_hours": n,
-                "total_sm_kwh": round(sum(sm_vals), 2),
-                "total_1m_kwh": round(sum(m1_vals), 2),
+                "total_sm_kwh": round(total_sm, 2),
+                "total_1m_kwh": round(total_1m, 2),
             }
 
         return {

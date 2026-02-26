@@ -29,12 +29,15 @@ function sign(n: number): string {
 
 function StatCard({ pair, color }: { pair: CheckMeterPair; color: string }) {
   const s = pair.stats;
+  const totalDev = s.total_deviation_pct ?? ((s.total_1m_kwh - s.total_sm_kwh) / (s.total_sm_kwh || 1) * 100);
+  const absTotal = Math.abs(totalDev);
+  const qualityColor = absTotal < 5 ? '#16a34a' : absTotal < 15 ? '#d97706' : '#dc2626';
   return (
     <div
-      className="rounded-xl border-2 bg-white shadow-sm p-4 min-w-[220px] flex-1"
+      className="rounded-xl border-2 bg-white shadow-sm p-4 min-w-[240px] flex-1"
       style={{ borderColor: color }}
     >
-      <div className="flex items-center gap-2 mb-3">
+      <div className="flex items-center gap-2 mb-2">
         <span
           className="inline-block w-3 h-3 rounded-full shrink-0"
           style={{ backgroundColor: color }}
@@ -42,33 +45,38 @@ function StatCard({ pair, color }: { pair: CheckMeterPair; color: string }) {
         <span className="font-bold text-gray-800 text-sm">{pair.account}</span>
       </div>
 
-      <div className="space-y-1.5 text-sm">
+      <div className="flex items-baseline gap-1.5 mb-3">
+        <span className="text-2xl font-bold" style={{ color: qualityColor }}>
+          {sign(totalDev)}%
+        </span>
+        <span className="text-xs text-gray-400">total deviation</span>
+      </div>
+
+      <div className="space-y-1 text-sm">
         <div className="flex justify-between">
-          <span className="text-gray-500">Mean Deviation</span>
-          <span className="font-semibold" style={{ color }}>
-            {sign(s.mean_deviation_pct)}%
-          </span>
+          <span className="text-gray-500">Total SM</span>
+          <span className="font-medium text-gray-700">{s.total_sm_kwh} kWh</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-gray-500">Std Dev</span>
-          <span className="font-medium text-gray-700">{s.stddev_deviation_pct.toFixed(1)}%</span>
+          <span className="text-gray-500">Total 1M</span>
+          <span className="font-medium text-gray-700">{s.total_1m_kwh} kWh</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-gray-500">Mean SM</span>
+          <span className="text-gray-500">Mean SM / hr</span>
           <span className="font-medium text-gray-700">{s.mean_sm_kwh.toFixed(3)} kWh</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-gray-500">Mean 1M</span>
+          <span className="text-gray-500">Mean 1M / hr</span>
           <span className="font-medium text-gray-700">{s.mean_1m_kwh.toFixed(3)} kWh</span>
         </div>
         <hr className="border-gray-100" />
         <div className="flex justify-between text-xs text-gray-400">
-          <span>Matched hours</span>
-          <span>{s.n_matched_hours}</span>
+          <span>Hourly dev (mean ± sd)</span>
+          <span>{sign(s.mean_deviation_pct)}% ± {s.stddev_deviation_pct.toFixed(0)}%</span>
         </div>
         <div className="flex justify-between text-xs text-gray-400">
-          <span>Total SM / 1M</span>
-          <span>{s.total_sm_kwh} / {s.total_1m_kwh} kWh</span>
+          <span>Matched hours</span>
+          <span>{s.n_matched_hours}</span>
         </div>
       </div>
     </div>
