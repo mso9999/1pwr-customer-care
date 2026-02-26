@@ -124,6 +124,135 @@ function CustomTooltip({ active, payload, label, pairs }: CustomTooltipProps) {
   );
 }
 
+function CumulativeChart({ data }: { data: CheckMeterComparisonResponse }) {
+  const cumData = data.time_series.reduce<Record<string, any>[]>((acc, point) => {
+    const prev = acc.length > 0 ? acc[acc.length - 1] : {};
+    const row: Record<string, any> = { reading_hour: point.reading_hour };
+    for (const pair of data.pairs) {
+      const smKey = `${pair.account}_sm`;
+      const m1Key = `${pair.account}_1m`;
+      const cSmKey = `${pair.account}_cum_sm`;
+      const cM1Key = `${pair.account}_cum_1m`;
+      row[cSmKey] = (prev[cSmKey] ?? 0) + (point[smKey] ?? 0);
+      row[cM1Key] = (prev[cM1Key] ?? 0) + (point[m1Key] ?? 0);
+    }
+    acc.push(row);
+    return acc;
+  }, []);
+
+  return (
+    <div className="bg-white rounded-xl shadow-md border border-gray-100 p-4 sm:p-6">
+      <div className="mb-3">
+        <h2 className="text-base font-bold text-gray-800">
+          Cumulative Energy — SM (solid) vs 1M (dashed)
+        </h2>
+        <p className="text-xs text-gray-400 mt-0.5">
+          Running total kWh since start of period · Local time (SAST)
+        </p>
+      </div>
+
+      <div className="flex gap-3 flex-wrap mb-4">
+        {data.pairs.map((pair, i) => (
+          <div key={pair.account} className="flex items-center gap-2 text-xs text-gray-600">
+            <span className="inline-block w-3 h-3 rounded-full" style={{ backgroundColor: PAIR_COLORS[i % PAIR_COLORS.length] }} />
+            <span className="font-medium">{pair.account}</span>
+          </div>
+        ))}
+      </div>
+
+      <ResponsiveContainer width="100%" height={380}>
+        <LineChart data={cumData} margin={{ top: 5, right: 20, left: 10, bottom: 5 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+          <XAxis
+            dataKey="reading_hour"
+            tickFormatter={formatHour}
+            tick={{ fontSize: 10 }}
+            interval="preserveStartEnd"
+            minTickGap={60}
+          />
+          <YAxis
+            tick={{ fontSize: 11 }}
+            label={{
+              value: 'kWh (cumulative)',
+              angle: -90,
+              position: 'insideLeft',
+              style: { fontSize: 11, fill: '#9ca3af' },
+            }}
+          />
+          <Tooltip
+            content={({ active, payload, label }) => {
+              if (!active || !payload || !payload.length) return null;
+              return (
+                <div className="bg-white border border-gray-200 rounded-lg shadow-lg p-3 text-xs max-w-xs">
+                  <p className="font-semibold text-gray-700 mb-1.5">{formatHour(String(label ?? ''))}</p>
+                  {data.pairs.map((pair, i) => {
+                    const sm = payload.find((p: any) => p.dataKey === `${pair.account}_cum_sm`);
+                    const m1 = payload.find((p: any) => p.dataKey === `${pair.account}_cum_1m`);
+                    const smV = sm?.value as number | undefined;
+                    const m1V = m1?.value as number | undefined;
+                    const color = PAIR_COLORS[i % PAIR_COLORS.length];
+                    return (
+                      <div key={pair.account} className="mb-1">
+                        <div className="flex items-center gap-1.5 font-medium" style={{ color }}>
+                          <span className="inline-block w-2 h-2 rounded-full" style={{ backgroundColor: color }} />
+                          {pair.account}
+                        </div>
+                        <div className="pl-3.5 text-gray-600">
+                          SM: {smV != null ? `${smV.toFixed(2)} kWh` : '—'}
+                          {' · '}
+                          1M: {m1V != null ? `${m1V.toFixed(2)} kWh` : '—'}
+                          {smV != null && m1V != null && smV > 0 && (
+                            <span className="ml-1 text-gray-400">
+                              ({sign(((m1V - smV) / smV) * 100)}%)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            }}
+          />
+          <Legend
+            wrapperStyle={{ fontSize: 11 }}
+            formatter={(value: string) => {
+              const parts = value.replace('_cum_', '_').split('_');
+              const acct = parts.slice(0, -1).join('_');
+              const type = parts[parts.length - 1] === 'sm' ? 'SM' : '1M';
+              return `${acct} ${type}`;
+            }}
+          />
+          {data.pairs.map((pair, i) => {
+            const color = PAIR_COLORS[i % PAIR_COLORS.length];
+            return [
+              <Line
+                key={`${pair.account}_cum_sm`}
+                type="monotone"
+                dataKey={`${pair.account}_cum_sm`}
+                stroke={color}
+                strokeWidth={2}
+                dot={false}
+                name={`${pair.account}_cum_sm`}
+              />,
+              <Line
+                key={`${pair.account}_cum_1m`}
+                type="monotone"
+                dataKey={`${pair.account}_cum_1m`}
+                stroke={color}
+                strokeWidth={2}
+                strokeDasharray="6 3"
+                dot={false}
+                name={`${pair.account}_cum_1m`}
+              />,
+            ];
+          })}
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 export default function CheckMeterPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -283,7 +412,7 @@ export default function CheckMeterPage() {
               </div>
 
               {/* Stat Cards */}
-              <div className="flex flex-wrap gap-4">
+              <div className="flex flex-wrap gap-4 mb-6">
                 {data.pairs.map((pair, i) => (
                   <StatCard
                     key={pair.account}
@@ -292,6 +421,9 @@ export default function CheckMeterPage() {
                   />
                 ))}
               </div>
+
+              {/* Cumulative Chart */}
+              <CumulativeChart data={data} />
             </>
           )}
         </>
