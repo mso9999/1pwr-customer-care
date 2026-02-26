@@ -1775,3 +1775,134 @@ def meter_data_export(
                 },
             },
         }
+
+
+# ---------------------------------------------------------------------------
+# 15. Check Meter vs Primary Meter Comparison
+# ---------------------------------------------------------------------------
+
+@router.get("/check-meter-comparison")
+def check_meter_comparison(
+    days: int = Query(7, description="Number of days of history"),
+    user: CurrentUser = Depends(require_employee),
+):
+    """
+    Hourly time series comparison of SparkMeter (primary) vs 1Meter (check)
+    for every account that has both meter roles installed.  Returns aligned
+    time series plus per-pair deviation statistics.
+    """
+    with _get_connection() as conn:
+        cursor = conn.cursor()
+        from country_config import UTC_OFFSET_HOURS
+
+        cursor.execute("""
+            SELECT m_check.account_number,
+                   m_check.meter_id   AS check_meter_id,
+                   m_primary.meter_id AS primary_meter_id
+            FROM meters m_check
+            JOIN meters m_primary
+              ON m_primary.account_number = m_check.account_number
+             AND m_primary.role = 'primary'
+            WHERE m_check.role = 'check'
+        """)
+        pairs: List[Dict[str, Any]] = []
+        pair_accounts: List[str] = []
+        for row in cursor.fetchall():
+            pairs.append({
+                "account": row[0],
+                "check_meter_id": row[1],
+                "primary_meter_id": row[2],
+            })
+            pair_accounts.append(row[0])
+
+        if not pair_accounts:
+            return {"pairs": [], "time_series": [], "note": "No check meter pairs found"}
+
+        cutoff = datetime.utcnow() - timedelta(days=days)
+        placeholders = ",".join(["%s"] * len(pair_accounts))
+        cursor.execute(
+            f"SELECT account_number, reading_hour, kwh, source "
+            f"FROM hourly_consumption "
+            f"WHERE account_number IN ({placeholders}) AND reading_hour >= %s "
+            f"ORDER BY reading_hour",
+            (*pair_accounts, cutoff),
+        )
+
+        hour_data: Dict[str, Dict[str, Dict[str, Optional[float]]]] = defaultdict(
+            lambda: defaultdict(lambda: {"sm": None, "1m": None})
+        )
+        for row in cursor.fetchall():
+            acct = str(row[0] or "").strip()
+            hour = row[1]
+            kwh = float(row[2]) if row[2] is not None else None
+            source = str(row[3] or "").lower()
+
+            if hasattr(hour, "strftime"):
+                local_hour = hour + timedelta(hours=UTC_OFFSET_HOURS)
+                hour_key = local_hour.strftime("%Y-%m-%dT%H:%M:%S")
+            else:
+                hour_key = str(hour)
+
+            if source in ("thundercloud", "koios"):
+                existing = hour_data[hour_key][acct]["sm"]
+                hour_data[hour_key][acct]["sm"] = (existing or 0) + (kwh or 0)
+            elif source == "iot":
+                existing = hour_data[hour_key][acct]["1m"]
+                hour_data[hour_key][acct]["1m"] = (existing or 0) + (kwh or 0)
+
+        sorted_hours = sorted(hour_data.keys())
+        time_series: List[Dict[str, Any]] = []
+        for hour_key in sorted_hours:
+            point: Dict[str, Any] = {"reading_hour": hour_key}
+            for pair in pairs:
+                acct = pair["account"]
+                vals = hour_data[hour_key].get(acct, {"sm": None, "1m": None})
+                sm_val = vals["sm"]
+                m1_val = vals["1m"]
+                point[f"{acct}_sm"] = round(sm_val, 4) if sm_val is not None else None
+                point[f"{acct}_1m"] = round(m1_val, 4) if m1_val is not None else None
+            time_series.append(point)
+
+        for pair in pairs:
+            acct = pair["account"]
+            deviations: List[float] = []
+            sm_vals: List[float] = []
+            m1_vals: List[float] = []
+            for hour_key in sorted_hours:
+                vals = hour_data[hour_key].get(acct, {"sm": None, "1m": None})
+                sm = vals["sm"]
+                m1 = vals["1m"]
+                if sm is not None and m1 is not None and sm > 0:
+                    deviations.append((m1 - sm) / sm * 100)
+                    sm_vals.append(sm)
+                    m1_vals.append(m1)
+
+            n = len(deviations)
+            if n > 0:
+                mean_dev = sum(deviations) / n
+                stddev_dev = (
+                    math.sqrt(sum((d - mean_dev) ** 2 for d in deviations) / n)
+                    if n > 1
+                    else 0
+                )
+                mean_sm = sum(sm_vals) / n
+                mean_1m = sum(m1_vals) / n
+            else:
+                mean_dev = stddev_dev = mean_sm = mean_1m = 0.0
+
+            pair["stats"] = {
+                "mean_deviation_pct": round(mean_dev, 2),
+                "stddev_deviation_pct": round(stddev_dev, 2),
+                "mean_sm_kwh": round(mean_sm, 4),
+                "mean_1m_kwh": round(mean_1m, 4),
+                "n_matched_hours": n,
+                "total_sm_kwh": round(sum(sm_vals), 2),
+                "total_1m_kwh": round(sum(m1_vals), 2),
+            }
+
+        return {
+            "pairs": pairs,
+            "time_series": time_series,
+            "days": days,
+            "cutoff": cutoff.strftime("%Y-%m-%dT%H:%M:%S"),
+        }

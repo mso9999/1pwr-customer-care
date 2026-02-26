@@ -1067,6 +1067,39 @@ export async function getConsumptionByTenure(): Promise<ConsumptionByTenureRespo
   return request('/om-report/consumption-by-tenure');
 }
 
+// ---------------------------------------------------------------------------
+// Check Meter Comparison
+// ---------------------------------------------------------------------------
+
+export interface CheckMeterPairStats {
+  mean_deviation_pct: number;
+  stddev_deviation_pct: number;
+  mean_sm_kwh: number;
+  mean_1m_kwh: number;
+  n_matched_hours: number;
+  total_sm_kwh: number;
+  total_1m_kwh: number;
+}
+
+export interface CheckMeterPair {
+  account: string;
+  check_meter_id: string;
+  primary_meter_id: string;
+  stats: CheckMeterPairStats;
+}
+
+export interface CheckMeterComparisonResponse {
+  pairs: CheckMeterPair[];
+  time_series: Record<string, any>[];
+  days: number;
+  cutoff: string;
+  note?: string;
+}
+
+export async function getCheckMeterComparison(days = 7): Promise<CheckMeterComparisonResponse> {
+  return request(`/om-report/check-meter-comparison?days=${days}`);
+}
+
 // Health is at root level, not under /api
 export async function getHealth() {
   const res = await fetch('/health');

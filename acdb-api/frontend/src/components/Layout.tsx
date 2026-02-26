@@ -123,6 +123,7 @@ export default function Layout() {
                   {navLink('/dashboard', 'Dashboard')}
                   {navLink('/om-report', 'O&M Report', true)}
                   {navLink('/financial', 'Financial', true)}
+                  {navLink('/check-meters', 'Check Meters', true)}
                   {navLink('/customers', 'Customers')}
                   {navLink('/meters', 'Meters')}
                   {navLink('/accounts', 'Accounts')}
@@ -154,6 +155,7 @@ export default function Layout() {
                 {navLink('/dashboard', 'Dashboard')}
                 {navLink('/om-report', 'O&M Report', true)}
                 {navLink('/financial', 'Financial', true)}
+                {navLink('/check-meters', 'Check Meters', true)}
                 {navLink('/customers', 'Customers')}
                 {navLink('/meters', 'Meters')}
                 {navLink('/accounts', 'Accounts')}

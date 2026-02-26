@@ -25,6 +25,7 @@ import FinancialPage from './pages/FinancialPage';
 import SyncPage from './pages/SyncPage';
 import CommissionCustomerPage from './pages/CommissionCustomerPage';
 import TariffManagementPage from './pages/TariffManagementPage';
+import CheckMeterPage from './pages/CheckMeterPage';
 
 function HomeRedirect() {
   const { user, loading } = useAuth();
@@ -62,6 +63,7 @@ export default function App() {
             <Route path="sync" element={<ProtectedRoute requireEmployee><SyncPage /></ProtectedRoute>} />
             <Route path="commission" element={<ProtectedRoute requireEmployee><CommissionCustomerPage /></ProtectedRoute>} />
             <Route path="tariffs" element={<ProtectedRoute requireEmployee><TariffManagementPage /></ProtectedRoute>} />
+            <Route path="check-meters" element={<ProtectedRoute requireEmployee><CheckMeterPage /></ProtectedRoute>} />
             {/* Customer routes */}
             <Route path="my/dashboard" element={<CustomerDashboardPage />} />
             <Route path="my/profile" element={<MyProfilePage />} />
