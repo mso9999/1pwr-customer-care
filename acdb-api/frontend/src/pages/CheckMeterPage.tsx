@@ -125,7 +125,22 @@ function CustomTooltip({ active, payload, label, pairs }: CustomTooltipProps) {
 }
 
 function CumulativeChart({ data }: { data: CheckMeterComparisonResponse }) {
-  const cumData = data.time_series.reduce<Record<string, any>[]>((acc, point) => {
+  // Find the first hour where BOTH SM and 1M have data for each pair,
+  // and start cumulative tracking from there to avoid startup offsets.
+  const firstBothIdx: Record<string, number> = {};
+  for (const pair of data.pairs) {
+    for (let i = 0; i < data.time_series.length; i++) {
+      const p = data.time_series[i];
+      if (p[`${pair.account}_sm`] != null && p[`${pair.account}_1m`] != null) {
+        firstBothIdx[pair.account] = i;
+        break;
+      }
+    }
+  }
+  const globalStart = Math.max(0, ...Object.values(firstBothIdx));
+
+  const trimmed = data.time_series.slice(globalStart);
+  const cumData = trimmed.reduce<Record<string, any>[]>((acc, point) => {
     const prev = acc.length > 0 ? acc[acc.length - 1] : {};
     const row: Record<string, any> = { reading_hour: point.reading_hour };
     for (const pair of data.pairs) {
