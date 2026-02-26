@@ -258,11 +258,12 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
             row = cur.fetchone()
             prev_energy = float(row[0]) if row else None
 
-            energy_for_delta = (
-                reading.energy_integrated
-                if reading.energy_integrated is not None
-                else reading.energy_active
-            )
+            # Use energy_active (DDS8888 Modbus register, non-volatile) for
+            # delta calculations.  energy_integrated has better resolution
+            # (~0.8 Wh vs 10 Wh) but resets to 0 on ESP32 reboot, silently
+            # losing all accumulated energy.  The Modbus register survives
+            # power cycles and is the reliable source of truth.
+            energy_for_delta = reading.energy_active
             delta_kwh = 0.0
             if prev_energy is not None and energy_for_delta >= prev_energy:
                 delta_kwh = energy_for_delta - prev_energy

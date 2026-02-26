@@ -120,7 +120,7 @@ export default function CheckMeterPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [data, setData] = useState<CheckMeterComparisonResponse | null>(null);
-  const [days, setDays] = useState(7);
+  const [days, setDays] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -157,6 +157,7 @@ export default function CheckMeterPage() {
             onChange={(e) => setDays(Number(e.target.value))}
             className="text-sm border border-gray-200 rounded-md px-2.5 py-1.5 bg-white focus:ring-1 focus:ring-blue-400 focus:outline-none"
           >
+            <option value={0}>Since firmware update</option>
             <option value={1}>Last 24 hours</option>
             <option value={3}>Last 3 days</option>
             <option value={7}>Last 7 days</option>

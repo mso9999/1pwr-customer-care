@@ -1783,7 +1783,7 @@ def meter_data_export(
 
 @router.get("/check-meter-comparison")
 def check_meter_comparison(
-    days: int = Query(7, description="Number of days of history"),
+    days: int = Query(0, description="Number of days of history (0 = since first check-meter reading)"),
     user: CurrentUser = Depends(require_employee),
 ):
     """
@@ -1818,7 +1818,17 @@ def check_meter_comparison(
         if not pair_accounts:
             return {"pairs": [], "time_series": [], "note": "No check meter pairs found"}
 
-        cutoff = datetime.utcnow() - timedelta(days=days)
+        if days > 0:
+            cutoff = datetime.utcnow() - timedelta(days=days)
+        else:
+            placeholders_iot = ",".join(["%s"] * len(pair_accounts))
+            cursor.execute(
+                f"SELECT MIN(reading_hour) FROM hourly_consumption "
+                f"WHERE account_number IN ({placeholders_iot}) AND source = 'iot'",
+                tuple(pair_accounts),
+            )
+            row = cursor.fetchone()
+            cutoff = row[0] if row and row[0] else datetime.utcnow() - timedelta(days=30)
         placeholders = ",".join(["%s"] * len(pair_accounts))
         cursor.execute(
             f"SELECT account_number, reading_hour, kwh, source "
