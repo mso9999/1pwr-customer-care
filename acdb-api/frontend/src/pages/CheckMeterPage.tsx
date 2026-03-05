@@ -4,7 +4,7 @@ import {
   ResponsiveContainer,
 } from 'recharts';
 import { getCheckMeterComparison } from '../lib/api';
-import type { CheckMeterComparisonResponse, CheckMeterPair } from '../lib/api';
+import type { CheckMeterComparisonResponse, CheckMeterPair, CheckMeterHealth } from '../lib/api';
 
 const PAIR_COLORS = [
   '#2563eb', '#dc2626', '#16a34a', '#d97706', '#7c3aed',
@@ -25,6 +25,54 @@ function formatHour(iso: string): string {
 
 function sign(n: number): string {
   return n >= 0 ? `+${n.toFixed(1)}` : n.toFixed(1);
+}
+
+const HEALTH_CONFIG: Record<string, { bg: string; border: string; text: string; dot: string; label: string }> = {
+  online:  { bg: 'bg-green-50',  border: 'border-green-200', text: 'text-green-800', dot: 'bg-green-500',  label: 'Online' },
+  stale:   { bg: 'bg-yellow-50', border: 'border-yellow-300', text: 'text-yellow-800', dot: 'bg-yellow-500', label: 'Stale' },
+  offline: { bg: 'bg-red-50',    border: 'border-red-300',   text: 'text-red-700',   dot: 'bg-red-500',    label: 'Offline' },
+  unknown: { bg: 'bg-gray-50',   border: 'border-gray-200',  text: 'text-gray-600',  dot: 'bg-gray-400',   label: 'Unknown' },
+};
+
+function formatLastSeen(h: CheckMeterHealth): string {
+  if (h.hours_since_report == null || h.last_seen_utc == null) return 'Never reported';
+  const hrs = h.hours_since_report;
+  if (hrs < 1) return `${Math.round(hrs * 60)}m ago`;
+  if (hrs < 24) return `${hrs.toFixed(1)}h ago`;
+  return `${(hrs / 24).toFixed(1)}d ago`;
+}
+
+function MeterHealthBanner({ pairs }: { pairs: CheckMeterPair[] }) {
+  const hasIssue = pairs.some(p => p.health?.status === 'offline' || p.health?.status === 'stale');
+  if (!hasIssue && pairs.every(p => p.health?.status === 'online')) return null;
+
+  const problematic = pairs.filter(p => p.health?.status !== 'online');
+  if (problematic.length === 0) return null;
+
+  return (
+    <div className="mb-6 space-y-2">
+      {problematic.map(pair => {
+        const h = pair.health;
+        if (!h) return null;
+        const cfg = HEALTH_CONFIG[h.status] ?? HEALTH_CONFIG.unknown;
+        return (
+          <div key={pair.account} className={`${cfg.bg} ${cfg.border} border rounded-lg px-4 py-3 flex items-center gap-3`}>
+            <span className={`inline-block w-2.5 h-2.5 rounded-full ${cfg.dot} shrink-0`} />
+            <div className={`${cfg.text} text-sm`}>
+              <span className="font-semibold">{pair.account}</span>
+              <span className="mx-1.5">·</span>
+              <span>1Meter {h.meter_id} — {cfg.label}</span>
+              <span className="mx-1.5">·</span>
+              <span>Last report: {formatLastSeen(h)}</span>
+              {h.status === 'offline' && (
+                <span className="ml-2 font-medium">⚠ No data in 6+ hours</span>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 function StatCard({ pair, color }: { pair: CheckMeterPair; color: string }) {
@@ -78,6 +126,22 @@ function StatCard({ pair, color }: { pair: CheckMeterPair; color: string }) {
           <span>Matched hours</span>
           <span>{s.n_matched_hours}</span>
         </div>
+        {pair.health && (
+          <>
+            <hr className="border-gray-100" />
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-400">1M status</span>
+              <span className={`font-medium ${
+                pair.health.status === 'online' ? 'text-green-600' :
+                pair.health.status === 'stale' ? 'text-yellow-600' :
+                pair.health.status === 'offline' ? 'text-red-600' : 'text-gray-500'
+              }`}>
+                {(HEALTH_CONFIG[pair.health.status] ?? HEALTH_CONFIG.unknown).label}
+                {pair.health.hours_since_report != null && ` · ${formatLastSeen(pair.health)}`}
+              </span>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -346,6 +410,7 @@ export default function CheckMeterPage() {
             </div>
           ) : (
             <>
+              <MeterHealthBanner pairs={data.pairs} />
               {/* Chart */}
               <div className="bg-white rounded-xl shadow-md border border-gray-100 p-4 sm:p-6 mb-6">
                 <div className="mb-3">

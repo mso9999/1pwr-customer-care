@@ -1082,11 +1082,19 @@ export interface CheckMeterPairStats {
   total_1m_kwh: number;
 }
 
+export interface CheckMeterHealth {
+  meter_id: string;
+  last_seen_utc: string | null;
+  hours_since_report: number | null;
+  status: 'online' | 'stale' | 'offline' | 'unknown';
+}
+
 export interface CheckMeterPair {
   account: string;
   check_meter_id: string;
   primary_meter_id: string;
   stats: CheckMeterPairStats;
+  health: CheckMeterHealth;
 }
 
 export interface CheckMeterComparisonResponse {
