@@ -148,8 +148,15 @@ function CumulativeChart({ data }: { data: CheckMeterComparisonResponse }) {
       const m1Key = `${pair.account}_1m`;
       const cSmKey = `${pair.account}_cum_sm`;
       const cM1Key = `${pair.account}_cum_1m`;
-      row[cSmKey] = (prev[cSmKey] ?? 0) + (point[smKey] ?? 0);
-      row[cM1Key] = (prev[cM1Key] ?? 0) + (point[m1Key] ?? 0);
+      const smVal = point[smKey] as number | null | undefined;
+      const m1Val = point[m1Key] as number | null | undefined;
+      if (smVal != null && m1Val != null) {
+        row[cSmKey] = (prev[cSmKey] ?? 0) + smVal;
+        row[cM1Key] = (prev[cM1Key] ?? 0) + m1Val;
+      } else {
+        row[cSmKey] = prev[cSmKey] ?? null;
+        row[cM1Key] = prev[cM1Key] ?? null;
+      }
     }
     acc.push(row);
     return acc;
