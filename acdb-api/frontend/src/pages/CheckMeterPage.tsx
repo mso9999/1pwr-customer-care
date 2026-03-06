@@ -147,6 +147,59 @@ function StatCard({ pair, color }: { pair: CheckMeterPair; color: string }) {
   );
 }
 
+function FleetSummaryCard({ pairs }: { pairs: CheckMeterPair[] }) {
+  const fleetSm = pairs.reduce((s, p) => s + (p.stats.total_sm_kwh ?? 0), 0);
+  const fleet1m = pairs.reduce((s, p) => s + (p.stats.total_1m_kwh ?? 0), 0);
+  const fleetDevPct = fleetSm > 0 ? ((fleet1m - fleetSm) / fleetSm) * 100 : 0;
+  const fleetDevKwh = fleet1m - fleetSm;
+  const absDevPct = Math.abs(fleetDevPct);
+  const qualityColor = absDevPct < 5 ? '#16a34a' : absDevPct < 15 ? '#d97706' : '#dc2626';
+  const totalMatchedHours = pairs.reduce((s, p) => s + (p.stats.n_matched_hours ?? 0), 0);
+
+  return (
+    <div className="rounded-xl border-2 border-gray-300 bg-gradient-to-r from-gray-50 to-white shadow-md p-5 mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-4 sm:gap-8">
+        <div>
+          <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-1">
+            Fleet Total — {pairs.length} check meters
+          </div>
+          <div className="flex items-baseline gap-2">
+            <span className="text-3xl font-bold" style={{ color: qualityColor }}>
+              {sign(fleetDevPct)}%
+            </span>
+            <span className="text-sm text-gray-500">
+              ({fleetDevKwh >= 0 ? '+' : ''}{fleetDevKwh.toFixed(2)} kWh)
+            </span>
+          </div>
+        </div>
+
+        <div className="hidden sm:block w-px h-12 bg-gray-200" />
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-sm">
+          <div>
+            <div className="text-gray-400 text-xs">Total SM</div>
+            <div className="font-semibold text-gray-700">{fleetSm.toFixed(2)} kWh</div>
+          </div>
+          <div>
+            <div className="text-gray-400 text-xs">Total 1M</div>
+            <div className="font-semibold text-gray-700">{fleet1m.toFixed(2)} kWh</div>
+          </div>
+          <div>
+            <div className="text-gray-400 text-xs">Difference</div>
+            <div className="font-semibold" style={{ color: qualityColor }}>
+              {fleetDevKwh >= 0 ? '+' : ''}{fleetDevKwh.toFixed(2)} kWh
+            </div>
+          </div>
+          <div>
+            <div className="text-gray-400 text-xs">Matched hours</div>
+            <div className="font-semibold text-gray-700">{totalMatchedHours.toLocaleString()}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface CustomTooltipProps {
   active?: boolean;
   payload?: any[];
@@ -497,6 +550,9 @@ export default function CheckMeterPage() {
                   </LineChart>
                 </ResponsiveContainer>
               </div>
+
+              {/* Fleet Summary */}
+              {data.pairs.length > 1 && <FleetSummaryCard pairs={data.pairs} />}
 
               {/* Stat Cards */}
               <div className="flex flex-wrap gap-4 mb-6">
