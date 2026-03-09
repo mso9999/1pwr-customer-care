@@ -1046,6 +1046,62 @@ Key evidence:
 
 ---
 
+## Session 2026-02-22 202602221945 (Benin Hourly Consumption Import via Koios Web CSV)
+
+### What Was Done
+
+1. **Reverse-engineered Koios web UI download endpoint**: The Koios v2 historical API for BN returns only daily aggregates (1 reading/meter/day), not the sub-hourly interval data available for LS. By decompiling the Koios SPA's JS bundles, discovered an internal `POST /sm/organizations/{orgId}/report/download` endpoint that produces CSVs with 15-minute interval data when accessed via web session auth (not API keys).
+
+2. **Created `import_hourly_bn.py`**: New Python script specifically for Benin hourly consumption:
+   - Authenticates to Koios web UI via CSRF-form login (`KOIOS_WEB_EMAIL` / `KOIOS_WEB_PASSWORD`)
+   - Downloads daily report CSVs containing 15-min interval data (`heartbeat_start`, `kilowatt_hours`, `meter/serial`, `meter/customer/code`)
+   - Aggregates 15-min intervals into hourly buckets
+   - Inserts into `hourly_consumption` with `ON CONFLICT (meter_id, reading_hour) DO NOTHING`
+   - Supports `--no-skip`, `--repair`, `--site`, date range args (same CLI conventions as `import_hourly.py`)
+
+3. **Fixed `onepower_bj` database schema**:
+   - Widened `account_number` column from `VARCHAR(10)` to `VARCHAR(50)` (BN meter serials are longer)
+   - Added `uq_hourly_meter_hour` unique constraint on `(meter_id, reading_hour)` (required for `ON CONFLICT`)
+
+4. **Deployed to EC2 and configured credentials**:
+   - Script at `/opt/1pdb/services/import_hourly_bn.py`
+   - Added `KOIOS_WEB_EMAIL=mso@1pwrafrica.com` and `KOIOS_WEB_PASSWORD=1PWRBN2026` to `/opt/1pdb/.env`
+
+5. **Ran initial 30-day backfill** (Jan 22 – Feb 21, 2026): **112,498 hourly records** imported for GBO + SAM sites.
+
+6. **Launched full historical backfill** (Jun 1, 2025 – Jan 21, 2026): Running in background. GBO data starts appearing from ~late August 2025 (site wasn't operational earlier). ~48 meters × 25 hours/day ≈ 1,200 rows/day for GBO.
+
+7. **Updated `sync_consumption.sh`**:
+   - Phase 2 now explicitly runs `import_hourly.py --country LS` (LS only via v2 API)
+   - Phase 3 added: runs `import_hourly_bn.py` against `onepower_bj` database via `DATABASE_URL` env override
+   - Architecture comment updated to reflect 4-phase pipeline (TC → Koios LS → Koios BN → Backfill)
+
+### Key Decisions
+- **Web session auth over API keys**: The Koios v2 historical API returns degraded (daily-only) data for BN. The web UI's internal report download endpoint is the only path to 15-minute interval data. This requires email/password auth, not API keys.
+- **Separate script for BN**: Rather than hacking web auth into `import_hourly.py` (which uses v2 API for LS), created a dedicated `import_hourly_bn.py` with its own auth and download logic. Cleaner separation of concerns.
+- **XOF site IDs discovered from JS bundles**: GBO site_id=`a23c334e-...`, SAM site_id=`b6b41de9-...`, service_area_id=`beb22c38-...` (shared). Org_id=`0123589c-...`.
+
+### What Next Session Should Know
+- **Historical backfill may still be running**: Check with `tail -20 /tmp/bn_backfill.log` on EC2. Look for "Import complete" line.
+- **Web credentials are user-specific**: `mso@1pwrafrica.com` / `1PWRBN2026` — if this password is rotated, `import_hourly_bn.py` will fail with a login error and needs updating in `/opt/1pdb/.env`.
+- **Session cookie expiry unknown**: The web session may expire after some period. The script re-authenticates on 401 responses during download, but if the login itself changes (2FA, CAPTCHA), this breaks.
+- **SAM site data**: SAM has fewer meters than GBO (~18 vs ~48). Both are imported in each run.
+- **`import_hourly.py` now uses `--country LS`** in sync_consumption.sh to avoid attempting the degraded BN v2 API path.
+
+### Files Created/Modified
+- `acdb-api/import_hourly_bn.py` — NEW: Benin hourly consumption via Koios web CSV
+- Server: `/opt/1pdb/services/import_hourly_bn.py` — deployed
+- Server: `/opt/1pdb/services/sync_consumption.sh` — updated with BN phase
+- Server: `/opt/1pdb/.env` — added `KOIOS_WEB_EMAIL`, `KOIOS_WEB_PASSWORD`
+- Server: `onepower_bj.hourly_consumption` — schema fixes (VARCHAR(50), unique constraint)
+
+### Protocol Feedback
+- CONTEXT.md was accurate about the multi-country architecture and Koios API landscape
+- The session log from the Consumption Sync Fix session (202602191600) was critical — it documented the BN Koios API degradation and the discovery of `/sm/` internal endpoints
+- CONTEXT.md should be updated to document the web CSV download path as a third data source for BN (alongside v2 historical API and monthly reports)
+
+---
+
 ## Session 2026-02-21 202602212100 (1Meter Assembly SOP + OTA Infrastructure + Field SOPs)
 
 ### What Was Done
@@ -1106,3 +1162,258 @@ Key evidence:
 - `onepwr-aws-mesh/main/CMakeLists.txt` — Removed missing mqtt_voltage_energy_polling_task.c
 - `onepwr-aws-mesh/main/main.c` — Added vStartOTACodeSigningDemo() call
 - `onepwr-aws-mesh/sdkconfig.defaults` — Enabled OTA demo with v1.0.0
+
+---
+
+## Session 2026-02-23 202602231215 (KET→uGridPLAN GPS Reconciliation)
+
+### What Was Done
+- **GPS-based reconciliation**: Matched 1,272 of 1,301 KET uGridPLAN connections to the KET Master File survey entries using GPS proximity (30m threshold, avg 4.2m, median 3.2m)
+- **Survey_ID push to uGridPLAN**: Batch-pushed `Survey_ID` (format: `KET NNNN TYPE`) and `Customer_Type` back to all 1,272 matched connections via the batch-connection-update API
+- **uGridPLAN batch endpoint fix**: Added `connection_XXX` index-based ID support to the `batch-connection-update` endpoint in the uGridPLAN adapter (`web/adapter/main.py`), enabling batch updates to connections that lack Survey_IDs. Committed and deployed to staging (`dev` branch → `dev.ugp.1pwrafrica.com`)
+- **Column name mismatch fix**: Discovered that the batch endpoint's `surveyId` mapping writes to `Survey ID` (with space) while the GeoDataFrame column is `Survey_ID` (with underscore). Worked around by sending `Survey_ID` directly as a column-level property key
+- **Delta storage persistence**: Used `save_project` (`/project/save-in-place`) to persist changes into the UGP delta storage system, creating version `20260223_172656` in `/opt/ugridplan/project_data/KET_minigrid/`
+
+### Key Decisions
+- GPS matching threshold of 30m was chosen — all 1,272 matches had <28m distance, with avg 4.2m showing excellent accuracy
+- 91 type disagreements between uGridPLAN and KET Master File (e.g. CHU in survey vs HH in UGP, HHSME vs SME). uGridPLAN Customer_Types were overwritten with the survey-derived types since the Master File is the authoritative source
+- 29 connections remain unmatched (>30m from any survey point) — these are likely newer connections added after the 2022 survey
+- Survey_ID format: `KET NNNN TT` (e.g. `KET 0031 HH1`) — directly parseable by `_survey_id_to_account_number` to yield account numbers (e.g. `0031KET`)
+
+### What Next Session Should Know
+- **KET connections now have Survey_IDs in uGridPLAN** — `sync_ugridplan.py`'s `_match_customers` can now use Strategy 0 (survey_id binding) or Strategy 2/3 (plot prefix) to match KET connections to 1PDB accounts
+- **The batch endpoint `surveyId` mapping bug** still exists on the server — the workaround is to send `Survey_ID` (exact column name) instead of `surveyId` (camelCase). Consider fixing the mapping to prefer existing columns before creating new ones
+- **22 KET connections still lack Survey_IDs** — these need manual identification or a wider GPS threshold
+- **1PDB already has 99.9% customer type coverage** (from earlier backfill work) — the UGP push was about closing the loop so UGP has the same type data
+- The uGridPLAN batch endpoint fix (`connection_XXX` support) is on `dev` branch only — needs cherry-pick to `main` for production UGP deployment
+
+### Files Created/Modified
+- `/Users/mattmso/Dropbox/AI Projects/uGridPlan map_v3/web/adapter/main.py` — Added connection_XXX index support to batch-connection-update (committed to `dev` branch)
+- `/tmp/recon_gps.py` — GPS matching analysis script (temporary)
+- `/tmp/push_ket_to_ugp.py` — Batch push script for Survey_IDs to uGridPLAN (temporary)
+- `/tmp/verify_ugp_ket.py` — Verification script (temporary)
+
+---
+
+## Session 2026-02-23 202602231215 (HH Subtype Migration & customers.customer_type)
+
+### What Was Done
+- **Synced all 12 site survey master files** from Dropbox (triggered Smart Sync download for 11 files that were 0-byte placeholders)
+- **Built universal survey extractor** (`extract_survey_types.py`) that processes all 12 LS sites, extracting 13,710 entries with 98% HH subtype resolution (HH1/HH2/HH3)
+  - Reconstructs HH subtypes from score column when type column only has "HH" (score 1→HH1, 2→HH2, 3→HH3)
+  - Normalizes edge cases: CLI→HC, CHRCH→CHU, HHSME→SME
+- **Backfilled 1,246 customers** in `customers.customer_type` with granular types from survey data
+  - Distribution: HH1: 1088, SME: 84, HH2: 44, SCP: 8, CHU: 5, SCH: 4, HH: 3, HC: 2, HH3: 2
+  - 206 still null (TLH, LSB sites without survey master files)
+- **Migrated all backend queries** from `meters.customer_type` to `customers.customer_type`:
+  - 4 queries in `om_report.py` (avg_daily_consumption, daily_load_profiles, consumption_by_tenure, raw_meter_readings)
+  - 1 query in `crud.py` (account_detail)
+  - All now join accounts→customers for type data
+- **Added HH aggregate filter logic**: `_matches_customer_type()` helper treats "HH" filter as matching HH1+HH2+HH3
+- **Updated frontend**:
+  - OMReportPage and FinancialPage type dropdowns include "All HH (HH1+HH2+HH3)" aggregate option
+  - Customer creation forms (NewCustomerWizard, CommissionCustomerPage, AssignMeterPage) updated from `['HH', ...]` to `['HH1', 'HH2', 'HH3', ...]`
+- **Deployed**: Backend via SCP+systemctl, frontend via git push → GitHub Actions (run 22326878379, success)
+
+### Key Decisions
+- `customer_type` is a customer property, not a meter property — source of truth is now `customers` table
+- HH subtypes (HH1/HH2/HH3) correspond to survey scores (1=Low, 2=Medium, 3=High)
+- "HH" in filter context = aggregate of all HH subtypes; in data context = unresolved (no score available)
+- 295 of 13,710 survey entries (2%) have unresolved "HH" — these are from villages where score wasn't recorded
+
+### What Next Session Should Know
+- **206 active customers still lack customer_type** — these are from TLH and LSB sites which have no survey master files. Consider defaulting them or obtaining survey data
+- **`meters.customer_type` is now deprecated** — all reads go through `customers` table. The column still exists but is not written to or read by any backend code
+- **JSON fallback** (`meter_customer_types.json`) still used as tertiary source in consumption-by-tenure endpoint only
+- **Registration default** is still "HH" (generic) in `registration.py` line 67 — since forms now show HH1-3, this rarely fires
+- **Sites without survey data**: TLH (no master file found), LSB (no master file found)
+
+### Files Created/Modified
+- `acdb-api/om_report.py` — Migrated 4 type queries to customers table, added `_matches_customer_type()` and `_ACCT_CTYPE_SQL`
+- `acdb-api/crud.py` — Account detail now prefers `customers.customer_type`
+- `acdb-api/frontend/src/pages/OMReportPage.tsx` — Added "All HH" aggregate option
+- `acdb-api/frontend/src/pages/FinancialPage.tsx` — Added "All HH" aggregate option
+- `acdb-api/frontend/src/pages/NewCustomerWizard.tsx` — HH→HH1/HH2/HH3 in CUSTOMER_TYPES
+- `acdb-api/frontend/src/pages/CommissionCustomerPage.tsx` — HH→HH1/HH2/HH3 in CUSTOMER_TYPES
+- `acdb-api/frontend/src/pages/AssignMeterPage.tsx` — HH→HH1/HH2/HH3 in CUSTOMER_TYPES
+- `acdb-api/extract_survey_types.py` — Universal survey type extractor for all 12 LS sites
+
+## Session 2026-02-26 202602261543 (Check Meter RCA & Full Pipeline Fix)
+
+### What Was Done
+- **Root cause analysis**: Investigated large SM vs 1M deviations on the Check Meter page
+  - Found `energy_integrated` resets to 0 on ESP32 reboot, silently losing accumulated energy
+  - Fixed `ingest.py` to use `energy_active` (DDS8888 Modbus register, non-volatile) for delta calculations
+  - Backfilled `hourly_consumption` from raw `meter_readings` for all 3 original check meters
+  - Redistributed gap-recovery energy spikes using SM consumption as proportional weights
+- **Registered 2 additional check meters** from DynamoDB (23022684→0026MAK, 23022646→0119MAK)
+  - Discovered team had reported serial-to-account mapping backwards; data confirmed swap fixed deviations
+  - Backfilled historical data from DynamoDB `1meter_data` table
+- **Identified all 8 MAK meters** in DynamoDB `meter_last_seen`: 3 customer check (original), 2 customer check (newly registered), 1 gateway (23022667), 1 repeater (23022613), 1 unknown (23021866)
+- **Added cumulative kWh chart** below the hourly chart, normalized to first hour with both SM+1M data
+- **Updated stat cards** to show total deviation as headline metric (green/amber/red color-coded)
+- **Changed default period** to "Since firmware update" (auto-detects first IoT reading)
+
+### Key Decisions
+- Use `energy_active` over `energy_integrated` for deltas — resolution (10 Wh vs 0.8 Wh) not worth reboot vulnerability
+- Redistribute gap energy proportionally using SM pattern rather than lumping into single hour
+- Confirmed 23022613 is a repeater at the powerhouse, not a customer meter
+
+### Final Check Meter Status (5 pairs)
+| Account | 1M Serial | Total Dev | Status |
+|---------|-----------|-----------|--------|
+| 0025MAK | 23022696 | +2.3% | Green |
+| 0026MAK | 23022684 | +1.2% | Green |
+| 0119MAK | 23022646 | +4.8% | Green |
+| 0005MAK | 23022628 | -1.8% | Green |
+| 0045MAK | 23022673 | -6.6% | Amber |
+
+### What Next Session Should Know
+- 23022613 (repeater) and 23022667 (gateway) don't need check-meter pairing
+- 23021866 is an unknown meter in DynamoDB not in the SOP — relay OFF, 0 kWh
+- The Lambda (`ingestion_gate`) does NOT forward `energy_integrated` — it only sends `energy_active`. So the ingest.py fix was about future-proofing, not retroactively fixing the data flow
+- All gap redistribution used SM pattern as weights — this is honest for totals but fabricates hourly shape during gaps
+- 0045MAK has very low consumption (~0.016 kWh/hr avg) where 10 Wh DDS8888 quantization causes larger % deviations
+
+### Files Modified
+- `acdb-api/ingest.py` — Switched delta calculation from `energy_integrated` to `energy_active`
+- `acdb-api/om_report.py` — Added `total_deviation_pct`, auto-detect IoT start for days=0
+- `acdb-api/frontend/src/pages/CheckMeterPage.tsx` — Cumulative chart, normalized start, updated stat cards
+- `acdb-api/frontend/src/lib/api.ts` — Added `total_deviation_pct` to `CheckMeterPairStats`
+
+## Session 2026-02-27 202602271930 (OTA Signature Verification Fix)
+
+### What Was Done
+- **Diagnosed OTA signature verification failure**: Team reported `E (314865) AWS_OTA: Signature verification failed` after successful download (265/266 blocks)
+- **Root cause**: Two different ECDSA key pairs were generated with the same Subject (`CN=1PWR OTA Signer`). One was imported into ACM (Feb 20, serial `5FFF5F49...`), a different one was placed in the firmware's `main/certs/aws_codesign.crt` (Feb 21, serial `715B3A62...`). AWS Signer signed with key A, device verified with key B — always fails.
+- **Fixed**: Replaced `aws_codesign.crt` in the firmware repo with the correct ACM certificate
+- **Added `.gitignore` exception**: The `*.crt` rule was preventing the cert from being tracked; added `!main/certs/aws_codesign.crt`
+- **Committed and pushed** to `onepwr-aws-mesh` main branch
+- **WiFi issue clarified**: Team reported WiFi/TLS failures — this is expected behavior since WiFi creds are compile-time constants (`DareMightyThings`/`bestcity` in `sdkconfig.defaults`). SOP already documents this requirement.
+
+### Key Decisions
+- The correct certificate is the ACM one (imported Feb 20), not the firmware one (generated Feb 21)
+- Both signing profiles (`1PWR_OTA_ESP32` and `1PWR_OTA_ESP32_v2`) use the same ACM cert ARN
+- `1PWR_OTA_ESP32` is Canceled; `1PWR_OTA_ESP32_v2` is Active — bench test SOP correctly uses v2
+
+### What Next Session Should Know
+- EC2 build server (13.244.104.137) was unreachable at time of fix — may need to be started
+- After `git pull` on the build server, the team must rebuild base firmware (v1.0.0) AND OTA target (v1.0.1) for bench test devices (OneMeter3, OneMeter4)
+- The base firmware must be USB-flashed (it contains the corrected cert that verifies OTA signatures)
+- WiFi creds are compile-time only — a future enhancement could store them in NVS for OTA-updateable WiFi config
+
+### Files Modified
+- `onepwr-aws-mesh/main/certs/aws_codesign.crt` — Replaced with correct ACM certificate
+- `onepwr-aws-mesh/.gitignore` — Added exception for `aws_codesign.crt`
+
+---
+
+## Session 2026-03-07 202603071350 (Fleet Summary Card + OTA Success + 0026MAK Diagnosis)
+
+### What Was Done
+
+1. **Fleet total deviation summary card** on Check Meter page (`CheckMeterPage.tsx`):
+   - New `FleetSummaryCard` component aggregates SM vs 1M totals across all check meters
+   - Shows fleet-wide deviation %, absolute kWh difference, total SM/1M kWh, matched hours
+   - Color-coded (green <5%, amber <15%, red 15%+), appears only when 2+ meters present
+   - Committed and pushed to `main` → auto-deployed to cc.1pwrafrica.com
+
+2. **OTA confirmed working end-to-end**:
+   - Team reported successful OTA on OneMeter3 and OneMeter4 (bench test)
+   - Console log shows: download 263/263 → signature verified → "OTA Completed successfully!" → reboot → polls for next job
+   - Both AWS IoT jobs show "Completed" status (Mar 6)
+   - Next steps: group targeting test Monday, MAK physical visit Tuesday
+
+3. **Remote diagnosis of 0026MAK 1M measurement failure**:
+   - Queried DynamoDB raw readings for all 5 check meters
+   - Found 0026MAK's DDS8888 current reading dropped from normal (41-105 mA during active periods) to 0-1 mA starting around Mar 5
+   - Voltage reads normally (228V), Modbus communication works, EnergyActive barely increments
+   - Compared with 3 other working meters running identical firmware -- all show normal 3-4 mA current readings
+   - **Firmware ruled out** as cause (same FW on all meters, only one affected)
+   - **Diagnosis: DDS8888 internal hardware failure** -- current passes through (SM confirms consumption) but internal metering circuit no longer senses it
+   - One brief 41 mA spike on Mar 7 suggests intermittent internal contact (failing solder joint or metering IC)
+   - **Action: swap the DDS8888 unit on Tuesday**
+
+4. **Team guidance drafted and sent via WhatsApp**:
+   - Monday parallelized across 3 engineers (build firmware / group OTA test / MAK prep)
+   - Tuesday MAK priorities: flash new watchdog firmware on all meters, priority on 23022696 (repeat dropout), swap 0026MAK DDS8888
+   - Recommended laptops over EC2 for firmware builds (self-sufficient, no SSH dependency)
+   - 0026MAK troubleshooting data shared with team
+
+### Key Decisions
+- Laptops preferred over EC2 build server for firmware builds (eliminates SSH dependency, enables build-flash-test cycle on one machine)
+- DDS8888 at 0026MAK diagnosed as internal hardware failure via remote data analysis, avoiding speculative on-site troubleshooting
+- Used EC2 Instance Connect (`send-ssh-public-key`) to access EOL server when SSH key wasn't authorized
+
+### Current Meter Fleet Status (Mar 7)
+| Account | 1M Serial | Status | Issue |
+|---------|-----------|--------|-------|
+| 0005MAK | 23022628 | ✓ Working | I=4 mA, normal |
+| 0026MAK | 23022684 | ✗ Faulty | DDS8888 internal failure, I=0-1 mA |
+| 0045MAK | 23022673 | ✓ Working | Very low consumption customer |
+| 0119MAK | 23022646 | ✓ Working | I=3-4 mA, normal |
+| 0025MAK | 23022696 | ✗ Offline | No data since Mar 5 17:08, repeat dropout |
+
+### What Next Session Should Know
+- **OTA is operational** for bench devices. Next: group targeting test, then field deployment
+- **New firmware** (watchdog + WiFi reconnect) committed to `onepwr-aws-mesh` but needs building before Tuesday MAK visit
+- **0026MAK needs DDS8888 swap** -- confirmed by remote DynamoDB data analysis
+- **0025MAK needs new firmware flash** -- repeat communication dropout, 210m from powerhouse with repeaters in between
+- **EC2 Instance Connect** is required to SSH into EOL (13.244.104.137) -- `id_rsa` key not authorized, must push via `aws ec2-instance-connect send-ssh-public-key` first
+- **DynamoDB access**: table `1meter_data`, partition key `device_id` (format: `000023022XXX`), region `us-east-1`
+- **PostgreSQL source enum**: `thundercloud` (SM), `koios` (SM), `iot` (1M) -- NOT `sparkmeter`
+- **Enclosure design issue** flagged by team -- single channel enclosures too cramped for meter + PCB + power converter
+
+### Files Modified
+- `acdb-api/frontend/src/pages/CheckMeterPage.tsx` — Added FleetSummaryCard component
+
+### Protocol Feedback
+- CONTEXT.md and SESSION_LOG.md provided good continuity from prior sessions
+- The conversation summary was accurate and comprehensive
+- EC2 Instance Connect workaround should be documented in CONTEXT.md for future sessions
+
+## Session 2026-02-16 202602161800 (CC Financing, Missing Features, and Manual Revision)
+
+### What Was Done
+- **Database tables created** on EOL PostgreSQL: `financing_products`, `financing_agreements`, `financing_ledger`, `payment_verifications`, plus `financing_portion`/`electricity_portion` columns on `transactions`
+- **Financing backend** (`financing.py`): CRUD for product templates and agreements, payment split logic (`compute_financing_split`, `apply_financing_payment`), and PDF contract generation using new Jinja2 template (`template_financing_en.html`)
+- **Payment routing modified** (`payments.py`): Both webhook and manual record endpoints now split payments between electricity and financing debt, with ones-digit 1/9 rule for dedicated debt payments
+- **Automatic penalty job** (`financing_penalties.py`): Standalone script that scans active agreements and applies penalties per grace/interval terms
+- **Payment verification backend** (`payment_verification.py`): Pending queue, bulk verify/reject endpoints
+- **Onboarding pipeline endpoint** added to `om_report.py`: Aggregates commissioning step counts into a funnel
+- **Four new frontend pages**: FinancingPage (product templates + agreements with ledger detail), RecordPaymentPage (manual payment with split indicator), PaymentVerificationPage (bulk verify/reject queue), PipelinePage (funnel visualization with drop-off %)
+- **Customer financing section** added to CustomerDataPage: Shows active agreements with progress bars when customer has financing
+- **App routing and Layout nav** updated to include all new pages
+- **Operating Manual revised**: New markdown manual (`1PWR Customer Care Portal Operating Manual.md`) replacing old ACCDB-based PDF, covering all as-built features including financing
+
+### Key Decisions
+- Financing is tracked completely separately from electricity balance — the prepaid relay cutoff mechanic is unaffected
+- Payment split uses FIFO ordering when multiple agreements exist
+- Penalties are automatic via a cron-ready script, not manual
+- The manual is markdown (not PDF) for easier maintenance
+
+### What Next Session Should Know
+- All 4 new tables exist on EOL PostgreSQL — no migrations needed
+- The financing router and verification router are registered in `customer_api.py`
+- `financing_penalties.py` needs to be added to a cron job on EOL (e.g., daily via `crontab -e` for the `ubuntu` user)
+- The Sesotho version of the financing contract template (`template_financing_so.html`) has not been created yet — only English exists
+- The extend credit wizard (4-step modal from CustomerDetailPage) was simplified into the agreements creation flow on the FinancingPage — a more polished wizard with signature canvas could be added later
+- XLSX export on the payment verification page is not yet implemented (table is viewable/filterable but no download button)
+
+### Files Modified
+- `acdb-api/financing.py` (new)
+- `acdb-api/financing_penalties.py` (new)
+- `acdb-api/payment_verification.py` (new)
+- `acdb-api/payments.py` (modified — split logic)
+- `acdb-api/om_report.py` (modified — pipeline endpoint)
+- `acdb-api/customer_api.py` (modified — router registration)
+- `acdb-api/templates/template_financing_en.html` (new)
+- `acdb-api/frontend/src/lib/api.ts` (modified — new API types and functions)
+- `acdb-api/frontend/src/App.tsx` (modified — new routes)
+- `acdb-api/frontend/src/components/Layout.tsx` (modified — nav links)
+- `acdb-api/frontend/src/pages/FinancingPage.tsx` (new)
+- `acdb-api/frontend/src/pages/RecordPaymentPage.tsx` (new)
+- `acdb-api/frontend/src/pages/PaymentVerificationPage.tsx` (new)
+- `acdb-api/frontend/src/pages/PipelinePage.tsx` (new)
+- `acdb-api/frontend/src/pages/CustomerDataPage.tsx` (modified — financing section)
+- `1PWR Customer Care Portal Operating Manual.md` (new)

@@ -22,6 +22,7 @@ from pydantic import BaseModel
 from customer_api import get_connection
 from sparkmeter_credit import credit_sparkmeter, CreditResult
 from balance_engine import get_balance_kwh, record_payment_kwh
+from financing import compute_financing_split, apply_financing_payment
 
 logger = logging.getLogger("cc-api.payments")
 
@@ -122,20 +123,37 @@ def payment_webhook(
             meter_id = _resolve_meter(conn, payload.account_number, payload.meter_id)
             rate = _get_tariff_rate(conn, payload.account_number)
 
+            split = compute_financing_split(conn, payload.account_number, payload.amount)
+            elec_amount = split["electricity_portion"]
+
             txn_id, kwh_vended, new_balance_kwh = record_payment_kwh(
                 conn, payload.account_number, meter_id,
-                amount_currency=payload.amount, rate=rate,
+                amount_currency=elec_amount, rate=rate,
                 source="sms_gateway", timestamp=ts,
+            )
+
+            if split["has_financing"] and split["debt_portion"] > 0:
+                apply_financing_payment(
+                    conn, split["agreement_id"], split["debt_portion"],
+                    source_transaction_id=txn_id,
+                )
+
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE transactions SET financing_portion = %s, electricity_portion = %s WHERE id = %s",
+                (split["debt_portion"], elec_amount, txn_id),
             )
             conn.commit()
 
-            background_tasks.add_task(
-                _credit_sm_and_log, payload.account_number,
-                payload.amount, f"sms_gateway txn {txn_id}",
-                str(txn_id),
-            )
+            sm_credit_amount = elec_amount if elec_amount > 0 else 0
+            if sm_credit_amount > 0:
+                background_tasks.add_task(
+                    _credit_sm_and_log, payload.account_number,
+                    sm_credit_amount, f"sms_gateway txn {txn_id}",
+                    str(txn_id),
+                )
 
-            return {
+            result = {
                 "status": "ok",
                 "transaction_id": txn_id,
                 "account_number": payload.account_number,
@@ -145,6 +163,13 @@ def payment_webhook(
                 "balance_kwh": new_balance_kwh,
                 "meter_id": meter_id,
             }
+            if split["has_financing"]:
+                result["financing"] = {
+                    "debt_portion": split["debt_portion"],
+                    "electricity_portion": elec_amount,
+                    "is_dedicated_payment": split["is_dedicated_payment"],
+                }
+            return result
 
     except HTTPException:
         raise
@@ -168,20 +193,38 @@ def record_manual_payment(payload: ManualPayment):
             meter_id = _resolve_meter(conn, payload.account_number, payload.meter_id)
             rate = _get_tariff_rate(conn, payload.account_number)
 
+            split = compute_financing_split(conn, payload.account_number, payload.amount)
+            elec_amount = split["electricity_portion"]
+
             txn_id, kwh_vended, new_balance_kwh = record_payment_kwh(
                 conn, payload.account_number, meter_id,
-                amount_currency=payload.amount, rate=rate,
-                kwh_override=payload.kwh,
+                amount_currency=elec_amount, rate=rate,
+                kwh_override=payload.kwh if not split["has_financing"] else None,
                 source="portal",
+            )
+
+            if split["has_financing"] and split["debt_portion"] > 0:
+                apply_financing_payment(
+                    conn, split["agreement_id"], split["debt_portion"],
+                    source_transaction_id=txn_id,
+                )
+
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE transactions SET financing_portion = %s, electricity_portion = %s WHERE id = %s",
+                (split["debt_portion"], elec_amount, txn_id),
             )
             conn.commit()
 
-            sm_result = _credit_sm_sync(
-                payload.account_number, payload.amount,
-                payload.note or f"portal txn {txn_id}", str(txn_id),
-            )
+            sm_credit_amount = elec_amount if elec_amount > 0 else 0
+            sm_result = None
+            if sm_credit_amount > 0:
+                sm_result = _credit_sm_sync(
+                    payload.account_number, sm_credit_amount,
+                    payload.note or f"portal txn {txn_id}", str(txn_id),
+                )
 
-            return {
+            result = {
                 "status": "ok",
                 "transaction_id": txn_id,
                 "amount": payload.amount,
@@ -189,6 +232,13 @@ def record_manual_payment(payload: ManualPayment):
                 "balance_kwh": new_balance_kwh,
                 "sm_credit": sm_result,
             }
+            if split["has_financing"]:
+                result["financing"] = {
+                    "debt_portion": split["debt_portion"],
+                    "electricity_portion": elec_amount,
+                    "is_dedicated_payment": split["is_dedicated_payment"],
+                }
+            return result
     except Exception as e:
         logger.error("Manual payment failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -274,7 +324,8 @@ def get_payment_history(
             cur.execute("""
                 SELECT id, account_number, meter_id, transaction_date,
                        transaction_amount, rate_used, kwh_value,
-                       is_payment, current_balance, source
+                       is_payment, current_balance, source,
+                       financing_portion, electricity_portion
                 FROM transactions
                 WHERE account_number = %s
                 ORDER BY transaction_date DESC

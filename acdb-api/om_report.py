@@ -1970,3 +1970,68 @@ def check_meter_comparison(
             "days": days,
             "cutoff": cutoff.strftime("%Y-%m-%dT%H:%M:%S"),
         }
+
+
+# ---------------------------------------------------------------------------
+# Onboarding Pipeline Report
+# ---------------------------------------------------------------------------
+
+@router.get("/api/om-report/pipeline")
+def onboarding_pipeline(
+    site: Optional[str] = Query(None),
+    user: CurrentUser = Depends(require_employee),
+):
+    """Aggregate commissioning step counts into a funnel.
+
+    Returns counts at each stage: registered -> connection_fee_paid -> ... -> customer_commissioned.
+    """
+    from customer_api import get_connection
+
+    steps = [
+        "connection_fee_paid",
+        "readyboard_fee_paid",
+        "readyboard_tested",
+        "readyboard_installed",
+        "airdac_connected",
+        "meter_installed",
+        "customer_commissioned",
+    ]
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+
+        site_clause = ""
+        params: list = []
+        if site:
+            site_clause = "WHERE m.community = %s"
+            params = [site]
+
+        cur.execute(f"""
+            SELECT count(*) FROM customers c
+            LEFT JOIN accounts a ON a.customer_id = c.id
+            LEFT JOIN meters m ON m.account_number = a.account_number
+            {site_clause}
+        """, params)
+        total_registered = cur.fetchone()[0]
+
+        funnel = [{"stage": "registered", "count": total_registered}]
+
+        for step in steps:
+            cur.execute(f"""
+                SELECT count(*) FROM customers c
+                LEFT JOIN accounts a ON a.customer_id = c.id
+                LEFT JOIN meters m ON m.account_number = a.account_number
+                WHERE c.{step} = true
+                {("AND m.community = %s" if site else "")}
+            """, [site] if site else [])
+            funnel.append({"stage": step, "count": cur.fetchone()[0]})
+
+        sites_list = []
+        cur.execute("""
+            SELECT DISTINCT m.community FROM meters m
+            WHERE m.community IS NOT NULL AND m.community != ''
+            ORDER BY m.community
+        """)
+        sites_list = [r[0] for r in cur.fetchall()]
+
+        return {"funnel": funnel, "sites": sites_list}

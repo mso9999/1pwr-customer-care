@@ -26,6 +26,11 @@ import SyncPage from './pages/SyncPage';
 import CommissionCustomerPage from './pages/CommissionCustomerPage';
 import TariffManagementPage from './pages/TariffManagementPage';
 import CheckMeterPage from './pages/CheckMeterPage';
+import FinancingPage from './pages/FinancingPage';
+import RecordPaymentPage from './pages/RecordPaymentPage';
+import PaymentVerificationPage from './pages/PaymentVerificationPage';
+import PipelinePage from './pages/PipelinePage';
+import HelpPage from './pages/HelpPage';
 
 function HomeRedirect() {
   const { user, loading } = useAuth();
@@ -64,6 +69,11 @@ export default function App() {
             <Route path="commission" element={<ProtectedRoute requireEmployee><CommissionCustomerPage /></ProtectedRoute>} />
             <Route path="tariffs" element={<ProtectedRoute requireEmployee><TariffManagementPage /></ProtectedRoute>} />
             <Route path="check-meters" element={<ProtectedRoute requireEmployee><CheckMeterPage /></ProtectedRoute>} />
+            <Route path="financing" element={<ProtectedRoute requireEmployee><FinancingPage /></ProtectedRoute>} />
+            <Route path="record-payment" element={<ProtectedRoute requireEmployee><RecordPaymentPage /></ProtectedRoute>} />
+            <Route path="payment-verification" element={<ProtectedRoute requireEmployee><PaymentVerificationPage /></ProtectedRoute>} />
+            <Route path="pipeline" element={<ProtectedRoute requireEmployee><PipelinePage /></ProtectedRoute>} />
+            <Route path="help" element={<ProtectedRoute requireEmployee><HelpPage /></ProtectedRoute>} />
             {/* Customer routes */}
             <Route path="my/dashboard" element={<CustomerDashboardPage />} />
             <Route path="my/profile" element={<MyProfilePage />} />

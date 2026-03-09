@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>ASSET FINANCING AGREEMENT</title>
+    <style>
+        @page { margin: 2cm; @frame footer { -pdf-frame-content: footer_content; bottom: 0cm; margin-left: 2cm; margin-right: 2cm; height: 1cm; } }
+        body { font-family: Helvetica, Arial, sans-serif; font-size: 11px; line-height: 1.5; color: #333; }
+        .container { max-width: 700px; margin: 0 auto; }
+        h2 { font-size: 16px; margin-top: 10px; text-align: center; }
+        h3 { font-size: 13px; margin-top: 12px; margin-bottom: 4px; }
+        p { margin: 4px 0; }
+        .center { text-align: center; }
+        #footer_content { font-size: 9px; text-align: center; color: #999; }
+        .info-table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+        .info-table td { padding: 4px 8px; border: 1px solid #ccc; font-size: 11px; }
+        .info-table .label { font-weight: bold; background-color: #f5f5f5; width: 40%; }
+        .terms-table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+        .terms-table td { padding: 5px 8px; border: 1px solid #ccc; font-size: 11px; }
+        .terms-table .label { font-weight: bold; background-color: #f0f7ff; width: 50%; }
+        .signature { margin: 15px 0; }
+        .signature img { max-width: 200px; max-height: 80px; }
+        .sig-line { border-bottom: 1px solid #333; width: 250px; display: inline-block; margin-bottom: 3px; }
+        .intro { font-style: italic; margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+<div id="footer_content">1PWR Asset Financing Agreement — Ref: FIN-{{ data.agreement_id }} — <pdf:pagenumber></div>
+
+<p class="intro">Administered by OnePower Lesotho</p>
+<h2>ASSET FINANCING AGREEMENT</h2>
+<p class="intro center">Agreement Reference: FIN-{{ data.agreement_id }}</p>
+
+<h3>1. PARTIES</h3>
+<table class="info-table">
+    <tr><td class="label">Customer Name</td><td>{{ data.first_name }} {{ data.last_name }}</td></tr>
+    <tr><td class="label">National ID</td><td>{{ data.national_id }}</td></tr>
+    <tr><td class="label">Phone Number</td><td>{{ data.phone }}</td></tr>
+    <tr><td class="label">Account Number</td><td>{{ data.account_number }}</td></tr>
+    <tr><td class="label">Date</td><td>{{ data.date }}</td></tr>
+</table>
+
+<h3>2. FINANCED ASSET</h3>
+<p>The Mini-Grid Provider agrees to extend financing to the Customer for the following:</p>
+<table class="info-table">
+    <tr><td class="label">Description</td><td>{{ data.description }}</td></tr>
+</table>
+
+<h3>3. FINANCIAL TERMS</h3>
+<table class="terms-table">
+    <tr><td class="label">Principal Amount</td><td>M {{ data.principal }}</td></tr>
+    <tr><td class="label">Interest</td><td>M {{ data.interest_amount }}</td></tr>
+    <tr><td class="label">Setup / Administration Fee</td><td>M {{ data.setup_fee }}</td></tr>
+    <tr><td class="label"><b>Total Amount Owed</b></td><td><b>M {{ data.total_owed }}</b></td></tr>
+    <tr><td class="label">Repayment Rate</td><td>{{ data.repayment_fraction }}% of each electricity payment</td></tr>
+    <tr><td class="label">Late Payment Penalty</td><td>{{ data.penalty_rate }}% of outstanding balance after {{ data.penalty_grace_days }} days without payment</td></tr>
+</table>
+
+<h3>4. REPAYMENT METHOD</h3>
+<p>
+    The Customer agrees that <b>{{ data.repayment_fraction }}%</b> of each electricity payment made to their account
+    will be automatically deducted and applied towards repaying the Total Amount Owed. The remaining portion of
+    each payment will be credited to the Customer's electricity balance as normal.
+</p>
+<p>
+    The Customer may make dedicated debt payments at any time by sending a payment whose amount ends in the
+    digit <b>1</b> or <b>9</b> (for example: M51, M101, M79). Such payments will be applied <b>entirely</b> towards
+    reducing the outstanding financing balance.
+</p>
+
+<h3>5. PENALTIES</h3>
+<p>
+    If no payment (of any kind) is received for a period of <b>{{ data.penalty_grace_days }} days</b>, a penalty of
+    <b>{{ data.penalty_rate }}%</b> of the outstanding balance will be added to the amount owed. This penalty may
+    be applied repeatedly for each successive period of non-payment.
+</p>
+
+<h3>6. DEFAULT</h3>
+<p>
+    If the Customer fails to make any payment for an extended period, the Mini-Grid Provider reserves the right to:
+</p>
+<p>(a) Classify the account as in default;</p>
+<p>(b) Restrict or disconnect electricity service until a satisfactory repayment arrangement is made;</p>
+<p>(c) Recover the financed asset where applicable.</p>
+
+<h3>7. ACKNOWLEDGEMENT</h3>
+<p>
+    By signing below, the Customer confirms that they understand and accept the terms of this financing
+    agreement, including the repayment method, penalty provisions, and consequences of default.
+</p>
+
+<div class="signature" style="margin-top: 30px;">
+    <p><b>Customer Signature:</b></p>
+    {% if data.customer_signature %}
+    <img src="data:image/png;base64,{{ data.customer_signature }}" alt="Customer Signature" />
+    {% else %}
+    <div class="sig-line">&nbsp;</div>
+    {% endif %}
+    <p>{{ data.first_name }} {{ data.last_name }}</p>
+    <p>Date: {{ data.date }}</p>
+</div>
+
+<div class="signature" style="margin-top: 20px;">
+    <p><b>Witness / Company Representative:</b></p>
+    {% if data.staff_signature %}
+    <img src="data:image/png;base64,{{ data.staff_signature }}" alt="Staff Signature" />
+    {% else %}
+    <div class="sig-line">&nbsp;</div>
+    {% endif %}
+    <p>{{ data.staff_name }}</p>
+    <p>Date: {{ data.date }}</p>
+</div>
+
+</div>
+</body>
+</html>

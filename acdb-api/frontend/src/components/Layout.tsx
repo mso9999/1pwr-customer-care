@@ -132,8 +132,13 @@ export default function Layout() {
                   {navLink('/tables', 'Tables')}
                   {navLink('/export', 'Export')}
                   {navLink('/tariffs', 'Tariffs')}
+                  {navLink('/financing', 'Financing', true)}
+                  {navLink('/record-payment', 'Record Payment')}
+                  {navLink('/payment-verification', 'Verify Payments')}
+                  {navLink('/pipeline', 'Pipeline')}
                   {navLink('/mutations', 'Mutations')}
                   {navLink('/sync', 'Sync', true)}
+                  {navLink('/help', 'Help')}
                   {isSuperadmin && navLink('/admin/roles', 'Roles')}
                 </>
               )}
@@ -164,8 +169,13 @@ export default function Layout() {
                 {navLink('/tables', 'Tables')}
                 {navLink('/export', 'Export')}
                 {navLink('/tariffs', 'Tariffs')}
+                {navLink('/financing', 'Financing', true)}
+                {navLink('/record-payment', 'Record Payment')}
+                {navLink('/payment-verification', 'Verify Payments')}
+                {navLink('/pipeline', 'Pipeline')}
                 {navLink('/mutations', 'Mutations')}
                 {navLink('/sync', 'Sync', true)}
+                {navLink('/help', 'Help')}
                 {isSuperadmin && navLink('/admin/roles', 'Roles')}
               </>
             )}

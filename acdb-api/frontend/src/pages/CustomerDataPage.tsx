@@ -6,8 +6,9 @@ import {
 } from 'recharts';
 import {
   getCustomerData, createRecord, updateRecord, deleteRecord,
-  getAccountMeterHistory,
+  getAccountMeterHistory, getCustomerFinancing,
   type CustomerDataResponse, type Transaction, type HourlyPoint, type MeterAssignment,
+  type CustomerFinancingSummary,
 } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -200,6 +201,9 @@ export default function CustomerDataPage() {
   const [meterHistory, setMeterHistory] = useState<MeterAssignment[]>([]);
   const [showMeterHistory, setShowMeterHistory] = useState(false);
 
+  // Financing
+  const [financing, setFinancing] = useState<CustomerFinancingSummary | null>(null);
+
   // Fetch data when account changes (or after CRUD refresh)
   useEffect(() => {
     if (!account) return;
@@ -212,6 +216,9 @@ export default function CustomerDataPage() {
     getAccountMeterHistory(account)
       .then(res => setMeterHistory(res.meters || []))
       .catch(() => setMeterHistory([]));
+    getCustomerFinancing(account)
+      .then(setFinancing)
+      .catch(() => setFinancing(null));
   }, [account, refreshKey]);
 
   // CRUD helpers
@@ -493,6 +500,41 @@ export default function CustomerDataPage() {
             <Stat label="Total Consumption (all time)" value={`${d.total_kwh_all_time.toFixed(0)} kWh`} color="blue" />
             <Stat label="Total Purchases (all time)" value={`${d.currency_code || 'LSL'} ${d.total_lsl_all_time.toFixed(0)}`} color="green" />
           </div>
+
+          {/* Financing section */}
+          {financing && financing.active_agreements > 0 && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold text-amber-800">Active Financing</h3>
+                <span className="text-xs bg-amber-200 text-amber-800 px-2 py-0.5 rounded-full font-medium">
+                  {financing.active_agreements} agreement{financing.active_agreements > 1 ? 's' : ''}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-3">
+                <Stat label="Total Outstanding" value={`M ${financing.total_outstanding.toFixed(2)}`} color="red" />
+              </div>
+              <div className="space-y-2">
+                {financing.agreements.filter(a => a.status === 'active').map(a => (
+                  <div key={a.id} className="bg-white rounded-lg p-3 border border-amber-100">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-medium text-gray-800">{a.description}</span>
+                      <span className="text-red-600 font-bold">M {Number(a.outstanding_balance).toFixed(2)}</span>
+                    </div>
+                    <div className="w-full bg-amber-100 rounded-full h-2 mt-2">
+                      <div
+                        className="bg-green-500 h-2 rounded-full transition-all"
+                        style={{ width: `${Math.min(((Number(a.total_owed) - Number(a.outstanding_balance)) / Number(a.total_owed)) * 100, 100)}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between text-xs text-gray-500 mt-1">
+                      <span>Paid: M {(Number(a.total_owed) - Number(a.outstanding_balance)).toFixed(2)}</span>
+                      <span>Total: M {Number(a.total_owed).toFixed(2)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Tabs */}
           <div className="flex gap-1 bg-gray-100 rounded-xl p-1">

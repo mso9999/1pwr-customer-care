@@ -248,6 +248,8 @@ from payments import router as payments_router
 from ingest import router as ingest_router
 from meter_lifecycle import router as meter_lifecycle_router, ensure_meter_assignments_table
 from pr_lookup import router as portfolio_router
+from financing import router as financing_router
+from payment_verification import router as verification_router
 
 from db_auth import init_auth_db
 init_auth_db()
@@ -271,6 +273,8 @@ app.include_router(payments_router)
 app.include_router(ingest_router)
 app.include_router(meter_lifecycle_router)
 app.include_router(portfolio_router)
+app.include_router(financing_router)
+app.include_router(verification_router)
 ensure_meter_assignments_table()
 
 

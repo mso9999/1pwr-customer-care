@@ -1109,6 +1109,203 @@ export async function getCheckMeterComparison(days = 7): Promise<CheckMeterCompa
   return request(`/om-report/check-meter-comparison?days=${days}`);
 }
 
+// ---------------------------------------------------------------------------
+// Financing
+// ---------------------------------------------------------------------------
+
+export interface FinancingProduct {
+  id: number;
+  name: string;
+  default_principal: number;
+  default_interest_rate: number;
+  default_setup_fee: number;
+  default_repayment_fraction: number;
+  default_penalty_rate: number;
+  default_penalty_grace_days: number;
+  default_penalty_interval_days: number;
+  is_active: boolean;
+}
+
+export interface FinancingAgreement {
+  id: number;
+  customer_id: number | null;
+  account_number: string;
+  product_id: number | null;
+  product_name: string | null;
+  description: string;
+  principal: number;
+  interest_amount: number;
+  setup_fee: number;
+  total_owed: number;
+  outstanding_balance: number;
+  repayment_fraction: number;
+  penalty_rate: number;
+  penalty_grace_days: number;
+  penalty_interval_days: number;
+  contract_path: string | null;
+  status: string;
+  created_at: string;
+  created_by: string | null;
+  paid_off_at: string | null;
+  ledger?: FinancingLedgerEntry[];
+}
+
+export interface FinancingLedgerEntry {
+  id: number;
+  agreement_id: number;
+  entry_type: string;
+  amount: number;
+  balance_after: number;
+  source_transaction_id: number | null;
+  note: string | null;
+  created_at: string;
+  created_by: string | null;
+}
+
+export interface CustomerFinancingSummary {
+  account_number: string;
+  total_outstanding: number;
+  active_agreements: number;
+  agreements: FinancingAgreement[];
+}
+
+export async function getFinancingProducts(): Promise<FinancingProduct[]> {
+  return request('/financing/products');
+}
+
+export async function createFinancingProduct(data: Partial<FinancingProduct>): Promise<{ id: number }> {
+  return request('/financing/products', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function updateFinancingProduct(id: number, data: Partial<FinancingProduct>): Promise<void> {
+  return request(`/financing/products/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+export async function getFinancingAgreements(params?: { status?: string; account_number?: string }): Promise<FinancingAgreement[]> {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set('status', params.status);
+  if (params?.account_number) qs.set('account_number', params.account_number);
+  const q = qs.toString();
+  return request(`/financing/agreements${q ? '?' + q : ''}`);
+}
+
+export async function createFinancingAgreement(data: {
+  account_number: string;
+  product_id?: number;
+  description: string;
+  principal: number;
+  interest_amount?: number;
+  setup_fee?: number;
+  total_owed?: number;
+  repayment_fraction?: number;
+  penalty_rate?: number;
+  penalty_grace_days?: number;
+  penalty_interval_days?: number;
+  customer_signature_b64?: string;
+}): Promise<{ id: number; contracts?: Record<string, string> }> {
+  return request('/financing/agreements', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function getFinancingAgreement(id: number): Promise<FinancingAgreement> {
+  return request(`/financing/agreements/${id}`);
+}
+
+export async function adjustFinancingAgreement(id: number, data: { entry_type: string; amount: number; note?: string }): Promise<{ outstanding_balance: number; status: string }> {
+  return request(`/financing/agreements/${id}/adjust`, { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function getCustomerFinancing(account_number: string): Promise<CustomerFinancingSummary> {
+  return request(`/financing/customer/${account_number}`);
+}
+
+// ---------------------------------------------------------------------------
+// Payment Verification
+// ---------------------------------------------------------------------------
+
+export interface PaymentVerification {
+  id: number;
+  transaction_id: number | null;
+  account_number: string;
+  payment_type: string;
+  amount: number;
+  status: string;
+  verified_by: string | null;
+  verified_at: string | null;
+  note: string | null;
+  created_at: string;
+  first_name?: string;
+  last_name?: string;
+}
+
+export async function getPendingVerifications(params?: { status?: string; payment_type?: string }): Promise<{ verifications: PaymentVerification[]; total: number }> {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set('status', params.status);
+  if (params?.payment_type) qs.set('payment_type', params.payment_type);
+  const q = qs.toString();
+  return request(`/payment-verification/pending${q ? '?' + q : ''}`);
+}
+
+export async function verifyPayments(ids: number[], action: 'verify' | 'reject', note?: string): Promise<{ updated: number }> {
+  return request('/payment-verification/verify', {
+    method: 'POST',
+    body: JSON.stringify({ ids, action, note }),
+  });
+}
+
+export function verificationExportUrl(status: string, paymentType?: string): string {
+  const qs = new URLSearchParams({ status });
+  if (paymentType) qs.set('payment_type', paymentType);
+  const token = getToken();
+  if (token) qs.set('token', token);
+  return `${getApiBase()}/payment-verification/export?${qs}`;
+}
+
+// ---------------------------------------------------------------------------
+// Onboarding Pipeline
+// ---------------------------------------------------------------------------
+
+export interface PipelineStage {
+  stage: string;
+  count: number;
+}
+
+export interface PipelineResponse {
+  funnel: PipelineStage[];
+  sites: string[];
+}
+
+export async function getOnboardingPipeline(site?: string): Promise<PipelineResponse> {
+  const qs = site ? `?site=${encodeURIComponent(site)}` : '';
+  return request(`/om-report/pipeline${qs}`);
+}
+
+// ---------------------------------------------------------------------------
+// Record Manual Payment
+// ---------------------------------------------------------------------------
+
+export interface RecordPaymentResult {
+  status: string;
+  transaction_id: number;
+  amount: number;
+  kwh: number;
+  balance_kwh: number;
+  sm_credit: Record<string, any> | null;
+  financing?: {
+    debt_portion: number;
+    electricity_portion: number;
+    is_dedicated_payment: boolean;
+  };
+}
+
+export async function recordManualPayment(data: {
+  account_number: string;
+  amount: number;
+  meter_id?: string;
+  note?: string;
+}): Promise<RecordPaymentResult> {
+  return request('/payments/record', { method: 'POST', body: JSON.stringify(data) });
+}
+
 // Health is at root level, not under /api
 export async function getHealth() {
   const res = await fetch('/health');

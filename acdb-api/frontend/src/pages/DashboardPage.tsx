@@ -97,6 +97,26 @@ export default function DashboardPage() {
         </div>
       </div>
 
+      {/* Quick actions */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+        <Link to="/help" className="bg-white rounded-lg shadow p-4 sm:p-5 hover:bg-blue-50 transition border border-transparent hover:border-blue-200 group">
+          <p className="text-xs sm:text-sm text-gray-500 group-hover:text-blue-600">Help & Instructions</p>
+          <p className="text-sm font-semibold text-gray-700 group-hover:text-blue-700 mt-1">Operating Manual</p>
+        </Link>
+        <Link to="/pipeline" className="bg-white rounded-lg shadow p-4 sm:p-5 hover:bg-blue-50 transition border border-transparent hover:border-blue-200 group">
+          <p className="text-xs sm:text-sm text-gray-500 group-hover:text-blue-600">Onboarding</p>
+          <p className="text-sm font-semibold text-gray-700 group-hover:text-blue-700 mt-1">Pipeline Funnel</p>
+        </Link>
+        <Link to="/record-payment" className="bg-white rounded-lg shadow p-4 sm:p-5 hover:bg-blue-50 transition border border-transparent hover:border-blue-200 group">
+          <p className="text-xs sm:text-sm text-gray-500 group-hover:text-blue-600">Payments</p>
+          <p className="text-sm font-semibold text-gray-700 group-hover:text-blue-700 mt-1">Record Payment</p>
+        </Link>
+        <Link to="/commission" className="bg-white rounded-lg shadow p-4 sm:p-5 hover:bg-blue-50 transition border border-transparent hover:border-blue-200 group">
+          <p className="text-xs sm:text-sm text-gray-500 group-hover:text-blue-600">Customers</p>
+          <p className="text-sm font-semibold text-gray-700 group-hover:text-blue-700 mt-1">Commission</p>
+        </Link>
+      </div>
+
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         {/* Bar chart: customers per site with MWh/LSL callouts */}

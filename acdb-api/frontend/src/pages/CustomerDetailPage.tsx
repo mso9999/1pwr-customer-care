@@ -1,7 +1,349 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getRecord, updateRecord, deleteRecord, getCustomerContracts, decommissionCustomer, type CommissionContract } from '../lib/api';
+import {
+  getRecord, updateRecord, deleteRecord, getCustomerContracts, decommissionCustomer,
+  getFinancingProducts, createFinancingAgreement,
+  type CommissionContract, type FinancingProduct,
+} from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
+
+// ---------------------------------------------------------------------------
+// Signature Canvas (same as CommissionCustomerPage)
+// ---------------------------------------------------------------------------
+
+function SignatureCanvas({ onCapture }: { onCapture: (b64: string) => void }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [hasContent, setHasContent] = useState(false);
+
+  const getPos = useCallback((e: React.TouchEvent | React.MouseEvent) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    if ('touches' in e) {
+      return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
+    }
+    return { x: (e as React.MouseEvent).clientX - rect.left, y: (e as React.MouseEvent).clientY - rect.top };
+  }, []);
+
+  const startDraw = useCallback((e: React.TouchEvent | React.MouseEvent) => {
+    e.preventDefault();
+    const ctx = canvasRef.current?.getContext('2d');
+    if (!ctx) return;
+    const pos = getPos(e);
+    ctx.beginPath();
+    ctx.moveTo(pos.x, pos.y);
+    setIsDrawing(true);
+  }, [getPos]);
+
+  const draw = useCallback((e: React.TouchEvent | React.MouseEvent) => {
+    e.preventDefault();
+    if (!isDrawing) return;
+    const ctx = canvasRef.current?.getContext('2d');
+    if (!ctx) return;
+    const pos = getPos(e);
+    ctx.lineTo(pos.x, pos.y);
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+    setHasContent(true);
+  }, [isDrawing, getPos]);
+
+  const endDraw = useCallback(() => { setIsDrawing(false); }, []);
+
+  const clearCanvas = () => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!ctx || !canvas) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setHasContent(false);
+  };
+
+  const acceptSignature = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+    onCapture(dataUrl.split(',')[1]);
+  };
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const parent = canvas.parentElement;
+    if (parent) {
+      canvas.width = parent.clientWidth;
+      canvas.height = Math.min(200, parent.clientWidth * 0.4);
+    }
+  }, []);
+
+  return (
+    <div className="space-y-3">
+      <div className="border-2 border-gray-300 rounded-xl overflow-hidden bg-white touch-none">
+        <canvas ref={canvasRef} className="w-full cursor-crosshair"
+          onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
+          onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw} />
+      </div>
+      <p className="text-xs text-gray-400 text-center">Sign above using your finger or stylus</p>
+      <div className="flex gap-3">
+        <button type="button" onClick={clearCanvas}
+          className="flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-medium text-sm hover:bg-gray-200 transition">Clear</button>
+        <button type="button" onClick={acceptSignature} disabled={!hasContent}
+          className="flex-1 py-3 bg-green-600 text-white rounded-xl font-semibold text-sm hover:bg-green-700 disabled:opacity-40 transition">Accept Signature</button>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Extend Credit Wizard (4-step modal)
+// ---------------------------------------------------------------------------
+
+function ExtendCreditWizard({ accountNumber, onClose, onCreated }: {
+  accountNumber: string;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [step, setStep] = useState(1);
+  const [products, setProducts] = useState<FinancingProduct[]>([]);
+  const [selectedProduct, setSelectedProduct] = useState<FinancingProduct | null>(null);
+
+  const [form, setForm] = useState({
+    description: '',
+    principal: 0,
+    interest_amount: 0,
+    setup_fee: 0,
+    repayment_fraction: 0.2,
+    penalty_rate: 0,
+    penalty_grace_days: 30,
+    penalty_interval_days: 30,
+  });
+
+  const [signatureB64, setSignatureB64] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState<any>(null);
+
+  useEffect(() => {
+    getFinancingProducts().then(setProducts).catch(() => {});
+  }, []);
+
+  const selectProduct = (p: FinancingProduct) => {
+    setSelectedProduct(p);
+    setForm({
+      description: p.name,
+      principal: p.default_principal,
+      interest_amount: +(p.default_principal * p.default_interest_rate).toFixed(2),
+      setup_fee: p.default_setup_fee,
+      repayment_fraction: p.default_repayment_fraction,
+      penalty_rate: p.default_penalty_rate,
+      penalty_grace_days: p.default_penalty_grace_days,
+      penalty_interval_days: p.default_penalty_interval_days,
+    });
+    setStep(2);
+  };
+
+  const totalOwed = form.principal + form.interest_amount + form.setup_fee;
+
+  const handleSubmit = async () => {
+    setSubmitting(true);
+    setError('');
+    try {
+      const res = await createFinancingAgreement({
+        account_number: accountNumber,
+        product_id: selectedProduct?.id,
+        description: form.description,
+        principal: form.principal,
+        interest_amount: form.interest_amount,
+        setup_fee: form.setup_fee,
+        total_owed: totalOwed,
+        repayment_fraction: form.repayment_fraction,
+        penalty_rate: form.penalty_rate,
+        penalty_grace_days: form.penalty_grace_days,
+        penalty_interval_days: form.penalty_interval_days,
+        customer_signature_b64: signatureB64,
+      });
+      setResult(res);
+      setStep(5);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const field = (label: string, key: keyof typeof form, step = 'any') => (
+    <label className="block">
+      <span className="text-sm text-gray-600">{label}</span>
+      <input type="number" step={step}
+        className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none"
+        value={form[key]}
+        onChange={e => setForm({ ...form, [key]: Number(e.target.value) })}
+      />
+    </label>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        {/* Header */}
+        <div className="sticky top-0 bg-white border-b px-6 py-4 rounded-t-2xl flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-bold text-gray-800">Extend Credit</h3>
+            <p className="text-xs text-gray-500">Account: {accountNumber}</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+        </div>
+
+        {/* Progress */}
+        <div className="px-6 pt-4">
+          <div className="flex gap-1">
+            {['Product', 'Terms', 'Signature', 'Review'].map((label, i) => (
+              <div key={label} className="flex-1">
+                <div className={`h-1.5 rounded-full ${step > i + 1 ? 'bg-green-500' : step === i + 1 ? 'bg-blue-500' : 'bg-gray-200'}`} />
+                <p className={`text-xs mt-1 ${step === i + 1 ? 'text-blue-600 font-medium' : 'text-gray-400'}`}>{label}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="px-6 py-4 space-y-4">
+          {error && <div className="bg-red-50 text-red-700 text-sm rounded-lg p-3">{error}</div>}
+
+          {/* Step 1: Product selection */}
+          {step === 1 && (
+            <div className="space-y-3">
+              <p className="text-sm text-gray-600">Select a financing product template or create a custom agreement.</p>
+              {products.filter(p => p.is_active).map(p => (
+                <button key={p.id} onClick={() => selectProduct(p)}
+                  className="w-full text-left p-4 border rounded-xl hover:bg-blue-50 hover:border-blue-300 transition">
+                  <div className="font-medium text-gray-800">{p.name}</div>
+                  <div className="text-xs text-gray-500 mt-1">
+                    Principal: M {p.default_principal.toFixed(2)} · Interest: {(p.default_interest_rate * 100).toFixed(1)}% · Repayment: {(p.default_repayment_fraction * 100).toFixed(0)}%
+                  </div>
+                </button>
+              ))}
+              <button onClick={() => setStep(2)}
+                className="w-full p-4 border-2 border-dashed rounded-xl text-gray-500 hover:text-gray-700 hover:border-gray-400 transition text-sm">
+                + Custom Agreement (no template)
+              </button>
+            </div>
+          )}
+
+          {/* Step 2: Terms */}
+          {step === 2 && (
+            <div className="space-y-3">
+              <label className="block">
+                <span className="text-sm text-gray-600">Description / Asset</span>
+                <input type="text"
+                  className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none"
+                  value={form.description}
+                  onChange={e => setForm({ ...form, description: e.target.value })}
+                  placeholder="e.g. Readyboard, Refrigerator"
+                />
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                {field('Principal (M)', 'principal')}
+                {field('Interest (M)', 'interest_amount')}
+                {field('Setup Fee (M)', 'setup_fee')}
+                {field('Repayment Fraction', 'repayment_fraction', '0.01')}
+                {field('Penalty Rate', 'penalty_rate', '0.01')}
+                {field('Grace Days', 'penalty_grace_days', '1')}
+              </div>
+              <div className="bg-blue-50 rounded-lg p-3 text-sm">
+                <span className="text-gray-600">Total Owed: </span>
+                <span className="font-bold text-blue-700">M {totalOwed.toFixed(2)}</span>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button onClick={() => setStep(1)} className="flex-1 py-2.5 bg-gray-100 text-gray-600 rounded-lg text-sm hover:bg-gray-200">Back</button>
+                <button onClick={() => setStep(3)} disabled={!form.description || form.principal <= 0}
+                  className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">Next: Signature</button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 3: Signature */}
+          {step === 3 && (
+            <div className="space-y-3">
+              <p className="text-sm text-gray-600">Customer signature confirming acceptance of financing terms.</p>
+              {signatureB64 ? (
+                <div className="space-y-3">
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-center">
+                    <img src={`data:image/jpeg;base64,${signatureB64}`} alt="Signature" className="max-h-24 mx-auto" />
+                    <p className="text-xs text-green-700 mt-2">Signature captured</p>
+                  </div>
+                  <button onClick={() => setSignatureB64('')} className="w-full py-2 text-sm text-gray-500 hover:text-gray-700">Re-sign</button>
+                </div>
+              ) : (
+                <SignatureCanvas onCapture={setSignatureB64} />
+              )}
+              <div className="flex gap-3 pt-2">
+                <button onClick={() => setStep(2)} className="flex-1 py-2.5 bg-gray-100 text-gray-600 rounded-lg text-sm hover:bg-gray-200">Back</button>
+                <button onClick={() => setStep(4)} disabled={!signatureB64}
+                  className="flex-1 py-2.5 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">Next: Review</button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 4: Review */}
+          {step === 4 && (
+            <div className="space-y-3">
+              <div className="bg-gray-50 rounded-lg p-4 space-y-2 text-sm">
+                <div className="flex justify-between"><span className="text-gray-500">Account</span><span className="font-medium">{accountNumber}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Description</span><span className="font-medium">{form.description}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Principal</span><span>M {form.principal.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Interest</span><span>M {form.interest_amount.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Setup Fee</span><span>M {form.setup_fee.toFixed(2)}</span></div>
+                <div className="flex justify-between border-t pt-2"><span className="text-gray-500 font-bold">Total Owed</span><span className="font-bold text-blue-700">M {totalOwed.toFixed(2)}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Repayment</span><span>{(form.repayment_fraction * 100).toFixed(0)}% of each payment</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Penalty</span><span>{(form.penalty_rate * 100).toFixed(1)}% after {form.penalty_grace_days} days</span></div>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button onClick={() => setStep(3)} className="flex-1 py-2.5 bg-gray-100 text-gray-600 rounded-lg text-sm hover:bg-gray-200">Back</button>
+                <button onClick={handleSubmit} disabled={submitting}
+                  className="flex-1 py-2.5 bg-green-600 text-white rounded-lg text-sm font-semibold hover:bg-green-700 disabled:opacity-50">
+                  {submitting ? 'Creating...' : 'Create Agreement'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 5: Success */}
+          {step === 5 && result && (
+            <div className="space-y-4 text-center">
+              <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto">
+                <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <h4 className="text-lg font-bold text-gray-800">Agreement Created</h4>
+              <p className="text-sm text-gray-500">Agreement #{result.id} for M {result.total_owed?.toFixed(2)}</p>
+              {result.contracts?.en_url && (
+                <a href={result.contracts.en_url} target="_blank" rel="noopener noreferrer"
+                  className="inline-block px-4 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm hover:bg-blue-100">
+                  Download Contract (EN)
+                </a>
+              )}
+              {result.contracts?.so_url && (
+                <a href={result.contracts.so_url} target="_blank" rel="noopener noreferrer"
+                  className="inline-block px-4 py-2 bg-blue-50 text-blue-700 rounded-lg text-sm hover:bg-blue-100 ml-2">
+                  Download Contract (SO)
+                </a>
+              )}
+              <button onClick={() => { onCreated(); onClose(); }}
+                className="w-full py-2.5 bg-gray-100 text-gray-700 rounded-lg text-sm hover:bg-gray-200 mt-2">Done</button>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Main Page
+// ---------------------------------------------------------------------------
 
 export default function CustomerDetailPage() {
   const { id: urlParam } = useParams<{ id: string }>();
@@ -15,6 +357,7 @@ export default function CustomerDetailPage() {
   const [contracts, setContracts] = useState<CommissionContract[]>([]);
   const [accountNumbers, setAccountNumbers] = useState<string[]>([]);
   const [decommissioning, setDecommissioning] = useState(false);
+  const [showCreditWizard, setShowCreditWizard] = useState(false);
   const { canWrite, isSuperadmin, user } = useAuth();
   const navigate = useNavigate();
 
@@ -173,13 +516,21 @@ export default function CustomerDetailPage() {
                 className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700"
               >View Data</button>
               {isCommissioned ? (
-                <button
-                  onClick={handleDecommission}
-                  disabled={decommissioning}
-                  className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 disabled:opacity-50"
-                >
-                  {decommissioning ? 'Decommissioning...' : 'Decommission'}
-                </button>
+                <>
+                  <button
+                    onClick={() => setShowCreditWizard(true)}
+                    className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700"
+                  >
+                    Extend Credit
+                  </button>
+                  <button
+                    onClick={handleDecommission}
+                    disabled={decommissioning}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {decommissioning ? 'Decommissioning...' : 'Decommission'}
+                  </button>
+                </>
               ) : (
                 <>
                   <button onClick={() => navigate(`/assign-meter?customer=${accountNumber || urlParam}`)} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700">Assign Meter</button>
@@ -269,6 +620,18 @@ export default function CustomerDetailPage() {
             ))}
           </div>
         </div>
+      )}
+
+      {showCreditWizard && accountNumber && (
+        <ExtendCreditWizard
+          accountNumber={accountNumber}
+          onClose={() => setShowCreditWizard(false)}
+          onCreated={() => {
+            getCustomerContracts(accountNumber)
+              .then(({ contracts: c }) => setContracts(c))
+              .catch(() => {});
+          }}
+        />
       )}
     </div>
   );
