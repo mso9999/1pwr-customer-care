@@ -51,6 +51,22 @@ COMMUNITY = "MAK"
 SOURCE = "thundercloud"
 
 
+def _normalize_avg_true_power(value) -> float:
+    """Normalize ThunderCloud latest_reading.avg_true_power to kW for storage.
+
+    This field has been observed to contain watt-valued spikes even though
+    `meter_readings.power_kw` is meant to hold kW. Treat obviously impossible
+    single-customer values as watts.
+    """
+    try:
+        power = float(value or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+    if power <= 0:
+        return 0.0
+    return power / 1000.0 if power > 20 else power
+
+
 def full_serial_to_short(serial: str) -> str:
     """Convert a full SM serial (e.g. SMRSD-03-0002E040) to the short numeric
     code used by the parquet importer (e.g. 57408).
@@ -126,7 +142,7 @@ def store_cumulative_readings(cur, customers):
                 "timestamp": dt,
                 "cumulative_wh": cumulative_wh,
                 "interval_kwh": float(interval_kwh) if interval_kwh else 0.0,
-                "power_kw": float(power_kw) if power_kw else 0.0,
+                "power_kw": _normalize_avg_true_power(power_kw),
                 "daily_energy": float(daily_energy) if daily_energy is not None else None,
             })
 

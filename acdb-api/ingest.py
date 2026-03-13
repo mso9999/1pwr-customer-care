@@ -40,6 +40,14 @@ _METER_TZ = timezone(timedelta(hours=UTC_OFFSET_HOURS))
 
 router = APIRouter(tags=["ingest"])
 
+
+def _watts_to_kw(value: float) -> float:
+    """Normalize 1Meter active-power payloads from W to kW for storage."""
+    try:
+        return float(value) / 1000.0
+    except (TypeError, ValueError):
+        return 0.0
+
 # ---------------------------------------------------------------------------
 # Koios consumption sync (triggered by payment events)
 # ---------------------------------------------------------------------------
@@ -276,7 +284,7 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
                 ON CONFLICT DO NOTHING
             """, (
                 meter_id, account, ts,
-                reading.energy_active * 1000, reading.power_active, community,
+                reading.energy_active * 1000, _watts_to_kw(reading.power_active), community,
             ))
 
             hour_key = ts.strftime("%Y-%m-%d %H:00:00+00")

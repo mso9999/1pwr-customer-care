@@ -45,6 +45,33 @@ def _matches_customer_type(ctype: str, filter_type: str) -> bool:
     return ct == ft
 
 
+def _normalize_power_kw_value(raw_kw: Any, customer_type: str = "", source: str = "") -> Optional[float]:
+    """Normalize mixed W/kW power values to kW for charts and exports.
+
+    `meter_readings.power_kw` is intended to store kW, but some upstream writers
+    have historically inserted watts. We can normalize the known/proven paths
+    (`iot`) and apply a conservative guard for obvious household/thundercloud
+    spikes until historical rows are backfilled.
+    """
+    if raw_kw is None:
+        return None
+    try:
+        kw_val = float(raw_kw)
+    except (ValueError, TypeError):
+        return None
+    if not math.isfinite(kw_val):
+        return None
+
+    ctype = str(customer_type or "").strip().upper()
+    src = str(source or "").strip().lower()
+
+    if src == "iot":
+        return kw_val / 1000.0
+    if kw_val > 20 and (src == "thundercloud" or ctype.startswith("HH")):
+        return kw_val / 1000.0
+    return kw_val
+
+
 # SQL fragment to build account -> customer_type from the customers table
 _ACCT_CTYPE_SQL = """
     SELECT a.account_number, c.customer_type
@@ -800,7 +827,7 @@ def daily_load_profiles(
 
         try:
             cursor.execute(
-                "SELECT meter_id, reading_time, power_kw, account_number "
+                "SELECT meter_id, reading_time, power_kw, account_number, source "
                 "FROM meter_readings "
                 "WHERE power_kw IS NOT NULL" + (
                     " AND community = %s" if site else ""
@@ -818,11 +845,11 @@ def daily_load_profiles(
                     continue
                 dt = row[1]
                 kw = row[2]
+                source_name = row[4]
                 if dt is None or kw is None:
                     continue
-                try:
-                    kw_val = float(kw)
-                except (ValueError, TypeError):
+                kw_val = _normalize_power_kw_value(kw, ctype, source_name)
+                if kw_val is None:
                     continue
                 try:
                     if hasattr(dt, 'hour'):
@@ -1677,7 +1704,7 @@ def meter_data_export(
 
         # -- 2. Query meter_readings --
         sql = (
-            "SELECT meter_id, reading_time, power_kw FROM meter_readings "
+            "SELECT meter_id, reading_time, power_kw, source FROM meter_readings "
             "WHERE power_kw IS NOT NULL"
         )
         params: List[Any] = []
@@ -1711,12 +1738,12 @@ def meter_data_export(
 
             dt_val = row[1]
             kw_val = row[2]
+            source_name = row[3]
             if dt_val is None or kw_val is None:
                 continue
 
-            try:
-                kw_float = float(kw_val)
-            except (ValueError, TypeError):
+            kw_float = _normalize_power_kw_value(kw_val, ctype, source_name)
+            if kw_float is None:
                 continue
 
             try:
