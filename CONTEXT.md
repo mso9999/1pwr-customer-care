@@ -17,7 +17,10 @@
 **Domain**: Rural minigrids (solar+battery), starting in Lesotho, expanding to Benin and Zambia.
 **Operated by**: 1PWR Africa / OnePower Lesotho.
 **Users**: 1PWR operations staff, finance team, customer care agents.
-**Data Source**: 1PDB (PostgreSQL 16) — migrated from ACCDB. ~1,400+ customers across 10+ sites (Lesotho).
+**Data Source**: 1PDB (PostgreSQL 16) — canonical source of truth for customer, meter, billing, and ingestion data.
+
+**Legacy naming note**: The repo still uses historical names like `acdb-api/`, but
+that no longer implies Access / ODBC / Windows as the active runtime.
 
 ## Architecture (Post-Migration)
 
@@ -26,7 +29,7 @@ cc.1pwrafrica.com
        │
        ▼
 ┌──────────────────────────────────────────────────┐
-│  Linux EC2 (13.244.104.137) - Caddy              │
+│  Linux CC host - Caddy + FastAPI                │
 │                                                    │
 │  Static files → /opt/cc-portal/frontend/           │
 │  /api/*       → reverse_proxy localhost:8100       │
@@ -34,9 +37,9 @@ cc.1pwrafrica.com
 │  /customers/* → reverse_proxy localhost:8100       │
 │  /sites       → reverse_proxy localhost:8100       │
 │                                                    │
-│  FastAPI backend (psycopg2 → PostgreSQL)           │
-│  PostgreSQL 16 (1PDB - master of record)           │
-│  systemd: 1pdb-api, 1pdb-import (timer)            │
+│  FastAPI backend (this repo)                       │
+│  1PDB PostgreSQL (master of record)                │
+│  systemd: 1pdb-api, 1pdb-api-bn                    │
 └──────────────────────────────────────────────────┘
        │
        ▼
@@ -51,7 +54,8 @@ cc.1pwrafrica.com
 └──────────────┘
 ```
 
-The Linux EC2 runs everything: Caddy, FastAPI, PostgreSQL. No Windows EC2 dependency.
+The active production stack is Linux-hosted and `1PDB`-backed. Do not treat
+Windows EC2 / ACCDB assumptions as current production architecture.
 
 ### Related Repos
 - **onepowerLS/1PDB** — Database schema, migration scripts, data pipeline services
@@ -109,23 +113,26 @@ The Linux EC2 runs everything: Caddy, FastAPI, PostgreSQL. No Windows EC2 depend
 ### Auto-Deploy (Primary Method)
 Push to `main` triggers GitHub Actions with two parallel jobs:
 - **deploy-frontend**: GitHub-hosted runner → `npm ci && npm run build` → `rsync` to Linux EC2
-- **deploy-backend**: Self-hosted Windows runner → `robocopy` → `pip install` → restart service
+- **deploy-backend**: GitHub-hosted runner → `rsync` backend files to Linux EC2 → restart `1pdb-api` services
 
 ### Manual Access
 
 | Target | Command |
 |--------|---------|
-| Linux EC2 (Caddy, Bridge) | `ssh -i ~/Downloads/EOver.pem ubuntu@13.244.104.137` |
-| Windows EC2 (ACDB API) | RDP via SSH tunnel: `ssh -i EOver.pem -L 3389:172.31.2.39:3389 -N ubuntu@13.244.104.137` |
-| uGridPlan EC2 | `ssh -i EOver.pem ubuntu@13.244.104.137 "ssh -i ~/.ssh/uGridPLAN.pem -p 2222 ugridplan@15.240.40.213"` |
+| CC Linux host | `ssh -i ~/Downloads/EOver.pem ubuntu@<current-cc-linux-host>` |
+| uGridPlan EC2 | `ssh -p 2222 -i uGridPLAN.pem ugridplan@15.240.40.213` |
+
+Resolve `<current-cc-linux-host>` from AWS inventory or the deploy secret.
+Avoid relying on historical public IPs in old docs.
 
 ### Service Management
 
 | Service | How to manage |
 |---------|---------------|
-| Caddy (frontend) | `ssh ubuntu@13.244.104.137 "sudo systemctl reload caddy"` |
-| CC Bridge | `ssh ubuntu@13.244.104.137 "pm2 restart whatsapp-cc"` |
-| ACDB API | Via deploy workflow, or RDP → `schtasks.exe /End /TN "ACDBCustomerAPI"` then `/Run` |
+| Caddy (frontend) | `ssh ubuntu@<current-cc-linux-host> "sudo systemctl reload caddy"` |
+| CC Bridge | `ssh ubuntu@<current-cc-linux-host> "pm2 restart whatsapp-cc"` |
+| CC API (LS) | `ssh ubuntu@<current-cc-linux-host> "sudo systemctl restart 1pdb-api"` |
+| CC API (BN) | `ssh ubuntu@<current-cc-linux-host> "sudo systemctl restart 1pdb-api-bn"` |
 
 ## Site Codes (Lesotho Minigrids)
 
@@ -263,16 +270,22 @@ integration, SMS gateway.
 ### 1. TypeScript Strict Mode
 The frontend uses strict TypeScript. Unused imports/variables cause build failures. Always run `npx tsc -b --noEmit` before pushing.
 
-### 2. Windows PowerShell in GitHub Actions
-- `robocopy` exit codes 0-7 are success; 8+ are errors. Must handle explicitly.
-- `pip` writes warnings to stderr that PowerShell treats as errors. Suppress with `2>$null`.
-- The runner service runs as `LocalSystem` -- do not change this or service management breaks.
+### 2. Linux GitHub Actions Deploys
+- Both deploy jobs run on GitHub-hosted Linux runners.
+- Backend deploy syncs `acdb-api/` to `/opt/cc-portal/backend/` and restarts
+  `1pdb-api` / `1pdb-api-bn`.
+- Do not reintroduce Windows runner or `robocopy` assumptions into current docs
+  or deployment guidance unless the live workflow changes.
 
 ### 3. Caddy Path Routing
-API paths (`/api/*`, `/health`, `/customers/*`, `/sites`) are proxied to Windows EC2. All other paths serve static frontend files with SPA fallback. If you add new API routes, ensure they match an existing `handle` block or add one to the Caddyfile.
+API paths are proxied to the Linux-hosted FastAPI backend (`localhost:8100` and
+country-specific peers). All other paths serve static frontend files with SPA
+fallback. If you add new API routes, ensure the proxy layer still exposes them.
 
-### 4. Access Database
-The ACDB is a live production database. Never modify schema. Read-only operations are safe; write operations go through the existing CRUD layer which handles ODBC connection pooling.
+### 4. 1PDB Ownership
+`1PDB` is the live production datastore. Avoid ad-hoc schema edits outside the
+canonical migration/runtime flow. Legacy `acdb-*` names in repo paths are
+historical only and should not be treated as evidence of an Access / ODBC stack.
 
 ---
 
@@ -286,7 +299,8 @@ The ACDB is a live production database. Never modify schema. Read-only operation
 
 **Integration points**: O&M tickets (CC → uGridPlan), customer sync (uGridPlan → CC), shared O&M analytics, email notifications.
 
-**Key rule**: No shared code. All integration via HTTP API calls. ACDB is the single source of truth.
+**Key rule**: No shared code. All integration via HTTP API calls. `1PDB` is the
+single source of truth behind the CC API.
 
 ---
 

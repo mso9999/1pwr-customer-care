@@ -1,38 +1,55 @@
 # 1PWR Customer Care Portal — Context
 
-> **Purpose**: This file provides context for AI assistants and developers working on the Customer Care system.
+> **Purpose**: Context for developers and AI assistants working inside
+> `acdb-api/`, the main backend application area of the CC portal.
 
 ## What This Project Is
 
-The **1PWR Customer Care (CC) Portal** is a customer management system for 1PWR Africa's minigrid operations. It handles customer onboarding, billing, contracts, meter assignment, and operational reporting.
+The **1PWR Customer Care (CC) Portal** is the application layer over `1PDB` for
+customer operations, billing workflows, reporting, and O&M-facing support.
 
 **Live URL**: https://cc.1pwrafrica.com
 
+**Important**: The directory name `acdb-api/` is legacy naming from the old
+Access/ACCDB era. The live system is now `1PDB`-backed and Linux-hosted.
+
 ## Architecture
 
-- **Backend**: FastAPI (Python), runs on port 8100
-- **Frontend**: React + TypeScript + Vite + Tailwind CSS
-- **Database**: ACDB (Access-based Customer Database), accessed via `pyodbc`
-- **Server**: Linux EC2 at `13.244.104.137` (shared with O&M portal)
+- **Backend**: FastAPI (Python), typically served on port `8100`
+- **Frontend**: React + TypeScript + Vite + Tailwind CSS (`acdb-api/frontend/`)
+- **Database**: `1PDB` PostgreSQL
+- **Hosting**: Linux CC stack behind Caddy
+- **Legacy status**: ACCDB / Windows / `pyodbc` assumptions are deprecated
 
 ### Backend Modules
 
 | Module | Description |
 |--------|-------------|
-| `customer_api.py` | Main FastAPI app with customer CRUD endpoints |
-| `auth.py` / `db_auth.py` | Employee authentication (JWT-based) |
-| `crud.py` | Database operations for customers, meters, contracts |
-| `om_report.py` | O&M quarterly reports — revenue, consumption, customer stats per site |
+| `customer_api.py` | Main FastAPI app with mounted routers and app setup |
+| `auth.py` / `db_auth.py` | Employee authentication and auth storage |
+| `crud.py` | Customer and meter CRUD workflows |
+| `om_report.py` | O&M analytics and financial reporting |
 | `exports.py` | Data export functionality |
 | `commission.py` | Customer commissioning workflow |
 | `contract_gen.py` | Contract document generation |
 | `mutations.py` | Audit trail for data changes |
-| `admin.py` | Admin operations (roles, permissions) |
+| `admin.py` | Roles and permissions administration |
 | `pr_lookup.py` | Payment reference lookup |
 
 ### Frontend Pages
 
-Login, Dashboard, Customer Data, Customer Detail, New Customer Wizard, Commission Customer, Assign Meter, Financial, Mutations, O&M Report, Export, Tariff Management, Sync, Tables, Admin Roles, My Profile.
+Login, Dashboard, Customer Data, Customer Detail, New Customer Wizard,
+Commission Customer, Assign Meter, Financial, Mutations, O&M Report, Export,
+Tariff Management, Sync, Tables, Admin Roles, and My Profile.
+
+## Data Ownership
+
+- `1PDB` owns canonical customer, meter, billing, and ingestion data.
+- `1PWR CC` owns the portal/API workflows over that data.
+- Legacy ACCDB artifacts in this repo should be treated as historical material,
+  not as the active runtime contract.
+- Archived ACCDB-era helper scripts now live under `legacy/accdb/` so they are
+  preserved without staying in the active backend tree.
 
 ## O&M Integration
 
@@ -40,47 +57,50 @@ This portal plays two roles in the O&M system:
 
 ### 1. Employee Authentication Provider
 
-The O&M portal at [om.1pwrafrica.com](https://om.1pwrafrica.com) proxies `/api/auth/*` requests to this backend. Employees log into the O&M portal using the same credentials as this portal.
+The O&M portal at [om.1pwrafrica.com](https://om.1pwrafrica.com) proxies
+`/api/auth/*` requests to this backend so employees can use the same credentials
+across systems.
 
-- **Endpoint**: `POST /api/auth/employee-login` (employee number + password)
+- **Endpoint**: `POST /api/auth/employee-login`
 - **Response**: JWT token used by the O&M portal for session management
-- **Caddy proxy**: `om.1pwrafrica.com/api/auth/*` → `172.31.2.39:8100`
+- **Runtime**: Linux-hosted CC backend over HTTP
 
 ### 2. O&M Financial Reporting
 
 The `om_report.py` module provides quarterly operational metrics:
-- Customer statistics per site (active, inactive, growth)
+
+- Customer statistics per site
 - Consumption per quarter per site
 - Revenue per site per quarter
-- Generation vs consumption comparison
+- Generation vs consumption comparisons
 
-- **Endpoint**: `/api/om-report/*`
-- **Caddy proxy**: `om.1pwrafrica.com/api/om-report/*` → `172.31.2.39:8100`
-- **Data source**: ACDB customer database (same DB used by this portal)
+- **Endpoint family**: `/api/om-report/*`
+- **Data source**: `1PDB` via the CC backend
 
 ### O&M Data Flow
 
-```
+```text
 O&M Portal (om.1pwrafrica.com)
-  ├─ Auth requests      → CC backend (this repo, port 8100)
-  ├─ Ticket/O&M data    → uGridPlan backend (15.240.40.213:8017)
-  └─ Financial reports   → CC backend (this repo, om_report.py)
+  ├─ Auth requests       → CC backend (this repo)
+  ├─ Ticket / O&M data   → uGridPlan backend
+  └─ Financial reports   → CC backend (`om_report.py`)
 ```
 
 ## Related Repositories
 
 | Repo | Role | URL |
 |------|------|-----|
-| [om-portal](https://github.com/onepowerLS/om-portal) | Standalone O&M frontend (React SPA). Proxies auth and financial requests to this backend. | `om.1pwrafrica.com` |
-| [uGridPlan](https://github.com/onepowerLS/uGridPlan) | O&M backend API (ticket storage, statistics). Also a minigrid network planning tool. | `ugp.1pwrafrica.com` |
+| [1PDB](https://github.com/onepowerLS/1PDB) | Canonical schema, ingestion, runtime timers, and repair scripts | `1PDB` |
+| [om-portal](https://github.com/onepowerLS/om-portal) | Standalone O&M frontend that proxies auth and reporting to CC | `om.1pwrafrica.com` |
+| [uGridPlan](https://github.com/onepowerLS/uGridPlan) | O&M ticketing backend and planning tool | `ugp.1pwrafrica.com` |
 
-## Hosting
+## Hosting and Deployment
 
-- **Server**: Linux EC2 at `13.244.104.137` (internal: `172.31.2.39`)
-- **Backend port**: 8100
-- **Frontend**: Served by Caddy at `cc.1pwrafrica.com`
-- **Shared server**: The O&M portal frontend is also hosted on this machine
+- **Frontend path**: `/opt/cc-portal/frontend/`
+- **Backend path**: `/opt/cc-portal/backend/`
+- **Backend services**: `1pdb-api` and `1pdb-api-bn`
+- **Deploy workflow**: `.github/workflows/deploy.yml`
 
-## Deployment
-
-Currently deployed manually (no GitHub Actions workflow). Backend and frontend are deployed via SSH/rsync to the server.
+Current deployments are Linux-based GitHub Actions deploys. If you encounter
+Windows/ACCDB instructions elsewhere in the repo, treat them as legacy unless
+explicitly marked otherwise.

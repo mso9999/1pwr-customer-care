@@ -3,7 +3,7 @@ Authentication endpoints for the Customer Care Portal.
 
 Two login modes:
   - Employee: employee_id + date-based password, name from HR portal
-  - Customer: account_number + self-set password, data from ACCDB
+  - Customer: account_number + self-set password, data from the CC database
 
 Customer identity:
   Customers identify by their **account number** (e.g. 0045MAK), which is the
@@ -41,7 +41,7 @@ from db_auth import (
     set_customer_password,
 )
 
-logger = logging.getLogger("acdb-api.auth")
+logger = logging.getLogger("cc-api.auth")
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -186,7 +186,7 @@ _RE_REVERSE_FMT = re.compile(r"^([A-Za-z]{3})(\d{4})$")   # MAK0045
 def normalize_account_number(raw: str) -> str:
     """
     Normalise any common account-number format to the canonical NNNNXXX
-    form stored in the ACCDB (e.g. '0045MAK').
+    form stored in the CC database (e.g. '0045MAK').
 
     Accepts:
       0045MAK  -> 0045MAK  (already canonical)
@@ -287,20 +287,20 @@ def _validate_account_exists(account_number: str) -> dict:
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("ACCDB lookup for account %s failed: %s", account_number, e)
+        logger.error("CC database lookup for account %s failed: %s", account_number, e)
         raise HTTPException(status_code=500, detail="Database error during account validation")
 
 
 @router.post("/customer-register")
 def customer_register(req: CustomerRegisterRequest):
     """
-    Register a customer account. Validates account number exists in ACCDB
+    Register a customer account. Validates account number exists in CC
     transaction history, then sets their password for future logins.
     The customer_id field is treated as an account number (e.g. 0045MAK or MAK0045).
     """
     acct = normalize_account_number(req.customer_id)
 
-    # Check account exists in ACCDB
+    # Check account exists in the CC database
     info = _validate_account_exists(acct)
 
     # Check not already registered
@@ -399,7 +399,7 @@ def get_me(user: CurrentUser = Depends(get_current_user)):
         "permissions": user.permissions,
     }
 
-    # If customer, also fetch their ACCDB record via account number
+    # If customer, also fetch their CC record via account number
     if user.user_type == UserType.customer:
         try:
             info = _validate_account_exists(user.user_id)

@@ -12,7 +12,8 @@ Runs on the Linux EC2 at 0.0.0.0:8100.
 
 Environment variables:
   DATABASE_URL        - PostgreSQL connection string (required)
-  ACDB_PORT           - Port to bind         (default: 8100)
+  CC_API_PORT         - Preferred port to bind (default: 8100)
+  ACDB_PORT           - Legacy port env var fallback
   CC_JWT_SECRET       - JWT signing secret   (default: dev secret)
   CC_JWT_EXPIRY_HOURS - Token lifetime       (default: 8)
   CC_AUTH_DB          - SQLite auth DB path  (default: ./cc_auth.db)
@@ -46,7 +47,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("cc-api")
 
-PORT = int(os.environ.get("ACDB_PORT", "8100"))
+PORT = int(os.environ.get("CC_API_PORT") or os.environ.get("ACDB_PORT", "8100"))
 
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",

@@ -1283,7 +1283,8 @@ def consumption_by_tenure(
 
     Data source priority:
       1. monthly_consumption -- actual meter readings imported from Koios /
-         ThunderCloud via import_meter_readings.py.
+         ThunderCloud via the historical ACCDB import pipeline
+         (now archived under legacy/accdb/import_meter_readings.py).
       2. transactions -- kWh vended per transaction (fallback if meter
          readings not yet imported).
 

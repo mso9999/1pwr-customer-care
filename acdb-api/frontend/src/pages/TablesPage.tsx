@@ -15,7 +15,7 @@ export default function TablesPage() {
   return (
     <div className="space-y-4">
       <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Database Tables</h1>
-      <p className="text-gray-500 text-sm">All tables in the Access database. Tap to browse.</p>
+      <p className="text-gray-500 text-sm">All tables in the customer care database. Tap to browse.</p>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
         {tables.map(t => (

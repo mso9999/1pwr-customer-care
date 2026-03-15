@@ -1417,3 +1417,143 @@ Key evidence:
 - `acdb-api/frontend/src/pages/PipelinePage.tsx` (new)
 - `acdb-api/frontend/src/pages/CustomerDataPage.tsx` (modified — financing section)
 - `1PWR Customer Care Portal Operating Manual.md` (new)
+
+## Session 2026-03-15 202603152032 (Reframe CC docs around 1PDB)
+
+### What Was Done
+- Rewrote the top-level `README.md` so the repo now clearly states that `1PDB` is the canonical source of truth and that `1PWR CC` is the portal/API layer over it.
+- Updated `CONTEXT.md`, `.cursorrules`, and `acdb-api/CONTEXT.md` to remove stale Windows/ACCDB deployment assumptions and teach future AI sessions the Linux + `1PDB` architecture instead.
+- Replaced `docs/whatsapp-customer-care.md` with a shorter current runbook centered on the Linux-hosted CC API and `1PDB`, while keeping explicit notes that old Windows/ACCDB references are legacy only.
+- Moved the nested `1Meter_PCB` repository out of `1PWR CC/` into the enclosing `AI Projects` folder so `1PWR CC` no longer contains an unrelated nested git repository.
+- Removed the stale local `.git/info/exclude` entry that had been hiding `/1Meter_PCB/` from `1PWR CC` status.
+
+### Key Decisions
+- Chose to fix architecture truth first in docs and AI guidance before touching runtime code or renaming legacy paths like `acdb-api/`.
+- Kept `acdb-api/` naming in place for now to avoid unnecessary churn; documented it as historical naming rather than trying to rename the tree in the same PR.
+- Treated ACCDB/Windows references as legacy context worth preserving only when explicitly labeled as deprecated, rather than silently deleting all historical evidence.
+- Moved `1Meter_PCB` out immediately because it was already a standalone repo and did not belong nested inside the CC application repo.
+
+### What Next Session Should Know
+- The highest-value follow-on in `1PWR CC` is still a docs-and-boundary cleanup sequence: operator-facing UI text and config defaults that still say `ACCDB` should be updated next.
+- The next cross-repo priority is to merge and deploy the `1PDB` reconciliation branch so repo state and live runtime stay aligned.
+- Legacy ACCDB-era operational scripts in `acdb-api/` still need to be quarantined into a `legacy/` area or removed if confirmed unused.
+- `1Meter_PCB` now lives at `/Users/mattmso/Dropbox/AI Projects/1Meter_PCB` as its own repo; `1PWR CC` status is clean after the move.
+
+### Senescence Notes
+- No major context degradation noticed during this slice.
+- The biggest continuity gap was stale repo documentation that still described the deprecated ACCDB/Windows topology as current.
+
+### Files Modified
+- `README.md`
+- `CONTEXT.md`
+- `.cursorrules`
+- `acdb-api/CONTEXT.md`
+- `docs/whatsapp-customer-care.md`
+- `.git/info/exclude`
+
+### Protocol Feedback
+- `CONTEXT.md` and `.cursorrules` were materially stale on architecture and deploy topology; future sessions would likely have been misled without this correction.
+- The repo benefits from explicitly distinguishing "legacy naming" from "live architecture" because `acdb-api/` now implies the wrong system to new readers.
+- A future cleanup should add a small `legacy/` section or doc index so deprecated ACCDB material is preserved intentionally instead of lingering in ambiguous locations.
+
+## Session 2026-03-15 202603152051 (Archive ACCDB-era helper scripts)
+
+### What Was Done
+- Created `legacy/accdb/README.md` to document the deprecated ACCDB / Windows helper scripts and explicitly mark them as historical-only.
+- Moved the clearly legacy helper files out of the active backend tree with git-preserving renames:
+  - `acdb-api/import_meter_readings.py` -> `legacy/accdb/import_meter_readings.py`
+  - `acdb-api/compact_accdb.py` -> `legacy/accdb/compact_accdb.py`
+  - `acdb-api/sync_accdb.ps1` -> `legacy/accdb/sync_accdb.ps1`
+  - `acdb-api/snapshot.py` -> `legacy/accdb/snapshot.py`
+  - `acdb-api/setup.bat` -> `legacy/accdb/setup.bat`
+  - `acdb-api/install-service.bat` -> `legacy/accdb/install-service.bat`
+- Updated `README.md` and `acdb-api/CONTEXT.md` so they now point future readers to `legacy/accdb/` instead of leaving those scripts implied in the active runtime tree.
+- Updated the `om_report.py` tenure-report docstring to note that `import_meter_readings.py` is historical and archived under `legacy/accdb/`.
+- Extended `docs/whatsapp-customer-care.md` with a pointer to the archived ACCDB helper area.
+
+### Key Decisions
+- Archived the scripts instead of deleting them because they still have historical and migration-provenance value.
+- Moved them outside `acdb-api/` so the normal backend deploy path no longer ships obviously deprecated Windows helpers.
+- Left historical content inside the archived scripts untouched; the archive is for reference, not for silently "modernized" reruns.
+
+### What Next Session Should Know
+- The active backend tree is now cleaner: legacy ACCDB helper scripts are no longer mixed into `acdb-api/`.
+- The next cleanup slice should focus on operator-facing UI/config leftovers that still say `ACCDB` or point to deprecated hosts, especially `whatsapp-bridge/whatsapp-customer-care.js`, `acdb-api/frontend/src/pages/TablesPage.tsx`, and `acdb-api/frontend/src/pages/SyncPage.tsx`.
+- Historical mentions in `SESSION_LOG.md` were intentionally left alone because they describe what happened at the time and remain useful provenance.
+
+### Files Modified
+- `README.md`
+- `acdb-api/CONTEXT.md`
+- `acdb-api/om_report.py`
+- `docs/whatsapp-customer-care.md`
+- `legacy/accdb/README.md`
+- `legacy/accdb/import_meter_readings.py` (renamed)
+- `legacy/accdb/compact_accdb.py` (renamed)
+- `legacy/accdb/sync_accdb.ps1` (renamed)
+- `legacy/accdb/snapshot.py` (renamed)
+- `legacy/accdb/setup.bat` (renamed)
+- `legacy/accdb/install-service.bat` (renamed)
+
+## Session 2026-03-15 202603152057 (Scrub live ACCDB wording and defaults)
+
+### What Was Done
+- Updated operator-facing frontend wording so active pages no longer imply that ACCDB or Access is the live backend:
+  - `TablesPage.tsx` now refers to the customer care database rather than the Access database
+  - `SyncPage.tsx` now frames sync as CC database ↔ uGridPlan instead of ACCDB ↔ uGridPlan
+  - `TariffManagementPage.tsx` now refers to live CC tariff configuration instead of `tblconfig.therate in the ACCDB`
+  - `FinancialPage.tsx` and `OMReportPage.tsx` now label their data as `1PDB`-backed CC data
+- Updated `whatsapp-bridge/whatsapp-customer-care.js` so comments and logs refer to the CC API, not ACDB, and added `CC_API` as the preferred environment variable while keeping `ACDB_API` as a backward-compatible fallback.
+- Verified the frontend text-only changes with `npx tsc -b --noEmit` and checked lints on the touched frontend/bridge files.
+
+### Key Decisions
+- Limited this slice to user-facing text and config-default cleanup, not deeper API contract renames such as `accdb_*` payload fields.
+- Kept `ACDB_API` as a backward-compatible env fallback in the bridge to avoid breaking existing deployments while still moving the documented default toward the current architecture.
+- Left explicitly historical ACCDB comparisons in the Help page intact because they describe the old system rather than implying it is still live.
+
+### What Next Session Should Know
+- The remaining `ACCDB` references in the active frontend are now mostly historical comparisons or internal variable names, not live operator guidance.
+- The next cleanup choice is either:
+  - deeper contract cleanup (`accdb_*` naming in sync payloads / frontend types), or
+  - switch back to cross-repo work and merge/deploy the `1PDB` reconciliation branch.
+- The current `1PWR CC` working tree includes three cleanup slices not yet committed: architecture/doc corrections, legacy script archiving, and operator-facing text/default updates.
+
+### Files Modified
+- `acdb-api/frontend/src/pages/TablesPage.tsx`
+- `acdb-api/frontend/src/pages/SyncPage.tsx`
+- `acdb-api/frontend/src/pages/TariffManagementPage.tsx`
+- `acdb-api/frontend/src/pages/FinancialPage.tsx`
+- `acdb-api/frontend/src/pages/OMReportPage.tsx`
+- `whatsapp-bridge/whatsapp-customer-care.js`
+
+## Session 2026-03-15 202603152059 (Finish deeper CC contract cleanup)
+
+### What Was Done
+- Renamed the active uGridPlan sync contract from `accdb_*` naming to `cc_*` / `cache_*` in the frontend and backend, including `SyncPage.tsx`, `frontend/src/lib/api.ts`, and `acdb-api/sync_ugridplan.py`.
+- Kept backward-compatible aliases in the sync backend response/request layer (`accdb_*`, `pull_to_sqlite`, `sqlite_written`) so any older callers will still work while the portal uses the cleaner names.
+- Updated additional active runtime remnants so the code better reflects the current architecture:
+  - `customer_api.py` now prefers `CC_API_PORT` with `ACDB_PORT` as a legacy fallback
+  - `auth.py` now describes lookups against the CC database instead of ACCDB
+  - `balance_engine.py` now refers to legacy imported consumption rather than active ACCDB rows
+  - `CustomerDataPage.tsx` comment now refers to the CC database
+- Fixed a small pre-existing bug in `sync_ugridplan.py` where `ugp_saved` could be undefined if a sync was run with `push_to_ugp=false`.
+- Validated the updated code with `python3 -m py_compile` on touched backend modules, `npx tsc -b --noEmit` in the frontend, and lint checks on the edited files.
+
+### Key Decisions
+- Treated the sync API as the highest-value place to finish the rename because it was the main active code path still exposing `accdb_*` names to the live frontend.
+- Preserved compatibility at the API boundary instead of doing a flag day break, since some external or older clients may still send/read the legacy field names.
+- Left explicitly historical ACCDB references in docs/help content intact when they are clearly describing the retired system rather than the live runtime.
+
+### What Next Session Should Know
+- The `1PWR CC` cleanup now has four coherent slices ready together: docs/boundary corrections, legacy-script archiving, operator-facing wording cleanup, and deeper sync/config contract cleanup.
+- The remaining active ACCDB mentions in code are now mostly compatibility aliases or clearly historical references, not the names used by the live frontend/runtime.
+- The next cross-repo move is still to finish the `1PDB` reconciliation branch merge/deploy work.
+
+### Files Modified
+- `acdb-api/sync_ugridplan.py`
+- `acdb-api/frontend/src/lib/api.ts`
+- `acdb-api/frontend/src/pages/SyncPage.tsx`
+- `acdb-api/frontend/src/pages/CustomerDataPage.tsx`
+- `acdb-api/customer_api.py`
+- `acdb-api/auth.py`
+- `acdb-api/balance_engine.py`
+- `SESSION_LOG.md`

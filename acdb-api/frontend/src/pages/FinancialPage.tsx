@@ -273,7 +273,7 @@ export default function FinancialPage() {
   if (!data || !data.arpu || data.arpu.length === 0) {
     return (
       <div className="bg-amber-50 text-amber-800 px-6 py-4 rounded-xl">
-        No ARPU data available. Ensure account history data exists in the ACCDB.
+        No ARPU data available. Ensure account history data exists in the CC database.
       </div>
     );
   }
@@ -967,7 +967,7 @@ export default function FinancialPage() {
 
       {/* Footer */}
       <div className="text-center text-xs text-gray-400 py-6 border-t mt-6">
-        <p>Data source: 1PWR Customer Care Portal (ACCDB)</p>
+        <p>Data source: 1PWR Customer Care Portal (1PDB-backed)</p>
         <p className="mt-1">
           ARPU = Total Quarterly Revenue / Active Customers in Quarter
         </p>

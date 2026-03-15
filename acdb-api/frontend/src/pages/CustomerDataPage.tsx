@@ -41,7 +41,7 @@ function fmtRecharge(seconds: number): string {
 }
 
 // ---------------------------------------------------------------------------
-// Transaction table name in ACCDB
+// Transaction table name in the CC database
 // ---------------------------------------------------------------------------
 
 const TXN_TABLE = 'transactions';

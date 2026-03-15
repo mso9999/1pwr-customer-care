@@ -962,15 +962,15 @@ export default function OMReportPage() {
       {/* Note if no type data */}
       {loadCurves.length === 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 text-sm text-amber-800">
-          <strong>Customer type analytics not yet available.</strong> The ACCDB meter table
-          ("Copy Of tblmeter") may not contain customer type data for all meters.
+          <strong>Customer type analytics not yet available.</strong> The meter records
+          currently available to the CC system may not contain customer type data for all meters.
           Check the Tables view to verify meter records exist.
         </div>
       )}
 
       {/* Footer note */}
       <div className="text-center text-xs text-gray-400 py-6 border-t mt-6">
-        <p>Data source: 1PWR Customer Care Portal (ACCDB) + uGridPLAN connection metadata</p>
+        <p>Data source: 1PWR Customer Care Portal (1PDB-backed) + uGridPLAN connection metadata</p>
         <p className="mt-1">
           Generation data, site availability, and maintenance logs require integration with the
           Generation Data Platform and O&M ticketing system.

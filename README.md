@@ -1,154 +1,187 @@
 # 1PWR Customer Care System
 
-Customer care and O&M support system for 1PWR Africa minigrids. Provides a web-based customer care portal, WhatsApp-based ticket management, financial analytics, and a customer database API backed by the ACDB (Access Customer Database).
+Customer care, billing, and O&M support portal for 1PWR Africa minigrids.
 
 **Portal**: https://cc.1pwrafrica.com
 
+## Status
+
+This repository still carries legacy path names such as `acdb-api/`, but the
+production system is now centered on `1PDB` (PostgreSQL), not Microsoft Access.
+
+- `1PDB` is the canonical source of truth for customer, meter, billing, and
+  ingestion data.
+- `1PWR CC` is the portal and API layer over that data.
+- The old ACCDB / Windows-hosted workflow is deprecated and should be treated as
+  historical or forensic material only.
+
 ## Architecture
 
-The system runs across three EC2 instances in AWS Africa (Cape Town) / af-south-1, all on the same VPC (`172.31.0.0/16`):
-
-| Component | Instance | URL / Access |
-|-----------|----------|--------------|
-| CC Portal Frontend | Linux EC2 (`13.244.104.137`) | https://cc.1pwrafrica.com (served by Caddy) |
-| ACDB Customer API (backend) | Windows EC2 (`172.31.2.39`) | Proxied via Caddy at `/api/*` |
-| WhatsApp Bridge | Linux EC2 | N/A (WhatsApp protocol via Baileys) |
-| uGridPlan (O&M UI) | uGridPlan EC2 (`15.240.40.213`) | https://ugp.1pwrafrica.com |
+| Component | Runtime | Role |
+|-----------|---------|------|
+| CC Portal Frontend | Linux EC2 + Caddy | Serves `cc.1pwrafrica.com` |
+| CC Backend API | Linux EC2 + FastAPI | Portal, auth, reporting, and workflow API |
+| Canonical datastore | `1PDB` PostgreSQL | Source of truth for customer, meter, and billing data |
+| WhatsApp Bridge | Linux EC2 + PM2 | Customer care automation and ticket workflow |
+| uGridPlan | Separate EC2 + FastAPI/React | O&M ticketing and planning system |
 
 ### How it fits together
 
+```text
+Customer Browser / WhatsApp
+            |
+            v
+   +--------------------------+
+   |    cc.1pwrafrica.com     |
+   |  Caddy + React frontend  |
+   +--------------------------+
+            |
+            v
+   +--------------------------+
+   |   FastAPI backend        |
+   |   (this repo)            |
+   |   /opt/cc-portal/backend |
+   +--------------------------+
+            |
+            v
+   +--------------------------+
+   |        1PDB              |
+   |   PostgreSQL + ingest    |
+   |   runtime / timers       |
+   +--------------------------+
+
+WhatsApp bridge runs alongside the CC stack, looks up customer context via the
+CC API, and creates O&M tickets in uGridPlan over HTTP.
 ```
-                           ┌─────────────────────────┐
-                           │    cc.1pwrafrica.com     │
-                           │    (Caddy on Linux EC2)  │
-                           │                          │
-                           │  Static files ──► /opt/cc-portal/frontend/
-                           │  /api/*       ──► 172.31.2.39:8100 (Windows)
-                           └─────────────────────────┘
-                                       │
-              ┌────────────────────────┼────────────────────────┐
-              ▼                        ▼                        ▼
-   ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-   │  React Frontend  │     │  FastAPI Backend │     │  WhatsApp Bridge │
-   │  (Vite + TS)     │     │  (customer_api)  │     │  (Node.js)       │
-   │                  │     │                  │     │                  │
-   │  - Dashboard     │     │  - ACDB via ODBC │     │  - Baileys API   │
-   │  - O&M Report    │     │  - Customer CRUD │     │  - OpenClaw AI   │
-   │  - Financial     │     │  - O&M analytics │     │  - Ticket creation│
-   │  - Customers     │     │  - ARPU / revenue│     │  via uGridPlan   │
-   │  - Tariffs       │     │  - Tariffs       │     │                  │
-   │  - Mutations     │     │  - Auth / roles  │     │                  │
-   └─────────────────┘     └─────────────────┘     └─────────────────┘
-```
 
-Communication between components is via HTTP -- no shared code or databases.
+**Key rule**: No shared code between repos. Integration happens over HTTP APIs.
+`1PDB` is the single source of truth; `1PWR CC` is the application layer over it.
 
-## Link to uGridPlan
+## Repo Layout
 
-This system and [uGridPlan](https://github.com/mso9999/uGridPlan) are **separate applications** that integrate at the API level:
+- `acdb-api/` — main FastAPI backend. The directory name is legacy.
+- `acdb-api/frontend/` — React + TypeScript + Vite portal UI.
+- `whatsapp-bridge/` — WhatsApp / Baileys automation.
+- `docs/` — architecture, ops, and troubleshooting documentation.
 
-| Integration Point | Direction | Mechanism |
-|-------------------|-----------|-----------|
-| **O&M Tickets** | CC → uGridPlan | WhatsApp bridge creates tickets via `POST /om/tickets` on uGridPlan API |
-| **Customer Lookup** | uGridPlan → CC | uGridPlan can sync customer data from the ACDB API (`/api/customers/*`) |
-| **O&M Analytics** | Shared data | Both systems display O&M metrics; uGridPlan has the O&M dashboard, CC portal has the O&M Report page |
-| **Notifications** | uGridPlan → Email | Ticket creation triggers email dispatch via uGridPlan's SMTP integration |
+## Responsibilities
 
-**Key rule**: Neither system imports code from the other. All integration is via HTTP API calls. The ACDB (Access database on Windows EC2) is the single source of truth for customer and billing data.
+### `1PDB` owns
+
+- Database schema and migrations
+- Canonical customer, meter, billing, and reading state
+- Ingestion jobs and normalization
+- Backfills, repair scripts, and systemd timer/runtime behavior
+
+### `1PWR CC` owns
+
+- Employee authentication and RBAC
+- Customer care portal UI
+- Reporting, exports, contracts, and operational workflows
+- WhatsApp customer support automation
+- uGridPlan-facing application/API integration
+
+### Legacy / deprecated
+
+The following are no longer part of the active production architecture:
+
+- ACCDB `.accdb` files as live operational data
+- Windows EC2 assumptions for the CC backend
+- Access ODBC / `pyodbc` as the current runtime contract
+- Older ACCDB-era operational scripts such as `sync_accdb.ps1`,
+  `compact_accdb.py`, and `import_meter_readings.py`
+
+Those archived scripts are preserved under `legacy/accdb/` and are intentionally
+kept out of the active backend deploy path.
 
 ## Components
 
 ### `acdb-api/`
 
-FastAPI service that wraps the ACDB Access database (`.accdb`). Provides:
-- Customer lookup and management
-- Billing and payment data
-- Tariff management
-- Revenue, consumption, and customer statistics (O&M reporting and ARPU)
-- Financial analytics (monthly/quarterly ARPU, revenue by site)
-- Commission calculations
-- Contract generation
-- uGridPlan sync endpoint
+FastAPI service over `1PDB`. Provides:
 
-**Deployment**: Runs on the Windows EC2 instance (requires Access ODBC driver). Auto-deployed via GitHub Actions.
+- Customer lookup and management
+- Billing and payment workflows
+- Tariff management
+- Revenue, consumption, and customer statistics
+- Financial analytics (monthly / quarterly ARPU, revenue by site)
+- Commission, contract, and export workflows
+- uGridPlan sync endpoints
+
+**Deployment**: Auto-deployed to the Linux CC host via GitHub Actions.
 
 ### `acdb-api/frontend/`
 
-React + TypeScript + Vite single-page application. Key pages:
-- **Dashboard** -- customer count, MWh, revenue, site overview
-- **O&M Report** -- quarterly operations & maintenance analytics
-- **Financial** -- ARPU time series (monthly + quarterly), revenue by site, per-site breakdown
-- **Customers** -- search, view, edit customer records
-- **Tariffs** -- tariff management
-- **Mutations** -- audit log of data changes
+React + TypeScript + Vite SPA. Key pages include:
 
-**Deployment**: Built on GitHub-hosted runner, deployed to Linux EC2 where Caddy serves static files.
+- Dashboard
+- O&M Report
+- Financial analytics
+- Customers
+- Tariffs
+- Mutations
+- Admin roles
+
+**Deployment**: Built on GitHub-hosted runners and deployed to
+`/opt/cc-portal/frontend/`.
 
 ### `whatsapp-bridge/`
 
-Node.js service using the Baileys library to connect to WhatsApp. Handles:
-- Incoming customer messages → AI classification → automatic ticket creation
-- Technician dispatching and acknowledgment
-- Ticket lifecycle (open → acknowledged → resolved)
-- Customer lookup via ACDB API
+Node.js service using Baileys to connect to WhatsApp. Handles:
 
-**Deployment**: Runs as a PM2-managed process on the Linux EC2 instance.
+- Incoming customer messages -> AI classification -> reply
+- Customer context lookup through the CC API
+- Ticket creation in uGridPlan
+- Group notifications and conversation tracking
 
-### `docs/`
+**Deployment**: Runs as a PM2-managed process on the Linux CC host.
 
-Comprehensive documentation for the system architecture, deployment, and troubleshooting.
+## Link to uGridPlan
+
+This system and [uGridPlan](https://github.com/onepowerLS/uGridPlan) are
+separate applications that integrate at the API level:
+
+| Integration Point | Direction | Mechanism |
+|-------------------|-----------|-----------|
+| **O&M Tickets** | CC -> uGridPlan | WhatsApp bridge creates tickets via `POST /om/tickets` |
+| **Customer Sync** | uGridPlan -> CC | uGridPlan syncs customer data from CC endpoints backed by `1PDB` |
+| **O&M Analytics** | Shared | Both systems display O&M metrics sourced through CC / `1PDB` data |
+| **Notifications** | uGridPlan -> Email | Ticket creation triggers uGridPlan notification flows |
 
 ## Auto-Deploy (CI/CD)
 
-Pushing to `main` triggers a GitHub Actions workflow (`.github/workflows/deploy.yml`) with two parallel jobs:
+Pushing to `main` triggers `.github/workflows/deploy.yml` with two parallel jobs:
 
 | Job | Runner | What it does |
 |-----|--------|--------------|
-| `deploy-frontend` | GitHub-hosted `ubuntu-latest` | `npm ci && npm run build`, then `rsync` to Linux EC2 `/opt/cc-portal/frontend/` |
-| `deploy-backend` | Self-hosted Windows runner | `robocopy` Python files to `C:\acdb-customer-api\`, `pip install`, restart `ACDBCustomerAPI` scheduled task |
+| `deploy-frontend` | GitHub-hosted `ubuntu-latest` | Builds the Vite app and rsyncs it to `/opt/cc-portal/frontend/` |
+| `deploy-backend` | GitHub-hosted `ubuntu-latest` | Syncs `acdb-api/` to `/opt/cc-portal/backend/`, installs requirements, restarts `1pdb-api` and `1pdb-api-bn` |
 
-### Caddy Configuration (Linux EC2)
+The workflow then verifies:
 
-Caddy reverse-proxies API requests to the Windows EC2 and serves the frontend as static files:
+- `https://cc.1pwrafrica.com/`
+- `https://cc.1pwrafrica.com/api/health`
+- `https://cc.1pwrafrica.com/api/bn/health`
 
-```
-cc.1pwrafrica.com {
-    handle /api/*        { reverse_proxy 172.31.2.39:8100 }
-    handle /health       { reverse_proxy 172.31.2.39:8100 }
-    handle /customers/*  { reverse_proxy 172.31.2.39:8100 }
-    handle /sites        { reverse_proxy 172.31.2.39:8100 }
-    handle {
-        root * /opt/cc-portal/frontend
-        try_files {path} /index.html
-        file_server
-    }
-}
-```
+### Host note
 
-### GitHub Secrets
-
-| Secret | Purpose |
-|--------|---------|
-| `EC2_SSH_KEY` | SSH private key for Linux EC2 (contents of `EOver.pem`) |
-| `EC2_LINUX_HOST` | Linux EC2 public IP (`13.244.104.137`) |
-
-### Windows Runner
-
-The self-hosted runner on the Windows EC2 runs as `LocalSystem` to have permissions for service management:
-```powershell
-sc.exe config "actions.runner.mso9999-1pwr-customer-care.EC2AMAZ-RP132EU" obj= "LocalSystem"
-```
+The current Linux host address is managed outside the repo (`EC2_LINUX_HOST`
+secret / AWS inventory). Do not hardcode stale public IPs in new docs or scripts.
 
 ## Quick Start
 
-### ACDB API (backend)
+### Backend
+
 ```bash
 cd acdb-api
 pip install -r requirements.txt
 uvicorn customer_api:app --host 0.0.0.0 --port 8100
 ```
 
-### CC Portal (frontend)
+Typical local setup requires `DATABASE_URL` and any relevant service credentials.
+
+### Frontend
+
 ```bash
 cd acdb-api/frontend
 npm install
@@ -156,6 +189,7 @@ npm run dev
 ```
 
 ### WhatsApp Bridge
+
 ```bash
 cd whatsapp-bridge
 npm install
@@ -164,4 +198,6 @@ node whatsapp-customer-care.js
 
 ## Related Repositories
 
-- **[uGridPlan](https://github.com/mso9999/uGridPlan)** -- Minigrid planning tool with O&M dashboard. CC system creates tickets via uGridPlan API and syncs customer data from the ACDB API. See "Link to uGridPlan" section above.
+- [1PDB](https://github.com/onepowerLS/1PDB) — canonical schema, ingestion, and runtime data stack
+- [uGridPlan](https://github.com/onepowerLS/uGridPlan) — planning app and O&M ticketing backend
+- [om-portal](https://github.com/onepowerLS/om-portal) — standalone O&M frontend

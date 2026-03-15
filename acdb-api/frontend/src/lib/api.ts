@@ -531,7 +531,7 @@ export async function getSiteOverview(): Promise<{ sites: SiteOverviewItem[] }> 
 }
 
 // ---------------------------------------------------------------------------
-// Sync (uGridPLAN <-> ACCDB)
+// Sync (uGridPLAN <-> CC)
 // ---------------------------------------------------------------------------
 
 export interface SiteProject {
@@ -546,15 +546,16 @@ export interface SiteProject {
 export interface SyncMatch {
   survey_id: string;
   customer_id: string;
+  account_number: string;
   match_method: string;
   customer_type: string;
   meter_serial: string;
   gps_x: number | null;
   gps_y: number | null;
-  accdb_name: string;
-  accdb_phone: string;
-  ugp_to_sqlite: Record<string, unknown>;
-  accdb_to_ugp: Record<string, unknown>;
+  cc_name: string;
+  cc_phone: string;
+  ugp_to_cache: Record<string, unknown>;
+  cc_to_ugp: Record<string, unknown>;
 }
 
 export interface DiscoverResult {
@@ -569,22 +570,22 @@ export interface SyncPreview {
   site: string;
   project_name?: string;
   ugp_connection_count: number;
-  accdb_customer_count: number;
+  cc_customer_count: number;
   matched: SyncMatch[];
   unmatched_ugp: Record<string, unknown>[];
-  unmatched_accdb: string[];
+  unmatched_cc: Record<string, unknown>[];
   matched_count: number;
   unmatched_ugp_count: number;
-  unmatched_accdb_count: number;
+  unmatched_cc_count: number;
 }
 
 export interface SyncResult {
   site: string;
   matched: number;
-  sqlite_written: number;
+  cache_written: number;
   ugp_updated: number;
   unmatched_ugp: number;
-  unmatched_accdb: number;
+  unmatched_cc: number;
 }
 
 export interface SyncStatus {
@@ -619,10 +620,10 @@ export async function getSyncPreview(site: string): Promise<SyncPreview> {
   return request(`/sync/preview?site=${encodeURIComponent(site)}`);
 }
 
-export async function executeSyncSite(site: string, push_to_ugp = true, pull_to_sqlite = true): Promise<SyncResult> {
+export async function executeSyncSite(site: string, push_to_ugp = true, pull_to_cache = true): Promise<SyncResult> {
   return request('/sync/execute', {
     method: 'POST',
-    body: JSON.stringify({ site, push_to_ugp, pull_to_sqlite }),
+    body: JSON.stringify({ site, push_to_ugp, pull_to_cache }),
   });
 }
 

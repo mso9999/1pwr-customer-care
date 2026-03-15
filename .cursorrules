@@ -20,7 +20,7 @@ Before responding to the user's first substantive request, you MUST:
    Focus on the last 2-3 session entries to understand recent work.
 
 4. **Briefly acknowledge** what you've learned (1-2 sentences) before proceeding.
-   Example: "I've oriented myself - this is the 1PWR Customer Care portal backed by the ACDB. Recent work includes the monthly ARPU financial analytics."
+   Example: "I've oriented myself - this is the 1PWR Customer Care portal backed by 1PDB. Recent work includes the monthly ARPU financial analytics."
 
 Skip orientation ONLY if the user explicitly says "skip orientation" or the request is trivially simple (e.g., "what time is it").
 
@@ -155,19 +155,21 @@ The goal is **continuous improvement** - each conversation should leave the syst
 - DRY (Don't Repeat Yourself) applies to code, UI, and documentation
 
 ### Data Integrity
-- The ACDB (Access database) is the **single source of truth** for customer and billing data
-- Never duplicate ACDB data into other stores; always query live
+- `1PDB` (PostgreSQL) is the **single source of truth** for customer, meter, and billing data
+- Never revive ACCDB / Windows-era data paths as active production truth without explicit confirmation
+- Prefer querying the live `1PDB`-backed API/runtime path over copying data into side stores
 - When computing derived metrics (e.g., ARPU), document the denominator definition clearly
 
 ## Project Quick Reference
 
 - **Portal**: https://cc.1pwrafrica.com
-- **Auto-deploy**: Push to `main` → GitHub Actions → deploys frontend to Linux EC2, backend to Windows EC2
+- **Auto-deploy**: Push to `main` → GitHub Actions → deploys frontend and backend to the Linux CC host
 - **Frontend**: React + TypeScript + Vite (`acdb-api/frontend/`)
-- **Backend**: FastAPI + pyodbc (`acdb-api/customer_api.py`)
+- **Backend**: FastAPI + psycopg2 (`acdb-api/customer_api.py`) over `1PDB`
 - **WhatsApp Bridge**: Node.js + Baileys (`whatsapp-bridge/`)
 - **Key backend files**: `customer_api.py`, `om_report.py`, `crud.py`, `auth.py`, `tariff.py`
 - **Key frontend files**: `src/App.tsx`, `src/lib/api.ts`, `src/pages/FinancialPage.tsx`
+- **Legacy naming note**: `acdb-api/` is a historical path name, not a statement about the live datastore
 
 ## Deployment Protocol (MANDATORY)
 
@@ -177,7 +179,7 @@ The goal is **continuous improvement** - each conversation should leave the syst
 
 ### Auto-Deploy Architecture
 - **Frontend**: GitHub-hosted `ubuntu-latest` runner builds Vite, rsyncs to Linux EC2
-- **Backend**: Self-hosted Windows runner robocopy's Python files, restarts service
+- **Backend**: GitHub-hosted `ubuntu-latest` runner rsyncs Python files to Linux EC2, installs requirements, restarts `1pdb-api` services
 - Both jobs run in parallel on push to `main`
 
 ### Before ANY Deployment
@@ -187,13 +189,13 @@ The goal is **continuous improvement** - each conversation should leave the syst
 
 ### CRITICAL RULES
 1. Run `npx tsc -b --noEmit` before pushing -- TypeScript errors will fail the frontend build
-2. Backend changes should not break the `/health` endpoint -- the deploy job checks it
-3. The Windows runner service account is `LocalSystem`; do not change this
+2. Backend changes should not break `/api/health` or `/api/bn/health` -- the deploy job checks both
+3. Do not reintroduce Windows / ACCDB deployment assumptions into docs or code unless the live runtime actually changes
 
 ## Related System: uGridPlan
 
 - **Repo**: https://github.com/onepowerLS/uGridPlan
 - **Local path**: `/Users/mattmso/Dropbox/AI Projects/uGridPlan map_v3/`
 - **Portal**: https://ugp.1pwrafrica.com
-- **Integration**: CC creates O&M tickets via uGridPlan API; uGridPlan syncs customer data from ACDB API
+- **Integration**: CC creates O&M tickets via uGridPlan API; uGridPlan syncs customer data from the `1PDB`-backed CC API
 - **Key rule**: No shared code. All integration via HTTP API calls.

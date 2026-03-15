@@ -3,7 +3,7 @@ uGridPLAN <-> PostgreSQL bidirectional customer data sync.
 
 - Fetches connection elements from uGridPLAN (customer_type, meter_serial, GPS)
 - Matches to customers by Customer_Code or GPS proximity
-- Stores customer_type/meter_serial/GPS in SQLite cc_customer_metadata
+- Stores customer_type/meter_serial/GPS in the local CC metadata cache
 - Pushes customer demographics (name, phone, address) to uGridPLAN connections
 
 Endpoints:
@@ -1095,12 +1095,12 @@ def _plot_prefix(plot_id: str) -> str:
 
 def _match_customers(
     ugp_connections: List[Dict[str, Any]],
-    accdb_customers: List[Dict[str, Any]],
-    accdb_meters: Optional[List[Dict[str, Any]]] = None,
+    cc_customers: List[Dict[str, Any]],
+    cc_meters: Optional[List[Dict[str, Any]]] = None,
     accounts_by_survey_id: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
-    Match uGridPLAN connections to customers.
+    Match uGridPLAN connections to CC customers.
 
     Matching strategies (tried in order):
       0. accounts.survey_id binding (explicit 1:1 mapping)
@@ -1119,57 +1119,57 @@ def _match_customers(
         accounts_by_survey_id = {}
 
     # Index customers by customer_id_legacy
-    accdb_by_id: Dict[str, Dict] = {}
-    for c in accdb_customers:
-        cid = str(c.get("customer_id_legacy") or c.get("customer_id", "")).strip()
+    cc_by_id: Dict[str, Dict] = {}
+    for customer in cc_customers:
+        cid = str(customer.get("customer_id_legacy") or customer.get("customer_id", "")).strip()
         if cid:
-            accdb_by_id[cid] = c
+            cc_by_id[cid] = customer
 
     # Index customers by plot_number (normalized: uppercased, stripped)
-    accdb_by_plot: Dict[str, Dict] = {}
-    for c in accdb_customers:
-        plot = str(c.get("plot_number", "")).strip().upper()
+    cc_by_plot: Dict[str, Dict] = {}
+    for customer in cc_customers:
+        plot = str(customer.get("plot_number", "")).strip().upper()
         if plot and plot != "NONE":
-            accdb_by_plot[plot] = c
+            cc_by_plot[plot] = customer
 
     # Index customers by plot *prefix* (site + number, ignoring type suffix)
-    accdb_by_prefix: Dict[str, Optional[Dict]] = {}
-    for c in accdb_customers:
-        plot = str(c.get("plot_number", "")).strip().upper()
+    cc_by_prefix: Dict[str, Optional[Dict]] = {}
+    for customer in cc_customers:
+        plot = str(customer.get("plot_number", "")).strip().upper()
         if plot and plot != "NONE":
-            pfx = _plot_prefix(plot)
-            if pfx in accdb_by_prefix:
-                accdb_by_prefix[pfx] = None  # ambiguous — skip
+            prefix = _plot_prefix(plot)
+            if prefix in cc_by_prefix:
+                cc_by_prefix[prefix] = None  # ambiguous — skip
             else:
-                accdb_by_prefix[pfx] = c
+                cc_by_prefix[prefix] = customer
 
-    # Index meters by customer_id and by accountnumber
+    # Index meters by customer_id, accountnumber, and meterid.
     meters_by_cust: Dict[str, Dict] = {}
     meters_by_acct: Dict[str, Dict] = {}
     meters_by_meterid: Dict[str, Dict] = {}
-    if accdb_meters:
-        for m in accdb_meters:
-            cid = m.get("customer_id", "")
+    if cc_meters:
+        for meter in cc_meters:
+            cid = str(meter.get("customer_id", "")).strip()
             if cid:
-                meters_by_cust[cid] = m
-            acct = m.get("accountnumber", "")
+                meters_by_cust[cid] = meter
+            acct = str(meter.get("accountnumber", "")).strip()
             if acct:
-                meters_by_acct[acct] = m
-            mid = m.get("meterid", "")
-            if mid:
-                meters_by_meterid[mid] = m
+                meters_by_acct[acct] = meter
+            meter_id = str(meter.get("meterid", "")).strip()
+            if meter_id:
+                meters_by_meterid[meter_id] = meter
 
     # Index customers by account_number (for survey_id binding lookups)
-    accdb_by_acct: Dict[str, Dict] = {}
-    for c in accdb_customers:
-        for an in (c.get("account_numbers") or []):
-            acct_str = str(an).strip()
+    cc_by_acct: Dict[str, Dict] = {}
+    for customer in cc_customers:
+        for account_number in (customer.get("account_numbers") or []):
+            acct_str = str(account_number).strip()
             if acct_str:
-                accdb_by_acct[acct_str] = c
+                cc_by_acct[acct_str] = customer
 
     matched = []
     unmatched_ugp = []
-    unmatched_accdb = set(accdb_by_id.keys())
+    unmatched_cc = set(cc_by_id.keys())
 
     for conn_el in ugp_connections:
         survey_id = conn_el.get("Survey_ID") or conn_el.get("survey_id") or conn_el.get("Name", "")
@@ -1186,119 +1186,119 @@ def _match_customers(
             gps_x = gps_y = None
 
         match_method = None
-        accdb_match = None
+        cc_match = None
         bound_acct = None  # account_number from explicit binding
 
         # Strategy 0: Explicit survey_id binding from accounts table
         if survey_id and survey_id in accounts_by_survey_id:
             bound_acct = accounts_by_survey_id[survey_id]
-            if bound_acct in accdb_by_acct:
-                accdb_match = accdb_by_acct[bound_acct]
+            if bound_acct in cc_by_acct:
+                cc_match = cc_by_acct[bound_acct]
                 match_method = "survey_id_binding"
-                cid = str(accdb_match.get("customer_id_legacy") or accdb_match.get("customer_id", "")).strip()
-                unmatched_accdb.discard(cid)
+                cid = str(cc_match.get("customer_id_legacy") or cc_match.get("customer_id", "")).strip()
+                unmatched_cc.discard(cid)
 
         # Strategy 1: Match by Customer_Code == CUSTOMER ID
-        if not accdb_match and customer_code and customer_code in accdb_by_id:
-            accdb_match = accdb_by_id[customer_code]
+        if not cc_match and customer_code and customer_code in cc_by_id:
+            cc_match = cc_by_id[customer_code]
             match_method = "customer_code"
-            unmatched_accdb.discard(customer_code)
+            unmatched_cc.discard(customer_code)
 
         # Strategy 2: Match by Survey_ID == PLOT NUMBER (exact)
-        if not accdb_match and survey_id:
+        if not cc_match and survey_id:
             normalized_sid = survey_id.strip().upper()
-            if normalized_sid in accdb_by_plot:
-                accdb_match = accdb_by_plot[normalized_sid]
+            if normalized_sid in cc_by_plot:
+                cc_match = cc_by_plot[normalized_sid]
                 match_method = "plot_number"
-                cid = str(accdb_match.get("customer_id", "")).strip()
-                unmatched_accdb.discard(cid)
+                cid = str(cc_match.get("customer_id", "")).strip()
+                unmatched_cc.discard(cid)
 
         # Strategy 3: Match by plot prefix (ignoring type suffix)
-        if not accdb_match and survey_id:
+        if not cc_match and survey_id:
             sid_prefix = _plot_prefix(survey_id)
-            candidate = accdb_by_prefix.get(sid_prefix)
+            candidate = cc_by_prefix.get(sid_prefix)
             if candidate is not None:
-                accdb_match = candidate
-                accdb_plot = str(candidate.get("plot_number", "")).strip()
-                match_method = f"plot_prefix"
-                cid = str(accdb_match.get("customer_id", "")).strip()
-                unmatched_accdb.discard(cid)
+                cc_match = candidate
+                match_method = "plot_prefix"
+                cid = str(cc_match.get("customer_id", "")).strip()
+                unmatched_cc.discard(cid)
 
         # Strategy 4: GPS proximity (using meter table GPS as source)
-        if not accdb_match and gps_x is not None and gps_y is not None and accdb_meters:
+        if not cc_match and gps_x is not None and gps_y is not None and cc_meters:
             best_dist = GPS_MATCH_RADIUS_M
             best_meter = None
-            for m in accdb_meters:
+            for meter in cc_meters:
                 try:
-                    m_lat = float(m.get("latitude") or 0)
-                    m_lon = float(m.get("longitude") or 0)
+                    meter_lat = float(meter.get("latitude") or 0)
+                    meter_lon = float(meter.get("longitude") or 0)
                 except (ValueError, TypeError):
                     continue
-                if m_lat == 0 or m_lon == 0:
+                if meter_lat == 0 or meter_lon == 0:
                     continue
                 # Note: uGridPLAN GPS_X = longitude, GPS_Y = latitude
-                dist = _haversine_m(gps_y, gps_x, m_lat, m_lon)
+                dist = _haversine_m(gps_y, gps_x, meter_lat, meter_lon)
                 if dist < best_dist:
                     best_dist = dist
-                    best_meter = m
+                    best_meter = meter
             if best_meter:
-                cid = best_meter.get("customer_id", "")
-                if cid and cid in accdb_by_id:
-                    accdb_match = accdb_by_id[cid]
+                cid = str(best_meter.get("customer_id", "")).strip()
+                if cid and cid in cc_by_id:
+                    cc_match = cc_by_id[cid]
                     match_method = f"gps_meter_{int(best_dist)}m"
-                    unmatched_accdb.discard(cid)
+                    unmatched_cc.discard(cid)
 
-        if accdb_match:
-            cid = str(accdb_match.get("customer_id_legacy") or accdb_match.get("customer_id", "")).strip()
+        if cc_match:
+            cid = str(cc_match.get("customer_id_legacy") or cc_match.get("customer_id", "")).strip()
 
             # Look up meter data (source of truth)
             meter = meters_by_cust.get(cid, {})
-            accdb_meter_serial = meter.get("meterid", "")
-            accdb_customer_type = meter.get("customer_type", "")
-            accdb_lat = meter.get("latitude")
-            accdb_lon = meter.get("longitude")
+            cc_meter_serial = meter.get("meterid", "")
+            cc_customer_type = meter.get("customer_type", "")
+            cc_lat = meter.get("latitude")
+            cc_lon = meter.get("longitude")
 
             try:
-                accdb_lat = float(accdb_lat) if accdb_lat else None
-                accdb_lon = float(accdb_lon) if accdb_lon else None
+                cc_lat = float(cc_lat) if cc_lat else None
+                cc_lon = float(cc_lon) if cc_lon else None
             except (ValueError, TypeError):
-                accdb_lat = accdb_lon = None
+                cc_lat = cc_lon = None
 
-            # Resolve best values: DB is source of truth for meter/type/GPS
-            final_customer_type = accdb_customer_type or ugp_customer_type
-            final_meter_serial = accdb_meter_serial or ugp_meter_serial
-            final_gps_x = accdb_lon if accdb_lon else gps_x
-            final_gps_y = accdb_lat if accdb_lat else gps_y
+            # Resolve best values: CC DB is source of truth for meter/type/GPS.
+            final_customer_type = cc_customer_type or ugp_customer_type
+            final_meter_serial = cc_meter_serial or ugp_meter_serial
+            final_gps_x = cc_lon if cc_lon else gps_x
+            final_gps_y = cc_lat if cc_lat else gps_y
 
-            # Data to store in SQLite metadata cache
-            to_sqlite = {}
+            # Data to store in the local CC metadata cache.
+            to_cache = {}
             if final_customer_type:
-                to_sqlite["customer_type"] = final_customer_type
+                to_cache["customer_type"] = final_customer_type
             if final_meter_serial:
-                to_sqlite["meter_serial"] = final_meter_serial
+                to_cache["meter_serial"] = final_meter_serial
             if final_gps_x is not None:
-                to_sqlite["gps_x"] = final_gps_x
+                to_cache["gps_x"] = final_gps_x
             if final_gps_y is not None:
-                to_sqlite["gps_y"] = final_gps_y
+                to_cache["gps_y"] = final_gps_y
 
-            # Data to push to uGridPLAN (from DB)
-            accdb_to_ugp = {}
-            first = accdb_match.get("first_name", "")
-            last = accdb_match.get("last_name", "")
-            phone = accdb_match.get("cell_phone_1") or accdb_match.get("phone", "")
-            plot = accdb_match.get("plot_number", "")
+            # Data to push to uGridPLAN (from CC DB).
+            cc_to_ugp = {}
+            first = cc_match.get("first_name", "")
+            last = cc_match.get("last_name", "")
+            phone = cc_match.get("cell_phone_1") or cc_match.get("phone", "")
+            plot = cc_match.get("plot_number", "")
 
             acct = bound_acct or _survey_id_to_account_number(survey_id)
             if not customer_code or customer_code != (acct or ""):
                 if acct:
-                    accdb_to_ugp["Customer_Code"] = acct
-            if accdb_customer_type and accdb_customer_type != ugp_customer_type:
-                accdb_to_ugp["Customer_Type"] = accdb_customer_type
-            if accdb_meter_serial and accdb_meter_serial != ugp_meter_serial:
-                accdb_to_ugp["Meter_Serial"] = accdb_meter_serial
+                    cc_to_ugp["Customer_Code"] = acct
+            if cc_customer_type and cc_customer_type != ugp_customer_type:
+                cc_to_ugp["Customer_Type"] = cc_customer_type
+            if cc_meter_serial and cc_meter_serial != ugp_meter_serial:
+                cc_to_ugp["Meter_Serial"] = cc_meter_serial
             if plot and not conn_el.get("notes"):
-                accdb_to_ugp["notes"] = f"{first} {last} | {phone} | Plot {plot}"
+                cc_to_ugp["notes"] = f"{first} {last} | {phone} | Plot {plot}"
 
+            cc_name = f"{first} {last}".strip()
             matched.append({
                 "survey_id": survey_id,
                 "customer_id": cid,
@@ -1308,24 +1308,29 @@ def _match_customers(
                 "meter_serial": final_meter_serial,
                 "gps_x": final_gps_x,
                 "gps_y": final_gps_y,
-                "accdb_name": f"{first} {last}".strip(),
+                "cc_name": cc_name,
+                "cc_phone": phone,
+                "ugp_to_cache": to_cache,
+                "cc_to_ugp": cc_to_ugp,
+                # Backward-compatible aliases for any older clients.
+                "accdb_name": cc_name,
                 "accdb_phone": phone,
-                "ugp_to_sqlite": to_sqlite,
-                "accdb_to_ugp": accdb_to_ugp,
+                "ugp_to_sqlite": to_cache,
+                "accdb_to_ugp": cc_to_ugp,
             })
         else:
-            # Determine why no match was found
+            # Determine why no match was found.
             normalized_sid = survey_id.strip().upper() if survey_id else ""
             if not normalized_sid:
                 reason = "no_survey_id"
-            elif customer_code and customer_code not in accdb_by_id:
-                reason = "customer_code_not_in_accdb"
+            elif customer_code and customer_code not in cc_by_id:
+                reason = "customer_code_not_in_cc"
             else:
                 sid_prefix = _plot_prefix(normalized_sid)
-                if sid_prefix in accdb_by_prefix and accdb_by_prefix[sid_prefix] is None:
+                if sid_prefix in cc_by_prefix and cc_by_prefix[sid_prefix] is None:
                     reason = "ambiguous_prefix"
                 else:
-                    reason = "no_accdb_customer"
+                    reason = "no_cc_customer"
             unmatched_ugp.append({
                 "survey_id": survey_id,
                 "customer_code": customer_code,
@@ -1335,14 +1340,14 @@ def _match_customers(
                 "reason": reason,
             })
 
-    # Build detailed unmatched list with names/plot numbers
-    unmatched_accdb_details = []
-    for cid in unmatched_accdb:
-        c = accdb_by_id.get(cid, {})
-        first = c.get("first_name", "")
-        last = c.get("last_name", "")
-        plot = c.get("plot_number", "")
-        unmatched_accdb_details.append({
+    # Build detailed unmatched list with names/plot numbers.
+    unmatched_cc_details = []
+    for cid in unmatched_cc:
+        customer = cc_by_id.get(cid, {})
+        first = customer.get("first_name", "")
+        last = customer.get("last_name", "")
+        plot = customer.get("plot_number", "")
+        unmatched_cc_details.append({
             "customer_id": cid,
             "name": f"{first} {last}".strip(),
             "plot_number": plot,
@@ -1352,10 +1357,13 @@ def _match_customers(
     return {
         "matched": matched,
         "unmatched_ugp": unmatched_ugp,
-        "unmatched_accdb": unmatched_accdb_details,
+        "unmatched_cc": unmatched_cc_details,
         "matched_count": len(matched),
         "unmatched_ugp_count": len(unmatched_ugp),
-        "unmatched_accdb_count": len(unmatched_accdb),
+        "unmatched_cc_count": len(unmatched_cc),
+        # Backward-compatible aliases for any older clients.
+        "unmatched_accdb": unmatched_cc_details,
+        "unmatched_accdb_count": len(unmatched_cc),
     }
 
 
@@ -1829,21 +1837,23 @@ def sync_preview(
             (site_code, f"%{concession_name}%"),
         )
         rows = cursor.fetchall()
-        accdb_customers = [_normalize_customer(_row_to_dict(cursor, r)) for r in rows]
+        cc_customers = [_normalize_customer(_row_to_dict(cursor, r)) for r in rows]
 
         # Also load meter data for this site (community = site code)
-        accdb_meters = _load_meter_data(cursor, site_code)
+        cc_meters = _load_meter_data(cursor, site_code)
 
         # Build accounts survey_id index for this site
         accounts_by_survey_id = _load_accounts_survey_id_index(cursor, site_code)
 
     # Run matching
-    results = _match_customers(ugp_connections, accdb_customers, accdb_meters, accounts_by_survey_id)
+    results = _match_customers(ugp_connections, cc_customers, cc_meters, accounts_by_survey_id)
     results["site"] = site_code
     results["project_name"] = project_name
     results["ugp_connection_count"] = len(ugp_connections)
-    results["accdb_customer_count"] = len(accdb_customers)
-    results["accdb_meter_count"] = len(accdb_meters)
+    results["cc_customer_count"] = len(cc_customers)
+    results["cc_meter_count"] = len(cc_meters)
+    results["accdb_customer_count"] = len(cc_customers)
+    results["accdb_meter_count"] = len(cc_meters)
 
     return results
 
@@ -1855,7 +1865,8 @@ def sync_preview(
 class SyncExecuteRequest(BaseModel):
     site: str
     push_to_ugp: bool = True
-    pull_to_sqlite: bool = True
+    pull_to_cache: bool = True
+    pull_to_sqlite: Optional[bool] = None
 
 
 @router.post("/execute")
@@ -1865,7 +1876,7 @@ def sync_execute(
 ):
     """
     Execute sync for a site.
-    - pull_to_sqlite: store customer_type/meter_serial/GPS from uGridPLAN in SQLite
+    - pull_to_cache: store customer_type/meter_serial/GPS from uGridPLAN in the local CC metadata cache
     - push_to_ugp: push customer data (Customer_Code, notes, Load_A) to uGridPLAN
     - Writes uGridPLAN GPS back to customers that have empty gps_lat/gps_lon
     - Computes Load_A from consumption history and pushes to uGridPLAN
@@ -1908,14 +1919,14 @@ def sync_execute(
             (site_code, f"%{concession_name}%"),
         )
         rows = cursor.fetchall()
-        accdb_customers = [_normalize_customer(_row_to_dict(cursor, r)) for r in rows]
+        cc_customers = [_normalize_customer(_row_to_dict(cursor, r)) for r in rows]
 
-        accdb_meters = _load_meter_data(cursor, site_code)
+        cc_meters = _load_meter_data(cursor, site_code)
 
         # Build accounts survey_id index for this site
         accounts_by_survey_id = _load_accounts_survey_id_index(cursor, site_code)
 
-    match_results = _match_customers(ugp_connections, accdb_customers, accdb_meters, accounts_by_survey_id)
+    match_results = _match_customers(ugp_connections, cc_customers, cc_meters, accounts_by_survey_id)
 
     # Detect binding mismatches: stored survey_id differs from matched UGP connection
     stored_sid_by_acct: Dict[str, str] = {acct: sid for sid, acct in accounts_by_survey_id.items()}
@@ -1945,19 +1956,21 @@ def sync_execute(
         logger.warning("Could not fetch vdrop voltages: %s", e)
 
     now = datetime.utcnow().isoformat()
-    sqlite_written = 0
+    cache_written = 0
     ugp_updated = 0
     gps_written = 0
     load_a_computed = 0
     load_a_via_vdrop = 0
     load_a_via_default = 0
     comm_date_set = 0
+    ugp_saved = False
 
-    # Pull: uGridPLAN -> SQLite (customer_type, meter_serial, GPS)
-    if req.pull_to_sqlite:
+    # Pull: uGridPLAN -> local CC metadata cache (customer_type, meter_serial, GPS)
+    pull_to_cache = req.pull_to_sqlite if req.pull_to_sqlite is not None else req.pull_to_cache
+    if pull_to_cache:
         with get_auth_db() as conn:
             for m in match_results["matched"]:
-                meta = m.get("ugp_to_sqlite", {})
+                meta = m.get("ugp_to_cache") or m.get("ugp_to_sqlite", {})
                 if not meta:
                     continue
 
@@ -1993,7 +2006,7 @@ def sync_execute(
                         now,
                     ),
                 )
-                sqlite_written += 1
+                cache_written += 1
 
     # ---------------------------------------------------------------
     # Backfill: persist survey_id on accounts that matched but lack it
@@ -2087,7 +2100,7 @@ def sync_execute(
 
             for m in match_results["matched"]:
                 sid = m.get("survey_id", "")
-                updates = dict(m.get("accdb_to_ugp", {}))
+                updates = dict(m.get("cc_to_ugp") or m.get("accdb_to_ugp", {}))
 
                 # Derive account number from Survey_ID for consumption lookup
                 acct = _survey_id_to_account_number(sid)
@@ -2133,7 +2146,6 @@ def sync_execute(
                     batch_updates[sid] = updates
 
         # Push ALL updates to uGridPLAN in a single batch call
-        ugp_saved = False
         if batch_updates:
             logger.info(
                 "Pushing %d updates to uGridPLAN via batch endpoint "
@@ -2168,7 +2180,8 @@ def sync_execute(
     result: Dict[str, Any] = {
         "site": req.site.upper(),
         "matched": match_results["matched_count"],
-        "sqlite_written": sqlite_written,
+        "cache_written": cache_written,
+        "sqlite_written": cache_written,
         "ugp_updated": ugp_updated,
         "ugp_saved": ugp_saved,
         "gps_written": gps_written,
@@ -2180,7 +2193,8 @@ def sync_execute(
         "vdrop_voltages_available": len(vdrop_voltages),
         "default_voltage": SYNC_LV_VOLTAGE,
         "unmatched_ugp": match_results["unmatched_ugp_count"],
-        "unmatched_accdb": match_results["unmatched_accdb_count"],
+        "unmatched_cc": match_results["unmatched_cc_count"],
+        "unmatched_accdb": match_results["unmatched_cc_count"],
     }
     if binding_mismatches:
         result["binding_mismatches"] = binding_mismatches

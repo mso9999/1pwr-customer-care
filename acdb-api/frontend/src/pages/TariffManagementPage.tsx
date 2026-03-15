@@ -361,7 +361,7 @@ export default function TariffManagementPage() {
           )}
           <p className="text-xs text-gray-400 mt-2">
             Applies to all customers unless overridden at the concession or customer level.
-            Synced to tblconfig.therate in the ACCDB.
+            Synced to the live CC tariff configuration.
           </p>
         </div>
       )}

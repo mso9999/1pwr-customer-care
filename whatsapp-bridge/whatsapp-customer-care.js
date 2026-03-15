@@ -12,7 +12,7 @@ const http = require("http");
 //
 // Handles customer messages on the CC phone (+266 58342168):
 //   1. Receives WhatsApp message from customer
-//   2. Looks up customer in ACDB by phone number
+//   2. Looks up customer in the CC API by phone number
 //   3. AI classifies: ticket-worthy or general inquiry
 //   4. If ticket-worthy: creates O&M ticket via ugridplan API
 //   5. Replies with ticket number + acknowledgment
@@ -33,7 +33,8 @@ var LOG_DIR = "/home/ubuntu/whatsapp-logger/cc-logs";
 
 // APIs
 var UGRIDPLAN_API = process.env.UGRIDPLAN_API || "https://dev.ugp.1pwrafrica.com/api";
-var ACDB_API = process.env.ACDB_API || "http://172.31.2.39:8100";
+// Legacy env var name ACDB_API is still accepted for backward compatibility.
+var CC_API = process.env.CC_API || process.env.ACDB_API || "https://cc.1pwrafrica.com/api";
 
 // Auth for ugridplan (date-based password)
 var UGRIDPLAN_USER = process.env.UGRIDPLAN_USER || "whatsapp-cc";
@@ -250,7 +251,7 @@ async function ensureUgridplanAuth() {
 }
 
 // ============================================================
-// ACDB CUSTOMER LOOKUP
+// CC CUSTOMER LOOKUP
 // ============================================================
 async function lookupCustomerByPhone(phone) {
     var normalized = phone.replace(/[^0-9]/g, "");
@@ -262,15 +263,15 @@ async function lookupCustomerByPhone(phone) {
     }
 
     try {
-        var resp = await apiRequest(ACDB_API + "/customers/by-phone/" + normalized, "GET");
+        var resp = await apiRequest(CC_API + "/customers/by-phone/" + normalized, "GET");
         if (resp.status === 200 && resp.data && resp.data.customers && resp.data.customers.length > 0) {
-            console.log("[ACDB] Found customer: " + resp.data.customers[0].first_name + " " + resp.data.customers[0].last_name);
+            console.log("[CC API] Found customer: " + resp.data.customers[0].first_name + " " + resp.data.customers[0].last_name);
             return resp.data.customers[0];
         }
-        console.log("[ACDB] No customer found for " + normalized);
+        console.log("[CC API] No customer found for " + normalized);
         return null;
     } catch(e) {
-        console.error("[ACDB] Lookup failed:", e.message);
+        console.error("[CC API] Lookup failed:", e.message);
         return null;
     }
 }
@@ -636,7 +637,7 @@ async function processQueue() {
     var chatName = first.chatName;
 
     try {
-        // 1. Look up customer in ACDB
+        // 1. Look up customer in the CC API
         var customer = await lookupCustomerByPhone(phone);
 
         // 2. Check for active conversation (existing ticket)
@@ -995,7 +996,7 @@ conversations = loadConversations();
 console.log("=== WhatsApp Customer Care Bridge v1 ===");
 console.log("CC Phone: +266 58342168");
 console.log("ugridplan API: " + UGRIDPLAN_API);
-console.log("ACDB API: " + ACDB_API);
+console.log("CC API: " + CC_API);
 console.log("Ticket tracker group: " + (TICKET_TRACKER_JID || "(will discover)"));
 console.log("Auth dir: " + AUTH_DIR);
 console.log("Conversation window: " + (CONVERSATION_WINDOW_MS / 60000) + " min");

@@ -2,13 +2,13 @@
 kWh Balance Engine for 1PDB.
 
 The single source of truth for customer balance computation.
-Balance is always in kWh, matching the legacy ACCDB VBA logic:
+Balance is always in kWh, matching the legacy VBA logic carried forward from ACCDB:
   - Payments credit kWh:  balance += payment_amount / tariff_rate
   - Consumption debits kWh: balance -= kwh_consumed
 
 Balance = SUM(payment kWh from transactions)
         - SUM(consumption kWh from hourly_consumption)
-        - SUM(consumption kWh from accdb transaction rows where is_payment=false)
+        - SUM(consumption kWh from legacy transaction rows where is_payment=false)
 
 This is a full-history computation — no running totals or seeds needed.
 For reconciliation, kWh can be converted to currency via tariff rate.
@@ -29,11 +29,11 @@ def get_balance_kwh(conn, account_number: str) -> tuple[float, datetime | None]:
     1. Payment credits from transactions (is_payment=true → kwh_value added)
     2. Consumption debits from:
        a) hourly_consumption table (Koios/ThunderCloud imports)
-       b) transactions where is_payment=false (legacy ACCDB consumption rows)
+       b) transactions where is_payment=false (legacy imported consumption rows)
     """
     cur = conn.cursor()
 
-    # Single scan of transactions: payment kWh credits and ACCDB consumption debits
+    # Single scan of transactions: payment kWh credits and legacy consumption debits
     cur.execute("""
         SELECT
             COALESCE(SUM(CASE WHEN is_payment THEN kwh_value ELSE 0 END), 0),
@@ -41,7 +41,7 @@ def get_balance_kwh(conn, account_number: str) -> tuple[float, datetime | None]:
         FROM transactions
         WHERE account_number = %s
     """, (account_number,))
-    total_payment_kwh, total_accdb_consumption = (float(v) for v in cur.fetchone())
+    total_payment_kwh, total_legacy_consumption = (float(v) for v in cur.fetchone())
 
     # Live consumption from hourly_consumption (Koios/ThunderCloud imports)
     cur.execute("""
@@ -51,7 +51,7 @@ def get_balance_kwh(conn, account_number: str) -> tuple[float, datetime | None]:
     """, (account_number,))
     total_live_consumption = float(cur.fetchone()[0])
 
-    balance = round(total_payment_kwh - total_live_consumption - total_accdb_consumption, 4)
+    balance = round(total_payment_kwh - total_live_consumption - total_legacy_consumption, 4)
     return balance, datetime.now(timezone.utc)
 
 

@@ -84,13 +84,13 @@ export default function SyncPage() {
   };
 
   const handleSync = async (siteCode: string) => {
-    if (!confirm(`Execute sync for ${siteCode}? This will update both uGridPLAN and the local database.`)) return;
+    if (!confirm(`Execute sync for ${siteCode}? This will update both uGridPLAN and the CC data records.`)) return;
     setSyncing(siteCode);
     setSyncResult('');
     try {
       const result = await executeSyncSite(siteCode);
       setSyncResult(
-        `Sync complete: ${result.matched} matched, ${result.sqlite_written} saved locally, ${result.ugp_updated} pushed to uGridPLAN`
+        `Sync complete: ${result.matched} matched, ${result.cache_written} saved in CC, ${result.ugp_updated} pushed to uGridPLAN`
       );
       setPreview(null);
       fetchData();
@@ -115,7 +115,7 @@ export default function SyncPage() {
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-gray-800">uGridPLAN Sync</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Sync customer data between ACCDB and uGridPLAN connection elements
+            Sync customer data between the CC portal database and uGridPLAN connection elements
           </p>
         </div>
         {isSuperadmin && (
@@ -349,8 +349,8 @@ export default function SyncPage() {
               <p className="text-xs text-blue-600">uGridPLAN Connections</p>
             </div>
             <div className="bg-green-50 rounded-lg p-3 text-center">
-              <p className="text-2xl font-bold text-green-700">{preview.accdb_customer_count}</p>
-              <p className="text-xs text-green-600">ACCDB Customers</p>
+              <p className="text-2xl font-bold text-green-700">{preview.cc_customer_count}</p>
+              <p className="text-xs text-green-600">CC Customers</p>
             </div>
             <div className="bg-emerald-50 rounded-lg p-3 text-center">
               <p className="text-2xl font-bold text-emerald-700">{preview.matched_count}</p>
@@ -361,8 +361,8 @@ export default function SyncPage() {
               <p className="text-xs text-amber-600">Unmatched (uGP)</p>
             </div>
             <div className="bg-red-50 rounded-lg p-3 text-center">
-              <p className="text-2xl font-bold text-red-700">{preview.unmatched_accdb_count}</p>
-              <p className="text-xs text-red-600">Unmatched (ACCDB)</p>
+              <p className="text-2xl font-bold text-red-700">{preview.unmatched_cc_count}</p>
+              <p className="text-xs text-red-600">Unmatched (CC)</p>
             </div>
           </div>
 
@@ -378,7 +378,7 @@ export default function SyncPage() {
                       <th className="px-3 py-2 text-left">Customer ID</th>
                       <th className="px-3 py-2 text-left">Method</th>
                       <th className="px-3 py-2 text-left">Type</th>
-                      <th className="px-3 py-2 text-left">Name (ACCDB)</th>
+                      <th className="px-3 py-2 text-left">Name (CC)</th>
                       <th className="px-3 py-2 text-left">Meter</th>
                     </tr>
                   </thead>
@@ -391,7 +391,7 @@ export default function SyncPage() {
                           <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded text-xs">{m.match_method}</span>
                         </td>
                         <td className="px-3 py-1.5 font-semibold">{m.customer_type || '—'}</td>
-                        <td className="px-3 py-1.5">{m.accdb_name}</td>
+                        <td className="px-3 py-1.5">{m.cc_name}</td>
                         <td className="px-3 py-1.5 font-mono">{m.meter_serial || '—'}</td>
                       </tr>
                     ))}
