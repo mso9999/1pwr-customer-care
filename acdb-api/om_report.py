@@ -18,7 +18,7 @@ import logging
 import math
 import os
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from fastapi import APIRouter, Depends, Query
@@ -98,6 +98,26 @@ def _extract_site(account_number: str) -> str:
     if candidate in KNOWN_SITES:
         return candidate
     return ""
+
+
+def _coerce_export_timestamp(raw_val: Any) -> Optional[datetime]:
+    """Normalize DB/date/string values to a naive datetime for export filtering."""
+    if raw_val is None:
+        return None
+    if isinstance(raw_val, datetime):
+        return raw_val.replace(tzinfo=None) if raw_val.tzinfo else raw_val
+    if isinstance(raw_val, date):
+        return datetime.combine(raw_val, time.min)
+    if isinstance(raw_val, str):
+        raw = raw_val.strip()
+        if not raw:
+            return None
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+            try:
+                return datetime.strptime(raw[:19], fmt)
+            except ValueError:
+                continue
+    return None
 
 
 def _date_to_quarter(dt) -> str:
@@ -1827,14 +1847,8 @@ def meter_data_export(
             if kw_float is None:
                 continue
 
-            try:
-                if hasattr(dt_val, 'year'):
-                    ts = dt_val
-                elif isinstance(dt_val, str):
-                    ts = datetime.strptime(dt_val.strip()[:19], "%Y-%m-%d %H:%M:%S")
-                else:
-                    continue
-            except (ValueError, AttributeError):
+            ts = _coerce_export_timestamp(dt_val)
+            if ts is None:
                 continue
 
             if start_dt and ts < start_dt:
@@ -1901,14 +1915,8 @@ def meter_data_export(
                 if not math.isfinite(kw_float) or kw_float <= 0:
                     continue
 
-                try:
-                    if hasattr(dt_val, 'year'):
-                        ts = dt_val
-                    elif isinstance(dt_val, str):
-                        ts = datetime.strptime(dt_val.strip()[:19], "%Y-%m-%d %H:%M:%S")
-                    else:
-                        continue
-                except (ValueError, AttributeError):
+                ts = _coerce_export_timestamp(dt_val)
+                if ts is None:
                     continue
 
                 if start_dt and ts < start_dt:
