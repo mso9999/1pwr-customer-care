@@ -1684,28 +1684,67 @@ def meter_data_export(
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        # -- 1. Build meter_id -> (customer_type, community) mapping via customers --
-        meter_info: Dict[str, Dict[str, str]] = {}
+        # -- 1. Mirror daily_load_profiles() type resolution --
+        # Build account -> customer_type from customers first, then extend to
+        # meter_id via meters.account_number. This lets raw rows fall back to
+        # account_number when the stored meter_id does not exactly match the
+        # registry key.
+        acct_type: Dict[str, str] = {}
+        meter_type: Dict[str, str] = {}
+        acct_site: Dict[str, str] = {}
+        acct_meter: Dict[str, str] = {}
+        meter_site: Dict[str, str] = {}
+
+        site_filter_sql = ""
+        site_params: tuple = ()
+        if site:
+            site_filter_sql = " AND a.account_number LIKE %s"
+            site_params = (f"%{site.upper()}",)
+
         cursor.execute(
-            "SELECT m.meter_id, c.customer_type, m.community "
-            "FROM meters m "
-            "JOIN accounts a ON m.account_number = a.account_number "
+            "SELECT a.account_number, c.customer_type "
+            "FROM accounts a "
             "JOIN customers c ON a.customer_id = c.id "
             "WHERE c.customer_type IS NOT NULL AND c.customer_type <> ''"
+            + site_filter_sql,
+            site_params,
+        )
+        for row in cursor.fetchall():
+            acct = str(row[0] or "").strip()
+            ctype = str(row[1] or "").strip().upper()
+            if customer_type and not _matches_customer_type(ctype, customer_type):
+                continue
+            if acct:
+                acct_type[acct] = ctype
+
+        cursor.execute(
+            "SELECT meter_id, account_number, community, role, status "
+            "FROM meters "
+            "ORDER BY account_number, "
+            "CASE WHEN role = 'primary' THEN 0 ELSE 1 END, "
+            "CASE WHEN status = 'active' THEN 0 ELSE 1 END, "
+            "meter_id"
         )
         for row in cursor.fetchall():
             mid = str(row[0] or "").strip()
-            ctype = str(row[1] or "").strip().upper()
+            acct = str(row[1] or "").strip()
             community = str(row[2] or "").strip().upper()
-            if mid and ctype:
-                meter_info[mid] = {"type": ctype, "site": community}
+            if acct and community and acct not in acct_site:
+                acct_site[acct] = community
+            if acct and mid and acct not in acct_meter:
+                acct_meter[acct] = mid
+            if mid and community:
+                meter_site[mid] = community
+            if mid and acct in acct_type:
+                meter_type[mid] = acct_type[acct]
 
-        if not meter_info:
-            return {"readings": [], "meta": {"error": "No meter registry data found"}}
+        if not meter_type and not acct_type:
+            return {"readings": [], "meta": {"error": "No typed customer data found"}}
 
         # -- 2. Query meter_readings --
         sql = (
-            "SELECT meter_id, reading_time, power_kw, source FROM meter_readings "
+            "SELECT meter_id, reading_time, power_kw, account_number, source, community "
+            "FROM meter_readings "
             "WHERE power_kw IS NOT NULL"
         )
         params: List[Any] = []
@@ -1722,24 +1761,41 @@ def meter_data_export(
 
         # -- 3. Stream results with Python-side filtering --
         readings: List[Dict[str, Any]] = []
+        raw_accounts_covered: Set[str] = set()
         skipped = 0
+        resolved_by_meter_id = 0
+        resolved_by_account = 0
+        source_rows = {"meter_readings": 0, "hourly_consumption": 0}
 
         for row in cursor.fetchall():
             mid = str(row[0] or "").strip()
-            info = meter_info.get(mid)
-            if not info:
+            acct = str(row[3] or "").strip()
+
+            ctype = meter_type.get(mid)
+            if ctype:
+                resolved_by_meter_id += 1
+            elif acct:
+                ctype = acct_type.get(acct)
+                if ctype:
+                    resolved_by_account += 1
+
+            if not ctype:
                 skipped += 1
                 continue
 
-            ctype = info["type"]
-            community = info["site"]
+            community = (
+                meter_site.get(mid)
+                or acct_site.get(acct)
+                or str(row[5] or "").strip().upper()
+                or _extract_site(acct)
+            )
 
             if customer_type and not _matches_customer_type(ctype, customer_type):
                 continue
 
             dt_val = row[1]
             kw_val = row[2]
-            source_name = row[3]
+            source_name = row[4]
             if dt_val is None or kw_val is None:
                 continue
 
@@ -1778,7 +1834,97 @@ def meter_data_export(
                 "customer_type": ctype,
                 "site": community,
                 "meterid": mid,
+                "source_table": "meter_readings",
+                "source": source_name,
             })
+            source_rows["meter_readings"] += 1
+            if acct:
+                raw_accounts_covered.add(acct)
+
+        skipped_hourly_no_type = 0
+        skipped_hourly_covered = 0
+        hourly_accounts_used: Set[str] = set()
+
+        try:
+            cursor.execute(
+                "SELECT account_number, meter_id, reading_hour, kwh, community, source "
+                "FROM hourly_consumption "
+                "WHERE kwh IS NOT NULL AND kwh > 0"
+                + (" AND community = %s" if site else ""),
+                (site.upper(),) if site else (),
+            )
+            for row in cursor.fetchall():
+                acct = str(row[0] or "").strip()
+                if not acct:
+                    skipped_hourly_no_type += 1
+                    continue
+                if acct in raw_accounts_covered:
+                    skipped_hourly_covered += 1
+                    continue
+
+                ctype = acct_type.get(acct)
+                if not ctype:
+                    skipped_hourly_no_type += 1
+                    continue
+
+                dt_val = row[2]
+                kwh_val = row[3]
+                if dt_val is None or kwh_val is None:
+                    continue
+                try:
+                    kw_float = float(kwh_val)
+                except (ValueError, TypeError):
+                    continue
+                if not math.isfinite(kw_float) or kw_float <= 0:
+                    continue
+
+                try:
+                    if hasattr(dt_val, 'year'):
+                        ts = dt_val
+                    elif isinstance(dt_val, str):
+                        ts = datetime.strptime(dt_val.strip()[:19], "%Y-%m-%d %H:%M:%S")
+                    else:
+                        continue
+                except (ValueError, AttributeError):
+                    continue
+
+                if start_date:
+                    try:
+                        sd = datetime.strptime(start_date, "%Y-%m-%d")
+                        if ts < sd:
+                            continue
+                    except ValueError:
+                        pass
+                if end_date:
+                    try:
+                        ed = datetime.strptime(end_date, "%Y-%m-%d")
+                        if ts > ed:
+                            continue
+                    except ValueError:
+                        pass
+
+                meterid = str(row[1] or "").strip() or acct_meter.get(acct) or acct
+                community = (
+                    acct_site.get(acct)
+                    or meter_site.get(meterid)
+                    or str(row[4] or "").strip().upper()
+                    or _extract_site(acct)
+                )
+                source_name = str(row[5] or "").strip().lower()
+
+                readings.append({
+                    "timestamp": ts.strftime("%Y-%m-%d %H:%M:%S"),
+                    "kw": round(kw_float, 4),
+                    "customer_type": ctype,
+                    "site": community,
+                    "meterid": meterid,
+                    "source_table": "hourly_consumption",
+                    "source": source_name,
+                })
+                source_rows["hourly_consumption"] += 1
+                hourly_accounts_used.add(acct)
+        except Exception as e:
+            logger.warning("meter-export hourly fallback query failed: %s", e)
 
         # -- 4. Summary --
         type_counts: Dict[str, int] = defaultdict(int)
@@ -1792,9 +1938,18 @@ def meter_data_export(
             "meta": {
                 "total_readings": len(readings),
                 "skipped_no_type": skipped,
-                "meter_source": "meters",
+                "skipped_hourly_no_type": skipped_hourly_no_type,
+                "skipped_hourly_already_covered": skipped_hourly_covered,
+                "meter_source": "meters+accounts",
                 "customer_types": dict(type_counts),
                 "sites": dict(site_counts),
+                "source_rows": source_rows,
+                "type_resolution": {
+                    "meter_id": resolved_by_meter_id,
+                    "account_number": resolved_by_account,
+                },
+                "raw_accounts_covered": len(raw_accounts_covered),
+                "hourly_fallback_accounts": len(hourly_accounts_used),
                 "filters": {
                     "customer_type": customer_type,
                     "site": site,
