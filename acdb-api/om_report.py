@@ -1684,6 +1684,24 @@ def meter_data_export(
     with _get_connection() as conn:
         cursor = conn.cursor()
 
+        valid_start_date = None
+        valid_end_date = None
+        start_dt: Optional[datetime] = None
+        end_exclusive_dt: Optional[datetime] = None
+        if start_date:
+            try:
+                start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+                valid_start_date = start_date
+            except ValueError:
+                logger.warning("meter-export ignoring invalid start_date: %s", start_date)
+        if end_date:
+            try:
+                end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+                end_exclusive_dt = end_dt + timedelta(days=1)
+                valid_end_date = end_date
+            except ValueError:
+                logger.warning("meter-export ignoring invalid end_date: %s", end_date)
+
         # -- 1. Mirror daily_load_profiles() type resolution --
         # Build account -> customer_type from customers first, then extend to
         # meter_id via meters.account_number. This lets raw rows fall back to
@@ -1752,6 +1770,12 @@ def meter_data_export(
         if site:
             sql += " AND community = %s"
             params.append(site.upper())
+        if valid_start_date:
+            sql += " AND reading_time >= %s::timestamp"
+            params.append(valid_start_date)
+        if valid_end_date:
+            sql += " AND reading_time < (%s::date + 1)::timestamp"
+            params.append(valid_end_date)
 
         try:
             cursor.execute(sql, params) if params else cursor.execute(sql)
@@ -1813,20 +1837,10 @@ def meter_data_export(
             except (ValueError, AttributeError):
                 continue
 
-            if start_date:
-                try:
-                    sd = datetime.strptime(start_date, "%Y-%m-%d")
-                    if ts < sd:
-                        continue
-                except ValueError:
-                    pass
-            if end_date:
-                try:
-                    ed = datetime.strptime(end_date, "%Y-%m-%d")
-                    if ts > ed:
-                        continue
-                except ValueError:
-                    pass
+            if start_dt and ts < start_dt:
+                continue
+            if end_exclusive_dt and ts >= end_exclusive_dt:
+                continue
 
             readings.append({
                 "timestamp": ts.strftime("%Y-%m-%d %H:%M:%S"),
@@ -1846,13 +1860,22 @@ def meter_data_export(
         hourly_accounts_used: Set[str] = set()
 
         try:
-            cursor.execute(
+            hourly_sql = (
                 "SELECT account_number, meter_id, reading_hour, kwh, community, source "
                 "FROM hourly_consumption "
                 "WHERE kwh IS NOT NULL AND kwh > 0"
-                + (" AND community = %s" if site else ""),
-                (site.upper(),) if site else (),
             )
+            hourly_params: List[Any] = []
+            if site:
+                hourly_sql += " AND community = %s"
+                hourly_params.append(site.upper())
+            if valid_start_date:
+                hourly_sql += " AND reading_hour >= %s::timestamp"
+                hourly_params.append(valid_start_date)
+            if valid_end_date:
+                hourly_sql += " AND reading_hour < (%s::date + 1)::timestamp"
+                hourly_params.append(valid_end_date)
+            cursor.execute(hourly_sql, hourly_params)
             for row in cursor.fetchall():
                 acct = str(row[0] or "").strip()
                 if not acct:
@@ -1888,20 +1911,10 @@ def meter_data_export(
                 except (ValueError, AttributeError):
                     continue
 
-                if start_date:
-                    try:
-                        sd = datetime.strptime(start_date, "%Y-%m-%d")
-                        if ts < sd:
-                            continue
-                    except ValueError:
-                        pass
-                if end_date:
-                    try:
-                        ed = datetime.strptime(end_date, "%Y-%m-%d")
-                        if ts > ed:
-                            continue
-                    except ValueError:
-                        pass
+                if start_dt and ts < start_dt:
+                    continue
+                if end_exclusive_dt and ts >= end_exclusive_dt:
+                    continue
 
                 meterid = str(row[1] or "").strip() or acct_meter.get(acct) or acct
                 community = (

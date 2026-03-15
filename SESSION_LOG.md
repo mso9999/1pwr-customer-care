@@ -1557,3 +1557,23 @@ Key evidence:
 - `acdb-api/auth.py`
 - `acdb-api/balance_engine.py`
 - `SESSION_LOG.md`
+
+## Session 2026-03-15 202603152356 (Push meter-export date filtering into SQL)
+
+### What Was Done
+- Updated `acdb-api/om_report.py` so `GET /api/om-report/meter-export` now applies valid `start_date` / `end_date` bounds directly in SQL for both the `meter_readings` query and the `hourly_consumption` fallback query.
+- Kept the existing “ignore malformed dates” behavior by validating the date strings first in Python and only pushing well-formed bounds into SQL.
+- Fixed the endpoint’s end-date behavior while doing that work: the filter is now `timestamp < end_date + 1 day`, so `end_date=YYYY-MM-DD` includes the full requested day instead of effectively stopping at midnight.
+- Re-ran `python3 -m py_compile acdb-api/om_report.py` and lint checks after the patch; both passed locally.
+
+### Key Decisions
+- Treated SQL-level date filtering as the root-cause fix for the HH refresh timeout path, because client-side month/quarter chunking is not enough if the backend still scans and serializes each site’s full history before trimming the date range.
+- Preserved the existing response shape and post-query safety checks so the change stays contract-compatible while making date-window requests materially cheaper.
+
+### What Next Session Should Know
+- This backend patch is local only right now; it still needs to be pushed/deployed before the new chunked HH refresh path in `uGridPlan` can benefit from it.
+- Live verification from the local environment was blocked by repeated timeouts reaching `https://cc.1pwrafrica.com/api/auth/employee-login`, so the next practical step is deploy first, then re-test when CC reachability is healthy again.
+
+### Files Modified
+- `acdb-api/om_report.py`
+- `SESSION_LOG.md`
