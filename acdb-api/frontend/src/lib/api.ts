@@ -49,6 +49,44 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return res.json();
 }
 
+async function downloadFile(path: string, fallbackFilename: string, options: RequestInit = {}): Promise<void> {
+  const token = getToken();
+  const headers: Record<string, string> = {
+    ...(options.headers as Record<string, string> || {}),
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(`${getApiBase()}${path}`, { ...options, headers });
+
+  if (res.status === 401) {
+    localStorage.removeItem('cc_token');
+    localStorage.removeItem('cc_user');
+    window.location.href = '/login';
+    throw new Error('Unauthorized');
+  }
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(body.detail || `HTTP ${res.status}`);
+  }
+
+  const blob = await res.blob();
+  const disposition = res.headers.get('content-disposition') || '';
+  const match = disposition.match(/filename="?([^"]+)"?/i);
+  const filename = match?.[1] || fallbackFilename;
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 // ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
@@ -1108,6 +1146,14 @@ export interface CheckMeterComparisonResponse {
 
 export async function getCheckMeterComparison(days = 7): Promise<CheckMeterComparisonResponse> {
   return request(`/om-report/check-meter-comparison?days=${days}`);
+}
+
+export async function downloadCheckMeterComparisonExcel(days = 7): Promise<void> {
+  const suffix = days === 0 ? 'since_firmware_update' : `last_${days}_days`;
+  return downloadFile(
+    `/om-report/check-meter-comparison/export?days=${days}`,
+    `check_meter_comparison_${suffix}.xlsx`,
+  );
 }
 
 // ---------------------------------------------------------------------------

@@ -3,7 +3,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer,
 } from 'recharts';
-import { getCheckMeterComparison } from '../lib/api';
+import { downloadCheckMeterComparisonExcel, getCheckMeterComparison } from '../lib/api';
 import type { CheckMeterComparisonResponse, CheckMeterPair, CheckMeterHealth } from '../lib/api';
 
 const PAIR_COLORS = [
@@ -395,6 +395,8 @@ function CumulativeChart({ data }: { data: CheckMeterComparisonResponse }) {
 export default function CheckMeterPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [downloadError, setDownloadError] = useState('');
+  const [downloading, setDownloading] = useState(false);
   const [data, setData] = useState<CheckMeterComparisonResponse | null>(null);
   const [days, setDays] = useState(0);
 
@@ -416,6 +418,18 @@ export default function CheckMeterPage() {
     return () => { cancelled = true; };
   }, [days]);
 
+  async function handleDownload() {
+    setDownloadError('');
+    setDownloading(true);
+    try {
+      await downloadCheckMeterComparisonExcel(days);
+    } catch (e: any) {
+      setDownloadError(e?.message || 'Download failed');
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   return (
     <div>
       {/* Header */}
@@ -426,7 +440,7 @@ export default function CheckMeterPage() {
             SparkMeter (primary) vs 1Meter (check) — hourly kWh readings
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <label className="text-sm text-gray-600">Period:</label>
           <select
             value={days}
@@ -440,10 +454,23 @@ export default function CheckMeterPage() {
             <option value={14}>Last 14 days</option>
             <option value={30}>Last 30 days</option>
           </select>
+          <button
+            type="button"
+            onClick={handleDownload}
+            disabled={loading || downloading}
+            className="text-sm font-medium rounded-md px-3 py-1.5 bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+          >
+            {downloading ? 'Downloading...' : 'Download Excel'}
+          </button>
         </div>
       </div>
 
       {/* Loading / Error */}
+      {downloadError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg p-4 mb-6">
+          {downloadError}
+        </div>
+      )}
       {loading && (
         <div className="flex items-center justify-center py-24">
           <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-blue-600" />

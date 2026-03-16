@@ -13,6 +13,7 @@ the SMP Operations & Maintenance Quarterly Report:
   - Site overview (concession list with districts)
 """
 
+import io
 import json
 import logging
 import math
@@ -21,7 +22,8 @@ from collections import defaultdict
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 
 from models import CurrentUser
 from middleware import require_employee
@@ -1973,6 +1975,329 @@ def meter_data_export(
 # 15. Check Meter vs Primary Meter Comparison
 # ---------------------------------------------------------------------------
 
+def _build_check_meter_comparison(conn, days: int) -> Dict[str, Any]:
+    """Build the check-meter comparison payload shared by JSON and export views."""
+    cursor = conn.cursor()
+    from country_config import UTC_OFFSET_HOURS
+
+    cursor.execute("""
+        SELECT m_check.account_number,
+               m_check.meter_id   AS check_meter_id,
+               m_primary.meter_id AS primary_meter_id
+        FROM meters m_check
+        JOIN meters m_primary
+          ON m_primary.account_number = m_check.account_number
+         AND m_primary.role = 'primary'
+        WHERE m_check.role = 'check'
+    """)
+    pairs: List[Dict[str, Any]] = []
+    pair_accounts: List[str] = []
+    for row in cursor.fetchall():
+        pairs.append({
+            "account": row[0],
+            "check_meter_id": row[1],
+            "primary_meter_id": row[2],
+        })
+        pair_accounts.append(row[0])
+
+    if not pair_accounts:
+        return {"pairs": [], "time_series": [], "days": days, "cutoff": "", "note": "No check meter pairs found"}
+
+    if days > 0:
+        cutoff = datetime.utcnow() - timedelta(days=days)
+    else:
+        placeholders_iot = ",".join(["%s"] * len(pair_accounts))
+        cursor.execute(
+            f"SELECT MIN(reading_hour) FROM hourly_consumption "
+            f"WHERE account_number IN ({placeholders_iot}) AND source = 'iot'",
+            tuple(pair_accounts),
+        )
+        row = cursor.fetchone()
+        cutoff = row[0] if row and row[0] else datetime.utcnow() - timedelta(days=30)
+
+    placeholders = ",".join(["%s"] * len(pair_accounts))
+    cursor.execute(
+        f"SELECT account_number, reading_hour, kwh, source "
+        f"FROM hourly_consumption "
+        f"WHERE account_number IN ({placeholders}) AND reading_hour >= %s "
+        f"ORDER BY reading_hour",
+        (*pair_accounts, cutoff),
+    )
+
+    hour_data: Dict[str, Dict[str, Dict[str, Optional[float]]]] = defaultdict(
+        lambda: defaultdict(lambda: {"sm": None, "1m": None})
+    )
+    for row in cursor.fetchall():
+        acct = str(row[0] or "").strip()
+        hour = row[1]
+        kwh = float(row[2]) if row[2] is not None else None
+        source = str(row[3] or "").lower()
+
+        if hasattr(hour, "strftime"):
+            local_hour = hour + timedelta(hours=UTC_OFFSET_HOURS)
+            hour_key = local_hour.strftime("%Y-%m-%dT%H:%M:%S")
+        else:
+            hour_key = str(hour)
+
+        if source in ("thundercloud", "koios"):
+            existing = hour_data[hour_key][acct]["sm"]
+            hour_data[hour_key][acct]["sm"] = (existing or 0) + (kwh or 0)
+        elif source == "iot":
+            existing = hour_data[hour_key][acct]["1m"]
+            hour_data[hour_key][acct]["1m"] = (existing or 0) + (kwh or 0)
+
+    sorted_hours = sorted(hour_data.keys())
+    time_series: List[Dict[str, Any]] = []
+    for hour_key in sorted_hours:
+        point: Dict[str, Any] = {"reading_hour": hour_key}
+        for pair in pairs:
+            acct = pair["account"]
+            vals = hour_data[hour_key].get(acct, {"sm": None, "1m": None})
+            sm_val = vals["sm"]
+            m1_val = vals["1m"]
+            point[f"{acct}_sm"] = round(sm_val, 4) if sm_val is not None else None
+            point[f"{acct}_1m"] = round(m1_val, 4) if m1_val is not None else None
+        time_series.append(point)
+
+    for pair in pairs:
+        acct = pair["account"]
+        deviations: List[float] = []
+        sm_vals: List[float] = []
+        m1_vals: List[float] = []
+        for hour_key in sorted_hours:
+            vals = hour_data[hour_key].get(acct, {"sm": None, "1m": None})
+            sm = vals["sm"]
+            m1 = vals["1m"]
+            if sm is not None and m1 is not None and sm > 0:
+                deviations.append((m1 - sm) / sm * 100)
+                sm_vals.append(sm)
+                m1_vals.append(m1)
+
+        n = len(deviations)
+        total_sm = sum(sm_vals)
+        total_1m = sum(m1_vals)
+
+        if n > 0:
+            mean_dev = sum(deviations) / n
+            stddev_dev = (
+                math.sqrt(sum((d - mean_dev) ** 2 for d in deviations) / n)
+                if n > 1
+                else 0
+            )
+            mean_sm = total_sm / n
+            mean_1m = total_1m / n
+        else:
+            mean_dev = stddev_dev = mean_sm = mean_1m = 0.0
+
+        total_dev_pct = (
+            (total_1m - total_sm) / total_sm * 100 if total_sm > 0 else 0
+        )
+
+        pair["stats"] = {
+            "total_deviation_pct": round(total_dev_pct, 2),
+            "mean_deviation_pct": round(mean_dev, 2),
+            "stddev_deviation_pct": round(stddev_dev, 2),
+            "mean_sm_kwh": round(mean_sm, 4),
+            "mean_1m_kwh": round(mean_1m, 4),
+            "n_matched_hours": n,
+            "total_sm_kwh": round(total_sm, 2),
+            "total_1m_kwh": round(total_1m, 2),
+        }
+
+    check_meter_ids = [p["check_meter_id"] for p in pairs]
+    health_map: Dict[str, Dict[str, Any]] = {}
+    if check_meter_ids:
+        ph = ",".join(["%s"] * len(check_meter_ids))
+        cursor.execute(
+            f"SELECT meter_id, account_number, last_seen_at, last_sample_time "
+            f"FROM prototype_meter_state WHERE meter_id IN ({ph})",
+            tuple(str(m) for m in check_meter_ids),
+        )
+        now = datetime.now(timezone.utc)
+        for row in cursor.fetchall():
+            meter_id = str(row[0]).strip()
+            acct = str(row[1]).strip()
+            last_seen_db = row[2]
+            raw_ts = str(row[3] or "").strip()
+            last_seen = None
+            hours_ago = None
+
+            if last_seen_db:
+                last_seen = last_seen_db
+                if last_seen.tzinfo is None:
+                    last_seen = last_seen.replace(tzinfo=timezone.utc)
+                hours_ago = round((now - last_seen).total_seconds() / 3600, 1)
+            elif raw_ts and len(raw_ts) >= 12:
+                try:
+                    last_seen = datetime(
+                        int(raw_ts[:4]), int(raw_ts[4:6]),
+                        int(raw_ts[6:8]), int(raw_ts[8:10]),
+                        int(raw_ts[10:12]),
+                        tzinfo=timezone.utc,
+                    )
+                    hours_ago = round((now - last_seen).total_seconds() / 3600, 1)
+                except (ValueError, IndexError):
+                    pass
+            health_map[acct] = {
+                "meter_id": meter_id,
+                "last_seen_utc": last_seen.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S") if last_seen else None,
+                "hours_since_report": hours_ago,
+                "status": (
+                    "online" if hours_ago is not None and hours_ago < 2
+                    else "stale" if hours_ago is not None and hours_ago < 6
+                    else "offline"
+                ),
+            }
+
+    for pair in pairs:
+        pair["health"] = health_map.get(pair["account"], {
+            "meter_id": pair["check_meter_id"],
+            "last_seen_utc": None,
+            "hours_since_report": None,
+            "status": "unknown",
+        })
+
+    return {
+        "pairs": pairs,
+        "time_series": time_series,
+        "days": days,
+        "cutoff": cutoff.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+
+
+def _style_export_sheet(ws) -> None:
+    """Apply light formatting to export worksheets."""
+    for cell in ws[1]:
+        cell.font = cell.font.copy(bold=True)
+    ws.freeze_panes = "A2"
+    max_row = min(ws.max_row, 250)
+    for col_idx in range(1, ws.max_column + 1):
+        max_len = 0
+        for row_idx in range(1, max_row + 1):
+            val = ws.cell(row=row_idx, column=col_idx).value
+            if val is not None:
+                max_len = max(max_len, len(str(val)))
+        ws.column_dimensions[ws.cell(row=1, column=col_idx).column_letter].width = min(max_len + 2, 40)
+
+
+def _export_check_meter_comparison_xlsx(data: Dict[str, Any], days: int) -> StreamingResponse:
+    """Generate an XLSX workbook for offline check-meter analysis."""
+    try:
+        from openpyxl import Workbook
+    except ImportError:
+        raise HTTPException(status_code=500, detail="openpyxl not installed; XLSX export unavailable")
+
+    wb = Workbook()
+
+    meta_ws = wb.active
+    meta_ws.title = "meta"
+    meta_ws.append(["field", "value"])
+    meta_ws.append(["generated_at_utc", datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")])
+    meta_ws.append(["days_param", days])
+    meta_ws.append(["cutoff", data.get("cutoff") or ""])
+    meta_ws.append(["pair_count", len(data.get("pairs") or [])])
+    meta_ws.append(["time_series_points", len(data.get("time_series") or [])])
+    if data.get("note"):
+        meta_ws.append(["note", data["note"]])
+    _style_export_sheet(meta_ws)
+
+    summary_ws = wb.create_sheet("summary")
+    summary_ws.append([
+        "account",
+        "primary_meter_id",
+        "check_meter_id",
+        "health_status",
+        "last_seen_utc",
+        "hours_since_report",
+        "matched_hours",
+        "total_sm_kwh",
+        "total_1m_kwh",
+        "total_deviation_pct",
+        "mean_sm_kwh",
+        "mean_1m_kwh",
+        "mean_deviation_pct",
+        "stddev_deviation_pct",
+    ])
+    for pair in data.get("pairs", []):
+        stats = pair.get("stats", {})
+        health = pair.get("health", {})
+        summary_ws.append([
+            pair.get("account"),
+            pair.get("primary_meter_id"),
+            pair.get("check_meter_id"),
+            health.get("status"),
+            health.get("last_seen_utc"),
+            health.get("hours_since_report"),
+            stats.get("n_matched_hours"),
+            stats.get("total_sm_kwh"),
+            stats.get("total_1m_kwh"),
+            stats.get("total_deviation_pct"),
+            stats.get("mean_sm_kwh"),
+            stats.get("mean_1m_kwh"),
+            stats.get("mean_deviation_pct"),
+            stats.get("stddev_deviation_pct"),
+        ])
+    _style_export_sheet(summary_ws)
+
+    wide_ws = wb.create_sheet("hourly_wide")
+    wide_headers = ["reading_hour"]
+    for pair in data.get("pairs", []):
+        acct = pair.get("account")
+        wide_headers.extend([f"{acct}_sm", f"{acct}_1m"])
+    wide_ws.append(wide_headers)
+    for point in data.get("time_series", []):
+        row = [point.get("reading_hour")]
+        for pair in data.get("pairs", []):
+            acct = pair.get("account")
+            row.extend([point.get(f"{acct}_sm"), point.get(f"{acct}_1m")])
+        wide_ws.append(row)
+    _style_export_sheet(wide_ws)
+
+    long_ws = wb.create_sheet("hourly_long")
+    long_ws.append([
+        "reading_hour",
+        "account",
+        "primary_meter_id",
+        "check_meter_id",
+        "sm_kwh",
+        "one_meter_kwh",
+        "deviation_pct",
+    ])
+    for point in data.get("time_series", []):
+        reading_hour = point.get("reading_hour")
+        for pair in data.get("pairs", []):
+            acct = pair.get("account")
+            sm_val = point.get(f"{acct}_sm")
+            m1_val = point.get(f"{acct}_1m")
+            deviation_pct = None
+            if sm_val not in (None, 0) and m1_val is not None:
+                deviation_pct = round((m1_val - sm_val) / sm_val * 100, 4)
+            long_ws.append([
+                reading_hour,
+                acct,
+                pair.get("primary_meter_id"),
+                pair.get("check_meter_id"),
+                sm_val,
+                m1_val,
+                deviation_pct,
+            ])
+    _style_export_sheet(long_ws)
+
+    filename_suffix = "since_firmware_update" if days == 0 else f"last_{days}_days"
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=check_meter_comparison_{filename_suffix}.xlsx"
+            )
+        },
+    )
+
+
 @router.get("/check-meter-comparison")
 def check_meter_comparison(
     days: int = Query(0, description="Number of days of history (0 = since first check-meter reading)"),
@@ -1980,196 +2305,22 @@ def check_meter_comparison(
 ):
     """
     Hourly time series comparison of SparkMeter (primary) vs 1Meter (check)
-    for every account that has both meter roles installed.  Returns aligned
+    for every account that has both meter roles installed. Returns aligned
     time series plus per-pair deviation statistics.
     """
     with _get_connection() as conn:
-        cursor = conn.cursor()
-        from country_config import UTC_OFFSET_HOURS
+        return _build_check_meter_comparison(conn, days)
 
-        cursor.execute("""
-            SELECT m_check.account_number,
-                   m_check.meter_id   AS check_meter_id,
-                   m_primary.meter_id AS primary_meter_id
-            FROM meters m_check
-            JOIN meters m_primary
-              ON m_primary.account_number = m_check.account_number
-             AND m_primary.role = 'primary'
-            WHERE m_check.role = 'check'
-        """)
-        pairs: List[Dict[str, Any]] = []
-        pair_accounts: List[str] = []
-        for row in cursor.fetchall():
-            pairs.append({
-                "account": row[0],
-                "check_meter_id": row[1],
-                "primary_meter_id": row[2],
-            })
-            pair_accounts.append(row[0])
 
-        if not pair_accounts:
-            return {"pairs": [], "time_series": [], "note": "No check meter pairs found"}
-
-        if days > 0:
-            cutoff = datetime.utcnow() - timedelta(days=days)
-        else:
-            placeholders_iot = ",".join(["%s"] * len(pair_accounts))
-            cursor.execute(
-                f"SELECT MIN(reading_hour) FROM hourly_consumption "
-                f"WHERE account_number IN ({placeholders_iot}) AND source = 'iot'",
-                tuple(pair_accounts),
-            )
-            row = cursor.fetchone()
-            cutoff = row[0] if row and row[0] else datetime.utcnow() - timedelta(days=30)
-        placeholders = ",".join(["%s"] * len(pair_accounts))
-        cursor.execute(
-            f"SELECT account_number, reading_hour, kwh, source "
-            f"FROM hourly_consumption "
-            f"WHERE account_number IN ({placeholders}) AND reading_hour >= %s "
-            f"ORDER BY reading_hour",
-            (*pair_accounts, cutoff),
-        )
-
-        hour_data: Dict[str, Dict[str, Dict[str, Optional[float]]]] = defaultdict(
-            lambda: defaultdict(lambda: {"sm": None, "1m": None})
-        )
-        for row in cursor.fetchall():
-            acct = str(row[0] or "").strip()
-            hour = row[1]
-            kwh = float(row[2]) if row[2] is not None else None
-            source = str(row[3] or "").lower()
-
-            if hasattr(hour, "strftime"):
-                local_hour = hour + timedelta(hours=UTC_OFFSET_HOURS)
-                hour_key = local_hour.strftime("%Y-%m-%dT%H:%M:%S")
-            else:
-                hour_key = str(hour)
-
-            if source in ("thundercloud", "koios"):
-                existing = hour_data[hour_key][acct]["sm"]
-                hour_data[hour_key][acct]["sm"] = (existing or 0) + (kwh or 0)
-            elif source == "iot":
-                existing = hour_data[hour_key][acct]["1m"]
-                hour_data[hour_key][acct]["1m"] = (existing or 0) + (kwh or 0)
-
-        sorted_hours = sorted(hour_data.keys())
-        time_series: List[Dict[str, Any]] = []
-        for hour_key in sorted_hours:
-            point: Dict[str, Any] = {"reading_hour": hour_key}
-            for pair in pairs:
-                acct = pair["account"]
-                vals = hour_data[hour_key].get(acct, {"sm": None, "1m": None})
-                sm_val = vals["sm"]
-                m1_val = vals["1m"]
-                point[f"{acct}_sm"] = round(sm_val, 4) if sm_val is not None else None
-                point[f"{acct}_1m"] = round(m1_val, 4) if m1_val is not None else None
-            time_series.append(point)
-
-        for pair in pairs:
-            acct = pair["account"]
-            deviations: List[float] = []
-            sm_vals: List[float] = []
-            m1_vals: List[float] = []
-            for hour_key in sorted_hours:
-                vals = hour_data[hour_key].get(acct, {"sm": None, "1m": None})
-                sm = vals["sm"]
-                m1 = vals["1m"]
-                if sm is not None and m1 is not None and sm > 0:
-                    deviations.append((m1 - sm) / sm * 100)
-                    sm_vals.append(sm)
-                    m1_vals.append(m1)
-
-            n = len(deviations)
-            total_sm = sum(sm_vals)
-            total_1m = sum(m1_vals)
-
-            if n > 0:
-                mean_dev = sum(deviations) / n
-                stddev_dev = (
-                    math.sqrt(sum((d - mean_dev) ** 2 for d in deviations) / n)
-                    if n > 1
-                    else 0
-                )
-                mean_sm = total_sm / n
-                mean_1m = total_1m / n
-            else:
-                mean_dev = stddev_dev = mean_sm = mean_1m = 0.0
-
-            total_dev_pct = (
-                (total_1m - total_sm) / total_sm * 100 if total_sm > 0 else 0
-            )
-
-            pair["stats"] = {
-                "total_deviation_pct": round(total_dev_pct, 2),
-                "mean_deviation_pct": round(mean_dev, 2),
-                "stddev_deviation_pct": round(stddev_dev, 2),
-                "mean_sm_kwh": round(mean_sm, 4),
-                "mean_1m_kwh": round(mean_1m, 4),
-                "n_matched_hours": n,
-                "total_sm_kwh": round(total_sm, 2),
-                "total_1m_kwh": round(total_1m, 2),
-            }
-
-        # ── Meter health: prefer last_seen_at, fall back to legacy last_sample_time ──
-        check_meter_ids = [p["check_meter_id"] for p in pairs]
-        health_map: Dict[str, Dict[str, Any]] = {}
-        if check_meter_ids:
-            ph = ",".join(["%s"] * len(check_meter_ids))
-            cursor.execute(
-                f"SELECT meter_id, account_number, last_seen_at, last_sample_time "
-                f"FROM prototype_meter_state WHERE meter_id IN ({ph})",
-                tuple(str(m) for m in check_meter_ids),
-            )
-            now = datetime.now(timezone.utc)
-            for row in cursor.fetchall():
-                meter_id = str(row[0]).strip()
-                acct = str(row[1]).strip()
-                last_seen_db = row[2]
-                raw_ts = str(row[3] or "").strip()
-                last_seen = None
-                hours_ago = None
-
-                if last_seen_db:
-                    last_seen = last_seen_db
-                    if last_seen.tzinfo is None:
-                        last_seen = last_seen.replace(tzinfo=timezone.utc)
-                    hours_ago = round((now - last_seen).total_seconds() / 3600, 1)
-                elif raw_ts and len(raw_ts) >= 12:
-                    try:
-                        last_seen = datetime(
-                            int(raw_ts[:4]), int(raw_ts[4:6]),
-                            int(raw_ts[6:8]), int(raw_ts[8:10]),
-                            int(raw_ts[10:12]),
-                            tzinfo=timezone.utc,
-                        )
-                        hours_ago = round((now - last_seen).total_seconds() / 3600, 1)
-                    except (ValueError, IndexError):
-                        pass
-                health_map[acct] = {
-                    "meter_id": meter_id,
-                    "last_seen_utc": last_seen.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S") if last_seen else None,
-                    "hours_since_report": hours_ago,
-                    "status": (
-                        "online" if hours_ago is not None and hours_ago < 2
-                        else "stale" if hours_ago is not None and hours_ago < 6
-                        else "offline"
-                    ),
-                }
-
-        for pair in pairs:
-            pair["health"] = health_map.get(pair["account"], {
-                "meter_id": pair["check_meter_id"],
-                "last_seen_utc": None,
-                "hours_since_report": None,
-                "status": "unknown",
-            })
-
-        return {
-            "pairs": pairs,
-            "time_series": time_series,
-            "days": days,
-            "cutoff": cutoff.strftime("%Y-%m-%dT%H:%M:%S"),
-        }
+@router.get("/check-meter-comparison/export")
+def export_check_meter_comparison(
+    days: int = Query(0, description="Number of days of history (0 = since first check-meter reading)"),
+    user: CurrentUser = Depends(require_employee),
+):
+    """Download the check-meter comparison dataset as an Excel workbook."""
+    with _get_connection() as conn:
+        data = _build_check_meter_comparison(conn, days)
+    return _export_check_meter_comparison_xlsx(data, days)
 
 
 # ---------------------------------------------------------------------------
