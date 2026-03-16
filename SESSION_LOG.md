@@ -1577,3 +1577,42 @@ Key evidence:
 ### Files Modified
 - `acdb-api/om_report.py`
 - `SESSION_LOG.md`
+
+## Session 2026-03-16 202603160250 (Fix date-window export crash in production)
+
+### What Was Done
+- Identified and patched a follow-on production bug in `acdb-api/om_report.py`: date-window `meter-export` requests could still fail with HTTP 500 once a window hit real rows, because the Python-side post-SQL filter treated any value with a `year` attribute as a timestamp and could end up comparing `datetime.date` values against `datetime.datetime` bounds.
+- Added `_coerce_export_timestamp()` to normalize export timestamps from DB/date/string values into a consistent naive `datetime`, then routed both the `meter_readings` path and the `hourly_consumption` fallback path through that helper before applying the Python-side start/end checks.
+- Committed the fix as `642d936` (`Normalize meter-export window timestamps.`), pushed `main` to `origin/main`, and monitored production deploy workflow `23114709010` to successful completion.
+- Re-probed the exact previously failing live request, `meter-export?customer_type=HH&site=MAK&start_date=2022-09-01&end_date=2022-09-30`, and confirmed it now returns HTTP 200 with real readings instead of 500.
+
+### Key Decisions
+- Treated this as a backend contract correctness fix rather than trying to special-case the client refresh logic, because the live API itself was crashing on a legitimate date-window request.
+- Kept the earlier SQL date filtering in place and only normalized timestamp handling around the remaining Python-side guard checks, minimizing the production patch while restoring stability for non-empty windows.
+
+### What Next Session Should Know
+- Production `meter-export` now appears stable for the previously failing `MAK` monthly window that blocked the streamed HH refresh.
+- The client-side `build_acdb_cdfs.py --refresh affected-households` rerun should be treated as the next source of truth for whether the full HH rebuild now completes end-to-end.
+
+### Files Modified
+- `acdb-api/om_report.py`
+- `SESSION_LOG.md`
+
+## Session 2026-03-16 202603160325 (Stabilize tenure date parsing)
+
+### What Was Done
+- Patched `acdb-api/om_report.py` `GET /api/om-report/consumption-by-tenure` to reuse `_coerce_export_timestamp()` for all transaction / consumption date parsing instead of keeping a separate permissive parser that could return raw `date` objects.
+- Extended `_coerce_export_timestamp()` to normalize slash-formatted dates as well, so the tenure endpoint and export endpoint now share one consistent DB/date/string-to-`datetime` coercion path.
+- Re-ran `python3 -m py_compile acdb-api/om_report.py` and lint checks after the change; both passed locally.
+
+### Key Decisions
+- Reused the already-deployed timestamp coercion helper rather than maintaining a second tenure-specific parser, because the likely failure mode was the same class of inconsistent DB date handling that had already caused the `meter-export` 500s.
+- Kept the patch narrow to parsing/coercion only, so the tenure aggregation math and output contract remain unchanged.
+
+### What Next Session Should Know
+- This patch is intended to remove the remaining live `consumption-by-tenure` HTTP 500 seen during the household refresh rebuild.
+- After deploy, the next validation step is to re-query `GET /api/om-report/consumption-by-tenure` directly, then rerun the local `smp_hh1` refresh path so tenure arrays can be repopulated from the live API if the endpoint is healthy.
+
+### Files Modified
+- `acdb-api/om_report.py`
+- `SESSION_LOG.md`

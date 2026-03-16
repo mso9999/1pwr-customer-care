@@ -101,7 +101,7 @@ def _extract_site(account_number: str) -> str:
 
 
 def _coerce_export_timestamp(raw_val: Any) -> Optional[datetime]:
-    """Normalize DB/date/string values to a naive datetime for export filtering."""
+    """Normalize DB/date/string values to a naive datetime."""
     if raw_val is None:
         return None
     if isinstance(raw_val, datetime):
@@ -112,9 +112,10 @@ def _coerce_export_timestamp(raw_val: Any) -> Optional[datetime]:
         raw = raw_val.strip()
         if not raw:
             return None
-        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"):
             try:
-                return datetime.strptime(raw[:19], fmt)
+                text = raw[:19] if fmt == "%Y-%m-%d %H:%M:%S" else raw
+                return datetime.strptime(text, fmt)
             except ValueError:
                 continue
     return None
@@ -1327,20 +1328,7 @@ def consumption_by_tenure(
         norm_map[mid.upper().replace("_", "-")] = ctype
 
     def _parse_dt(dt) -> Optional[datetime]:
-        if dt is None:
-            return None
-        if isinstance(dt, str):
-            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y", "%d/%m/%Y"):
-                try:
-                    return datetime.strptime(dt.strip(), fmt)
-                except (ValueError, AttributeError):
-                    continue
-            return None
-        try:
-            _ = dt.year
-            return dt
-        except (AttributeError, TypeError):
-            return None
+        return _coerce_export_timestamp(dt)
 
     def _lookup_type(meter_id: str) -> Optional[str]:
         if not meter_id:
