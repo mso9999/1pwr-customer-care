@@ -2110,36 +2110,44 @@ def check_meter_comparison(
                 "total_1m_kwh": round(total_1m, 2),
             }
 
-        # ── Meter health: last-seen timestamps from prototype_meter_state ──
+        # ── Meter health: prefer last_seen_at, fall back to legacy last_sample_time ──
         check_meter_ids = [p["check_meter_id"] for p in pairs]
         health_map: Dict[str, Dict[str, Any]] = {}
         if check_meter_ids:
             ph = ",".join(["%s"] * len(check_meter_ids))
             cursor.execute(
-                f"SELECT meter_id, account_number, last_sample_time "
+                f"SELECT meter_id, account_number, last_seen_at, last_sample_time "
                 f"FROM prototype_meter_state WHERE meter_id IN ({ph})",
                 tuple(str(m) for m in check_meter_ids),
             )
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             for row in cursor.fetchall():
                 meter_id = str(row[0]).strip()
                 acct = str(row[1]).strip()
-                raw_ts = str(row[2] or "").strip()
+                last_seen_db = row[2]
+                raw_ts = str(row[3] or "").strip()
                 last_seen = None
                 hours_ago = None
-                if raw_ts and len(raw_ts) >= 12:
+
+                if last_seen_db:
+                    last_seen = last_seen_db
+                    if last_seen.tzinfo is None:
+                        last_seen = last_seen.replace(tzinfo=timezone.utc)
+                    hours_ago = round((now - last_seen).total_seconds() / 3600, 1)
+                elif raw_ts and len(raw_ts) >= 12:
                     try:
                         last_seen = datetime(
                             int(raw_ts[:4]), int(raw_ts[4:6]),
                             int(raw_ts[6:8]), int(raw_ts[8:10]),
                             int(raw_ts[10:12]),
+                            tzinfo=timezone.utc,
                         )
                         hours_ago = round((now - last_seen).total_seconds() / 3600, 1)
                     except (ValueError, IndexError):
                         pass
                 health_map[acct] = {
                     "meter_id": meter_id,
-                    "last_seen_utc": last_seen.strftime("%Y-%m-%dT%H:%M:%S") if last_seen else None,
+                    "last_seen_utc": last_seen.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S") if last_seen else None,
                     "hours_since_report": hours_ago,
                     "status": (
                         "online" if hours_ago is not None and hours_ago < 2
