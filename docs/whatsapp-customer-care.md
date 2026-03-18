@@ -293,6 +293,22 @@ sudo journalctl -u 1pdb-api --lines 100
 - Check bridge logs for auth or timeout errors
 - Check uGridPlan service logs on the target host
 
+**OpenClaw refusal loop / non-JSON replies**
+
+If bridge logs show repeated parse failures with outputs like `**NO.**` / `**STOP.**`,
+the OpenClaw session context is likely poisoned.
+
+1. SSH to the CC Linux host.
+2. Archive the poisoned session file:
+   - `~/.openclaw/agents/main/sessions/customer-care.jsonl`
+3. Restart the bridge process:
+   - `pm2 restart whatsapp-cc`
+4. Run a direct OpenClaw smoke test with JSON output to verify healthy responses.
+
+Prevention:
+- The bridge now uses a rotating session id (`customer-care-YYYYMMDD`) instead of
+  a single long-lived `customer-care` session to reduce long-context poisoning risk.
+
 **WhatsApp re-pairing**
 
 ```bash

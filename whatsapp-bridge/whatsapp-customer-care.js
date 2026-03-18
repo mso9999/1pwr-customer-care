@@ -63,6 +63,13 @@ var CONVERSATION_WINDOW_MS = 30 * 60 * 1000;   // 30 minutes
 var MOONSHOT_KEY = process.env.MOONSHOT_API_KEY || "sk-biRH9QEva0y9kJUoUpi7QLpTt6ZCtSUAwFMHWqbsZzKcnr3X";
 var AGENT_TIMEOUT = 30;
 var AGENT_EXEC_TIMEOUT = 40000;
+var AGENT_SESSION_PREFIX = process.env.AGENT_SESSION_PREFIX || "customer-care";
+
+function getAgentSessionId() {
+    // Rotate session context daily to avoid long-term prompt poisoning.
+    var day = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    return AGENT_SESSION_PREFIX + "-" + day;
+}
 
 // Lesotho site codes for concession -> site_id mapping
 var CONCESSION_TO_SITE = {
@@ -444,8 +451,9 @@ function classifyWithAI(customerInfo, messageText, conversationHistory) {
         fs.writeFileSync(tmpFile, prompt);
 
         var { exec } = require("child_process");
+        var agentSessionId = getAgentSessionId();
         var cmd = 'MOONSHOT_API_KEY="' + MOONSHOT_KEY + '" openclaw agent'
-            + ' --session-id customer-care'
+            + ' --session-id ' + agentSessionId
             + ' --thinking off'
             + ' --message "$(cat ' + tmpFile + ')"'
             + ' --json --timeout ' + AGENT_TIMEOUT;
