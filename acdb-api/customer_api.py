@@ -251,6 +251,7 @@ from meter_lifecycle import router as meter_lifecycle_router, ensure_meter_assig
 from pr_lookup import router as portfolio_router
 from financing import router as financing_router
 from payment_verification import router as verification_router
+from tickets import router as tickets_router
 
 from db_auth import init_auth_db
 init_auth_db()
@@ -276,6 +277,7 @@ app.include_router(meter_lifecycle_router)
 app.include_router(portfolio_router)
 app.include_router(financing_router)
 app.include_router(verification_router)
+app.include_router(tickets_router)
 ensure_meter_assignments_table()
 
 

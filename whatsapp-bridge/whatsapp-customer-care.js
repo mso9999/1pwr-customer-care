@@ -32,7 +32,10 @@ var CONV_FILE = "/home/ubuntu/whatsapp-logger/cc-conversations.json";
 var LOG_DIR = "/home/ubuntu/whatsapp-logger/cc-logs";
 
 // APIs
-var UGRIDPLAN_API = process.env.UGRIDPLAN_API || "https://dev.ugp.1pwrafrica.com/api";
+var UGRIDPLAN_API = process.env.UGRIDPLAN_API || "https://ugp.1pwrafrica.com/api";
+if (!process.env.UGRIDPLAN_API) {
+    console.log("[WARN] UGRIDPLAN_API not set in env; using default: " + UGRIDPLAN_API);
+}
 // Legacy env var name ACDB_API is still accepted for backward compatibility.
 var CC_API = process.env.CC_API || process.env.ACDB_API || "https://cc.1pwrafrica.com/api";
 
@@ -286,10 +289,11 @@ async function lookupCustomerByPhone(phone) {
 // ============================================================
 // TICKET CREATION
 // ============================================================
-async function createTicket(siteId, faultDescription, accountNumber, reportedBy, phone, classification) {
+async function createTicket(siteId, faultDescription, accountNumber, reportedBy, phone, classification, customerInfo) {
     await ensureUgridplanAuth();
 
     classification = classification || {};
+    customerInfo = customerInfo || null;
 
     var equipCat = "unknown";
     if (classification.category === "meter-issue") equipCat = "meter";
@@ -316,6 +320,18 @@ async function createTicket(siteId, faultDescription, accountNumber, reportedBy,
         if (resp.status === 200 && resp.data && resp.data.success) {
             var ticket = resp.data.ticket;
             console.log("[TICKET] Created: " + ticket.ticket_id + " site=" + siteId);
+
+            mirrorTicketToCC(ticket, {
+                phone: phone,
+                accountNumber: accountNumber,
+                siteId: siteId,
+                faultDescription: faultDescription,
+                category: classification.category,
+                priority: classification.priority || "P3",
+                reportedBy: reportedBy,
+                customerInfo: customerInfo,
+            });
+
             return ticket;
         } else {
             console.error("[TICKET] Creation failed:", JSON.stringify(resp.data).slice(0, 300));
@@ -324,6 +340,35 @@ async function createTicket(siteId, faultDescription, accountNumber, reportedBy,
     } catch(e) {
         console.error("[TICKET] Error:", e.message);
         return null;
+    }
+}
+
+async function mirrorTicketToCC(ticket, ctx) {
+    try {
+        var customerId = null;
+        if (ctx.customerInfo && ctx.customerInfo.id) {
+            customerId = ctx.customerInfo.id;
+        }
+        var payload = {
+            ugp_ticket_id: ticket.ticket_id,
+            source: "whatsapp",
+            phone: ctx.phone || null,
+            customer_id: customerId,
+            account_number: ctx.accountNumber || null,
+            site_code: ctx.siteId || null,
+            fault_description: ctx.faultDescription || null,
+            category: ctx.category || null,
+            priority: ctx.priority || null,
+            reported_by: ctx.reportedBy || null,
+        };
+        var resp = await apiRequest(CC_API + "/tickets", "POST", payload);
+        if (resp.status === 200 && resp.data && resp.data.status === "ok") {
+            console.log("[CC-MIRROR] Ticket " + ticket.ticket_id + " mirrored to CC (id=" + resp.data.id + ")");
+        } else {
+            console.log("[CC-MIRROR] Mirror response: " + JSON.stringify(resp.data).slice(0, 200));
+        }
+    } catch(e) {
+        console.error("[CC-MIRROR] Failed (non-blocking): " + e.message);
     }
 }
 
@@ -349,7 +394,7 @@ async function addTicketComment(ticketId, user, text) {
 // ============================================================
 // NOTIFY WHATSAPP GROUP
 // ============================================================
-async function notifyTicketGroup(ticket, customerName, phone) {
+async function notifyTicketGroup(ticket, customerName, phone, accountNumber) {
     if (!isReady || !sock || !TICKET_TRACKER_JID) {
         console.log("[NOTIFY] Skipped - no group JID or not ready");
         return;
@@ -359,6 +404,7 @@ async function notifyTicketGroup(ticket, customerName, phone) {
     var site = ticket.site_id || "unknown";
     var priority = ticket.priority || "unset";
     var desc = (ticket.fault_description || "").slice(0, 200);
+    var acctLine = accountNumber ? ("*Account:* " + accountNumber + "\n") : "";
 
     var text = "\uD83C\uDFAB *New O&M Ticket from WhatsApp*\n"
         + "\n"
@@ -366,9 +412,11 @@ async function notifyTicketGroup(ticket, customerName, phone) {
         + "*Site:* " + site + "\n"
         + "*Priority:* " + priority + "\n"
         + "*Customer:* " + (customerName || "Unknown") + "\n"
+        + acctLine
         + "*Phone:* " + phone + "\n"
         + "*Description:* " + desc + "\n"
         + "\n"
+        + "View ticket: " + CC_API.replace("/api", "") + "\n"
         + "View in ugridplan: " + UGRIDPLAN_API.replace("/api", "") + "\n";
 
     try {
@@ -395,7 +443,8 @@ function classifyWithAI(customerInfo, messageText, conversationHistory) {
                 + "  Concession: " + customerInfo.concession + "\n"
                 + "  Plot: " + customerInfo.plot_number + "\n";
         } else {
-            customerContext = "UNKNOWN CUSTOMER (not found in database)\n";
+            customerContext = "UNKNOWN CUSTOMER (not found in database by phone number)\n"
+                + "  You MUST ask the customer for their 1PWR account number (format: 0045MAK) so we can identify them.\n";
         }
 
         var historyContext = "";
@@ -425,7 +474,8 @@ function classifyWithAI(customerInfo, messageText, conversationHistory) {
             + '  "site_id": "...",              // 3-letter site code if determinable from customer data, or "UNKNOWN"\n'
             + '  "fault_summary": "...",        // 1-sentence technical summary for the ticket (English)\n'
             + '  "customer_reply": "...",       // BILINGUAL reply: Sesotho first, then English, separated by \\n\\n\n'
-            + '  "ask_for_info": true/false     // If true, the reply should ask for more details before creating a ticket\n'
+            + '  "ask_for_info": true/false,    // If true, the reply should ask for more details before creating a ticket\n'
+            + '  "account_number": "..."        // If the customer provides an account number (e.g. 0045MAK), extract it here; otherwise null\n'
             + "}\n"
             + "\n"
             + "LANGUAGE RULES (CRITICAL):\n"
@@ -443,7 +493,8 @@ function classifyWithAI(customerInfo, messageText, conversationHistory) {
             + "- General questions (hours, contact info) -> needs_ticket=false, category=general-inquiry\n"
             + "- Vegetation on lines -> needs_ticket=true, category=vegetation, P3\n"
             + "- If the message is vague, set ask_for_info=true and ask for details\n"
-            + "- If customer is unknown, ask for their account number or village name in the reply\n"
+            + "- If customer is UNKNOWN, you MUST set ask_for_info=true and ask for their 1PWR account number (format: 0045MAK) before creating a ticket\n"
+            + "- If the customer provides an account number in their message, extract it into the account_number field\n"
             + "\n"
             + "Respond ONLY with the JSON object. No markdown, no explanation.\n";
 
@@ -721,21 +772,33 @@ async function processQueue() {
         } else if (classification.needs_ticket) {
             // Create O&M ticket
             var faultDesc = classification.fault_summary || combinedText.slice(0, 500);
-            var reportedBy = customer
-                ? (customer.first_name + " " + customer.last_name + " (WhatsApp)")
-                : ("WhatsApp: " + chatName + " (" + phone + ")");
 
             var custAcct = null;
             if (customer && customer.account_numbers && customer.account_numbers.length > 0) {
                 custAcct = customer.account_numbers[0];
             }
+            if (!custAcct && classification.account_number) {
+                custAcct = classification.account_number;
+            }
+
+            if (custAcct) {
+                faultDesc = "[" + custAcct + "] " + faultDesc;
+            }
+            if (phone) {
+                faultDesc += " (ph: " + phone + ")";
+            }
+
+            var reportedBy = customer
+                ? (customer.first_name + " " + customer.last_name + " (WhatsApp)")
+                : ("WhatsApp: " + chatName + " (" + phone + ")");
             var ticket = await createTicket(
                 siteId,
                 faultDesc,
                 custAcct,
                 reportedBy,
                 phone,
-                classification
+                classification,
+                customer
             );
 
             if (ticket) {
@@ -758,7 +821,7 @@ async function processQueue() {
                 logMessage(phone, chatName, "bot", ticketReply);
 
                 // Notify group
-                await notifyTicketGroup(ticket, customer ? (customer.first_name + " " + customer.last_name) : chatName, phone);
+                await notifyTicketGroup(ticket, customer ? (customer.first_name + " " + customer.last_name) : chatName, phone, custAcct);
 
                 // Track conversation
                 conversations[phone] = {
