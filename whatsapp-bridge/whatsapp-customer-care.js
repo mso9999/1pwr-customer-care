@@ -92,6 +92,90 @@ var CONCESSION_TO_SITE = {
     "LSB": "LSB", "Lesotho Sandbox": "LSB",
 };
 
+// LID-to-phone resolution: WhatsApp newer protocol uses @lid JIDs instead
+// of phone-based @s.whatsapp.net JIDs. The numeric part of a LID is NOT a
+// real phone number. Baileys writes reverse-mapping files we can use.
+var lidToPhoneCache = {};
+
+function loadLidMappings() {
+    var count = 0;
+    try {
+        var files = fs.readdirSync(AUTH_DIR);
+        for (var i = 0; i < files.length; i++) {
+            var m = files[i].match(/^lid-mapping-(\d+)_reverse\.json$/);
+            if (m) {
+                try {
+                    var phone = JSON.parse(fs.readFileSync(path.join(AUTH_DIR, files[i]), "utf-8"));
+                    if (typeof phone === "string" && phone.length >= 8) {
+                        lidToPhoneCache[m[1]] = phone;
+                        count++;
+                    }
+                } catch(e) {}
+            }
+        }
+    } catch(e) {
+        console.error("[LID] Failed to load mappings:", e.message);
+    }
+    console.log("[LID] Loaded " + count + " LID->phone mappings");
+}
+
+function resolvePhone(jid) {
+    if (!jid) return "";
+    if (jid.indexOf("@s.whatsapp.net") >= 0) {
+        return jid.replace("@s.whatsapp.net", "").split(":")[0];
+    }
+    var lidNum = jid.replace("@lid", "").split(":")[0];
+    if (lidToPhoneCache[lidNum]) {
+        return lidToPhoneCache[lidNum];
+    }
+    var reverseFile = path.join(AUTH_DIR, "lid-mapping-" + lidNum + "_reverse.json");
+    try {
+        if (fs.existsSync(reverseFile)) {
+            var phone = JSON.parse(fs.readFileSync(reverseFile, "utf-8"));
+            if (typeof phone === "string" && phone.length >= 8) {
+                lidToPhoneCache[lidNum] = phone;
+                return phone;
+            }
+        }
+    } catch(e) {}
+    console.log("[LID] No mapping for " + lidNum + " — using raw LID");
+    return lidNum;
+}
+
+// Valid site codes — used to validate AI output
+var VALID_SITE_CODES = new Set([
+    "MAK", "LEB", "MAT", "SEB", "TOS", "SEH", "TLH", "MAS",
+    "SHG", "RIB", "KET", "RAL", "SUA", "DON", "LSB",
+    "GBO", "SAM",
+]);
+
+var SITE_ALIASES = {
+    "KTN": "KET", "KETANE": "KET", "KET.": "KET",
+    "MAKHUNOANE": "MAK", "MAKEBE": "MAK", "HA MAKEBE": "MAK",
+    "LEBAKENG": "LEB",
+    "MATSIENG": "MAT",
+    "SEMONKONG": "SEB", "SEM": "SEB",
+    "TOSING": "TOS",
+    "SEHLABATHEBE": "SEH",
+    "TLOHA-RE-BUE": "TLH", "TLOHA": "TLH", "TLHANYAKU": "TLH",
+    "MASHAI": "MAS",
+    "SEHONGHONG": "SHG", "SEKGUTLONG": "SHG",
+    "RIBANENG": "RIB",
+    "RALEBESE": "RAL",
+    "HA SUOANE": "SUA", "SUOANE": "SUA",
+    "HA NKONE": "DON", "NKONE": "DON",
+    "GBOKO": "GBO",
+    "SAMIONDJI": "SAM",
+};
+
+function normalizeSiteCode(raw) {
+    if (!raw || raw === "UNKNOWN") return "UNKNOWN";
+    var upper = raw.toUpperCase().trim();
+    if (VALID_SITE_CODES.has(upper)) return upper;
+    if (SITE_ALIASES[upper]) return SITE_ALIASES[upper];
+    return "UNKNOWN";
+}
+
 // State
 var sock = null;
 var isReady = false;
@@ -627,8 +711,8 @@ async function handleMessage(msg) {
         return;
     }
 
-    // Extract phone number from JID
-    var phone = jid.replace("@s.whatsapp.net", "").replace("@lid", "");
+    // Extract phone number from JID (resolve LID → real phone if available)
+    var phone = resolvePhone(jid);
     var chatName = msg.pushName || phone;
 
     // --- Layer 7: Rate limit - max 1 reply per 60s to same number ---
@@ -737,10 +821,13 @@ async function processQueue() {
         // Determine site_id from customer data or AI classification
         var siteId = "UNKNOWN";
         if (customer && customer.concession) {
-            siteId = CONCESSION_TO_SITE[customer.concession] || customer.concession;
+            siteId = CONCESSION_TO_SITE[customer.concession] || normalizeSiteCode(customer.concession);
         }
         if (classification.site_id && classification.site_id !== "UNKNOWN") {
-            siteId = classification.site_id;
+            var validatedSite = normalizeSiteCode(classification.site_id);
+            if (validatedSite !== "UNKNOWN") {
+                siteId = validatedSite;
+            }
         }
 
         // 4. Handle based on classification
@@ -1063,6 +1150,7 @@ var healthInterval = setInterval(function() {
 // START
 // ============================================================
 conversations = loadConversations();
+loadLidMappings();
 
 console.log("=== WhatsApp Customer Care Bridge v1 ===");
 console.log("CC Phone: +266 58342168");
