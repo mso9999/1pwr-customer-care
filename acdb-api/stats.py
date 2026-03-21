@@ -241,10 +241,12 @@ def customer_record_completeness(user: CurrentUser = Depends(require_employee)):
                 FROM customers c
                 LEFT JOIN accounts a ON a.customer_id = c.id
             ),
-            earliest_data AS (
+            first_transaction AS (
                 SELECT account_number,
-                       date_trunc('day', MIN(reading_hour)) AS first_record
-                FROM hourly_consumption
+                       MIN(CASE WHEN year_month ~ '^\d{{4}}-\d{{2}}$'
+                                THEN (year_month || '-01')::date
+                                ELSE NULL END) AS first_txn
+                FROM monthly_transactions
                 GROUP BY account_number
             ),
             service_windows AS (
@@ -255,15 +257,13 @@ def customer_record_completeness(user: CurrentUser = Depends(require_employee)):
                     ca.account_number,
                     CASE
                         WHEN %s::timestamp IS NULL THEN NULL
-                        WHEN ca.commissioned_at IS NOT NULL
-                            THEN date_trunc('day', ca.commissioned_at)
-                        WHEN ed.first_record IS NOT NULL
-                            THEN ed.first_record
+                        WHEN ft.first_txn IS NOT NULL
+                            THEN ft.first_txn::timestamp
                         ELSE NULL
                     END AS window_start,
                     CASE
                         WHEN %s::timestamp IS NULL THEN NULL
-                        WHEN ca.commissioned_at IS NOT NULL OR ed.first_record IS NOT NULL
+                        WHEN ft.first_txn IS NOT NULL
                             THEN LEAST(
                                 %s::timestamp + INTERVAL '1 hour',
                                 COALESCE(
@@ -274,7 +274,7 @@ def customer_record_completeness(user: CurrentUser = Depends(require_employee)):
                         ELSE NULL
                     END AS window_end
                 FROM customer_accounts ca
-                LEFT JOIN earliest_data ed ON ed.account_number = ca.account_number
+                LEFT JOIN first_transaction ft ON ft.account_number = ca.account_number
             ),
             records_by_account AS (
                 SELECT
