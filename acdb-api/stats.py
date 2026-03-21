@@ -241,6 +241,12 @@ def customer_record_completeness(user: CurrentUser = Depends(require_employee)):
                 FROM customers c
                 LEFT JOIN accounts a ON a.customer_id = c.id
             ),
+            earliest_data AS (
+                SELECT account_number,
+                       date_trunc('day', MIN(reading_hour)) AS first_record
+                FROM hourly_consumption
+                GROUP BY account_number
+            ),
             service_windows AS (
                 SELECT
                     ca.customer_pk,
@@ -248,20 +254,27 @@ def customer_record_completeness(user: CurrentUser = Depends(require_employee)):
                     ca.customer_type,
                     ca.account_number,
                     CASE
-                        WHEN ca.commissioned_at IS NULL OR %s::timestamp IS NULL THEN NULL
-                        ELSE date_trunc('day', ca.commissioned_at)
+                        WHEN %s::timestamp IS NULL THEN NULL
+                        WHEN ca.commissioned_at IS NOT NULL
+                            THEN date_trunc('day', ca.commissioned_at)
+                        WHEN ed.first_record IS NOT NULL
+                            THEN ed.first_record
+                        ELSE NULL
                     END AS window_start,
                     CASE
-                        WHEN ca.commissioned_at IS NULL OR %s::timestamp IS NULL THEN NULL
-                        ELSE LEAST(
-                            %s::timestamp + INTERVAL '1 hour',
-                            COALESCE(
-                                date_trunc('day', ca.terminated_at) + INTERVAL '1 day',
-                                %s::timestamp + INTERVAL '1 hour'
+                        WHEN %s::timestamp IS NULL THEN NULL
+                        WHEN ca.commissioned_at IS NOT NULL OR ed.first_record IS NOT NULL
+                            THEN LEAST(
+                                %s::timestamp + INTERVAL '1 hour',
+                                COALESCE(
+                                    date_trunc('day', ca.terminated_at) + INTERVAL '1 day',
+                                    %s::timestamp + INTERVAL '1 hour'
+                                )
                             )
-                        )
+                        ELSE NULL
                     END AS window_end
                 FROM customer_accounts ca
+                LEFT JOIN earliest_data ed ON ed.account_number = ca.account_number
             ),
             records_by_account AS (
                 SELECT
