@@ -1,7 +1,15 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LabelList } from 'recharts';
-import { listTables, listSites, getSiteSummary, type TableInfo, type SiteStat } from '../lib/api';
+import {
+  listTables,
+  listSites,
+  getSiteSummary,
+  getCustomerRecordCompleteness,
+  type CustomerRecordCompletenessResponse,
+  type TableInfo,
+  type SiteStat,
+} from '../lib/api';
 import { useCountry } from '../contexts/CountryContext';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899', '#14b8a6', '#6366f1', '#84cc16', '#e11d48', '#0ea5e9', '#a855f7'];
@@ -21,7 +29,27 @@ export default function DashboardPage() {
   const [tables, setTables] = useState<TableInfo[]>([]);
   const [siteData, setSiteData] = useState<SiteRow[]>([]);
   const [totals, setTotals] = useState({ mwh: 0, revenue_thousands: 0 });
+  const [recordCompleteness, setRecordCompleteness] = useState<CustomerRecordCompletenessResponse | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const formatPercent = (value: number | null | undefined) => {
+    if (value == null) return '—';
+    return `${value.toFixed(1)}%`;
+  };
+
+  const formatTimestamp = (value: string | null | undefined) => {
+    if (!value) return '—';
+    const dt = new Date(value);
+    if (Number.isNaN(dt.getTime())) return value;
+    return dt.toLocaleString();
+  };
+
+  const completenessBadgeClass = (value: number | null | undefined) => {
+    if (value == null) return 'bg-gray-100 text-gray-600';
+    if (value >= 90) return 'bg-green-100 text-green-700';
+    if (value >= 60) return 'bg-amber-100 text-amber-700';
+    return 'bg-red-100 text-red-700';
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -29,7 +57,8 @@ export default function DashboardPage() {
       listTables().catch(() => []),
       listSites().catch(() => ({ sites: [], total_sites: 0 })),
       getSiteSummary().catch(() => ({ sites: [], totals: { mwh: 0, lsl_thousands: 0 } })),
-    ]).then(([t, sitesResp, stats]) => {
+      getCustomerRecordCompleteness().catch(() => null),
+    ]).then(([t, sitesResp, stats, completeness]) => {
       setTables(t);
 
       const statsMap = new Map<string, SiteStat>();
@@ -50,6 +79,7 @@ export default function DashboardPage() {
       setSiteData(merged);
       const raw = stats.totals || { mwh: 0, lsl_thousands: 0 };
       setTotals({ mwh: raw.mwh, revenue_thousands: raw.lsl_thousands });
+      setRecordCompleteness(completeness);
     }).finally(() => setLoading(false));
   }, [country]);
 
@@ -96,6 +126,99 @@ export default function DashboardPage() {
           <p className="text-2xl sm:text-3xl font-bold text-purple-700">{siteData.length}</p>
         </div>
       </div>
+
+      {recordCompleteness && (
+        <div className="bg-white rounded-lg shadow p-4 sm:p-5">
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-4">
+            <div>
+              <h2 className="text-base sm:text-lg font-semibold text-gray-700">1PDB Record Completeness</h2>
+              <p className="text-xs text-gray-500 mt-1">{recordCompleteness.note}</p>
+            </div>
+            <div className="text-xs text-gray-400">
+              Data through {formatTimestamp(recordCompleteness.data_as_of)}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+            <div className="bg-white rounded-xl shadow p-4 border-l-4 border-blue-500">
+              <p className="text-xs text-gray-500 uppercase">Customers</p>
+              <p className="text-2xl font-bold text-gray-800 mt-1">
+                {recordCompleteness.totals.customer_count.toLocaleString()}
+              </p>
+            </div>
+            <div className="bg-white rounded-xl shadow p-4 border-l-4 border-purple-500">
+              <p className="text-xs text-gray-500 uppercase">Commissioned</p>
+              <p className="text-2xl font-bold text-gray-800 mt-1">
+                {recordCompleteness.totals.commissioned_customers.toLocaleString()}
+              </p>
+            </div>
+            <div className="bg-white rounded-xl shadow p-4 border-l-4 border-amber-500">
+              <p className="text-xs text-gray-500 uppercase">Hourly Records</p>
+              <p className="text-2xl font-bold text-gray-800 mt-1">
+                {recordCompleteness.totals.actual_records.toLocaleString()}
+              </p>
+            </div>
+            <div className="bg-white rounded-xl shadow p-4 border-l-4 border-green-500">
+              <p className="text-xs text-gray-500 uppercase">Overall Complete</p>
+              <p className="text-2xl font-bold text-gray-800 mt-1">
+                {formatPercent(recordCompleteness.totals.completeness_pct)}
+              </p>
+            </div>
+          </div>
+
+          {recordCompleteness.rows.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium text-gray-600">Customer Type</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">Customers</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">Commissioned</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">Accounts with Data</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">Hourly Records</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">Expected Records</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">% Complete</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {recordCompleteness.rows.map((row) => (
+                    <tr key={row.customer_type} className="hover:bg-gray-50">
+                      <td className="px-3 py-2 font-medium">{row.customer_type}</td>
+                      <td className="px-3 py-2 text-right">{row.customer_count.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right">{row.commissioned_customers.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right">{row.accounts_with_records.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right">{row.actual_records.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right">{row.expected_records.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right">
+                        <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${completenessBadgeClass(row.completeness_pct)}`}>
+                          {formatPercent(row.completeness_pct)}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot className="bg-gray-50 border-t font-medium">
+                  <tr>
+                    <td className="px-3 py-2">Total</td>
+                    <td className="px-3 py-2 text-right">{recordCompleteness.totals.customer_count.toLocaleString()}</td>
+                    <td className="px-3 py-2 text-right">{recordCompleteness.totals.commissioned_customers.toLocaleString()}</td>
+                    <td className="px-3 py-2 text-right">{recordCompleteness.totals.accounts_with_records.toLocaleString()}</td>
+                    <td className="px-3 py-2 text-right">{recordCompleteness.totals.actual_records.toLocaleString()}</td>
+                    <td className="px-3 py-2 text-right">{recordCompleteness.totals.expected_records.toLocaleString()}</td>
+                    <td className="px-3 py-2 text-right">
+                      <span className={`inline-flex rounded-full px-2 py-1 text-xs font-semibold ${completenessBadgeClass(recordCompleteness.totals.completeness_pct)}`}>
+                        {formatPercent(recordCompleteness.totals.completeness_pct)}
+                      </span>
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          ) : (
+            <p className="text-gray-400 text-center py-6">No hourly record completeness data available yet.</p>
+          )}
+        </div>
+      )}
 
       {/* Quick actions */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">

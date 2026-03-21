@@ -426,6 +426,43 @@ export async function getSiteSummary(): Promise<SiteSummary> {
   return request('/stats/site-summary');
 }
 
+export interface CustomerRecordCompletenessRow {
+  customer_type: string;
+  customer_count: number;
+  customers_with_account: number;
+  commissioned_customers: number;
+  account_count: number;
+  commissioned_accounts: number;
+  accounts_with_records: number;
+  actual_records: number;
+  expected_records: number;
+  completeness_pct: number | null;
+  first_record_at: string | null;
+  last_record_at: string | null;
+}
+
+export interface CustomerRecordCompletenessResponse {
+  rows: CustomerRecordCompletenessRow[];
+  totals: {
+    customer_count: number;
+    customers_with_account: number;
+    commissioned_customers: number;
+    account_count: number;
+    commissioned_accounts: number;
+    accounts_with_records: number;
+    actual_records: number;
+    expected_records: number;
+    completeness_pct: number | null;
+  };
+  data_as_of: string | null;
+  record_source: string;
+  note?: string;
+}
+
+export async function getCustomerRecordCompleteness(): Promise<CustomerRecordCompletenessResponse> {
+  return request('/stats/customer-record-completeness');
+}
+
 // ---------------------------------------------------------------------------
 // Mutations
 // ---------------------------------------------------------------------------
