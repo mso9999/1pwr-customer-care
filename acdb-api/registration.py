@@ -13,6 +13,7 @@ Endpoints:
 
 import io
 import logging
+import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -64,7 +65,7 @@ class CustomerCreateRequest(BaseModel):
     street_address: Optional[str] = None
     city: Optional[str] = None
     district: Optional[str] = None
-    customer_type: Optional[str] = "HH"
+    customer_type: Optional[str] = None
     gps_lat: Optional[float] = None
     gps_lon: Optional[float] = None
     meter_id: Optional[str] = None
@@ -75,6 +76,32 @@ class BulkImportResult(BaseModel):
     imported: int
     skipped: int
     errors: List[Dict[str, Any]]
+
+
+VALID_CUSTOMER_TYPES = {
+    "HH1", "HH2", "HH3",
+    "SME", "CHU", "SCP", "SCH", "HC", "PWH", "GOV", "COM", "IND",
+    "REL", "AGR", "CLI", "PUE", "HCF", "OTH", "OTHER",
+}
+
+
+def _infer_customer_type(explicit_value: Optional[str], plot_number: Optional[str]) -> Optional[str]:
+    """Resolve a canonical stored customer type without persisting aggregate HH."""
+    explicit = str(explicit_value or "").strip().upper()
+    if explicit in VALID_CUSTOMER_TYPES:
+        return explicit
+    if explicit == "HH":
+        explicit = ""
+
+    plot = str(plot_number or "").strip().upper()
+    if plot:
+        for code in sorted(VALID_CUSTOMER_TYPES | {"HH"}, key=len, reverse=True):
+            if re.search(rf"(?:^|[\s_]){re.escape(code)}(?:[\s_]|$)", plot):
+                if code == "HH":
+                    return None
+                return code
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +122,8 @@ def register_customer(
         # Generate account number
         account_number = generate_account_number(conn, community)
 
+        resolved_customer_type = _infer_customer_type(req.customer_type, req.plot_number)
+
         # Insert customer
         cursor.execute("""
             INSERT INTO customers (
@@ -112,7 +141,7 @@ def register_customer(
             req.phone, req.cell_phone_1, req.cell_phone_2,
             req.email, req.national_id, req.plot_number,
             req.street_address, req.city, req.district,
-            req.customer_type, req.gps_lat, req.gps_lon,
+            resolved_customer_type, req.gps_lat, req.gps_lon,
             user.user_id, user.user_id,
         ))
 
@@ -224,11 +253,16 @@ async def bulk_import_customers(
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, %s)
                     RETURNING id
                 """, (
+                    # Preserve explicit HH1/HH2/HH3/etc. when present, but do not
+                    # persist aggregate HH as though it were an atomic type.
                     first_name, last_name, community_upper,
                     str(row_dict.get("phone", "") or "").strip() or None,
                     str(row_dict.get("national_id", "") or "").strip() or None,
                     str(row_dict.get("plot_number", "") or "").strip() or None,
-                    str(row_dict.get("customer_type", "") or "").strip() or "HH",
+                    _infer_customer_type(
+                        str(row_dict.get("customer_type", "") or "").strip() or None,
+                        str(row_dict.get("plot_number", "") or "").strip() or None,
+                    ),
                     float(row_dict["gps_lat"]) if row_dict.get("gps_lat") else None,
                     float(row_dict["gps_lon"]) if row_dict.get("gps_lon") else None,
                     user.user_id,

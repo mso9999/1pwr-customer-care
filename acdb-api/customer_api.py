@@ -126,6 +126,8 @@ def _normalize_customer(row_dict: Dict[str, Any]) -> Dict[str, Any]:
         "city": _s("city"),
         "district": _s("district"),
         "concession": _s("community"),
+        "customer_type": _s("customer_type"),
+        "customer_position": _s("customer_position"),
         "date_connected": _s("date_service_connected"),
         "date_terminated": _s("date_service_terminated"),
     }

@@ -1988,7 +1988,11 @@ def _build_check_meter_comparison(conn, days: int) -> Dict[str, Any]:
         JOIN meters m_primary
           ON m_primary.account_number = m_check.account_number
          AND m_primary.role = 'primary'
+         AND m_primary.status = 'active'
         WHERE m_check.role = 'check'
+          AND m_check.status = 'active'
+          AND m_check.account_number IS NOT NULL
+          AND m_check.account_number <> ''
     """)
     pairs: List[Dict[str, Any]] = []
     pair_accounts: List[str] = []
@@ -2015,25 +2019,40 @@ def _build_check_meter_comparison(conn, days: int) -> Dict[str, Any]:
         row = cursor.fetchone()
         cutoff = row[0] if row and row[0] else datetime.utcnow() - timedelta(days=30)
 
+    cutoff_for_compare = cutoff
+    if isinstance(cutoff_for_compare, datetime):
+        if cutoff_for_compare.tzinfo is None:
+            cutoff_for_compare = cutoff_for_compare.replace(tzinfo=timezone.utc)
+        visible_cutoff_key = (cutoff_for_compare + timedelta(hours=UTC_OFFSET_HOURS)).strftime("%Y-%m-%dT%H:%M:%S")
+    else:
+        visible_cutoff_key = str(cutoff_for_compare)
+
+    # Pull a short lookback before the visible cutoff so we can detect the first
+    # iot hour after long outages / reconnects inside the requested window.
+    query_start = cutoff - timedelta(hours=24)
     placeholders = ",".join(["%s"] * len(pair_accounts))
     cursor.execute(
-        f"SELECT account_number, reading_hour, kwh, source "
+        f"SELECT account_number, meter_id, reading_hour, kwh, source "
         f"FROM hourly_consumption "
         f"WHERE account_number IN ({placeholders}) AND reading_hour >= %s "
         f"ORDER BY reading_hour",
-        (*pair_accounts, cutoff),
+        (*pair_accounts, query_start),
     )
 
     hour_data: Dict[str, Dict[str, Dict[str, Optional[float]]]] = defaultdict(
         lambda: defaultdict(lambda: {"sm": None, "1m": None})
     )
+    iot_hour_meta: Dict[str, Dict[str, Dict[str, Any]]] = defaultdict(dict)
     for row in cursor.fetchall():
         acct = str(row[0] or "").strip()
-        hour = row[1]
-        kwh = float(row[2]) if row[2] is not None else None
-        source = str(row[3] or "").lower()
+        meter_id = str(row[1] or "").strip()
+        hour = row[2]
+        kwh = float(row[3]) if row[3] is not None else None
+        source = str(row[4] or "").lower()
 
         if hasattr(hour, "strftime"):
+            if hour.tzinfo is None:
+                hour = hour.replace(tzinfo=timezone.utc)
             local_hour = hour + timedelta(hours=UTC_OFFSET_HOURS)
             hour_key = local_hour.strftime("%Y-%m-%dT%H:%M:%S")
         else:
@@ -2045,16 +2064,55 @@ def _build_check_meter_comparison(conn, days: int) -> Dict[str, Any]:
         elif source == "iot":
             existing = hour_data[hour_key][acct]["1m"]
             hour_data[hour_key][acct]["1m"] = (existing or 0) + (kwh or 0)
+            meta = iot_hour_meta[acct].setdefault(
+                hour_key,
+                {"utc_hour": hour, "meter_ids": set()},
+            )
+            meta["meter_ids"].add(meter_id)
+
+    excluded_iot_hours: Dict[str, Set[str]] = defaultdict(set)
+    for acct, hour_meta in iot_hour_meta.items():
+        prev_hour: Optional[datetime] = None
+        prev_meter_ids: Optional[Tuple[str, ...]] = None
+        ordered = sorted(
+            hour_meta.items(),
+            key=lambda item: item[1]["utc_hour"] if item[1]["utc_hour"] is not None else item[0],
+        )
+        for hour_key, meta in ordered:
+            utc_hour = meta["utc_hour"]
+            meter_ids = tuple(sorted(str(mid) for mid in meta["meter_ids"] if mid))
+            has_gap = (
+                prev_hour is not None
+                and utc_hour is not None
+                and utc_hour - prev_hour > timedelta(hours=2)
+            )
+            meter_changed = (
+                prev_meter_ids is not None
+                and meter_ids
+                and meter_ids != prev_meter_ids
+            )
+            mixed_meter_hour = len(meter_ids) > 1
+            if has_gap or meter_changed or mixed_meter_hour:
+                excluded_iot_hours[acct].add(hour_key)
+            if utc_hour is not None:
+                prev_hour = utc_hour
+            if meter_ids:
+                prev_meter_ids = meter_ids
 
     sorted_hours = sorted(hour_data.keys())
     time_series: List[Dict[str, Any]] = []
+    visible_hours = [hour_key for hour_key in sorted_hours if hour_key >= visible_cutoff_key]
     for hour_key in sorted_hours:
+        if hour_key < visible_cutoff_key:
+            continue
         point: Dict[str, Any] = {"reading_hour": hour_key}
         for pair in pairs:
             acct = pair["account"]
             vals = hour_data[hour_key].get(acct, {"sm": None, "1m": None})
             sm_val = vals["sm"]
             m1_val = vals["1m"]
+            if hour_key in excluded_iot_hours.get(acct, set()):
+                m1_val = None
             point[f"{acct}_sm"] = round(sm_val, 4) if sm_val is not None else None
             point[f"{acct}_1m"] = round(m1_val, 4) if m1_val is not None else None
         time_series.append(point)
@@ -2064,10 +2122,12 @@ def _build_check_meter_comparison(conn, days: int) -> Dict[str, Any]:
         deviations: List[float] = []
         sm_vals: List[float] = []
         m1_vals: List[float] = []
-        for hour_key in sorted_hours:
+        for hour_key in visible_hours:
             vals = hour_data[hour_key].get(acct, {"sm": None, "1m": None})
             sm = vals["sm"]
             m1 = vals["1m"]
+            if hour_key in excluded_iot_hours.get(acct, set()):
+                m1 = None
             if sm is not None and m1 is not None and sm > 0:
                 deviations.append((m1 - sm) / sm * 100)
                 sm_vals.append(sm)
@@ -2102,6 +2162,10 @@ def _build_check_meter_comparison(conn, days: int) -> Dict[str, Any]:
             "n_matched_hours": n,
             "total_sm_kwh": round(total_sm, 2),
             "total_1m_kwh": round(total_1m, 2),
+            "excluded_1m_hours": len([
+                hour_key for hour_key in visible_hours
+                if hour_key in excluded_iot_hours.get(acct, set())
+            ]),
         }
 
     check_meter_ids = [p["check_meter_id"] for p in pairs]
@@ -2157,12 +2221,23 @@ def _build_check_meter_comparison(conn, days: int) -> Dict[str, Any]:
             "status": "unknown",
         })
 
-    return {
+    total_excluded = sum(
+        len([hour_key for hour_key in visible_hours if hour_key in excluded_iot_hours.get(pair["account"], set())])
+        for pair in pairs
+    )
+
+    result = {
         "pairs": pairs,
         "time_series": time_series,
         "days": days,
         "cutoff": cutoff.strftime("%Y-%m-%dT%H:%M:%S"),
     }
+    if total_excluded:
+        result["note"] = (
+            f"Excluded {total_excluded} 1Meter hourly points after long gaps, "
+            f"meter changes, or mixed-meter hours."
+        )
+    return result
 
 
 def _style_export_sheet(ws) -> None:
@@ -2210,6 +2285,7 @@ def _export_check_meter_comparison_xlsx(data: Dict[str, Any], days: int) -> Stre
         "last_seen_utc",
         "hours_since_report",
         "matched_hours",
+        "excluded_1m_hours",
         "total_sm_kwh",
         "total_1m_kwh",
         "total_deviation_pct",
@@ -2229,6 +2305,7 @@ def _export_check_meter_comparison_xlsx(data: Dict[str, Any], days: int) -> Stre
             health.get("last_seen_utc"),
             health.get("hours_since_report"),
             stats.get("n_matched_hours"),
+            stats.get("excluded_1m_hours"),
             stats.get("total_sm_kwh"),
             stats.get("total_1m_kwh"),
             stats.get("total_deviation_pct"),
