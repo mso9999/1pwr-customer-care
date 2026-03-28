@@ -63,6 +63,7 @@ Windows EC2 / ACCDB assumptions as current production architecture.
 - **onepowerLS/SMSComms-BN** — Benin SMS Gateway (smsbn.1pwrafrica.com)
 - **onepowerLS/SMS-Gateway-APP** — Android Medic Gateway app (phones → PHP gateways)
 - **onepowerLS/ingestion_gate** — Prototype meter IoT Lambda (DynamoDB)
+- **onepowerLS/onepwr-aws-mesh** — 1Meter ESP32-C3 firmware (AWS IoT + Mesh-Lite + OTA)
 
 ## Key Files
 
@@ -125,6 +126,20 @@ Push to `main` triggers GitHub Actions with two parallel jobs:
 Resolve `<current-cc-linux-host>` from AWS inventory or the deploy secret.
 Avoid relying on historical public IPs in old docs.
 
+### 1Meter Firmware Build Host
+
+- Current remote firmware build host is the repurposed staging EC2 at `13.247.190.132` on port `2222`, accessed as `ubuntu`.
+- Firmware workspace lives under `/opt/1meter-firmware`.
+- Key paths on that host:
+  - repo clone: `/opt/1meter-firmware/onepwr-aws-mesh`
+  - ESP-IDF: `/opt/1meter-firmware/esp-idf`
+  - environment bootstrap: `/opt/1meter-firmware/env.sh`
+  - release bundles: `/opt/1meter-firmware/releases`
+- Historical helper assets from the March 2026 1Meter workflow are archived in:
+  - `docs/archive/2026-03-worktree-cleanup/1meter/`
+  - `scripts/archive/2026-03-worktree-cleanup/1meter/`
+- Current state: remote build is proven working, but S3 release publishing / OTA job automation is still a next step.
+
 ### Service Management
 
 | Service | How to manage |
@@ -180,6 +195,9 @@ to UTC before storing. The CC portal's `_to_local()` converts back to SAST for d
 GPIO with PCNT support. This would enable hardware-accurate pulse counting at 1200 imp/kWh
 (0.83 Wh resolution) without the drift inherent in power integration. Current PCB (v2.2)
 connects to DDS8888 exclusively via RS485 Modbus.
+
+**Repo boundary note**: `1Meter_PCB` is the KiCad hardware repo. The live ESP32 firmware source is
+in `onepowerLS/onepwr-aws-mesh`. Do not expect MQTT / TLS / OTA code to live in the PCB repo.
 
 ### Data Sources
 | Source | Platform | Coverage | Ingestion |

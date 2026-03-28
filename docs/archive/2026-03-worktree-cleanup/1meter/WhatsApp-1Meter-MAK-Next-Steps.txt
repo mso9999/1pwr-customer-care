@@ -1,0 +1,51 @@
+Team, here is the current MAK action plan based on Motlatsi's field report plus the live cloud check.
+
+Current position:
+- work at MAK is not yet complete
+- 23022696 PCB was already replaced, and the target identity is now OneMeter16
+- 0026MAK cloud data is currently coming from serial 23021847 as OneMeter14
+- 23022684, 23022628, and 23022667 were already confirmed on console as OneMeter14, OneMeter18, and OneMeter44
+- 23022646 Thing Name is now OneMeter5
+- OneMeter13 and OneMeter14 cert folders were recreated locally
+- cert folders have NOT yet been backed up to S3
+- gateway OTA succeeded, 23022696 is queued, and the rest are in progress
+- OTA needs stable connection, and MAK signal was weak, so OTA is not today's priority
+
+Main action order:
+
+1. 0025MAK / 23022696:
+- do NOT flash back to OneMeter15
+- confirm it boots as OneMeter16
+- if reflash is needed, use onemeter16
+- confirm Wi-Fi, MQTT connect, and first cloud publish before leaving
+
+2. 0026MAK:
+- record the physical serial on the installed board
+- confirm the console shows OneMeter14
+- if the installed board is 23021847, keep it labeled that way and tell me so I can update CC mapping remotely
+- if the installed board is 23022684 but cloud still shows 23021847, stop and send the exact situation
+
+3. 0119MAK / 23022646:
+- confirm the console shows OneMeter5
+- because 23022646 and the 0026MAK board stopped almost together last night, please treat this as a local comms / power check too
+
+4. Leave the currently healthy boards mostly alone unless local console or cloud identity says otherwise:
+- 23022628 / OneMeter18 is live
+- 23022673 / OneMeter13 is live
+- 23022667 / OneMeter44 is live
+
+Important:
+- use the local cert folders already on the laptop
+- do NOT rely on S3 for certs right now; the bucket currently only has device-map.json
+- do NOT reuse cert folders across devices
+- if 23022696 needs reflash, use onemeter16, not onemeter15
+- get stable telemetry first, then OTA later
+
+After each touched device, send back:
+- physical serial
+- Thing Name shown on console
+- whether telemetry returned
+- photo / screenshot of console if it did not publish
+
+Full SOP is in:
+docs/SOP-1Meter-MAK-Next-Steps.md

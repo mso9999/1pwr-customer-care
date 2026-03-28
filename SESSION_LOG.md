@@ -1616,3 +1616,689 @@ Key evidence:
 ### Files Modified
 - `acdb-api/om_report.py`
 - `SESSION_LOG.md`
+
+## Session 2026-03-13 202603131625 (Draft 1Meter MAK Next Steps SOP)
+
+### What Was Done
+- Reconstructed the latest known 1Meter MAK fleet state from the current `SESSION_LOG.md` plus prior conversation transcripts covering OTA validation, identity cleanup, and device-fault diagnosis.
+- Created `docs/SOP-1Meter-MAK-Next-Steps.md` with a concise field SOP covering:
+  - current OTA status
+  - current 1Meter vs SparkMeter comparison baseline
+  - device-by-device health / action table
+  - pre-visit prep, on-site execution order, verification checklist, and remote follow-up
+- Created `docs/WhatsApp-1Meter-MAK-Next-Steps.txt` as a ready-to-send operational message for the team.
+
+### Key Decisions
+- Treated the deliverables as a “latest known state” handoff rather than claiming a fresh live AWS / DynamoDB re-check, since this session did not re-query those systems directly.
+- Kept the new deliverables in simple repo-native formats (`.md` and `.txt`) because the earlier 1Meter operational docs are no longer present in this repo after the repo-boundary cleanup.
+- Framed the next action sequence around root causes already identified: identity / cert cleanup, `23022696` PCB failure, and `23022684` DDS8888 failure.
+
+### What Next Session Should Know
+- The new SOP assumes the last verified field state still holds; if the team has already visited MAK again, `docs/SOP-1Meter-MAK-Next-Steps.md` and `docs/WhatsApp-1Meter-MAK-Next-Steps.txt` should be updated from fresh telemetry / field notes before reuse.
+- The clearest ongoing validation meters after repair should be `0005MAK`, `0119MAK`, and `0045MAK` with low-load caution.
+- The next OTA cycle should not be treated as routine until identity cleanup is complete and the repaired meters are back online.
+
+### Senescence Notes
+- No major context degradation inside this slice, but continuity on 1Meter operations required transcript lookup because the older MAK SOP files are no longer in the repo.
+
+### Protocol Feedback
+- Repo cleanup improved boundaries, but it also removed easy access to prior 1Meter field SOPs from the working tree. A lightweight non-sensitive operational status doc in `docs/` would reduce future transcript archaeology.
+- `SESSION_LOG.md` still carried enough detail to reconstruct the important comparison and device-health facts, especially for `0025MAK`, `0026MAK`, and the 5-pair comparison baseline.
+
+## Session 2026-03-16 202603131625 (Fix live 0119MAK prototype sync gap)
+
+### What Was Done
+- Verified the live CC stack directly instead of relying on historical handoffs:
+  - SSH'd to the current CC Linux host at `13.245.142.186`
+  - Queried live PostgreSQL `onepower_cc`
+  - Queried live DynamoDB tables `1meter_data` and `meter_last_seen`
+- Confirmed the user-reported mismatch was real: `23022646` / `0119MAK` had fresh readings in DynamoDB but stale rows in `1PDB`.
+- Traced the active writer into `1PDB` to the running systemd service `prototype-sync.service` on the CC host, backed by `/opt/1pdb/services/prototype_sync.py`.
+- Identified root cause: the deployed `prototype_sync.py` was hardcoded to only sync the original 3 prototype customer meters (`23022673`, `23022628`, `23022696`) and never queried DynamoDB for `23022646` or `23022684`.
+- Patched the source-controlled service copy at `/Users/mattmso/Dropbox/AI Projects/1PDB/services/prototype_sync.py` to load prototype customer meters dynamically from the live `meters` table instead of using the stale hardcoded map.
+- Deployed the patched service file to the live host, compile-checked it in place, and restarted `prototype-sync.service`.
+- Verified immediate recovery on restart:
+  - service registered all 5 customer-linked prototype meters
+  - `23022646` / `0119MAK` backfilled `133` readings and `39` hourly bins into `1PDB`
+  - `prototype_meter_state.last_seen_at` for `23022646` advanced to `2026-03-15 20:45:00+00`
+
+### Key Decisions
+- Fixed the root cause in the live sync service rather than adding `23022646` to another hardcoded list.
+- Used the `meters` table as the runtime source of truth for which prototype customer meters should be polled from DynamoDB.
+- Kept the deployment narrow: replaced only `/opt/1pdb/services/prototype_sync.py` and restarted only `prototype-sync.service`.
+
+### What Next Session Should Know
+- `0119MAK` is no longer a DynamoDB-only meter; it is flowing into `1PDB` again after the live fix.
+- `0026MAK` / `23022684` is now included in the sync service's dynamic meter registration, but it still has no fresh DynamoDB data, so it remains a real field / hardware problem rather than a sync-config problem.
+- The source repo `1PDB` now has an uncommitted local modification in `services/prototype_sync.py`; if the fix should be preserved properly, it still needs a normal git commit in the `1PDB` repo.
+- The legacy one-shot `import_service.py --dynamodb` path still appears to depend on the older static `config.sites.PROTOTYPE_METERS` list, so the live daemon is fixed but some auxiliary import tooling may still be stale.
+
+### Senescence Notes
+- The key continuity gap was that the earlier live process inspection initially missed `prototype-sync.service` because of a bad stdin filter in my own shell command. Re-running the service/process inspection correctly resolved that.
+
+### Protocol Feedback
+- Direct live verification through SSH + PostgreSQL + DynamoDB was much more reliable here than relying on prior handoff summaries or UI interpretation.
+- For 1Meter work, the most important hidden dependency is that some live runtime pieces live in the separate `1PDB` repo and on-host systemd services rather than in the `1PWR CC` repo alone.
+
+## Session 2026-03-16 202603131625 (Fix stale check-meter health badges)
+
+### What Was Done
+- Investigated why the frontend still showed all check meters as offline even after `0119MAK` was restored to `1PDB`.
+- Confirmed root cause in live production:
+  - `acdb-api/om_report.py` health logic was selecting and parsing only `prototype_meter_state.last_sample_time`
+  - the active `prototype-sync.service` updates `last_seen_at` correctly, but older rows still carried stale `last_sample_time` values
+- Patched `acdb-api/om_report.py` locally so check-meter health now prefers the real timestamp column `last_seen_at` and only falls back to `last_sample_time` if needed.
+- Patched `/Users/mattmso/Dropbox/AI Projects/1PDB/services/prototype_sync.py` locally so the sync daemon also writes `last_sample_time` going forward, preventing future drift for any other consumers of that field.
+- Deployed both patched files directly to the live CC host and restarted:
+  - `1pdb-api`
+  - `prototype-sync.service`
+- Verified live `prototype_meter_state` after restart:
+  - `23022628 / 0005MAK` now has `last_seen_at=2026-03-16 05:43:00+00`, `hours_ago=0.0`
+  - `23022673 / 0045MAK` has `hours_ago=1.1`
+  - `23022646 / 0119MAK` has `hours_ago=9.0`
+  - `23022684 / 0026MAK` and `23022696 / 0025MAK` remain truly offline
+
+### Key Decisions
+- Fixed the backend health calculation at the source instead of trying to massage frontend rendering logic.
+- Also fixed the sync daemon to keep the legacy `last_sample_time` field updated, because other hidden consumers may still depend on it.
+- Kept the live deploy narrow and surgical: only two Python files plus two service restarts.
+
+### What Next Session Should Know
+- The live frontend should now classify meters based on the true `last_seen_at` value from `prototype_meter_state`.
+- Expected live health state after the fix:
+  - `0005MAK` online
+  - `0045MAK` online
+  - `0119MAK` still offline, but now only about 9 hours stale rather than incorrectly ~2 days
+  - `0026MAK` offline
+  - `0025MAK` offline
+- The repo copies of both fixes are local only right now:
+  - `1PWR CC/acdb-api/om_report.py`
+  - `1PDB/services/prototype_sync.py`
+  They still need normal git commits if we want source control to match production again.
+
+### Senescence Notes
+- No major degradation beyond the earlier shell-filter mistake; once the correct live fields were queried, the health-badge bug was straightforward.
+
+### Protocol Feedback
+- This bug showed the value of checking the actual production DB rows rather than trusting a UI symptom: the frontend was faithfully showing stale backend-derived health, not inventing it.
+
+## Session 2026-03-16 202603161112 (Re-check MAK replacements and cert backups)
+
+### What Was Done
+- Re-queried live DynamoDB `1meter_data` / `meter_last_seen`, live PostgreSQL `onepower_cc`, AWS IoT thing metadata, IoT job executions, and the S3 backup bucket after receiving fresh field notes from MAK.
+- Confirmed the `23022696` replacement problem is upstream of `1PDB`: there are still zero DynamoDB records for `OneMeter16`, even though the AWS IoT thing exists, has an active certificate, sits in `MAK_V1_0_2`, and the current OTA job `AFR_OTA-v1_0_3-MAKGroup` is still `QUEUED` for it.
+- Confirmed the neighbouring boards really did last report around `2026-03-15 22:xx SAST`:
+  - `23022646` reporting as `OneMeter5` last seen `202603152245`
+  - `23021847` reporting as `OneMeter14` last seen `202603152257`
+- Confirmed `23021847` is not registered in the live `meters` table, so the portal still tracks `0026MAK` against the old serial `23022684`; any UI/API view of `0026MAK` will remain stale until that mapping is updated.
+- Checked the cert backup bucket directly: `s3://1pwr-device-certs/` currently contains only a stale `device-map.json` object from `2026-03-11` and no cert-folder backups.
+
+### Key Decisions
+- Treated `23022696` as a field-side identity / connectivity issue, not a CC ingestion issue, because there is no cloud-side telemetry at all under `OneMeter16`.
+- Separated the `0026MAK` problem into two layers:
+  - field replacement appears real (`23021847` is publishing as `OneMeter14`)
+  - CC mapping is stale (`meters` still points `0026MAK` to `23022684`)
+- Used the live AWS/S3 state rather than prior SOP assumptions as the source of truth for cert backup status.
+
+### What Next Session Should Know
+- `23022696` still needs on-device debugging. AWS-side setup looks present, but no `OneMeter16` telemetry has ever appeared in DynamoDB, so the next check should be local serial console / Wi-Fi / MQTT connection success, not backend ingestion.
+- `23022646` and `23021847` were both healthy enough to publish voltage / power until they stopped near the same time on `2026-03-15` night, which points more toward a local comms / power-path issue than a data-pipeline problem.
+- If `23021847` is now the permanent replacement for `0026MAK`, the live `meters` mapping and any supporting device map docs should be updated accordingly.
+- The current S3 bucket is not a usable cert backup source of truth; for newly recreated things like `OneMeter13` / `OneMeter14`, full backup must come from the locally saved cert folders that include the private keys.
+
+### Senescence Notes
+- No major degradation in this slice; the main correction was catching that a first-pass DynamoDB scan needed pagination before drawing conclusions from thing-name searches.
+
+### Protocol Feedback
+- The stale `device-map.json` in S3 is now a continuity risk: it still reflects pre-field-change identities like `ExampleThing` and old serial/account assignments.
+- For future field work, cert backup verification should explicitly include an S3 object listing check, because bucket existence alone is not evidence that private-key folders were actually archived.
+
+## Session 2026-03-16 202603161331 (Retarget MAK SOP for en-route team)
+
+### What Was Done
+- Updated `docs/SOP-1Meter-MAK-Next-Steps.md` from a broad cleanup / reflash plan into a live field-triage SOP based on the current morning telemetry checks.
+- Updated `docs/WhatsApp-1Meter-MAK-Next-Steps.txt` to match the new field priorities for a team already en route to MAK.
+- Reframed the visit around the true current blockers:
+  - `23022696` needs first cloud publish under `OneMeter16`
+  - `0026MAK` needs physical-serial confirmation because live cloud data is from `23021847`
+  - `23022646` and `23021847` need paired local comms / power confirmation after their near-simultaneous overnight cutoff
+
+### Key Decisions
+- Removed the earlier assumption that the team should proactively reflash every meter; the updated guidance leaves currently healthy boards mostly untouched.
+- Removed the earlier assumption that S3 already held the required cert bundles, because the live bucket check showed only a stale `device-map.json`.
+- Treated OTA as secondary for this visit because MAK connectivity is weak enough to restart downloads from zero; stable telemetry and confirmed identity come first.
+
+### What Next Session Should Know
+- The current field docs now explicitly target `OneMeter16` for `23022696`, not `OneMeter15`.
+- The WhatsApp message now tells the team to report back the physical serial at `0026MAK`; that answer should drive whether live CC meter mapping is updated from `23022684` to `23021847`.
+- If the team reports that `23022696` still cannot publish under `OneMeter16`, the next step should be console-level troubleshooting of Wi-Fi / MQTT connect, not more backend investigation.
+
+### Senescence Notes
+- No significant degradation here; this was mainly a translation step from fresh live findings into a field-usable action sequence.
+
+### Protocol Feedback
+- Keeping the operational SOP in-repo worked well here because it could be rapidly retargeted once the latest telemetry contradicted the earlier generic plan.
+
+## Session 2026-03-16 202603161417 (Rewrite MAK docs as standalone first-send)
+
+### What Was Done
+- Rewrote `docs/SOP-1Meter-MAK-Next-Steps.md` so it no longer reads as an update to a previously sent document and instead stands alone as the first field SOP to send.
+- Folded Motlatsi's field report directly into both the SOP and the WhatsApp message:
+  - incomplete work at MAK
+  - `23022696` moved to `OneMeter16`
+  - `0026MAK` now involving `23021847`
+  - console-confirmed identities for `23022684`, `23022628`, and `23022667`
+  - `23022646` renamed to `OneMeter5`
+  - recreated local cert folders for `OneMeter13` / `OneMeter14`
+  - no cert backup yet in S3
+  - OTA status and weak-site-connection caution
+- Regenerated clean standalone Word exports and opened them:
+  - `docs/SOP-1Meter-MAK-Field-Visit.docx`
+  - `docs/WhatsApp-1Meter-MAK-Field-Message.docx`
+
+### Key Decisions
+- Removed wording like "this replaces the earlier version" because the earlier draft had not actually been sent to the field.
+- Kept the docs anchored to both Motlatsi's report and the live cloud checks so the team gets one coherent instruction set rather than a stale handoff plus a separate correction.
+- Used fresh `.docx` filenames without `Update` in the name to match the standalone-first-send framing.
+
+### What Next Session Should Know
+- The clean Word files to send are now `docs/SOP-1Meter-MAK-Field-Visit.docx` and `docs/WhatsApp-1Meter-MAK-Field-Message.docx`.
+- The markdown / text source files remain the original repo paths:
+  - `docs/SOP-1Meter-MAK-Next-Steps.md`
+  - `docs/WhatsApp-1Meter-MAK-Next-Steps.txt`
+- If more field feedback arrives, these two source files should continue to be the editing source before regenerating the standalone Word exports.
+
+### Senescence Notes
+- No notable degradation; this was mainly a communication-layer rewrite to better match what the field team has and has not yet seen.
+
+### Protocol Feedback
+- Distinguishing between "drafted internally" and "already sent externally" matters for field docs. Future operational docs should avoid "update" framing unless the earlier version was definitely distributed.
+
+## Session 2026-03-16 202603161648 (Add check-meter Excel export)
+
+### What Was Done
+- Added a backend Excel export for the `/check-meters` comparison dataset in `acdb-api/om_report.py`.
+- Refactored the check-meter comparison query into a shared helper so the page JSON and the Excel workbook use the exact same underlying data path.
+- Generated an Excel workbook with multiple sheets for offline analysis:
+  - `meta`
+  - `summary`
+  - `hourly_wide`
+  - `hourly_long`
+- Added a `Download Excel` button to `acdb-api/frontend/src/pages/CheckMeterPage.tsx`.
+- Added an authenticated frontend download helper in `acdb-api/frontend/src/lib/api.ts` for the new export route.
+
+### Key Decisions
+- Chose a backend-generated XLSX export rather than client-side spreadsheet assembly so offline analysis uses the exact same server-side comparison data already trusted by the page.
+- Kept the export route separate from the JSON route (`/check-meter-comparison/export`) to avoid mixing response types on the existing page API.
+- Included both wide and long hourly layouts in the workbook because the page data is chart-friendly in wide form, while offline checking is easier in normalized long form.
+
+### What Next Session Should Know
+- The new frontend action downloads the workbook for whatever period is currently selected on `/check-meters`.
+- The workbook filename is `check_meter_comparison_since_firmware_update.xlsx` for `days=0`, or `check_meter_comparison_last_<N>_days.xlsx` otherwise.
+- Verification completed locally via:
+  - `python3 -m py_compile acdb-api/om_report.py`
+  - `cd acdb-api/frontend && npx tsc -b --noEmit`
+
+### Senescence Notes
+- No notable degradation; the main implementation risk was avoiding drift between the page JSON and the export, which the shared helper resolved cleanly.
+
+### Protocol Feedback
+- Reusing the existing repo-native export pattern (`openpyxl` on the backend, authenticated blob download on the frontend) made this feature faster and lower risk than introducing a new client-side Excel dependency.
+
+## Session 2026-03-16 202603161715 (Filter check-meter spikes and remap 0026MAK)
+
+### What Was Done
+- Patched `acdb-api/om_report.py` so the check-meter comparison path now excludes unreliable 1Meter hourly points that occur:
+  - immediately after a long 1Meter reporting gap
+  - on the first hour after a check-meter identity change
+  - in any hour where multiple check-meter IDs contribute to the same account/hour
+- Tightened the active-pair selection in `acdb-api/om_report.py` so comparison pairs are built only from active primary/check meter rows with non-empty account assignments.
+- Validated the new filter logic against live production data with ad-hoc SQL/Python checks before deployment:
+  - `0005MAK` and `0119MAK` both come out close in the last 24 hours once reconnect-spike hours are removed
+  - `0025MAK` still remains contaminated by the fresh `OneMeter16` reconnection spike and currently has too little clean post-recovery data for a strong short-window verdict
+  - `0045MAK` remains sparse / low-load and still needs caution
+- Applied the live `0026MAK` remap directly in production PostgreSQL:
+  - inserted `23021847` as the active `check` / `prototype` meter for `0026MAK`
+  - retired `23022684` from the active account mapping by clearing its `account_number` and marking it `decommissioned`
+  - backfilled `meter_assignments` history rows for both the removed and replacement check meters
+- Restarted `prototype-sync.service` after the remap and verified that `23021847` immediately backfilled into live CC data:
+  - `prototype_meter_state` now shows `23021847 / 0026MAK` last seen `2026-03-16 14:19:00+00`
+  - `meter_readings` now contains fresh last-24h rows for `23021847`
+  - `hourly_consumption` now contains fresh last-24h `iot` bins for `23021847`
+
+### Key Decisions
+- Used conservative filtering in the comparison path rather than trying to reinterpret catch-up energy across missing hours; the goal is to prevent obviously unfair apples-to-oranges hourly comparisons from polluting experiment stats.
+- Remapped `0026MAK` by creating a new active meter row for `23021847` instead of rewriting `23022684` in place, preserving the old serial as a retired asset while allowing the sync daemon to ingest the new board cleanly.
+- Cleared the old row's `account_number` rather than leaving two active check meters on the same account, because both the comparison query and the sync daemon use the live `meters` mapping as their source of truth.
+
+### What Next Session Should Know
+- The `0026MAK` live mapping problem is fixed in production now; any current/future syncs should follow `23021847`, not `23022684`.
+- The comparison-filter code exists only locally so far in `acdb-api/om_report.py`; it has not yet been committed or pushed/deployed.
+- Post-remap filtered live snapshot:
+  - last 24h: `0026MAK / 23021847` is roughly `-4.49%` over 6 matched hours
+  - last 24h: `0005MAK` roughly `-2.71%`
+  - last 24h: `0119MAK` roughly `-3.05%`
+  - `0025MAK` and `0045MAK` still need caution for different reasons (fresh reconnect spike vs sparse low-load behavior)
+- If we want the page/export itself to use the new filtering, the next step is a normal deploy of the updated `acdb-api/om_report.py`.
+
+### Senescence Notes
+- No major degradation in this slice; the main correction was catching that the first `0026MAK` remap attempt violated a `meters.community` NOT NULL constraint, which was then safely retried inside a clean transaction.
+
+### Protocol Feedback
+- The `meter_assignments` table is useful, but the current comparison path still fundamentally depends on the live `meters` mapping; future lifecycle work should keep those two sources synchronized to avoid stale-pair analysis.
+
+## Session 2026-03-16 202603161715 (Prepare targeted 0026MAK hourly repair)
+
+### What Was Done
+- Investigated the historical `0026MAK / 23022684` drift window from `2026-03-05` through `2026-03-11` in more detail across:
+  - `hourly_consumption`
+  - `meter_readings`
+  - raw DynamoDB `1meter_data`
+- Confirmed the apparent `-72%` drift in that window is primarily a bad historical `iot` hourly build, not a clean meter-accuracy signal:
+  - stored `hourly_consumption` totals for `23022684` in the window sum to only `4.86 kWh`
+  - preserved raw `meter_readings.wh_reading` for the same window span `34.54 -> 51.58 kWh`
+  - raw DynamoDB `EnergyActive` positive deltas sum to about `17.04 kWh`, close to SparkMeter's `17.60 kWh`
+  - there are no `EnergyActive` resets in that window
+- Verified that the raw `meter_readings` rows for `23022684` are intact and match the raw DynamoDB window closely, so a surgical hourly-only repair is possible without replaying raw API ingestion.
+- Added `acdb-api/repair_1meter_hourly_window.py`:
+  - defaults target the exact `0026MAK / 23022684 / 2026-03-05..2026-03-11` repair window
+  - dry-run by default
+  - computes rebuilt hourly `iot` kWh from preserved cumulative `meter_readings.wh_reading`
+  - reports telemetry gaps and changed hours
+  - in execute mode, writes a JSON backup of the current hourly rows, deletes only the target `hourly_consumption` `iot` rows, and inserts rebuilt rows
+  - deliberately leaves `meter_readings` and `prototype_meter_state` untouched
+- Dry-ran the script on the production host using the backend venv Python and confirmed:
+  - `existing_total_kwh = 4.86`
+  - `rebuilt_total_kwh = 17.07`
+  - `changed_hour_count = 114`
+  - `negative_delta_count = 0`
+
+### Key Decisions
+- Chose the safest repair path: rebuild only `hourly_consumption` from preserved raw cumulative readings instead of deleting/reposting `meter_readings`.
+- Kept the script generic enough to reuse for future historical 1Meter window repairs, but with defaults aimed at the exact `0026MAK` anomaly.
+- Left long-gap treatment to the comparison filter rather than trying to redistribute catch-up energy across missing hours during repair; the repair restores cumulative integrity, while the comparison layer handles fairness exclusions.
+
+### What Next Session Should Know
+- The prepared script to repair the bad `0026MAK` hourly window is `acdb-api/repair_1meter_hourly_window.py`.
+- Safest execution pattern on the CC host should be:
+  - copy the script to the host
+  - run dry-run as `postgres` with `/opt/cc-portal/backend/venv/bin/python`
+  - only then rerun with `--execute`
+- The script defaults already target:
+  - meter `23022684`
+  - account `0026MAK`
+  - start `2026-03-05T06:37:00+00:00`
+  - end `2026-03-11T14:39:00+00:00`
+- After execution, the right follow-up is to re-check the comparison/export for windows that include this segment and continue treating post-gap first hours cautiously via the live comparison filter.
+
+### Senescence Notes
+- No notable degradation in this slice; the main correction was realizing the right repair target is the historical hourly derivative table, not the raw sample table.
+
+### Protocol Feedback
+- Keeping raw cumulative readings in `meter_readings` is paying off: it makes this kind of historical repair possible without dangerous source-data reconstruction.
+
+## Session 2026-03-16 202603161715 (Patch firmware TLS/MQTT timeout settings)
+
+### What Was Done
+- Confirmed the actual 1Meter firmware source lives in GitHub repo `onepowerLS/onepwr-aws-mesh`, not in the local `1Meter_PCB` KiCad repo.
+- Inspected the firmware source and found the real MQTT/TLS connection path in:
+  - `/tmp/onepwr-aws-mesh/main/networking/mqtt/core_mqtt_agent_manager.c`
+  - `/tmp/onepwr-aws-mesh/main/networking/mqtt/core_mqtt_agent_manager_config.h`
+  - `/tmp/onepwr-aws-mesh/main/Kconfig.projbuild`
+  - `/tmp/onepwr-aws-mesh/sdkconfig.defaults`
+- Verified the root distinction:
+  - MQTT CONNACK timeout was already Kconfig-backed
+  - TLS connect timeout and TLS recv timeout were still hardcoded (`3000` ms and `100` ms)
+- Patched the temporary local clone in `/tmp/onepwr-aws-mesh` to:
+  - add Kconfig-backed settings for TLS connect timeout and TLS receive timeout
+  - expose those settings through `core_mqtt_agent_manager_config.h`
+  - replace the hardcoded `vTlsSetConnectTimeout(3000)` / `vTlsSetRecvTimeout(100)` with configurable values
+  - honor the existing mesh reconnect stabilization delay before attempting TLS/MQTT reconnect
+  - update defaults in `sdkconfig.defaults` to:
+    - `CONFIG_GRI_MQTT_AGENT_CONNACK_RECV_TIMEOUT_MS=15000`
+    - `CONFIG_GRI_MQTT_AGENT_TLS_CONNECT_TIMEOUT_MS=15000`
+    - `CONFIG_GRI_MQTT_AGENT_TLS_RECV_TIMEOUT_MS=500`
+
+### Key Decisions
+- Chose to make TLS timeouts configurable rather than just changing magic numbers in-place, so future tuning can happen through menuconfig / sdkconfig.
+- Also wired in the already-defined mesh reconnect delay because the field logs suggest the TLS handshake is racing a weak/settling WiFi/mesh connection.
+- Kept the patch scoped to connectivity behavior only; no OTA version bump or unrelated firmware logic changes were mixed in.
+
+### What Next Session Should Know
+- The firmware patch currently exists only in the temporary clone at `/tmp/onepwr-aws-mesh`; it has not been committed or pushed anywhere yet.
+- I did not run a full firmware build because the temp clone was used for source inspection only and no ESP-IDF build environment was configured in this working session.
+- Before the patch can be fielded, the next steps are:
+  - move or clone the firmware repo to a stable local path
+  - build with ESP-IDF
+  - choose and set a valid higher OTA app version
+  - then physically flash or OTA a stable test unit
+
+### Senescence Notes
+- No notable degradation in this slice; the main task was locating the true firmware repo and distinguishing configurable MQTT timeouts from hardcoded TLS transport timeouts.
+
+### Protocol Feedback
+- The separation between hardware (`1Meter_PCB`) and firmware (`onepwr-aws-mesh`) is an important continuity detail that should ideally live in `CONTEXT.md` or a dedicated 1Meter operations note to avoid repeated rediscovery.
+
+## Session 2026-03-16 202603161715 (Draft remote-first 1Meter operations plan)
+
+### What Was Done
+- Wrote `docs/1Meter-Remote-First-Firmware-Plan.md` to turn the earlier high-level idea into a concrete implementation plan.
+- The new doc defines the target operating model where:
+  - the laptop is used only for initial provisioning / first flash
+  - EC2 / AWS own firmware builds, OTA releases, runtime config, and fleet visibility
+- Captured the current blockers discovered in this conversation:
+  - firmware source is in `onepowerLS/onepwr-aws-mesh`
+  - ESP-IDF build environment currently lives on Motlatsi's laptop
+  - important operational settings still depend on build-time config
+  - TLS timeout tuning is not yet remotely adjustable in the currently deployed firmware
+- Broke the migration into:
+  - target architecture
+  - minimum viable version
+  - required architecture changes
+  - workstreams (firmware, EC2 build/release, AWS IoT, provisioning, CC/ops)
+  - phased roadmap from immediate stabilization through full provisioning modernization
+  - immediate backlog and unresolved decisions
+
+### Key Decisions
+- Framed the first practical milestone as a minimum viable remote-first setup, not a full fleet-provisioning redesign, so progress can start with build/release/config control before the cert/provisioning model is fully replaced.
+- Recommended AWS IoT named shadows for persistent runtime configuration and IoT Jobs for imperative actions like OTA, reboot, and diagnostics.
+- Kept Fleet Provisioning as a later phase rather than making it a prerequisite for the first remote-first milestone.
+
+### What Next Session Should Know
+- The concrete plan doc is `docs/1Meter-Remote-First-Firmware-Plan.md`.
+- The most important first three actions in the doc are:
+  - put `onepwr-aws-mesh` on EC2 in a stable buildable location
+  - commit/build the timeout patch there
+  - implement the first shadow-driven runtime config keys for timeout tuning
+- The plan intentionally assumes that some dead/offline units may still require physical recovery; the goal is to eliminate routine laptop dependence for normal operations, not every recovery edge case.
+
+### Senescence Notes
+- No notable degradation here; the main value was consolidating several discoveries from this conversation into one coherent operating-model document.
+
+### Protocol Feedback
+- A dedicated in-repo technical plan for 1Meter operations is useful because the key information spans CC, AWS, firmware, field provisioning, and OTA release management rather than living cleanly in one repo.
+
+## Session 2026-03-17 202603170346 (Seed remote firmware workspace on EC2)
+
+### What Was Done
+- Began implementing Phase 0 of the remote-first 1Meter workflow on the current CC EC2 host.
+- Inspected the host and confirmed:
+  - current host is `ip-172-31-3-91`
+  - `/opt` exists and is usable for a separate firmware workspace
+  - `git` and `python3` are installed
+  - `docker` and `idf.py` are not installed
+  - only about `3.6G` disk remains on `/opt` / root volume
+- Created a stable firmware workspace on the host:
+  - `/opt/1meter-firmware/`
+  - `/opt/1meter-firmware/releases`
+  - `/opt/1meter-firmware/patches`
+  - `/opt/1meter-firmware/scripts`
+- Seeded `/opt/1meter-firmware/onepwr-aws-mesh` from a locally authenticated clone because direct `git clone` on the host failed for the private GitHub repo without credentials.
+- Added reusable remote assets to the CC repo and installed them on the host:
+  - `scripts/1meter/build_firmware_remote.sh`
+  - `scripts/1meter/onepwr-aws-mesh-timeout.patch`
+- Applied the timeout patch to the remote firmware clone on EC2, resulting in local modifications on:
+  - `main/Kconfig.projbuild`
+  - `main/networking/mqtt/core_mqtt_agent_manager.c`
+  - `main/networking/mqtt/core_mqtt_agent_manager_config.h`
+  - `sdkconfig.defaults`
+- Verified:
+  - remote build script passes `bash -n`
+  - timeout patch file applies cleanly
+  - remote repo origin points to `https://github.com/onepowerLS/onepwr-aws-mesh.git`
+
+### Key Decisions
+- Avoided storing persistent personal GitHub credentials on the production CC host for now; used a local authenticated seed copy instead.
+- Kept the firmware workspace separate from `/opt/cc-portal` so firmware operations do not interfere with the running CC app.
+- Stopped short of installing ESP-IDF on the production CC host because the current host is already at high disk utilization and lacks clear spare capacity for a safe toolchain install.
+
+### What Next Session Should Know
+- Remote firmware groundwork now exists on the host at `/opt/1meter-firmware`.
+- The current build blocker is not repo setup; it is host capacity / tooling:
+  - `idf.py` missing
+  - submodules not initialized (`components/esp-aws-iot`, `components/FreeRTOS-Libraries-Integration-Tests`)
+  - only `3.6G` free disk on the current host
+- Best next step is likely one of:
+  - provision a dedicated build EC2 instance
+  - or expand disk / install ESP-IDF on the current host if we explicitly accept the risk
+- The remote timeout patch and build script are now preserved in the CC repo under `scripts/1meter/` even if the host workspace is later recreated.
+
+### Senescence Notes
+- No notable degradation in this slice; the main shift was moving from design work into implementation and discovering the current production host is not yet a safe full build target.
+
+### Protocol Feedback
+- Seeding a private firmware repo from a local authenticated clone works as a safe bootstrap when the target host has no GitHub credentials, but long-term remote-first operations should use a dedicated deploy key or machine token rather than a personal interactive login.
+
+## Session 2026-03-17 202603170433 (Prove staging firmware build host)
+
+### What Was Done
+- Repurposed the uGridPlan staging EC2 as a separate 1Meter firmware build host without disturbing its existing contents.
+- Fixed the ESP-IDF install on that host so `ubuntu` can use it cleanly:
+  - corrected ownership under `/opt/1meter-firmware/esp-idf` and `/opt/1meter-firmware/.espressif`
+  - initialized ESP-IDF submodules
+- Proved a real native firmware build works on the staging host using ESP-IDF `v5.2.3`.
+- Resolved the final build-time dependency by placing the public AWS root CA at `main/certs/root_cert_auth.crt`.
+- Updated `scripts/1meter/build_firmware_remote.sh` to allow an explicitly intentional dirty-tree build via `ALLOW_DIRTY=1`, while still refusing accidental dirty builds by default.
+- Fixed nested repo ownership under `/opt/1meter-firmware/onepwr-aws-mesh/.git/modules` so the scripted build path works too.
+- Generated the first staged release bundle at:
+  - `/opt/1meter-firmware/releases/staging-timeout-patch-20260317042800-3a03c5f`
+- Verified the release bundle contains:
+  - `FeaturedFreeRTOSIoTIntegration.bin`
+  - `bootloader.bin`
+  - `partition-table.bin`
+  - `ota_data_initial.bin`
+  - `flasher_args.json`
+  - `project_description.json`
+  - `sdkconfig`
+  - `release-manifest.json`
+
+### Key Decisions
+- Used the repurposed staging EC2 rather than the production CC host because the production host was tight on disk and not a safe place to install the full ESP-IDF toolchain.
+- Treated `root_cert_auth.crt` as a public build dependency, not a secret, because it is the AWS root CA certificate rather than a per-device credential.
+- Added `ALLOW_DIRTY=1` as an explicit escape hatch instead of removing dirty-tree protection entirely, since the remote clone is intentionally dirty only until the timeout patch is committed upstream.
+
+### What Next Session Should Know
+- The staging build host is now operational for native firmware builds:
+  - host: `13.247.190.132:2222`
+  - user: `ubuntu`
+  - workspace: `/opt/1meter-firmware`
+- Build environment:
+  - ESP-IDF: `/opt/1meter-firmware/esp-idf`
+  - tools cache: `/opt/1meter-firmware/.espressif`
+  - env bootstrap: `/opt/1meter-firmware/env.sh`
+- The remote firmware clone is intentionally dirty because the timeout patch is applied locally there and not yet committed to the upstream repo.
+- Current disk state on the staging host is workable but not generous: about `5.4G` free on `/`.
+- The next practical steps are:
+  - commit/push the timeout patch into `onepwr-aws-mesh`
+  - add S3 release publishing from the staging host
+  - add OTA job creation / rollout helpers
+  - build a real canary release with a higher OTA app version
+
+### Senescence Notes
+- No major degradation noticed in this slice. The session stayed focused on turning the staging instance from “almost there” into a proven build host.
+
+### Protocol Feedback
+- Adding the live firmware build-host details to `CONTEXT.md` is useful because this is now operational infrastructure, not just a plan.
+
+## Session 2026-03-17 202603170530 (Add remote OTA release automation)
+
+### What Was Done
+- Added remote firmware release automation helpers in `scripts/1meter/`:
+  - `publish_release.sh` to upload release artifacts to S3 and write `s3-publish-manifest.json`
+  - `create_ota_update.sh` to create an AWS IoT OTA update from the publish manifest
+- Updated `build_firmware_remote.sh` to:
+  - include richer metadata in `release-manifest.json`
+  - accept `OTA_APP_VERSION=MAJOR.MINOR.BUILD` so OTA version bumps can be injected remotely without hand-editing firmware files
+- Updated `bootstrap_build_host.sh` to install AWS CLI during host bootstrap.
+- Wrote `docs/1Meter-Remote-Build-OTA-Runbook.md` documenting:
+  - build
+  - publish
+  - OTA creation
+  - current host path and current AWS resources
+- Verified the new publish/OTA scripts end-to-end in dry-run mode against the staging host release layout.
+- Confirmed locally that the AWS-side baseline already exists:
+  - bucket `1pwr-ota-firmware`
+  - OTA service role `arn:aws:iam::758201218523:role/1pwr-ota-service-role`
+  - active signing profiles including `1PWR_OTA_ESP32_v2`
+- Built a fresh timeout-adjusted release on the staging host with OTA version `1.0.1`:
+  - `/opt/1meter-firmware/releases/staging-timeout-patch-v1_0_1-20260317052335-3a03c5f`
+- Pulled that release locally and published it to S3 under:
+  - `s3://1pwr-ota-firmware/firmware-releases/v1.0.1/staging-timeout-patch-v1_0_1-20260317052335-3a03c5f/`
+- Audited current OTA state in AWS:
+  - active group OTA job is `AFR_OTA-v1_0_3-MAKGroup`
+  - its execution summary shows `OneMeter44` succeeded while the other MAK targets remain `IN_PROGRESS`
+
+### Key Decisions
+- Treated `OneMeter44` as the best OTA-proven field canary from current evidence because it is the only MAK target that completed the current `v1.0.3` group OTA.
+- Did not treat the newly built `1.0.1` timeout image as a real field canary candidate, because the fleet OTA lineage is already at least `v1.0.3` for part of MAK and anti-rollback means the next real timeout image must be built at a version above the current deployed line.
+- Kept the host AWS-auth question separate from the automation itself:
+  - scripts are ready on the host
+  - AWS CLI is installed on the host
+  - but the host still lacks its own AWS credentials / instance profile
+
+### What Next Session Should Know
+- The remote build/publish/OTA workflow is now implemented in the repo and dry-run validated.
+- The next real firmware step is **not** “create OTA from `1.0.1`”.
+- The next real firmware step is:
+  - rebuild the timeout-adjusted image at `> 1.0.3` (for example `1.0.4`)
+  - publish it
+  - use a canary target
+- Best current canary choices:
+  - if bench/test device `OneMeter17` is truly available and reachable, that is safest overall
+  - otherwise `OneMeter44` is the best field canary from current OTA evidence
+  - avoid `OneMeter16` as first field canary because it is still the most intermittent in recent telemetry
+- AWS control-plane limitations discovered:
+  - no IoT thing index enabled
+  - no thing shadows currently present for the devices
+  - so AWS cannot yet answer rich live connectivity questions by itself
+
+### Senescence Notes
+- No major degradation noticed here; the main risk uncovered was operational rather than contextual: a lower OTA version build (`1.0.1`) is not suitable once the fleet has already advanced to a higher OTA lineage.
+
+### Protocol Feedback
+- Capturing current OTA lineage in shared docs is important; otherwise it is easy to build a technically valid image that is operationally invalid because of anti-rollback.
+
+## Session 2026-03-17 202603170925 (Launch timeout canary OTA)
+
+### What Was Done
+- Chose `OneMeter44` as the first real timeout-firmware canary target because:
+  - it is in the live MAK thing group
+  - it already completed the current `v1.0.3` group OTA successfully
+  - `OneMeter17` exists in `ESP32C3-TEST` but has no recorded job history in AWS
+- Built a timeout-adjusted firmware release at OTA version `1.0.4` on the staging build host:
+  - `/opt/1meter-firmware/releases/staging-timeout-patch-v1_0_4-20260317091711-3a03c5f`
+- Copied that release locally and published it to:
+  - `s3://1pwr-ota-firmware/firmware-releases/v1.0.4/staging-timeout-patch-v1_0_4-20260317091711-3a03c5f/`
+- Fixed two real workflow bugs while turning the automation live:
+  - `create_ota_update.sh` used `mapfile`, which fails on macOS Bash 3.2; replaced with portable array population
+  - AWS IoT OTA creation requires the S3 object version; updated `publish_release.sh` to record S3 `VersionId`s and `create_ota_update.sh` to include them in `fileLocation.s3Location.version`
+- Created a real single-device OTA canary:
+  - OTA update ID: `timeout-v1_0_4-OneMeter44-canary-20260317-0922`
+  - AWS job ID: `AFR_OTA-timeout-v1_0_4-OneMeter44-canary-20260317-0922`
+- Verified immediate AWS state after creation:
+  - OTA update status: `CREATE_COMPLETE`
+  - job status: `IN_PROGRESS`
+  - `OneMeter44` execution status: `QUEUED`
+- Monitored the canary for about two more minutes and it remained `QUEUED` with no `IN_PROGRESS` transition.
+- Investigated AWS IoT logs and found a likely root cause unrelated to the OTA package itself:
+  - `OneMeter44` has repeated `DUPLICATE_CLIENT_ID` disconnects
+  - two different cert principals were alternately connecting as MQTT client ID `OneMeter44`
+  - the expected principal belongs to `OneMeter44`
+  - the conflicting second principal belongs to `OneMeter55`
+  - this means something using the `OneMeter55` cert is still presenting itself as `OneMeter44`
+
+### Key Decisions
+- Did not use the previously built `1.0.1` timeout image for field rollout because anti-rollback means the next real timeout build had to exceed the current `v1.0.3` fleet line.
+- Used `fileName=NA` and the existing signing profile `1PWR_OTA_ESP32_v2` to stay close to the structure of prior successful OTA jobs.
+- Kept the canary scope to a single proven device rather than touching the full MAK group again.
+- Did not attempt any destructive AWS-side mitigation like deactivating the `OneMeter55` cert, because that needs an explicit operational decision once the field/team confirms what physical device is currently using the wrong identity.
+
+### What Next Session Should Know
+- Current live canary to watch:
+  - OTA update: `timeout-v1_0_4-OneMeter44-canary-20260317-0922`
+  - job: `AFR_OTA-timeout-v1_0_4-OneMeter44-canary-20260317-0922`
+- At the time of handoff, `OneMeter44` had not yet started downloading; it was still `QUEUED`.
+- The strongest current hypothesis is that the queued canary is a symptom of broader gateway instability caused by identity collision:
+  - `OneMeter55` cert principal: `ac11444ffb41a1c8fa33a2007fa31db9861adac8535be3b50327c5d403314d99`
+  - `OneMeter44` cert principal: `1ae9cfcfc4cd9763604dc73cafd35e75f4b0dc93bb43edfcf0ae7dfc68af7e63`
+- If the canary succeeds, the next likely step is a controlled expansion beyond `OneMeter44`.
+- If it stalls in `QUEUED` or moves to `IN_PROGRESS` and hangs, the next diagnostic focus should be:
+  - whether the `OneMeter55` device / cert is incorrectly configured with client ID / thing name `OneMeter44`
+  - whether the gateway can stay online without duplicate-client thrash
+  - field-side serial logs if it connects but still times out mid-transfer
+
+### Senescence Notes
+- No major degradation noticed. The key improvement was crossing from “automation exists” to “real OTA canary launched”.
+
+### Protocol Feedback
+- The S3 object version requirement is easy to miss; the runbook and tooling should preserve that detail so future sessions do not rediscover it mid-rollout.
+
+## Session 2026-03-21 202603211627 (Add CC dashboard record completeness)
+
+### What Was Done
+- Added a new backend dashboard aggregate in `acdb-api/stats.py`: `GET /api/stats/customer-record-completeness`.
+- Wired the main CC dashboard (`acdb-api/frontend/src/pages/DashboardPage.tsx`) to show a new `1PDB Record Completeness` section with:
+  - total customers
+  - commissioned customers
+  - hourly record count
+  - overall completeness percentage
+  - a per-customer-type table for customers, commissioned customers, accounts with data, actual records, expected records, and `% complete`
+- Extended `acdb-api/frontend/src/lib/api.ts` with the new response types and fetch helper.
+
+### Key Decisions
+- Treated `hourly_consumption` as the canonical cross-source record table for this dashboard view, since both Koios and the ThunderCloud import path are expected to populate it.
+- Defined completeness as:
+  - distinct account-hours present in `hourly_consumption`
+  - divided by expected account-hours from `date_service_connected` through the earlier of the latest loaded hour or `date_service_terminated`
+- Counted distinct `reading_hour` values per account instead of raw row count so duplicate per-hour rows from multiple meters/sources do not artificially inflate completeness.
+- Used `customer_type` with fallback to `customer_position`, then `UNKNOWN`, so the dashboard can still show a by-type breakdown even where the schema is partially inconsistent.
+
+### What Next Session Should Know
+- Local validation succeeded for:
+  - `python3 -m py_compile acdb-api/stats.py`
+  - frontend build (`npm run build`) in `acdb-api/frontend`
+  - lints clean on the touched frontend files
+- Live DB execution of the new aggregate was **not** validated in this shell because:
+  - the local shell Python does not have the CC FastAPI environment installed
+  - no local PostgreSQL instance was available at the default `postgresql://cc_api@localhost:5432/onepower_cc`
+- The next best validation step is to run the real CC backend with its normal environment and hit `/api/stats/customer-record-completeness` or load `/dashboard`.
+
+### Senescence Notes
+- No major senescence issue surfaced here; the key risk was confusing sync-cache completeness with real 1PDB record completeness, and the implementation stayed anchored to the actual hourly data model.
+
+### Protocol Feedback
+- The repo would benefit from a short documented definition of “record completeness” versus “sync completeness”, because both concepts now exist and they use different source tables and denominators.
+
+## Session 2026-03-23 202603231300 (Multi-workstream: PIP, MAK meters, WhatsApp tickets, data completeness, adaptive engine)
+
+### What Was Done
+- **WhatsApp ticket flow**: Fixed dev→prod URL default, added CC-side ticket audit trail (wa_tickets table + /api/tickets), mirrored tickets to CC, added customer ID to notifications, added LID-to-phone resolution (230 mappings), added site code validation with alias map (e.g. KTN→KET). Deployed to production.
+- **MAK 1Meter comms**: Coordinated field team on firmware stabilization, tracked meter recovery (2 stable, 3 PSU-damaged), set up build-time WiFi credential injection on staging build host, pulled latest firmware repo (commit 6d74ad5 with 60s TLS timeout).
+- **Data completeness**: Backfilled date_service_connected for 1,261 customers, updated completeness query to use first transaction date as window start, built Dropbox CSV importer (local + remote/EC2 via Dropbox API), imported 4.6M rows from UNCLEANED/CONS folder, identified OPL_readings_* files as new source (~4.5GB), started EC2 import with --include-opl.
+- **PIP assessment**: Deployed test to EC2 at cc.1pwrafrica.com/pip/, Hlomohang took test (100% in 23 minutes, 9 regenerations), analyzed credibility (B=81% correct, longest=94% correct, no option randomization). Began planning adaptive engine redesign.
+- **Adaptive engine plan approved**: 5 difficulty tiers (L1-L5), one-at-a-time flow, server-side sessions, option randomization, length equalization, single-session enforcement.
+
+### Key Decisions
+- WhatsApp bridge runs from /home/ubuntu/whatsapp-logger/ not /opt/cc-portal/whatsapp-bridge/ — manual scp deploy needed
+- PIP server deployed to EC2 at port 8788, behind Caddy at /pip/* route on cc.1pwrafrica.com
+- Manager token: PIP_MANAGER_TOKEN='hlm-manager-2026'
+- Hlomohang's 100% score flagged as non-credible; proctored re-take required after engine fixes
+- OPL import running on EC2 (PID check: sudo tail -30 /tmp/dropbox-import-opl.log)
+
+### What Next Session Should Know
+- **Adaptive engine implementation is IN PROGRESS**: Plan is approved, background agents were launched to generate L1-L2 and L4-L5 question banks but may not have completed. Check agent transcripts.
+- **Implementation order**: (1) expand question bank, (2) option shuffling, (3) adaptive session API, (4) HTML one-at-a-time, (5) adaptive grading, (6) deploy to EC2
+- **Key files**: scripts/pip_assessment/question_bank.json, pip_exam.py, admin_server.py, docs/pip/pip-test-admin.html
+- **Current question bank problems**: answer=1 (B) for 81% of questions, longest option correct 94%, no difficulty tiers, no option randomization
+- **OPL Dropbox import**: may still be running on EC2, check /tmp/dropbox-import-opl.log
+- **MAK meters**: 2 stable (23021847, 23022696), 3 need PSU replacement, OTA paused, build host ready at 13.247.190.132:2222
+- **Caddy config**: /pip/* route added to cc.1pwrafrica.com pointing to localhost:8788
+- **PIP server on EC2**: running as PID 422939, not a systemd service yet — will die on reboot
+
+### Senescence Notes
+- Context degradation detected at ~50+ exchanges. Multiple workstreams (PIP, meters, WhatsApp, data completeness) increased cognitive load. Recommend starting adaptive engine implementation in a fresh conversation.
+
+### Protocol Feedback
+- The PIP test server on EC2 should be converted to a systemd service for persistence
+- The WhatsApp bridge deploy path (scp to /home/ubuntu/whatsapp-logger/) should be documented in CONTEXT.md or automated in the deploy workflow
+- Question bank authoring at scale (280+ questions) is better done in a dedicated session, not bolted onto a multi-workstream conversation
