@@ -8,10 +8,10 @@ Firebase Admin SDK authenticates via the service-account JSON referenced by
 ``FIREBASE_SA_PATH`` (default: ``firebase-service-account.json`` next to this file).
 """
 
+import logging
 import os
 import sqlite3
-import logging
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter
 
@@ -243,6 +243,16 @@ def get_cc_role_for_employee_id(employee_id: str) -> Optional[str]:
 _portfolio_cache: list[dict] | None = None
 
 
+def _normalize_site_ids(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [part.strip().upper() for part in value.split(",") if part.strip()]
+    if isinstance(value, dict):
+        return [str(key).strip().upper() for key in value.keys() if str(key).strip()]
+    if isinstance(value, (list, tuple, set)):
+        return [str(item).strip().upper() for item in value if str(item).strip()]
+    return []
+
+
 @router.get("")
 def list_portfolios():
     """Return active organizations from the PR system's Firestore."""
@@ -270,6 +280,9 @@ def list_portfolios():
                 "country": d.get("country"),
                 "baseCurrency": d.get("baseCurrency", "USD"),
                 "allowedCurrencies": d.get("allowedCurrencies", []),
+                "siteIds": _normalize_site_ids(
+                    d.get("siteIds") or d.get("site_ids") or d.get("sites")
+                ),
             })
 
         _portfolio_cache = result
