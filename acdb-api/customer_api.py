@@ -116,6 +116,7 @@ def _normalize_customer(row_dict: Dict[str, Any]) -> Dict[str, Any]:
         "customer_id_legacy": _s("customer_id_legacy"),
         "first_name": _s("first_name"),
         "middle_name": _s("middle_name"),
+        "gender": _s("gender"),
         "last_name": _s("last_name"),
         "phone": _s("phone"),
         "cell_phone_1": _s("cell_phone_1"),

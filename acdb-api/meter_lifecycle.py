@@ -10,8 +10,9 @@ audit trail and workflow for meter replacements.
 """
 
 import logging
+import re
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -117,9 +118,195 @@ class ReplaceRequest(BaseModel):
     notes: Optional[str] = None
 
 
+class AssignMeterRequest(BaseModel):
+    customer_identifier: str
+    meter_id: str
+    community: str
+    customer_type: str
+    account_number: str
+    connection_date: str
+    village_name: Optional[str] = None
+    latitude: Optional[str] = None
+    longitude: Optional[str] = None
+
+
+def _row_to_dict(cursor, row) -> dict[str, Any]:
+    cols = [d[0] for d in cursor.description]
+    return dict(zip(cols, row))
+
+
+def _resolve_customer_for_assignment(cursor, identifier: str) -> Optional[dict[str, Any]]:
+    raw_identifier = str(identifier or "").strip()
+    if not raw_identifier:
+        return None
+
+    if re.match(r"^\d{3,4}[A-Za-z]{2,4}$", raw_identifier):
+        cursor.execute(
+            "SELECT c.* FROM accounts a "
+            "JOIN customers c ON a.customer_id = c.id "
+            "WHERE a.account_number = %s LIMIT 1",
+            (raw_identifier.upper(),),
+        )
+        row = cursor.fetchone()
+        return _row_to_dict(cursor, row) if row else None
+
+    if raw_identifier.isdigit():
+        cursor.execute("SELECT * FROM customers WHERE id = %s", (raw_identifier,))
+        row = cursor.fetchone()
+        if row:
+            return _row_to_dict(cursor, row)
+
+        cursor.execute(
+            "SELECT * FROM customers WHERE customer_id_legacy = %s",
+            (raw_identifier,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return _row_to_dict(cursor, row)
+
+    return None
+
+
+def _parse_account_sequence(account_number: str) -> int:
+    match = re.match(r"^(\d{3,4})[A-Za-z]{2,4}$", str(account_number or "").strip().upper())
+    if not match:
+        raise HTTPException(
+            status_code=400,
+            detail="Account number must start with 3-4 digits followed by the site code",
+        )
+    return int(match.group(1))
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+@router.post("/assign")
+def assign_meter(
+    req: AssignMeterRequest,
+    user: CurrentUser = Depends(require_employee),
+):
+    """Atomically assign a meter and account to an existing customer."""
+    if user.role not in (CCRole.superadmin.value, CCRole.onm_team.value):
+        raise HTTPException(status_code=403, detail="Requires superadmin or onm_team role")
+
+    customer_identifier = str(req.customer_identifier or "").strip()
+    meter_id = str(req.meter_id or "").strip()
+    community = str(req.community or "").strip().upper()
+    customer_type = str(req.customer_type or "").strip().upper()
+    account_number = str(req.account_number or "").strip().upper()
+    connection_date = str(req.connection_date or "").strip()
+
+    if not customer_identifier:
+        raise HTTPException(status_code=400, detail="customer_identifier is required")
+    if not meter_id:
+        raise HTTPException(status_code=400, detail="meter_id is required")
+    if not community:
+        raise HTTPException(status_code=400, detail="community is required")
+    if not customer_type:
+        raise HTTPException(status_code=400, detail="customer_type is required")
+    if not account_number:
+        raise HTTPException(status_code=400, detail="account_number is required")
+
+    account_sequence = _parse_account_sequence(account_number)
+    now = datetime.now(timezone.utc).isoformat()
+
+    with _get_connection() as conn:
+        cursor = conn.cursor()
+
+        customer = _resolve_customer_for_assignment(cursor, customer_identifier)
+        if not customer:
+            raise HTTPException(status_code=404, detail="Customer not found")
+
+        customer_pg_id = customer.get("id")
+        if customer_pg_id is None:
+            raise HTTPException(status_code=500, detail="Resolved customer is missing id")
+
+        cursor.execute(
+            "SELECT customer_id FROM accounts WHERE account_number = %s",
+            (account_number,),
+        )
+        account_row = cursor.fetchone()
+        if account_row:
+            existing_customer_id = account_row[0]
+            if existing_customer_id and int(existing_customer_id) != int(customer_pg_id):
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Account {account_number} is already linked to another customer",
+                )
+            cursor.execute(
+                "UPDATE accounts SET meter_id = %s, community = %s WHERE account_number = %s",
+                (meter_id, community, account_number),
+            )
+        else:
+            cursor.execute(
+                "INSERT INTO accounts "
+                "(account_number, customer_id, meter_id, community, account_sequence, created_by) "
+                "VALUES (%s, %s, %s, %s, %s, %s)",
+                (account_number, customer_pg_id, meter_id, community, account_sequence, user.user_id),
+            )
+
+        meter_values = (
+            community,
+            account_number,
+            customer_type,
+            connection_date or now[:10],
+            str(req.village_name or "").strip() or None,
+            str(req.latitude or "").strip() or None,
+            str(req.longitude or "").strip() or None,
+            meter_id,
+        )
+        cursor.execute("SELECT 1 FROM meters WHERE meter_id = %s", (meter_id,))
+        if cursor.fetchone():
+            cursor.execute(
+                "UPDATE meters SET community = %s, account_number = %s, customer_type = %s, "
+                "customer_connect_date = %s, village_name = %s, latitude = %s, longitude = %s "
+                "WHERE meter_id = %s",
+                meter_values,
+            )
+        else:
+            cursor.execute(
+                "INSERT INTO meters "
+                "(community, account_number, customer_type, customer_connect_date, village_name, latitude, longitude, meter_id) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                meter_values,
+            )
+
+        cursor.execute(
+            "SELECT 1 FROM meter_assignments "
+            "WHERE meter_id = %s AND account_number = %s AND removed_at IS NULL",
+            (meter_id, account_number),
+        )
+        if not cursor.fetchone():
+            cursor.execute(
+                "UPDATE meter_assignments SET removed_at = %s, removal_reason = %s "
+                "WHERE removed_at IS NULL AND (meter_id = %s OR account_number = %s)",
+                (now, "reassigned", meter_id, account_number),
+            )
+            cursor.execute(
+                "INSERT INTO meter_assignments "
+                "(meter_id, account_number, community, assigned_at, created_by, notes) "
+                "VALUES (%s, %s, %s, %s, %s, %s)",
+                (
+                    meter_id,
+                    account_number,
+                    community,
+                    now,
+                    user.user_id,
+                    f"Assigned via CC portal to customer {customer.get('customer_id_legacy')}",
+                ),
+            )
+
+        conn.commit()
+        log_mutation(user, "assign", "meters", meter_id)
+        return {
+            "message": f"Meter {meter_id} assigned to account {account_number}",
+            "meter_id": meter_id,
+            "account_number": account_number,
+            "customer_id_legacy": customer.get("customer_id_legacy"),
+        }
+
 
 @router.post("/{meter_id}/decommission")
 def decommission_meter(

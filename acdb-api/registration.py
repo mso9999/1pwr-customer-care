@@ -20,8 +20,10 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
+from country_config import COUNTRY
 from middleware import require_employee, require_role
 from models import CurrentUser
+from mutations import log_mutation
 
 logger = logging.getLogger("cc-api.registration")
 
@@ -54,6 +56,8 @@ def generate_account_number(conn, community: str) -> str:
 
 class CustomerCreateRequest(BaseModel):
     first_name: str = Field(..., min_length=1)
+    middle_name: Optional[str] = None
+    gender: Optional[str] = None
     last_name: str = Field(..., min_length=1)
     community: str = Field(..., min_length=2, max_length=10)
     phone: Optional[str] = None
@@ -68,6 +72,7 @@ class CustomerCreateRequest(BaseModel):
     customer_type: Optional[str] = None
     gps_lat: Optional[float] = None
     gps_lon: Optional[float] = None
+    date_service_connected: Optional[str] = None
     meter_id: Optional[str] = None
 
 
@@ -82,6 +87,13 @@ VALID_CUSTOMER_TYPES = {
     "HH1", "HH2", "HH3",
     "SME", "CHU", "SCP", "SCH", "HC", "PWH", "GOV", "COM", "IND",
     "REL", "AGR", "CLI", "PUE", "HCF", "OTH", "OTHER",
+}
+
+VALID_GENDERS = {
+    "MALE": "Male",
+    "M": "Male",
+    "FEMALE": "Female",
+    "F": "Female",
 }
 
 
@@ -104,6 +116,33 @@ def _infer_customer_type(explicit_value: Optional[str], plot_number: Optional[st
     return None
 
 
+def _normalize_phone_for_storage(raw: Optional[str]) -> Optional[str]:
+    digits = "".join(c for c in str(raw or "") if c.isdigit())
+    if not digits:
+        return None
+
+    if digits.startswith("00"):
+        digits = digits[2:]
+    if digits.startswith(COUNTRY.dial_code) and len(digits) > len(COUNTRY.dial_code):
+        digits = digits[len(COUNTRY.dial_code):]
+    if digits.startswith("0") and len(digits) > 8:
+        digits = digits[1:]
+
+    return digits or None
+
+
+def _normalize_gender_for_storage(raw: Optional[str]) -> Optional[str]:
+    value = str(raw or "").strip()
+    if not value:
+        return None
+
+    normalized = VALID_GENDERS.get(value.upper())
+    if not normalized:
+        raise HTTPException(status_code=400, detail="gender must be Male or Female when provided")
+
+    return normalized
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -123,30 +162,35 @@ def register_customer(
         account_number = generate_account_number(conn, community)
 
         resolved_customer_type = _infer_customer_type(req.customer_type, req.plot_number)
+        gender = _normalize_gender_for_storage(req.gender)
+        phone = _normalize_phone_for_storage(req.phone)
+        cell_phone_1 = _normalize_phone_for_storage(req.cell_phone_1)
+        cell_phone_2 = _normalize_phone_for_storage(req.cell_phone_2)
 
         # Insert customer
         cursor.execute("""
             INSERT INTO customers (
-                first_name, last_name, community, phone, cell_phone_1,
+                first_name, middle_name, gender, last_name, community, phone, cell_phone_1,
                 cell_phone_2, email, national_id, plot_number,
                 street_address, city, district, customer_type,
-                gps_lat, gps_lon, is_active,
+                gps_lat, gps_lon, date_service_connected, is_active,
                 created_by, updated_by
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                 TRUE, %s, %s
             ) RETURNING id, customer_id_legacy
         """, (
-            req.first_name, req.last_name, community,
-            req.phone, req.cell_phone_1, req.cell_phone_2,
+            req.first_name, req.middle_name, gender, req.last_name, community,
+            phone, cell_phone_1, cell_phone_2,
             req.email, req.national_id, req.plot_number,
             req.street_address, req.city, req.district,
-            resolved_customer_type, req.gps_lat, req.gps_lon,
+            resolved_customer_type, req.gps_lat, req.gps_lon, req.date_service_connected,
             user.user_id, user.user_id,
         ))
 
         row = cursor.fetchone()
         customer_pg_id = row[0]
+        customer_legacy_id = row[1]
 
         # Extract sequence number from account number
         seq = int(account_number[:4])
@@ -161,6 +205,42 @@ def register_customer(
 
         conn.commit()
 
+        customer_values = {
+            "id": customer_pg_id,
+            "customer_id_legacy": customer_legacy_id,
+            "first_name": req.first_name,
+            "middle_name": req.middle_name,
+            "gender": gender,
+            "last_name": req.last_name,
+            "community": community,
+            "phone": phone,
+            "cell_phone_1": cell_phone_1,
+            "cell_phone_2": cell_phone_2,
+            "email": req.email,
+            "national_id": req.national_id,
+            "plot_number": req.plot_number,
+            "street_address": req.street_address,
+            "city": req.city,
+            "district": req.district,
+            "customer_type": resolved_customer_type,
+            "gps_lat": req.gps_lat,
+            "gps_lon": req.gps_lon,
+            "date_service_connected": req.date_service_connected,
+            "is_active": True,
+            "created_by": user.user_id,
+            "updated_by": user.user_id,
+        }
+        account_values = {
+            "account_number": account_number,
+            "customer_id": customer_pg_id,
+            "meter_id": req.meter_id,
+            "community": community,
+            "account_sequence": seq,
+            "created_by": user.user_id,
+        }
+        log_mutation(user, "create", "customers", str(customer_pg_id), new_values=customer_values)
+        log_mutation(user, "create", "accounts", account_number, new_values=account_values)
+
         logger.info(
             "Customer registered: %s %s -> %s by %s",
             req.first_name, req.last_name, account_number, user.user_id,
@@ -169,6 +249,7 @@ def register_customer(
         return {
             "account_number": account_number,
             "customer_id": customer_pg_id,
+            "customer_id_legacy": customer_legacy_id,
             "first_name": req.first_name,
             "last_name": req.last_name,
             "community": community,
@@ -197,6 +278,7 @@ async def bulk_import_customers(
     """Bulk import customers from an Excel file.
 
     Expected columns: first_name, last_name, phone, customer_type,
+                      gender,
                       plot_number, national_id, gps_lat, gps_lon
     """
     if not file.filename.endswith((".xlsx", ".xls")):
@@ -243,20 +325,23 @@ async def bulk_import_customers(
             try:
                 account_number = generate_account_number(conn, community_upper)
                 seq = int(account_number[:4])
+                gender = _normalize_gender_for_storage(
+                    str(row_dict.get("gender", "") or "").strip() or None
+                )
 
                 cursor.execute("""
                     INSERT INTO customers (
-                        first_name, last_name, community, phone,
+                        first_name, gender, last_name, community, phone,
                         national_id, plot_number, customer_type,
                         gps_lat, gps_lon, is_active,
                         created_by
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, %s)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, %s)
                     RETURNING id
                 """, (
                     # Preserve explicit HH1/HH2/HH3/etc. when present, but do not
                     # persist aggregate HH as though it were an atomic type.
-                    first_name, last_name, community_upper,
-                    str(row_dict.get("phone", "") or "").strip() or None,
+                    first_name, gender, last_name, community_upper,
+                    _normalize_phone_for_storage(str(row_dict.get("phone", "") or "").strip() or None),
                     str(row_dict.get("national_id", "") or "").strip() or None,
                     str(row_dict.get("plot_number", "") or "").strip() or None,
                     _infer_customer_type(

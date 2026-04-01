@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { createRecord, getRecord, listRows, listSites } from '../lib/api';
+import { assignMeter, getCommissionData, getRecord, listSites, previewNextAccount } from '../lib/api';
 
 // ---------------------------------------------------------------------------
 // Types & constants
@@ -67,26 +67,8 @@ function GPSCapture({ lat, lng, onChange }: { lat: string; lng: string; onChange
 // ---------------------------------------------------------------------------
 
 async function getNextAccountNumber(siteCode: string): Promise<string> {
-  // Query meters table for highest account number in this community
-  try {
-    const resp = await listRows('meters', {
-      filter_col: 'community',
-      filter_val: siteCode,
-      sort: 'account_number',
-      order: 'desc',
-      limit: 1,
-    });
-    if (resp.rows.length > 0) {
-      const acct = String(resp.rows[0].account_number || '');
-      // Account number format: NNNNXXX -- extract the numeric prefix
-      const numPart = acct.replace(/[A-Za-z]+$/, '');
-      const next = (parseInt(numPart, 10) || 0) + 1;
-      return String(next).padStart(4, '0') + siteCode.toUpperCase();
-    }
-  } catch { /* ignore */ }
-
-  // First meter for this site
-  return '0001' + siteCode.toUpperCase();
+  const resp = await previewNextAccount(siteCode);
+  return resp.next_account_number;
 }
 
 // ---------------------------------------------------------------------------
@@ -110,6 +92,7 @@ export default function AssignMeterPage() {
 
   // Account number (auto-generated or overridden)
   const [accountNumber, setAccountNumber] = useState('');
+  const [resolvedAccountNumber, setResolvedAccountNumber] = useState('');
   const [acctLoading, setAcctLoading] = useState(false);
 
   // Site options
@@ -139,23 +122,42 @@ export default function AssignMeterPage() {
 
   // Auto-generate account number when community changes
   useEffect(() => {
+    if (resolvedAccountNumber) {
+      setAccountNumber(resolvedAccountNumber);
+      setAcctLoading(false);
+      return;
+    }
     if (!community) { setAccountNumber(''); return; }
     let cancelled = false;
     setAcctLoading(true);
-    getNextAccountNumber(community).then(acct => {
-      if (!cancelled) { setAccountNumber(acct); setAcctLoading(false); }
-    });
+    getNextAccountNumber(community)
+      .then(acct => {
+        if (!cancelled) { setAccountNumber(acct); }
+      })
+      .catch(() => {
+        if (!cancelled) { setAccountNumber(''); }
+      })
+      .finally(() => {
+        if (!cancelled) { setAcctLoading(false); }
+      });
     return () => { cancelled = true; };
-  }, [community]);
+  }, [community, resolvedAccountNumber]);
 
   // Lookup customer name when ID changes
   useEffect(() => {
-    if (!customerId.trim()) { setCustomerName(''); return; }
+    if (!customerId.trim()) {
+      setCustomerName('');
+      setResolvedAccountNumber('');
+      return;
+    }
     let cancelled = false;
     setCustomerLoading(true);
     const timer = setTimeout(() => {
-      getRecord('customers', customerId.trim())
-        .then(({ record }) => {
+      Promise.all([
+        getRecord('customers', customerId.trim()),
+        getCommissionData(customerId.trim()).catch(() => null),
+      ])
+        .then(([{ record }, commissionData]) => {
           if (!cancelled) {
             const first = record['first_name'] || '';
             const last = record['last_name'] || '';
@@ -168,9 +170,21 @@ export default function AssignMeterPage() {
             const gy = String(record['gps_lat'] || '');
             if (gy && !latitude) setLatitude(gy);
             if (gx && !longitude) setLongitude(gx);
+
+            const resolvedType = String(record['customer_type'] || record['customer_position'] || '');
+            if (resolvedType && !customerType) setCustomerType(resolvedType);
+
+            const existingAccount = String(commissionData?.account_number || '').trim();
+            setResolvedAccountNumber(existingAccount);
+            if (existingAccount) setAccountNumber(existingAccount);
           }
         })
-        .catch(() => { if (!cancelled) setCustomerName(''); })
+        .catch(() => {
+          if (!cancelled) {
+            setCustomerName('');
+            setResolvedAccountNumber('');
+          }
+        })
         .finally(() => { if (!cancelled) setCustomerLoading(false); });
     }, 500); // debounce
     return () => { cancelled = true; clearTimeout(timer); };
@@ -190,35 +204,22 @@ export default function AssignMeterPage() {
     setError('');
     setSuccess('');
 
-    const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
-
     try {
-      const meterData: Record<string, unknown> = {
-        'meter_id': meterid.trim(),
-        'community': community.toUpperCase(),
-        'customer_id_legacy': parseInt(customerId, 10),
-        'account_number': accountNumber.trim(),
-        'customer_type': customerType,
-        'customer_connect_date': connectDate || now,
-        'created_by': 'CC Portal',
-      };
-      if (villageName.trim()) meterData['village_name'] = villageName.trim();
-      if (latitude.trim()) meterData['latitude'] = latitude.trim();
-      if (longitude.trim()) meterData['longitude'] = longitude.trim();
+      const result = await assignMeter({
+        customer_identifier: customerId.trim(),
+        meter_id: meterid.trim(),
+        community: community.toUpperCase(),
+        customer_type: customerType,
+        account_number: accountNumber.trim().toUpperCase(),
+        connection_date: connectDate,
+        village_name: villageName.trim() || undefined,
+        latitude: latitude.trim() || undefined,
+        longitude: longitude.trim() || undefined,
+      });
 
-      await createRecord('meters', meterData);
-
-      const acctData: Record<string, unknown> = {
-        'account_number': accountNumber.trim(),
-        'meter_id': meterid.trim(),
-        'customer_id': parseInt(customerId, 10),
-        'community': community.toUpperCase(),
-        'created_by': 'CC Portal',
-      };
-
-      await createRecord('accounts', acctData);
-
-      setSuccess(`Meter ${meterid} assigned to customer ${customerId} with account ${accountNumber}`);
+      if (result.customer_id_legacy != null) setCustomerId(String(result.customer_id_legacy));
+      setAccountNumber(result.account_number);
+      setSuccess(result.message);
 
     } catch (e: any) {
       setError(e.message || 'Failed to assign meter');

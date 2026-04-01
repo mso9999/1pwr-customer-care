@@ -8,6 +8,8 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import SignatureCapture from '../components/SignatureCapture';
 
+const GENDER_OPTIONS = ['', 'Male', 'Female'];
+
 // ---------------------------------------------------------------------------
 // Extend Credit Wizard (4-step modal)
 // ---------------------------------------------------------------------------
@@ -501,11 +503,24 @@ export default function CustomerDetailPage() {
             <div key={field} className="bg-white p-3 sm:p-4">
               <label className="block text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 truncate">{field}</label>
               {editing ? (
-                <input
-                  value={formData[field] || ''}
-                  onChange={e => setFormData(prev => ({ ...prev, [field]: e.target.value }))}
-                  className="w-full px-2 py-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-                />
+                field === 'gender' ? (
+                  <select
+                    value={formData[field] || ''}
+                    onChange={e => setFormData(prev => ({ ...prev, [field]: e.target.value }))}
+                    className="w-full px-2 py-1.5 border rounded text-sm bg-white focus:ring-2 focus:ring-blue-500 outline-none"
+                  >
+                    <option value="">Not set</option>
+                    {GENDER_OPTIONS.filter(Boolean).map((option) => (
+                      <option key={option} value={option}>{option}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    value={formData[field] || ''}
+                    onChange={e => setFormData(prev => ({ ...prev, [field]: e.target.value }))}
+                    className="w-full px-2 py-1.5 border rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                )
               ) : (
                 <p className="text-sm text-gray-800 break-words">{record[field] != null ? String(record[field]) : <span className="text-gray-300">--</span>}</p>
               )}

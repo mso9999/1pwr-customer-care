@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { createRecord, listUGPConnections, type UGPConnection } from '../lib/api';
+import { listSites, listUGPConnections, registerCustomerRecord, type UGPConnection } from '../lib/api';
 
 // ---------------------------------------------------------------------------
 // Wizard step definitions
@@ -48,7 +48,7 @@ const steps: { title: string; description: string; fields: FieldDef[] }[] = [
     title: 'Service Details',
     description: 'Connection and metering information',
     fields: [
-      { key: 'customer_position', label: 'Customer Type', type: 'select', options: CUSTOMER_TYPES, required: true },
+      { key: 'customer_type', label: 'Customer Type', type: 'select', options: CUSTOMER_TYPES, required: true },
       { key: 'date_service_connected', label: 'Date Connected', type: 'date' },
     ],
   },
@@ -360,10 +360,9 @@ export default function NewCustomerWizard() {
   const [ugpLinked, setUgpLinked] = useState('');
 
   useEffect(() => {
-    fetch('/api/sites')
-      .then(r => r.json())
+    listSites()
       .then(d => {
-        const fetched = (d.sites || []).map((s: any) => s.concession).filter(Boolean);
+        const fetched = (d.sites || []).map((s) => s.concession).filter(Boolean);
         if (fetched.length > 0) setSites(fetched);
       })
       .catch(() => {});
@@ -376,7 +375,7 @@ export default function NewCustomerWizard() {
 
     set('community', site);
     if (conn.survey_id) set('plot_number', conn.survey_id);
-    if (conn.customer_type) set('customer_position', conn.customer_type);
+    if (conn.customer_type) set('customer_type', conn.customer_type);
     if (conn.gps_lat != null) set('gps_lat', String(conn.gps_lat));
     if (conn.gps_lon != null) set('gps_lon', String(conn.gps_lon));
 
@@ -410,15 +409,23 @@ export default function NewCustomerWizard() {
     setSaving(true);
     setError('');
     try {
-      const data: Record<string, unknown> = {};
-      const syntheticKeys = new Set(['GPS', '_ugp_picker']);
-      for (const [k, v] of Object.entries(form)) {
-        if (v.trim() && !syntheticKeys.has(k)) data[k] = v.trim();
-      }
-      data['created_by'] = 'CC Portal';
-      data['country'] = 'Lesotho';
-
-      await createRecord('customers', data);
+      await registerCustomerRecord({
+        first_name: form['first_name']?.trim() || '',
+        middle_name: form['middle_name']?.trim() || undefined,
+        gender: form['gender']?.trim() || undefined,
+        last_name: form['last_name']?.trim() || '',
+        community: form['community']?.trim().toUpperCase() || '',
+        phone: form['phone']?.trim() || undefined,
+        cell_phone_1: form['cell_phone_1']?.trim() || undefined,
+        national_id: form['national_id']?.trim() || undefined,
+        plot_number: form['plot_number']?.trim() || undefined,
+        street_address: form['street_address']?.trim() || undefined,
+        district: form['district']?.trim() || undefined,
+        customer_type: form['customer_type']?.trim() || undefined,
+        gps_lat: form['gps_lat']?.trim() || undefined,
+        gps_lon: form['gps_lon']?.trim() || undefined,
+        date_service_connected: form['date_service_connected']?.trim() || undefined,
+      });
       navigate('/customers', { replace: true });
     } catch (e: any) {
       setError(e.message || 'Failed to create customer');

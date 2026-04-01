@@ -2302,3 +2302,194 @@ Key evidence:
 - The PIP test server on EC2 should be converted to a systemd service for persistence
 - The WhatsApp bridge deploy path (scp to /home/ubuntu/whatsapp-logger/) should be documented in CONTEXT.md or automated in the deploy workflow
 - Question bank authoring at scale (280+ questions) is better done in a dedicated session, not bolted onto a multi-workstream conversation
+
+## Session 2026-03-28 202603281605 (1Meter commissioning OTA bootstrap implementation)
+
+### What Was Done
+- Implemented a dedicated commissioning build mode in the `onepwr-aws-mesh` firmware repo clone at `/tmp/onepwr-aws-mesh-review`.
+- Added `CONFIG_ONEPWR_COMMISSIONING_BUILD` to gate meter polling, RS485, publish timers, mesh bridge startup, and the hard restart watchdog out of the commissioning image.
+- Reworked `main/networking/wifi/app_wifi.c` so the commissioning build uses ESP-IDF Wi-Fi provisioning instead of the production mesh/bridge startup path, while preserving the existing TLS identity loading and MQTT/OTA path.
+- Added `sdkconfig.commissioning.defaults` as the commissioning overlay.
+- Split the build graph in `main/CMakeLists.txt` so commissioning builds only pull in MQTT/OTA + provisioning dependencies.
+- Replaced the old interactive Windows-centric cert/flash helpers with deterministic package tooling:
+  - `embed_certs.py` is now cross-platform and non-interactive
+  - `scripts/commissioning/build_device_package.py` builds one self-contained folder per device
+  - `scripts/commissioning/flash_device_package.py` flashes a package after checksum verification
+  - `auto_flash.py` now wraps the package flow instead of patching local state interactively
+  - `esp_cert_script.sh` now delegates to `embed_certs.py`
+- Added manufacturer and internal SOPs:
+  - `Docs/SOP-1meter-factory-commissioning.md`
+  - `Docs/SOP-1meter-commissioning-canary.md`
+- Updated `Docs/SOP-1meter-ota-setup.md` with the commissioning bootstrap workflow.
+
+### Key Decisions
+- Kept the v1 identity model per-device: Thing name remains explicit and package-specific rather than moving to runtime fleet provisioning.
+- Kept the existing `cust_flash` `esp_secure_cert` format to match the current firmware expectations.
+- Worked around a real upstream Espressif tool bug: `configure_esp_secure_cert.py` fails on `cust_flash --skip_flash`, so `embed_certs.py` now generates the legacy partition directly through the underlying module path when needed.
+- Reordered SNTP initialization in `main/main.c` to occur after `esp_netif` and the event loop are initialized.
+
+### What Next Session Should Know
+- Code/docs/package tooling are implemented, but **the real bench-canary step was not executable here**.
+- I validated the package tooling offline by:
+  - creating a synthetic certificate bundle and dummy binaries
+  - generating a full per-device package
+  - verifying manifest + checksums output
+  - dry-running the package flash command successfully
+- The blocking point for the remaining bench-canary task was environmental:
+  - no local USB serial bench device was visible
+  - SSH to the current remote firmware host `13.247.190.132:2222` with `/Users/mattmso/Downloads/EOver.pem` returned `Permission denied (publickey)`
+- If a next session needs to finish the final validation todo, it needs either:
+  - a real bench device connected locally, or
+  - working SSH access to the firmware host that has a device attached
+
+### Senescence Notes
+- No major senescence issue noticed in this implementation pass. The main risk was drifting into documentation without validating the tooling, so I forced an offline synthetic package build to confirm the new flow actually works.
+
+### Protocol Feedback
+- CONTEXT.md was useful for the remote build-host path and firmware repo boundary, but it would help to document the current authentication method for the firmware host if remote bench validation is expected from future sessions.
+- SESSION_LOG.md was useful for the earlier OTA/canary context and current firmware repo location.
+
+## Session 2026-03-29 202603291646 (Create provisional China prototype IoT identity)
+
+### What Was Done
+- Created a provisional China prototype AWS IoT identity:
+  - device ID: `CN-PROTOTYPE-01`
+  - Thing name: `OneMeter121`
+- Created the AWS IoT Thing in `us-east-1` and attached the standard fleet policy `DevicePolicy`.
+- Generated the AWS certificate/key pair for `OneMeter121`.
+- Saved the local cert bundle in the firmware repo clone under:
+  - `/tmp/onepwr-aws-mesh-review/main/certs/onemeter121/`
+- Generated the matching `esp_secure_cert.bin` for that identity.
+- Added safe local metadata and helper files:
+  - `identity-metadata.json`
+  - `README.txt`
+  - `scripts/commissioning/china_prototype_01.csv`
+
+### Key Decisions
+- Used `OneMeter121` rather than a custom non-fleet Thing name so the prototype stays aligned with the existing `OneMeterNNN` fleet naming and current MQTT/OTA assumptions.
+- Attached only `DevicePolicy`; the older `ExampleThing-Policy` attached to some legacy certs was not reused because it is example/test-specific and not required for the current device flow.
+- Deleted the raw AWS `create-keys-and-certificate` response JSON after creation because it duplicated the private key material.
+
+### What Next Session Should Know
+- The cert folder now contains:
+  - `AmazonRootCA1.pem`
+  - `OneMeter121-certificate.pem.crt`
+  - `OneMeter121-private.pem.key`
+  - `OneMeter121-public.pem.key`
+  - `esp_secure_cert.bin`
+- The safe metadata file is:
+  - `/tmp/onepwr-aws-mesh-review/main/certs/onemeter121/identity-metadata.json`
+- The commissioning app binary/package was **not** built in this step; this created the cloud identity and cert artifacts only.
+- I also fixed another real bug in `embed_certs.py`: the CLI path now correctly uses the legacy direct-generation workaround for `cust_flash --skip_flash`, matching the internal package-builder behavior.
+
+### Senescence Notes
+- No major degradation noticed in this step. The main risk was accidentally retaining duplicated secret material from raw AWS responses, which was cleaned up immediately.
+
+### Protocol Feedback
+- The repo would benefit from a documented convention for provisional prototype numbering (for example, reserving a range like `OneMeter121+` for factory canaries) so future sessions do not have to infer the next free fleet number manually.
+
+## Session 2026-03-30 202603300054 (Finalize China prototype commissioning package)
+
+### What Was Done
+- Verified and rebuilt the commissioning package for `CN-PROTOTYPE-01` / `OneMeter121` after finding that the package builder was defaulting to the repo MQTT endpoint instead of the endpoint stored with the device identity metadata.
+- Updated `scripts/commissioning/build_device_package.py` in the firmware repo clone so it prefers `main/certs/<device>/identity-metadata.json` for `mqtt_endpoint`, falling back to the repo default only if no per-device metadata exists.
+- Rebuilt the full commissioning package and confirmed the corrected endpoint is now present in both:
+  - `build_commissioning/CN-PROTOTYPE-01-OneMeter121/device.defaults`
+  - `releases/commissioning/CN-PROTOTYPE-01-OneMeter121/manifest.json`
+- Created the sendable archive:
+  - `/tmp/onepwr-aws-mesh-review/releases/commissioning/CN-PROTOTYPE-01-OneMeter121.zip`
+- Re-ran the packaged `flash_device_package.py --dry-run` successfully after the rebuild.
+
+### Key Decisions
+- Treated the endpoint mismatch as a root-cause defect in package generation, not a documentation issue, because the MQTT endpoint is compiled into the commissioning image and must match the cert bundle's AWS region.
+- Completed the per-device packaging task only after the rebuilt package, manifest, dry-run flash helper, and zip archive all matched the device identity metadata.
+
+### What Next Session Should Know
+- The ready-to-send package folder is:
+  - `/tmp/onepwr-aws-mesh-review/releases/commissioning/CN-PROTOTYPE-01-OneMeter121/`
+- The ready-to-send zip archive is:
+  - `/tmp/onepwr-aws-mesh-review/releases/commissioning/CN-PROTOTYPE-01-OneMeter121.zip`
+- The package now targets the endpoint from the `OneMeter121` identity bundle:
+  - `a3p95svnbmzyit-ats.iot.us-east-1.amazonaws.com`
+- Remaining open task: real bench validation from factory flash through OTA of the full firmware (`bench-canary-ota`) still needs either a local device or working access to a remote bench/build host with hardware attached.
+
+### Senescence Notes
+- No major degradation noticed in this closing step. Re-orientation was useful because the workspace protocol and the active firmware repo live in different locations.
+
+### Protocol Feedback
+- `CONTEXT.md` was useful for the firmware-host / repo-boundary reminder, but it may be worth documenting that ad hoc firmware packaging work often happens in a disposable clone under `/tmp`, so future sessions do not assume the CC repo itself contains the firmware sources.
+
+## Session 2026-04-01 202604010750 (Deploy signature upload and write-permission guardrails)
+
+### What Was Done
+- Added JPEG signature upload support to the frontend alongside the existing drawn-signature canvas.
+  - New shared component: `acdb-api/frontend/src/components/SignatureCapture.tsx`
+  - Wired into:
+    - `acdb-api/frontend/src/pages/CommissionCustomerPage.tsx`
+    - `acdb-api/frontend/src/pages/CustomerDetailPage.tsx`
+- Investigated O&M team reports of `POST /api/tables/meters 403 (Forbidden)` from the Assign Meter flow.
+- Traced the backend enforcement path:
+  - `acdb-api/crud.py` rejects writes when `middleware.can_write_table()` returns false
+  - `acdb-api/middleware.py` only allows customer/meter writes when `user.permissions.write_customers` is true
+  - `acdb-api/models.py` sets `write_customers=False` for the `generic` role
+- Found the frontend mismatch that caused the confusing failure:
+  - `acdb-api/frontend/src/contexts/AuthContext.tsx` previously treated every employee as `canWrite`
+  - this exposed customer-write workflows to `generic` users even though the backend correctly blocks them
+- Fixed the frontend permission model and route gating:
+  - added `canWriteCustomers` derived from backend permissions
+  - restricted `/customers/new`, `/assign-meter`, and `/commission` to `superadmin` or `onm_team`
+  - hid customer-write actions from users without customer-write permission on:
+    - `CustomersPage`
+    - `MetersPage`
+    - `AccountsPage`
+    - `DashboardPage`
+    - `CustomerDetailPage`
+- Built and deployed the frontend changes to production by pushing `main`.
+- Verified GitHub Actions deploy success:
+  - run: `23837954421`
+  - URL: `https://github.com/mso9999/1pwr-customer-care/actions/runs/23837954421`
+
+### Key Decisions
+- Treated the `403` as a real UX/permission alignment bug, not a backend defect.
+- Kept the backend write rules unchanged because they already matched the intended role model.
+- Deployed the earlier user-requested JPEG signature upload together with the permission guardrails because the touched customer-detail/commissioning frontend code was already intertwined and both changes built cleanly.
+
+### What Next Session Should Know
+- Production now hides the main customer-write workflows from `generic` users, so they should see an access-denied guard instead of reaching a form that ends in a `403`.
+- The immediate operational fix for any affected O&M staff account is still to assign the user the `onm_team` role in the Admin Roles UI.
+- The strongest current explanation for the reported user landing as `generic` is:
+  - no manual CC role override
+  - and/or no successful PR department mapping for that employee at login
+- I could inspect the local Firestore-backed PR lookup schema, but did not positively identify the reported employee by name from this workspace snapshot, so the live user-specific role source still needs confirmation if we want to fix auto-mapping rather than just apply a manual override.
+
+### Senescence Notes
+- No major degradation detected in this pass. The main risk was conflating an expected backend permission denial with a backend bug; tracing both the role model and the frontend auth context avoided that.
+
+### Protocol Feedback
+- The repo would benefit from a small documented matrix of frontend action groups versus backend permission flags (`write_customers`, `write_transactions`) so future sessions do not infer write access from “employee” status alone.
+
+## Session 2026-04-01 202604011032 (Restore optional customer gender field)
+
+### What Was Done
+- Added a new migration file `acdb-api/migrations/004_add_gender_to_customers.sql` to restore `customers.gender` as an optional nullable column.
+- Updated `acdb-api/registration.py` so single-customer registration and bulk import both accept optional gender, normalize it to canonical values, and continue normalizing phone numbers before insert.
+- Updated `acdb-api/customer_api.py` normalized customer responses to include `gender`.
+- Restored the optional Gender selector in `acdb-api/frontend/src/pages/NewCustomerWizard.tsx`.
+- Constrained customer edit mode in `acdb-api/frontend/src/pages/CustomerDetailPage.tsx` so `gender` is edited via a dropdown instead of free text.
+
+### Key Decisions
+- Stored gender on `customers`, not `accounts`, because it is customer demographic data and duplicating it per account would create drift risk.
+- Kept the allowed UI/API values canonical (`Male` / `Female`) and optional, rather than reintroducing an unconstrained text field.
+
+### What Next Session Should Know
+- The schema change is staged in the repo as a migration file but has not been deployed/applied to production yet.
+- After the migration runs, the create-customer flow and customer detail page are ready to use the field immediately.
+- Validation passed locally:
+  - `python3 -m py_compile acdb-api/registration.py acdb-api/customer_api.py`
+  - `cd acdb-api/frontend && npx tsc -b --noEmit`
+
+### Senescence Notes
+- No major degradation noticed in this step. The main risk was reintroducing `gender` on the wrong entity; tracing the current customer/account model avoided that.
+
+### Protocol Feedback
+- The protocol docs are helpful on entity ownership (`1PDB` as source of truth), but a short note on when generic CRUD pages are safe versus when a dedicated workflow endpoint should be preferred would make future schema fixes faster.

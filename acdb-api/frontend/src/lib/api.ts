@@ -246,6 +246,32 @@ export async function decommissionMeter(
   });
 }
 
+export interface AssignMeterRequest {
+  customer_identifier: string;
+  meter_id: string;
+  community: string;
+  customer_type: string;
+  account_number: string;
+  connection_date: string;
+  village_name?: string;
+  latitude?: string;
+  longitude?: string;
+}
+
+export interface AssignMeterResult {
+  message: string;
+  meter_id: string;
+  account_number: string;
+  customer_id_legacy: number | null;
+}
+
+export async function assignMeter(data: AssignMeterRequest): Promise<AssignMeterResult> {
+  return request('/meters/assign', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
 export async function getMeterHistory(meterId: string): Promise<{ meter_id: string; assignments: MeterAssignment[] }> {
   return request(`/meters/${encodeURIComponent(meterId)}/history`);
 }
@@ -375,6 +401,53 @@ export async function removeRole(employee_id: string) {
 
 export async function listSites() {
   return request<{ sites: { concession: string; customer_count: number }[]; total_sites: number }>('/sites');
+}
+
+export interface NextAccountPreview {
+  community: string;
+  next_account_number: string;
+}
+
+export async function previewNextAccount(community: string): Promise<NextAccountPreview> {
+  return request(`/customers/next-account?community=${encodeURIComponent(community)}`);
+}
+
+export interface CustomerRegistrationRequest {
+  first_name: string;
+  middle_name?: string;
+  gender?: string;
+  last_name: string;
+  community: string;
+  phone?: string;
+  cell_phone_1?: string;
+  cell_phone_2?: string;
+  email?: string;
+  national_id?: string;
+  plot_number?: string;
+  street_address?: string;
+  city?: string;
+  district?: string;
+  customer_type?: string;
+  gps_lat?: string;
+  gps_lon?: string;
+  date_service_connected?: string;
+  meter_id?: string;
+}
+
+export interface CustomerRegistrationResult {
+  account_number: string;
+  customer_id: number;
+  customer_id_legacy: number;
+  first_name: string;
+  last_name: string;
+  community: string;
+}
+
+export async function registerCustomerRecord(data: CustomerRegistrationRequest): Promise<CustomerRegistrationResult> {
+  return request('/customers/register', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
 }
 
 export interface UGPConnection {
