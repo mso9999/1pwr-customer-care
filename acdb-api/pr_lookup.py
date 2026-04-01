@@ -71,15 +71,8 @@ def _ensure_firebase():
 _DEPT_TO_ROLE: dict[str, str] = {}
 
 _ONM_DEPARTMENTS = [
-    "o&m", "o_m", "o_m_smp",
-    "reticulation", "reticulation_smp",
-    "production", "production_smp",
-    "engineering", "mechanical_engineering",
-    "ehs",
-    "pueco",
-    "asset_management", "asset management",
-    "fleet",
-    "facilities",
+    "o&m",
+    "o_m",
 ]
 
 _FINANCE_DEPARTMENTS = [
