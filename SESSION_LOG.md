@@ -2493,3 +2493,31 @@ Key evidence:
 
 ### Protocol Feedback
 - The protocol docs are helpful on entity ownership (`1PDB` as source of truth), but a short note on when generic CRUD pages are safe versus when a dedicated workflow endpoint should be preferred would make future schema fixes faster.
+
+## Session 2026-04-01 202604011330 (Verify om_report.py PostgreSQL migration)
+
+### What Was Done
+- Investigated task to migrate `acdb-api/om_report.py` from ACCDB to 1PDB (PostgreSQL).
+- **Found that the migration is already complete**:
+  - `om_report.py` uses `_get_connection()` which returns a psycopg2 PostgreSQL connection
+  - All queries use PostgreSQL table names: `customers`, `transactions`, `meters`, `meter_readings`, `accounts`, `monthly_transactions`, `monthly_consumption`, `hourly_consumption`
+  - All column names use snake_case: `community`, `date_service_connected`, `transaction_date`, `kwh_value`, etc.
+  - No ACCDB artifacts remain: no `pyodbc`, no bracket-quoted column names, no `tbl*` table prefixes
+- Verified `psycopg2-binary` is already in `acdb-api/requirements.txt`
+- Confirmed ACCDB code is archived in `legacy/accdb/` folder (not in active runtime)
+- The `om-report-pg-migration` branch is at the same commit as `main` with no additional changes needed
+
+### Key Decisions
+- No code changes required — the migration was completed in prior sessions
+- The task description appears to reference an outdated state of the codebase
+
+### What Next Session Should Know
+- `om_report.py` is fully PostgreSQL-native; no further migration work needed
+- The ACCDB import tools are preserved in `legacy/accdb/` for historical reference but are not used in production
+- The CC backend runs entirely on 1PDB (PostgreSQL) via psycopg2
+
+### Senescence Notes
+- No degradation in this quick verification pass.
+
+### Protocol Feedback
+- The task description in the issue was outdated. Future issues should reference the current state of the codebase or link to the relevant commit history.
