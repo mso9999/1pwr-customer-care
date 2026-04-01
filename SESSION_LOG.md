@@ -2494,6 +2494,41 @@ Key evidence:
 ### Protocol Feedback
 - The protocol docs are helpful on entity ownership (`1PDB` as source of truth), but a short note on when generic CRUD pages are safe versus when a dedicated workflow endpoint should be preferred would make future schema fixes faster.
 
+## Session 2026-04-01 202604011037 (World Bank data export script)
+
+### What Was Done
+- Created `scripts/wb_data_export.py` (v1.0.0) - a Python script that queries CC API O&M report endpoints and generates an Excel workbook for World Bank energy team analysis.
+- The script produces 8 sheets covering:
+  1. Portfolio Overview - Total customers, sites, MWh, revenue
+  2. Customer Growth - Quarterly new connections with cumulative totals and growth rate
+  3. Consumption by Site - Quarterly kWh per site with full names
+  4. Average Consumption Trend - Average daily kWh per customer per quarter
+  5. Load Curves by Type - Consumption by customer type (HH, SME, institution)
+  6. Daily Load Profiles - 24-hour average power by customer type
+  7. ARPU - Quarterly and monthly revenue per user
+  8. Revenue by Site - Quarterly LSL revenue per site
+- Features: JWT auth, configurable API URL, styled worksheets (bold headers, frozen rows, auto-width), data validation checks
+- Validated Python syntax passes
+- Created draft PR #2 for the feature
+
+### Key Decisions
+- Used `requests` + `openpyxl` (both already in requirements.txt) rather than adding new dependencies
+- Script is standalone and queries the existing O&M report API endpoints rather than accessing DB directly
+- Added version string `__version__ = "1.0.0"` for tracking
+
+### What Next Session Should Know
+- The script is on branch `wb-data-export` and has a draft PR
+- To use: `python scripts/wb_data_export.py --token <JWT> --api-url https://cc.1pwrafrica.com`
+- Requires valid JWT token for API authentication
+- Output file defaults to `wb_demand_analysis_YYYYMMDD.xlsx` in current directory
+
+### Senescence Notes
+- No degradation noted. This was a fresh implementation session.
+
+### Protocol Feedback
+- CONTEXT.md and SESSION_LOG.md provided good orientation on the API structure and O&M report endpoints
+- The `.cursorrules` doesn't specify version conventions for new scripts; I added a standard `__version__` string
+
 ## Session 2026-04-01 202604011330 (Verify om_report.py PostgreSQL migration)
 
 ### What Was Done

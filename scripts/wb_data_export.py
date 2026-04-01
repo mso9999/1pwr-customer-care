@@ -17,6 +17,8 @@ Environment:
     CC_JWT_TOKEN      JWT token for API authentication
 """
 
+__version__ = "1.0.0"
+
 import argparse
 import os
 import sys
