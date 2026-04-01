@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { listSites, listUGPConnections, registerCustomerRecord, type UGPConnection } from '../lib/api';
+import { listSites, listUGPConnections, registerCustomerRecord, type CustomerRegistrationResult, type UGPConnection } from '../lib/api';
 
 // ---------------------------------------------------------------------------
 // Wizard step definitions
@@ -358,6 +358,7 @@ export default function NewCustomerWizard() {
   const [sites, setSites] = useState<string[]>([]);
   const [showUGPPicker, setShowUGPPicker] = useState(false);
   const [ugpLinked, setUgpLinked] = useState('');
+  const [createdCustomer, setCreatedCustomer] = useState<CustomerRegistrationResult | null>(null);
 
   useEffect(() => {
     listSites()
@@ -369,6 +370,15 @@ export default function NewCustomerWizard() {
   }, []);
 
   const set = (key: string, value: string) => setForm(prev => ({ ...prev, [key]: value }));
+  const resetWizard = () => {
+    setStep(0);
+    setForm({});
+    setSaving(false);
+    setError('');
+    setShowUGPPicker(false);
+    setUgpLinked('');
+    setCreatedCustomer(null);
+  };
 
   const handleUGPSelect = (conn: UGPConnection, site: string) => {
     setShowUGPPicker(false);
@@ -409,7 +419,7 @@ export default function NewCustomerWizard() {
     setSaving(true);
     setError('');
     try {
-      await registerCustomerRecord({
+      const result = await registerCustomerRecord({
         first_name: form['first_name']?.trim() || '',
         middle_name: form['middle_name']?.trim() || undefined,
         gender: form['gender']?.trim() || undefined,
@@ -426,7 +436,7 @@ export default function NewCustomerWizard() {
         gps_lon: form['gps_lon']?.trim() || undefined,
         date_service_connected: form['date_service_connected']?.trim() || undefined,
       });
-      navigate('/customers', { replace: true });
+      setCreatedCustomer(result);
     } catch (e: any) {
       setError(e.message || 'Failed to create customer');
     } finally {
@@ -574,6 +584,7 @@ export default function NewCustomerWizard() {
 
   const isReview = step === steps.length;
   const currentStep = isReview ? null : steps[step];
+  const createdName = createdCustomer ? [createdCustomer.first_name, createdCustomer.last_name].filter(Boolean).join(' ') : '';
 
   return (
     <div className="max-w-lg mx-auto pb-8">
@@ -588,68 +599,138 @@ export default function NewCustomerWizard() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
         </button>
-        <h1 className="text-xl font-bold text-gray-800">New Customer</h1>
+        <h1 className="text-xl font-bold text-gray-800">{createdCustomer ? 'Customer Created' : 'New Customer'}</h1>
       </div>
 
-      {/* Progress */}
-      <ProgressBar current={step} total={TOTAL_STEPS} />
+      {!createdCustomer && (
+        <>
+          {/* Progress */}
+          <ProgressBar current={step} total={TOTAL_STEPS} />
 
-      {/* Step content card */}
-      <div className="bg-white rounded-2xl shadow-sm border p-5 sm:p-6 min-h-[320px]">
-        <div className="mb-5">
-          <h2 className="text-lg font-semibold text-gray-800">
-            {isReview ? 'Review & Submit' : currentStep!.title}
-          </h2>
-          <p className="text-sm text-gray-400 mt-0.5">
-            {isReview ? 'Confirm all details are correct' : currentStep!.description}
-          </p>
-        </div>
+          {/* Step content card */}
+          <div className="bg-white rounded-2xl shadow-sm border p-5 sm:p-6 min-h-[320px]">
+            <div className="mb-5">
+              <h2 className="text-lg font-semibold text-gray-800">
+                {isReview ? 'Review & Submit' : currentStep!.title}
+              </h2>
+              <p className="text-sm text-gray-400 mt-0.5">
+                {isReview ? 'Confirm all details are correct' : currentStep!.description}
+              </p>
+            </div>
 
-        {isReview ? renderReview() : (
-          <div className="grid grid-cols-2 gap-4">
-            {currentStep!.fields.map(renderField)}
+            {isReview ? renderReview() : (
+              <div className="grid grid-cols-2 gap-4">
+                {currentStep!.fields.map(renderField)}
+              </div>
+            )}
+
+            {error && (
+              <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
+                {error}
+              </div>
+            )}
           </div>
-        )}
 
-        {error && (
-          <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">
-            {error}
+          {/* Navigation buttons */}
+          <div className="flex gap-3 mt-6">
+            {step > 0 && (
+              <button
+                onClick={goBack}
+                className="flex-1 py-4 bg-gray-100 text-gray-700 rounded-xl font-medium text-base hover:bg-gray-200 active:bg-gray-300 transition"
+              >
+                Back
+              </button>
+            )}
+            {isReview ? (
+              <button
+                onClick={handleSubmit}
+                disabled={saving}
+                className="flex-1 py-4 bg-blue-600 text-white rounded-xl font-semibold text-base hover:bg-blue-700 active:bg-blue-800 disabled:opacity-50 transition"
+              >
+                {saving ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="animate-spin inline-block w-5 h-5 border-2 border-white border-t-transparent rounded-full" />
+                    Creating...
+                  </span>
+                ) : 'Create Customer'}
+              </button>
+            ) : (
+              <button
+                onClick={goNext}
+                className="flex-1 py-4 bg-blue-600 text-white rounded-xl font-semibold text-base hover:bg-blue-700 active:bg-blue-800 transition"
+              >
+                Next
+              </button>
+            )}
           </div>
-        )}
-      </div>
+        </>
+      )}
 
-      {/* Navigation buttons */}
-      <div className="flex gap-3 mt-6">
-        {step > 0 && (
+      {createdCustomer && (
+        <>
+          <div className="bg-white rounded-2xl shadow-sm border p-5 sm:p-6">
+            <div className="flex items-start gap-3 p-4 bg-green-50 border border-green-200 rounded-xl">
+              <svg className="w-6 h-6 text-green-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              <div>
+                <h2 className="text-lg font-semibold text-green-900">Customer saved to CC / 1PDB</h2>
+                <p className="text-sm text-green-800 mt-1">
+                  Keep these generated identifiers for follow-up work in CC.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 bg-gray-50 rounded-xl border divide-y">
+              <div className="flex items-start justify-between gap-4 px-4 py-3">
+                <span className="text-sm text-gray-500">Customer Name</span>
+                <span className="text-sm font-medium text-gray-900 text-right">{createdName}</span>
+              </div>
+              <div className="flex items-start justify-between gap-4 px-4 py-3">
+                <span className="text-sm text-gray-500">Customer ID</span>
+                <span className="text-sm font-semibold font-mono text-gray-900 text-right">
+                  {createdCustomer.customer_id_legacy}
+                </span>
+              </div>
+              <div className="flex items-start justify-between gap-4 px-4 py-3">
+                <span className="text-sm text-gray-500">Account Number</span>
+                <span className="text-sm font-semibold font-mono text-gray-900 text-right">
+                  {createdCustomer.account_number}
+                </span>
+              </div>
+              <div className="flex items-start justify-between gap-4 px-4 py-3">
+                <span className="text-sm text-gray-500">Site</span>
+                <span className="text-sm font-medium text-gray-900 text-right">{createdCustomer.community}</span>
+              </div>
+            </div>
+
+            <p className="mt-4 text-sm text-gray-500">
+              The numeric customer ID above is the generated portal customer ID. The account number is separate.
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-3 mt-6">
+            <button
+              onClick={() => navigate(`/customers/${createdCustomer.customer_id_legacy}`)}
+              className="flex-1 py-4 bg-blue-600 text-white rounded-xl font-semibold text-base hover:bg-blue-700 active:bg-blue-800 transition"
+            >
+              Open Customer Record
+            </button>
+            <button
+              onClick={resetWizard}
+              className="flex-1 py-4 bg-gray-100 text-gray-700 rounded-xl font-medium text-base hover:bg-gray-200 active:bg-gray-300 transition"
+            >
+              Create Another
+            </button>
+          </div>
           <button
-            onClick={goBack}
-            className="flex-1 py-4 bg-gray-100 text-gray-700 rounded-xl font-medium text-base hover:bg-gray-200 active:bg-gray-300 transition"
+            onClick={() => navigate('/customers', { replace: true })}
+            className="w-full mt-3 py-3 text-sm text-gray-500 hover:text-gray-700"
           >
-            Back
+            Back to Customers
           </button>
-        )}
-        {isReview ? (
-          <button
-            onClick={handleSubmit}
-            disabled={saving}
-            className="flex-1 py-4 bg-blue-600 text-white rounded-xl font-semibold text-base hover:bg-blue-700 active:bg-blue-800 disabled:opacity-50 transition"
-          >
-            {saving ? (
-              <span className="flex items-center justify-center gap-2">
-                <span className="animate-spin inline-block w-5 h-5 border-2 border-white border-t-transparent rounded-full" />
-                Creating...
-              </span>
-            ) : 'Create Customer'}
-          </button>
-        ) : (
-          <button
-            onClick={goNext}
-            className="flex-1 py-4 bg-blue-600 text-white rounded-xl font-semibold text-base hover:bg-blue-700 active:bg-blue-800 transition"
-          >
-            Next
-          </button>
-        )}
-      </div>
+        </>
+      )}
 
       {/* uGridPlan picker modal */}
       {showUGPPicker && (
