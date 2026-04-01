@@ -52,12 +52,12 @@ export default function App() {
             {/* Employee routes */}
             <Route path="dashboard" element={<ProtectedRoute requireEmployee><DashboardPage /></ProtectedRoute>} />
             <Route path="customers" element={<ProtectedRoute requireEmployee><CustomersPage /></ProtectedRoute>} />
-            <Route path="customers/new" element={<ProtectedRoute requireEmployee><NewCustomerWizard /></ProtectedRoute>} />
+            <Route path="customers/new" element={<ProtectedRoute requireEmployee requireRole={['superadmin', 'onm_team']}><NewCustomerWizard /></ProtectedRoute>} />
             <Route path="customers/:id" element={<ProtectedRoute requireEmployee><CustomerDetailPage /></ProtectedRoute>} />
             <Route path="meters" element={<ProtectedRoute requireEmployee><MetersPage /></ProtectedRoute>} />
             <Route path="accounts" element={<ProtectedRoute requireEmployee><AccountsPage /></ProtectedRoute>} />
             <Route path="transactions" element={<ProtectedRoute requireEmployee><TransactionsPage /></ProtectedRoute>} />
-            <Route path="assign-meter" element={<ProtectedRoute requireEmployee><AssignMeterPage /></ProtectedRoute>} />
+            <Route path="assign-meter" element={<ProtectedRoute requireEmployee requireRole={['superadmin', 'onm_team']}><AssignMeterPage /></ProtectedRoute>} />
             <Route path="customer-data" element={<ProtectedRoute requireEmployee><CustomerDataPage /></ProtectedRoute>} />
             <Route path="tables" element={<ProtectedRoute requireEmployee><TablesPage /></ProtectedRoute>} />
             <Route path="tables/:name" element={<ProtectedRoute requireEmployee><TableBrowserPage /></ProtectedRoute>} />
@@ -66,7 +66,7 @@ export default function App() {
             <Route path="om-report" element={<ProtectedRoute requireEmployee><OMReportPage /></ProtectedRoute>} />
             <Route path="financial" element={<ProtectedRoute requireEmployee><FinancialPage /></ProtectedRoute>} />
             <Route path="sync" element={<ProtectedRoute requireEmployee><SyncPage /></ProtectedRoute>} />
-            <Route path="commission" element={<ProtectedRoute requireEmployee><CommissionCustomerPage /></ProtectedRoute>} />
+            <Route path="commission" element={<ProtectedRoute requireEmployee requireRole={['superadmin', 'onm_team']}><CommissionCustomerPage /></ProtectedRoute>} />
             <Route path="tariffs" element={<ProtectedRoute requireEmployee><TariffManagementPage /></ProtectedRoute>} />
             <Route path="check-meters" element={<ProtectedRoute requireEmployee><CheckMeterPage /></ProtectedRoute>} />
             <Route path="financing" element={<ProtectedRoute requireEmployee><FinancingPage /></ProtectedRoute>} />

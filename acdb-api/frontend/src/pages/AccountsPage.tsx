@@ -11,7 +11,7 @@ export default function AccountsPage() {
   const [filterSite, setFilterSite] = useState('');
   const [sites, setSites] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const { canWrite } = useAuth();
+  const { canWrite, canWriteCustomers } = useAuth();
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -84,7 +84,7 @@ export default function AccountsPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Accounts</h1>
-        {canWrite && (
+        {canWriteCustomers && (
           <Link to="/assign-meter" className="px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 active:bg-blue-800 transition flex items-center gap-1.5">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
             New Account

@@ -20,7 +20,7 @@ export default function CustomersPage() {
   const [filterSite, setFilterSite] = useState('');
   const [sites, setSites] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const { canWrite } = useAuth();
+  const { canWriteCustomers } = useAuth();
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -202,7 +202,7 @@ export default function CustomersPage() {
 
     return (
       <tr key={i} className={`hover:bg-gray-50 ${isSelected ? 'bg-blue-50' : ''}`}>
-        {canWrite && (
+        {canWriteCustomers && (
           <td className="px-3 py-2">
             <input
               type="checkbox"
@@ -274,7 +274,7 @@ export default function CustomersPage() {
     return (
       <div key={i} className={`bg-white rounded-lg shadow p-4 ${isSelected ? 'ring-2 ring-blue-400' : ''}`}>
         <div className="flex items-start gap-3">
-          {canWrite && (
+          {canWriteCustomers && (
             <input
               type="checkbox"
               checked={isSelected}
@@ -299,7 +299,7 @@ export default function CustomersPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Customers</h1>
-        {canWrite && tab === 'active' && (
+        {canWriteCustomers && tab === 'active' && (
           <div className="flex gap-2">
             <Link to="/assign-meter" className="px-4 py-2.5 bg-emerald-600 text-white rounded-xl text-sm font-medium hover:bg-emerald-700 active:bg-emerald-800 transition flex items-center gap-1.5">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
@@ -318,7 +318,7 @@ export default function CustomersPage() {
       </div>
 
       {/* Tab bar */}
-      {canWrite && (
+      {canWriteCustomers && (
         <div className="flex border-b">
           <button
             onClick={() => switchTab('active')}
@@ -383,7 +383,7 @@ export default function CustomersPage() {
       )}
 
       {/* Selection action bar */}
-      {canWrite && selected.size > 0 && (
+      {canWriteCustomers && selected.size > 0 && (
         <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
           <span className="text-sm font-medium text-blue-800">
             {selected.size} record{selected.size !== 1 ? 's' : ''} selected
@@ -445,7 +445,7 @@ export default function CustomersPage() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b">
                 <tr>
-                  {canWrite && (
+                  {canWriteCustomers && (
                     <th className="px-3 py-3 w-10">
                       <input
                         type="checkbox"
@@ -473,7 +473,7 @@ export default function CustomersPage() {
 
           {/* Mobile card list */}
           <div className="md:hidden space-y-2">
-            {canWrite && data.rows.length > 0 && (
+            {canWriteCustomers && data.rows.length > 0 && (
               <button
                 onClick={toggleAll}
                 className="text-sm text-blue-600 font-medium px-1 py-1"

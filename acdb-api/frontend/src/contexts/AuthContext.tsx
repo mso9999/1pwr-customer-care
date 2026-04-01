@@ -21,6 +21,7 @@ interface AuthContextType {
   isCustomer: boolean;
   isSuperadmin: boolean;
   canWrite: boolean;
+  canWriteCustomers: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -65,10 +66,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isEmployee = user?.user_type === 'employee';
   const isCustomer = user?.user_type === 'customer';
   const isSuperadmin = user?.role === 'superadmin';
-  const canWrite = isEmployee;
+  const canWrite = Boolean(user?.permissions?.write_customers || user?.permissions?.write_transactions);
+  const canWriteCustomers = Boolean(user?.permissions?.write_customers);
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, loading, isEmployee, isCustomer, isSuperadmin, canWrite }}>
+    <AuthContext.Provider value={{ user, token, login, logout, loading, isEmployee, isCustomer, isSuperadmin, canWrite, canWriteCustomers }}>
       {children}
     </AuthContext.Provider>
   );

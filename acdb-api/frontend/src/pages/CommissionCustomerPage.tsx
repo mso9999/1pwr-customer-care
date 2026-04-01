@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   getCommissionData,
@@ -11,6 +11,7 @@ import {
   type UpstreamWarning,
   type UGPConnection,
 } from '../lib/api';
+import SignatureCapture from '../components/SignatureCapture';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -65,114 +66,6 @@ function GPSCapture({ lat, lng, onChange }: { lat: string; lng: string; onChange
         )}
       </button>
       {error && <p className="text-red-500 text-xs">{error}</p>}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Signature Canvas
-// ---------------------------------------------------------------------------
-
-function SignatureCanvas({ onCapture }: { onCapture: (b64: string) => void }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [hasContent, setHasContent] = useState(false);
-
-  const getPos = useCallback((e: React.TouchEvent | React.MouseEvent) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-    if ('touches' in e) {
-      return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
-    }
-    return { x: (e as React.MouseEvent).clientX - rect.left, y: (e as React.MouseEvent).clientY - rect.top };
-  }, []);
-
-  const startDraw = useCallback((e: React.TouchEvent | React.MouseEvent) => {
-    e.preventDefault();
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (!ctx) return;
-    const pos = getPos(e);
-    ctx.beginPath();
-    ctx.moveTo(pos.x, pos.y);
-    setIsDrawing(true);
-  }, [getPos]);
-
-  const draw = useCallback((e: React.TouchEvent | React.MouseEvent) => {
-    e.preventDefault();
-    if (!isDrawing) return;
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (!ctx) return;
-    const pos = getPos(e);
-    ctx.lineTo(pos.x, pos.y);
-    ctx.strokeStyle = '#000';
-    ctx.lineWidth = 2;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.stroke();
-    setHasContent(true);
-  }, [isDrawing, getPos]);
-
-  const endDraw = useCallback(() => {
-    setIsDrawing(false);
-  }, []);
-
-  const clearCanvas = () => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (!ctx || !canvas) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    setHasContent(false);
-  };
-
-  const acceptSignature = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    // Convert to JPEG base64
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-    const b64 = dataUrl.split(',')[1]; // strip data:image/jpeg;base64,
-    onCapture(b64);
-  };
-
-  // Size canvas to container on mount
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const parent = canvas.parentElement;
-    if (parent) {
-      canvas.width = parent.clientWidth;
-      canvas.height = Math.min(200, parent.clientWidth * 0.4);
-    }
-  }, []);
-
-  return (
-    <div className="space-y-3">
-      <div className="border-2 border-gray-300 rounded-xl overflow-hidden bg-white touch-none">
-        <canvas
-          ref={canvasRef}
-          className="w-full cursor-crosshair"
-          onMouseDown={startDraw}
-          onMouseMove={draw}
-          onMouseUp={endDraw}
-          onMouseLeave={endDraw}
-          onTouchStart={startDraw}
-          onTouchMove={draw}
-          onTouchEnd={endDraw}
-        />
-      </div>
-      <p className="text-xs text-gray-400 text-center">Sign above using your finger or stylus</p>
-      <div className="flex gap-3">
-        <button type="button" onClick={clearCanvas}
-          className="flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-medium text-sm hover:bg-gray-200 active:bg-gray-300 transition">
-          Clear
-        </button>
-        <button type="button" onClick={acceptSignature} disabled={!hasContent}
-          className="flex-1 py-3 bg-green-600 text-white rounded-xl font-semibold text-sm hover:bg-green-700 active:bg-green-800 disabled:opacity-40 transition">
-          Accept Signature
-        </button>
-      </div>
     </div>
   );
 }
@@ -487,7 +380,7 @@ export default function CommissionCustomerPage() {
       if (!accountNumber.trim()) return 'Account number is required';
     }
     if (step === 2) {
-      if (!signatureB64) return 'Please capture the customer signature';
+      if (!signatureB64) return 'Please capture or upload the customer signature';
     }
     return null;
   };
@@ -709,11 +602,11 @@ export default function CommissionCustomerPage() {
           </div>
           <button type="button" onClick={() => setSignatureB64('')}
             className="w-full py-3 bg-gray-100 text-gray-600 rounded-xl font-medium text-sm hover:bg-gray-200 active:bg-gray-300 transition">
-            Re-sign
+            Replace Signature
           </button>
         </div>
       ) : (
-        <SignatureCanvas onCapture={setSignatureB64} />
+        <SignatureCapture onCapture={setSignatureB64} />
       )}
     </div>
   );
@@ -872,7 +765,7 @@ export default function CommissionCustomerPage() {
   const stepDescs = [
     'Enter the Customer ID to look up their record',
     'Fill in commissioning details',
-    'Customer signs on the tablet',
+    'Customer draws a signature or uploads a JPEG image',
     result ? 'Commissioning complete' : 'Confirm and generate contracts',
   ];
 

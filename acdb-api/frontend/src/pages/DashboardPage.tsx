@@ -11,6 +11,7 @@ import {
   type SiteStat,
 } from '../lib/api';
 import { useCountry } from '../contexts/CountryContext';
+import { useAuth } from '../contexts/AuthContext';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899', '#14b8a6', '#6366f1', '#84cc16', '#e11d48', '#0ea5e9', '#a855f7'];
 
@@ -22,6 +23,7 @@ interface SiteRow {
 }
 
 export default function DashboardPage() {
+  const { canWriteCustomers } = useAuth();
   const { country, portfolio, countries } = useCountry();
   const currentCountry = countries.find((c) => c.code === country);
   const currency = currentCountry?.baseCurrency ?? 'LSL';
@@ -234,10 +236,12 @@ export default function DashboardPage() {
           <p className="text-xs sm:text-sm text-gray-500 group-hover:text-blue-600">Payments</p>
           <p className="text-sm font-semibold text-gray-700 group-hover:text-blue-700 mt-1">Record Payment</p>
         </Link>
-        <Link to="/commission" className="bg-white rounded-lg shadow p-4 sm:p-5 hover:bg-blue-50 transition border border-transparent hover:border-blue-200 group">
-          <p className="text-xs sm:text-sm text-gray-500 group-hover:text-blue-600">Customers</p>
-          <p className="text-sm font-semibold text-gray-700 group-hover:text-blue-700 mt-1">Commission</p>
-        </Link>
+        {canWriteCustomers && (
+          <Link to="/commission" className="bg-white rounded-lg shadow p-4 sm:p-5 hover:bg-blue-50 transition border border-transparent hover:border-blue-200 group">
+            <p className="text-xs sm:text-sm text-gray-500 group-hover:text-blue-600">Customers</p>
+            <p className="text-sm font-semibold text-gray-700 group-hover:text-blue-700 mt-1">Commission</p>
+          </Link>
+        )}
       </div>
 
       {/* Charts */}

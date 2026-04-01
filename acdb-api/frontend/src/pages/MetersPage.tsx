@@ -22,7 +22,7 @@ export default function MetersPage() {
   const [filterStatus, setFilterStatus] = useState('');
   const [sites, setSites] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const { canWrite } = useAuth();
+  const { canWriteCustomers } = useAuth();
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -193,7 +193,7 @@ export default function MetersPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Meters</h1>
-        {canWrite && (
+        {canWriteCustomers && (
           <Link to="/assign-meter" className="px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 active:bg-blue-800 transition flex items-center gap-1.5">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
             Assign Meter
@@ -239,7 +239,7 @@ export default function MetersPage() {
       </div>
 
       {/* Selection bar */}
-      {canWrite && selected.size > 0 && (
+      {canWriteCustomers && selected.size > 0 && (
         <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
           <span className="text-sm font-medium text-blue-800">
             {selected.size} meter{selected.size !== 1 ? 's' : ''} selected
@@ -428,7 +428,7 @@ export default function MetersPage() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b">
                 <tr>
-                  {canWrite && (
+                  {canWriteCustomers && (
                     <th className="px-3 py-3 w-10">
                       <input type="checkbox" checked={allSelected} onChange={toggleAll} className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
                     </th>
@@ -455,7 +455,7 @@ export default function MetersPage() {
                   const isSelected = selected.has(mid);
                   return (
                     <tr key={i} className={`hover:bg-gray-50 ${isSelected ? 'bg-blue-50' : ''}`}>
-                      {canWrite && (
+                      {canWriteCustomers && (
                         <td className="px-3 py-2">
                           <input type="checkbox" checked={isSelected} onChange={() => toggleOne(mid)} className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
                         </td>
@@ -491,7 +491,7 @@ export default function MetersPage() {
 
           {/* Mobile cards */}
           <div className="md:hidden space-y-2">
-            {canWrite && data.rows.length > 0 && (
+            {canWriteCustomers && data.rows.length > 0 && (
               <button onClick={toggleAll} className="text-sm text-blue-600 font-medium px-1 py-1">
                 {allSelected ? 'Deselect All' : 'Select All'}
               </button>
@@ -508,7 +508,7 @@ export default function MetersPage() {
               return (
                 <div key={i} className={`bg-white rounded-lg shadow p-4 ${isSelected ? 'ring-2 ring-blue-400' : ''}`}>
                   <div className="flex items-start gap-3">
-                    {canWrite && (
+                    {canWriteCustomers && (
                       <input type="checkbox" checked={isSelected} onChange={() => toggleOne(mid)} className="w-4 h-4 mt-1 rounded border-gray-300 text-blue-600 focus:ring-blue-500 shrink-0" />
                     )}
                     <div className="flex-1 min-w-0">

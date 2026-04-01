@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   getRecord, updateRecord, deleteRecord, getCustomerContracts, decommissionCustomer,
@@ -6,95 +6,7 @@ import {
   type CommissionContract, type FinancingProduct,
 } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
-
-// ---------------------------------------------------------------------------
-// Signature Canvas (same as CommissionCustomerPage)
-// ---------------------------------------------------------------------------
-
-function SignatureCanvas({ onCapture }: { onCapture: (b64: string) => void }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [hasContent, setHasContent] = useState(false);
-
-  const getPos = useCallback((e: React.TouchEvent | React.MouseEvent) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return { x: 0, y: 0 };
-    const rect = canvas.getBoundingClientRect();
-    if ('touches' in e) {
-      return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
-    }
-    return { x: (e as React.MouseEvent).clientX - rect.left, y: (e as React.MouseEvent).clientY - rect.top };
-  }, []);
-
-  const startDraw = useCallback((e: React.TouchEvent | React.MouseEvent) => {
-    e.preventDefault();
-    const ctx = canvasRef.current?.getContext('2d');
-    if (!ctx) return;
-    const pos = getPos(e);
-    ctx.beginPath();
-    ctx.moveTo(pos.x, pos.y);
-    setIsDrawing(true);
-  }, [getPos]);
-
-  const draw = useCallback((e: React.TouchEvent | React.MouseEvent) => {
-    e.preventDefault();
-    if (!isDrawing) return;
-    const ctx = canvasRef.current?.getContext('2d');
-    if (!ctx) return;
-    const pos = getPos(e);
-    ctx.lineTo(pos.x, pos.y);
-    ctx.strokeStyle = '#000';
-    ctx.lineWidth = 2;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.stroke();
-    setHasContent(true);
-  }, [isDrawing, getPos]);
-
-  const endDraw = useCallback(() => { setIsDrawing(false); }, []);
-
-  const clearCanvas = () => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (!ctx || !canvas) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    setHasContent(false);
-  };
-
-  const acceptSignature = () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-    onCapture(dataUrl.split(',')[1]);
-  };
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const parent = canvas.parentElement;
-    if (parent) {
-      canvas.width = parent.clientWidth;
-      canvas.height = Math.min(200, parent.clientWidth * 0.4);
-    }
-  }, []);
-
-  return (
-    <div className="space-y-3">
-      <div className="border-2 border-gray-300 rounded-xl overflow-hidden bg-white touch-none">
-        <canvas ref={canvasRef} className="w-full cursor-crosshair"
-          onMouseDown={startDraw} onMouseMove={draw} onMouseUp={endDraw} onMouseLeave={endDraw}
-          onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={endDraw} />
-      </div>
-      <p className="text-xs text-gray-400 text-center">Sign above using your finger or stylus</p>
-      <div className="flex gap-3">
-        <button type="button" onClick={clearCanvas}
-          className="flex-1 py-3 bg-gray-100 text-gray-600 rounded-xl font-medium text-sm hover:bg-gray-200 transition">Clear</button>
-        <button type="button" onClick={acceptSignature} disabled={!hasContent}
-          className="flex-1 py-3 bg-green-600 text-white rounded-xl font-semibold text-sm hover:bg-green-700 disabled:opacity-40 transition">Accept Signature</button>
-      </div>
-    </div>
-  );
-}
+import SignatureCapture from '../components/SignatureCapture';
 
 // ---------------------------------------------------------------------------
 // Extend Credit Wizard (4-step modal)
@@ -266,17 +178,17 @@ function ExtendCreditWizard({ accountNumber, onClose, onCreated }: {
           {/* Step 3: Signature */}
           {step === 3 && (
             <div className="space-y-3">
-              <p className="text-sm text-gray-600">Customer signature confirming acceptance of financing terms.</p>
+              <p className="text-sm text-gray-600">Customer signature confirming acceptance of financing terms. Draw it here or upload a JPEG image.</p>
               {signatureB64 ? (
                 <div className="space-y-3">
                   <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-center">
                     <img src={`data:image/jpeg;base64,${signatureB64}`} alt="Signature" className="max-h-24 mx-auto" />
                     <p className="text-xs text-green-700 mt-2">Signature captured</p>
                   </div>
-                  <button onClick={() => setSignatureB64('')} className="w-full py-2 text-sm text-gray-500 hover:text-gray-700">Re-sign</button>
+                  <button onClick={() => setSignatureB64('')} className="w-full py-2 text-sm text-gray-500 hover:text-gray-700">Replace Signature</button>
                 </div>
               ) : (
-                <SignatureCanvas onCapture={setSignatureB64} />
+                <SignatureCapture onCapture={setSignatureB64} />
               )}
               <div className="flex gap-3 pt-2">
                 <button onClick={() => setStep(2)} className="flex-1 py-2.5 bg-gray-100 text-gray-600 rounded-lg text-sm hover:bg-gray-200">Back</button>
@@ -358,7 +270,7 @@ export default function CustomerDetailPage() {
   const [accountNumbers, setAccountNumbers] = useState<string[]>([]);
   const [decommissioning, setDecommissioning] = useState(false);
   const [showCreditWizard, setShowCreditWizard] = useState(false);
-  const { canWrite, isSuperadmin, user } = useAuth();
+  const { canWrite, canWriteCustomers, isSuperadmin, user } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -508,34 +420,42 @@ export default function CustomerDetailPage() {
           )}
         </div>
         <div className="flex flex-wrap gap-2 shrink-0">
-          {canWrite && !editing && (
+          {!editing && (
             <>
-              <button onClick={() => setEditing(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Edit</button>
               <button
                 onClick={() => navigate(`/customer-data?account=${accountNumbers[0] || accountNumber || urlParam}`)}
                 className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700"
               >View Data</button>
+              {canWriteCustomers && (
+                <button onClick={() => setEditing(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">Edit</button>
+              )}
               {isCommissioned ? (
                 <>
-                  <button
-                    onClick={() => setShowCreditWizard(true)}
-                    className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700"
-                  >
-                    Extend Credit
-                  </button>
-                  <button
-                    onClick={handleDecommission}
-                    disabled={decommissioning}
-                    className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 disabled:opacity-50"
-                  >
-                    {decommissioning ? 'Decommissioning...' : 'Decommission'}
-                  </button>
+                  {canWrite && (
+                    <button
+                      onClick={() => setShowCreditWizard(true)}
+                      className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700"
+                    >
+                      Extend Credit
+                    </button>
+                  )}
+                  {canWriteCustomers && (
+                    <button
+                      onClick={handleDecommission}
+                      disabled={decommissioning}
+                      className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700 disabled:opacity-50"
+                    >
+                      {decommissioning ? 'Decommissioning...' : 'Decommission'}
+                    </button>
+                  )}
                 </>
               ) : (
+                canWriteCustomers && (
                 <>
                   <button onClick={() => navigate(`/assign-meter?customer=${accountNumber || urlParam}`)} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700">Assign Meter</button>
                   <button onClick={() => navigate(`/commission?customer=${accountNumber || urlParam}`)} className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700">Commission</button>
                 </>
+                )
               )}
             </>
           )}
