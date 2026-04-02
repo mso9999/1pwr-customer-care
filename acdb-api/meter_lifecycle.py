@@ -135,6 +135,77 @@ def _row_to_dict(cursor, row) -> dict[str, Any]:
     return dict(zip(cols, row))
 
 
+def _fetch_table_row(cursor, table_name: str, column: str, value: Optional[str]) -> Optional[dict[str, Any]]:
+    if not value:
+        return None
+    cursor.execute(f"SELECT * FROM {table_name} WHERE {column} = %s", (value,))
+    row = cursor.fetchone()
+    return _row_to_dict(cursor, row) if row else None
+
+
+def _fetch_active_assignment(
+    cursor,
+    *,
+    meter_id: Optional[str] = None,
+    account_number: Optional[str] = None,
+) -> Optional[dict[str, Any]]:
+    if meter_id:
+        cursor.execute(
+            """
+            SELECT id, meter_id, account_number, community, assigned_at, removed_at,
+                   removal_reason, replaced_by, notes, created_by
+            FROM meter_assignments
+            WHERE meter_id = %s AND removed_at IS NULL
+            ORDER BY assigned_at DESC
+            LIMIT 1
+            """,
+            (meter_id,),
+        )
+    elif account_number:
+        cursor.execute(
+            """
+            SELECT id, meter_id, account_number, community, assigned_at, removed_at,
+                   removal_reason, replaced_by, notes, created_by
+            FROM meter_assignments
+            WHERE account_number = %s AND removed_at IS NULL
+            ORDER BY assigned_at DESC
+            LIMIT 1
+            """,
+            (account_number,),
+        )
+    else:
+        return None
+
+    row = cursor.fetchone()
+    return _row_to_dict(cursor, row) if row else None
+
+
+def _snapshot_meter_lifecycle_state(
+    cursor,
+    meter_id: str,
+    account_number: Optional[str] = None,
+    related_meter_ids: Optional[list[str]] = None,
+) -> dict[str, Any]:
+    snapshot: dict[str, Any] = {
+        "meter": _fetch_table_row(cursor, "meters", "meter_id", meter_id),
+        "account": _fetch_table_row(cursor, "accounts", "account_number", account_number),
+        "meter_active_assignment": _fetch_active_assignment(cursor, meter_id=meter_id),
+        "account_active_assignment": _fetch_active_assignment(cursor, account_number=account_number),
+    }
+    if related_meter_ids:
+        related: dict[str, Any] = {}
+        for related_meter_id in related_meter_ids:
+            if not related_meter_id:
+                continue
+            related[related_meter_id] = {
+                "meter": _fetch_table_row(cursor, "meters", "meter_id", related_meter_id),
+                "active_assignment": _fetch_active_assignment(cursor, meter_id=related_meter_id),
+            }
+        if related:
+            snapshot["related_meters"] = related
+    return snapshot
+
+
 def _resolve_customer_for_assignment(cursor, identifier: str) -> Optional[dict[str, Any]]:
     raw_identifier = str(identifier or "").strip()
     if not raw_identifier:
@@ -214,92 +285,111 @@ def assign_meter(
 
     with _get_connection() as conn:
         cursor = conn.cursor()
+        try:
+            customer = _resolve_customer_for_assignment(cursor, customer_identifier)
+            if not customer:
+                raise HTTPException(status_code=404, detail="Customer not found")
 
-        customer = _resolve_customer_for_assignment(cursor, customer_identifier)
-        if not customer:
-            raise HTTPException(status_code=404, detail="Customer not found")
+            customer_pg_id = customer.get("id")
+            if customer_pg_id is None:
+                raise HTTPException(status_code=500, detail="Resolved customer is missing id")
 
-        customer_pg_id = customer.get("id")
-        if customer_pg_id is None:
-            raise HTTPException(status_code=500, detail="Resolved customer is missing id")
+            before_state = _snapshot_meter_lifecycle_state(cursor, meter_id, account_number)
 
-        cursor.execute(
-            "SELECT customer_id FROM accounts WHERE account_number = %s",
-            (account_number,),
-        )
-        account_row = cursor.fetchone()
-        if account_row:
-            existing_customer_id = account_row[0]
-            if existing_customer_id and int(existing_customer_id) != int(customer_pg_id):
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Account {account_number} is already linked to another customer",
+            cursor.execute(
+                "SELECT customer_id FROM accounts WHERE account_number = %s",
+                (account_number,),
+            )
+            account_row = cursor.fetchone()
+            if account_row:
+                existing_customer_id = account_row[0]
+                if existing_customer_id and int(existing_customer_id) != int(customer_pg_id):
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Account {account_number} is already linked to another customer",
+                    )
+                cursor.execute(
+                    "UPDATE accounts SET meter_id = %s, community = %s WHERE account_number = %s",
+                    (meter_id, community, account_number),
                 )
-            cursor.execute(
-                "UPDATE accounts SET meter_id = %s, community = %s WHERE account_number = %s",
-                (meter_id, community, account_number),
-            )
-        else:
-            cursor.execute(
-                "INSERT INTO accounts "
-                "(account_number, customer_id, meter_id, community, account_sequence, created_by) "
-                "VALUES (%s, %s, %s, %s, %s, %s)",
-                (account_number, customer_pg_id, meter_id, community, account_sequence, user.user_id),
-            )
+            else:
+                cursor.execute(
+                    "INSERT INTO accounts "
+                    "(account_number, customer_id, meter_id, community, account_sequence, created_by) "
+                    "VALUES (%s, %s, %s, %s, %s, %s)",
+                    (account_number, customer_pg_id, meter_id, community, account_sequence, user.user_id),
+                )
 
-        meter_values = (
-            community,
-            account_number,
-            customer_type,
-            connection_date or now[:10],
-            str(req.village_name or "").strip() or None,
-            str(req.latitude or "").strip() or None,
-            str(req.longitude or "").strip() or None,
-            meter_id,
-        )
-        cursor.execute("SELECT 1 FROM meters WHERE meter_id = %s", (meter_id,))
-        if cursor.fetchone():
-            cursor.execute(
-                "UPDATE meters SET community = %s, account_number = %s, customer_type = %s, "
-                "customer_connect_date = %s, village_name = %s, latitude = %s, longitude = %s "
-                "WHERE meter_id = %s",
-                meter_values,
+            meter_values = (
+                community,
+                account_number,
+                customer_type,
+                connection_date or now[:10],
+                str(req.village_name or "").strip() or None,
+                str(req.latitude or "").strip() or None,
+                str(req.longitude or "").strip() or None,
+                meter_id,
             )
-        else:
-            cursor.execute(
-                "INSERT INTO meters "
-                "(community, account_number, customer_type, customer_connect_date, village_name, latitude, longitude, meter_id) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                meter_values,
-            )
+            cursor.execute("SELECT 1 FROM meters WHERE meter_id = %s", (meter_id,))
+            if cursor.fetchone():
+                cursor.execute(
+                    "UPDATE meters SET community = %s, account_number = %s, customer_type = %s, "
+                    "customer_connect_date = %s, village_name = %s, latitude = %s, longitude = %s "
+                    "WHERE meter_id = %s",
+                    meter_values,
+                )
+            else:
+                cursor.execute(
+                    "INSERT INTO meters "
+                    "(community, account_number, customer_type, customer_connect_date, village_name, latitude, longitude, meter_id) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                    meter_values,
+                )
 
-        cursor.execute(
-            "SELECT 1 FROM meter_assignments "
-            "WHERE meter_id = %s AND account_number = %s AND removed_at IS NULL",
-            (meter_id, account_number),
-        )
-        if not cursor.fetchone():
             cursor.execute(
-                "UPDATE meter_assignments SET removed_at = %s, removal_reason = %s "
-                "WHERE removed_at IS NULL AND (meter_id = %s OR account_number = %s)",
-                (now, "reassigned", meter_id, account_number),
+                "SELECT 1 FROM meter_assignments "
+                "WHERE meter_id = %s AND account_number = %s AND removed_at IS NULL",
+                (meter_id, account_number),
             )
-            cursor.execute(
-                "INSERT INTO meter_assignments "
-                "(meter_id, account_number, community, assigned_at, created_by, notes) "
-                "VALUES (%s, %s, %s, %s, %s, %s)",
-                (
-                    meter_id,
-                    account_number,
-                    community,
-                    now,
-                    user.user_id,
-                    f"Assigned via CC portal to customer {customer.get('customer_id_legacy')}",
-                ),
-            )
+            if not cursor.fetchone():
+                cursor.execute(
+                    "UPDATE meter_assignments SET removed_at = %s, removal_reason = %s "
+                    "WHERE removed_at IS NULL AND (meter_id = %s OR account_number = %s)",
+                    (now, "reassigned", meter_id, account_number),
+                )
+                cursor.execute(
+                    "INSERT INTO meter_assignments "
+                    "(meter_id, account_number, community, assigned_at, created_by, notes) "
+                    "VALUES (%s, %s, %s, %s, %s, %s)",
+                    (
+                        meter_id,
+                        account_number,
+                        community,
+                        now,
+                        user.user_id,
+                        f"Assigned via CC portal to customer {customer.get('customer_id_legacy')}",
+                    ),
+                )
 
-        conn.commit()
-        log_mutation(user, "assign", "meters", meter_id)
+            after_state = _snapshot_meter_lifecycle_state(cursor, meter_id, account_number)
+            log_mutation(
+                user,
+                "assign",
+                "meters",
+                meter_id,
+                old_values=before_state,
+                new_values=after_state,
+                metadata={"customer_identifier": customer_identifier},
+                conn=conn,
+            )
+            conn.commit()
+        except HTTPException:
+            conn.rollback()
+            raise
+        except Exception as e:
+            conn.rollback()
+            raise HTTPException(status_code=400, detail=f"Assign failed: {e}")
+
         return {
             "message": f"Meter {meter_id} assigned to account {account_number}",
             "meter_id": meter_id,
@@ -325,68 +415,94 @@ def decommission_meter(
     with _get_connection() as conn:
         cursor = conn.cursor()
         now = datetime.now(timezone.utc).isoformat()
+        try:
+            cursor.execute("SELECT account_number, community FROM meters WHERE meter_id = %s", (meter_id,))
+            meter_row = cursor.fetchone()
+            if not meter_row:
+                raise HTTPException(status_code=404, detail=f"Meter {meter_id} not found")
 
-        cursor.execute("SELECT account_number, community FROM meters WHERE meter_id = %s", (meter_id,))
-        meter_row = cursor.fetchone()
-        if not meter_row:
-            raise HTTPException(status_code=404, detail=f"Meter {meter_id} not found")
-
-        account_number, community = meter_row[0], meter_row[1]
-
-        # Close the active assignment
-        cursor.execute(
-            "UPDATE meter_assignments SET removed_at = %s, removal_reason = %s, "
-            "replaced_by = %s, notes = %s "
-            "WHERE meter_id = %s AND removed_at IS NULL",
-            (now, req.reason.lower(), req.replacement_meter_id, req.notes, meter_id),
-        )
-
-        reason_lower = req.reason.lower()
-        db_status = REASON_TO_ENUM.get(reason_lower, "decommissioned")
-        notes_combined = f"[{reason_lower}] {req.notes}" if req.notes else f"[{reason_lower}]"
-
-        cursor.execute(
-            "UPDATE meters SET status = %s, status_date = %s, status_set_by = %s, "
-            "special_notes = %s WHERE meter_id = %s",
-            (db_status, now, user.user_id, notes_combined, meter_id),
-        )
-
-        result = {
-            "message": f"Meter {meter_id} marked as {req.reason}",
-            "meter_id": meter_id,
-            "account_number": account_number,
-        }
-
-        # If a replacement is specified, create the new assignment
-        if req.replacement_meter_id and account_number:
-            cursor.execute(
-                "SELECT meter_id FROM meters WHERE meter_id = %s",
-                (req.replacement_meter_id,),
+            account_number, community = meter_row[0], meter_row[1]
+            before_state = _snapshot_meter_lifecycle_state(
+                cursor,
+                meter_id,
+                account_number,
+                related_meter_ids=[req.replacement_meter_id] if req.replacement_meter_id else None,
             )
-            if not cursor.fetchone():
-                conn.rollback()
-                raise HTTPException(
-                    status_code=404,
-                    detail=f"Replacement meter {req.replacement_meter_id} not found",
+
+            # Close the active assignment
+            cursor.execute(
+                "UPDATE meter_assignments SET removed_at = %s, removal_reason = %s, "
+                "replaced_by = %s, notes = %s "
+                "WHERE meter_id = %s AND removed_at IS NULL",
+                (now, req.reason.lower(), req.replacement_meter_id, req.notes, meter_id),
+            )
+
+            reason_lower = req.reason.lower()
+            db_status = REASON_TO_ENUM.get(reason_lower, "decommissioned")
+            notes_combined = f"[{reason_lower}] {req.notes}" if req.notes else f"[{reason_lower}]"
+
+            cursor.execute(
+                "UPDATE meters SET status = %s, status_date = %s, status_set_by = %s, "
+                "special_notes = %s WHERE meter_id = %s",
+                (db_status, now, user.user_id, notes_combined, meter_id),
+            )
+
+            result = {
+                "message": f"Meter {meter_id} marked as {req.reason}",
+                "meter_id": meter_id,
+                "account_number": account_number,
+            }
+
+            # If a replacement is specified, create the new assignment
+            if req.replacement_meter_id and account_number:
+                cursor.execute(
+                    "SELECT meter_id FROM meters WHERE meter_id = %s",
+                    (req.replacement_meter_id,),
                 )
+                if not cursor.fetchone():
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Replacement meter {req.replacement_meter_id} not found",
+                    )
 
-            cursor.execute(
-                "UPDATE meters SET account_number = %s, community = %s WHERE meter_id = %s",
-                (account_number, community, req.replacement_meter_id),
-            )
-            cursor.execute(
-                "INSERT INTO meter_assignments "
-                "(meter_id, account_number, community, assigned_at, created_by, notes) "
-                "VALUES (%s, %s, %s, %s, %s, %s)",
-                (req.replacement_meter_id, account_number, community, now,
-                 user.user_id, f"Replaced {meter_id} ({req.reason})"),
-            )
-            result["replacement_meter_id"] = req.replacement_meter_id
-            result["message"] += f", replaced by {req.replacement_meter_id}"
+                cursor.execute(
+                    "UPDATE meters SET account_number = %s, community = %s WHERE meter_id = %s",
+                    (account_number, community, req.replacement_meter_id),
+                )
+                cursor.execute(
+                    "INSERT INTO meter_assignments "
+                    "(meter_id, account_number, community, assigned_at, created_by, notes) "
+                    "VALUES (%s, %s, %s, %s, %s, %s)",
+                    (req.replacement_meter_id, account_number, community, now,
+                     user.user_id, f"Replaced {meter_id} ({req.reason})"),
+                )
+                result["replacement_meter_id"] = req.replacement_meter_id
+                result["message"] += f", replaced by {req.replacement_meter_id}"
 
-        conn.commit()
-        log_mutation(user, "decommission", "meters", meter_id)
-        return result
+            after_state = _snapshot_meter_lifecycle_state(
+                cursor,
+                meter_id,
+                account_number,
+                related_meter_ids=[req.replacement_meter_id] if req.replacement_meter_id else None,
+            )
+            log_mutation(
+                user,
+                "decommission",
+                "meters",
+                meter_id,
+                old_values=before_state,
+                new_values=after_state,
+                metadata={"reason": req.reason.lower(), "replacement_meter_id": req.replacement_meter_id},
+                conn=conn,
+            )
+            conn.commit()
+            return result
+        except HTTPException:
+            conn.rollback()
+            raise
+        except Exception as e:
+            conn.rollback()
+            raise HTTPException(status_code=400, detail=f"Decommission failed: {e}")
 
 
 @router.get("/{meter_id}/history")
@@ -471,9 +587,11 @@ def batch_update_status(
             if not mid or not new_status:
                 results["errors"].append(f"Missing meter_id or status: {item}")
                 continue
+            cursor.execute("SAVEPOINT batch_status_item")
             try:
-                cursor.execute("SELECT 1 FROM meters WHERE meter_id = %s", (mid,))
-                if not cursor.fetchone():
+                before_state = _snapshot_meter_lifecycle_state(cursor, mid)
+                if before_state.get("meter") is None:
+                    cursor.execute("RELEASE SAVEPOINT batch_status_item")
                     results["not_found"] += 1
                     continue
                 db_status = REASON_TO_ENUM.get(new_status, "decommissioned")
@@ -488,8 +606,22 @@ def batch_update_status(
                     "WHERE meter_id = %s AND removed_at IS NULL",
                     (now, new_status, notes, mid),
                 )
+                after_state = _snapshot_meter_lifecycle_state(cursor, mid)
+                log_mutation(
+                    user,
+                    "batch_status",
+                    "meters",
+                    mid,
+                    old_values=before_state,
+                    new_values=after_state,
+                    metadata={"requested_status": new_status, "notes": notes},
+                    conn=conn,
+                )
+                cursor.execute("RELEASE SAVEPOINT batch_status_item")
                 results["updated"] += 1
             except Exception as e:
+                cursor.execute("ROLLBACK TO SAVEPOINT batch_status_item")
+                cursor.execute("RELEASE SAVEPOINT batch_status_item")
                 results["errors"].append(f"{mid}: {e}")
         conn.commit()
 

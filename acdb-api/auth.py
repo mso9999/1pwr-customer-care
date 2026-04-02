@@ -40,6 +40,7 @@ from db_auth import (
     get_employee_role,
     set_customer_password,
 )
+from mutations import try_log_mutation
 
 logger = logging.getLogger("cc-api.auth")
 
@@ -310,6 +311,19 @@ def customer_register(req: CustomerRegisterRequest):
     # Hash and store password (keyed by normalised account number)
     hashed = _bcrypt.hashpw(req.password.encode(), _bcrypt.gensalt()).decode()
     set_customer_password(acct, hashed)
+    try_log_mutation(
+        CurrentUser(
+            user_type=UserType.customer,
+            user_id=acct,
+            role="customer",
+            name=info.get("name", acct),
+        ),
+        "password_registered",
+        "cc_customer_passwords",
+        acct,
+        new_values={"password_state": "registered"},
+        metadata={"origin": "customer_self_service"},
+    )
 
     return {
         "message": "Registration successful. You can now log in.",
@@ -380,6 +394,15 @@ def customer_change_password(
 
     new_hash = _bcrypt.hashpw(req.new_password.encode(), _bcrypt.gensalt()).decode()
     set_customer_password(user.user_id, new_hash)
+    try_log_mutation(
+        user,
+        "password_changed",
+        "cc_customer_passwords",
+        user.user_id,
+        old_values={"password_state": "registered"},
+        new_values={"password_state": "changed"},
+        metadata={"origin": "customer_self_service"},
+    )
     return {"message": "Password changed successfully"}
 
 

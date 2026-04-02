@@ -384,9 +384,15 @@ def restore_record(
             "DELETE FROM soft_deletes WHERE table_name = %s AND record_id = %s",
             (table_name, record_id),
         )
+        log_mutation(
+            user,
+            "restore",
+            table_name,
+            record_id,
+            metadata={"deleted_at": str(row[0]) if row and row[0] is not None else None},
+            conn=conn,
+        )
         conn.commit()
-
-        log_mutation(user, "restore", table_name, record_id)
 
         return {"message": "Record restored", "table": table_name, "id": record_id}
 
@@ -674,6 +680,7 @@ def create_record(
 
     with _get_connection() as conn:
         cursor = conn.cursor()
+        pk = _get_primary_key(conn, table_name)
 
         coerced = _coerce_values(cursor, table_name, req.data)
         if not coerced:
@@ -684,30 +691,27 @@ def create_record(
         col_list = ", ".join(columns)
         values = [coerced[c] for c in columns]
 
-        returning = " RETURNING id" if table_name == "transactions" else ""
+        returning = f" RETURNING {pk}" if pk else ""
         sql = f"INSERT INTO {table_name} ({col_list}) VALUES ({placeholders}){returning}"
         try:
             cursor.execute(sql, values)
-            new_id = cursor.fetchone() if returning else None
+            new_id = cursor.fetchone()[0] if returning else None
+            rid = str(new_id) if new_id is not None else "unknown"
+            if rid == "unknown" and pk:
+                for k, v in req.data.items():
+                    if k.lower() == pk:
+                        rid = str(v)
+                        break
+            log_mutation(user, "create", table_name, rid, new_values=coerced, conn=conn)
             conn.commit()
         except Exception as e:
             conn.rollback()
             raise HTTPException(status_code=400, detail=f"Insert failed: {e}")
 
-        pk = _get_primary_key(conn, table_name)
-        rid = "unknown"
-        if pk:
-            for k, v in req.data.items():
-                if k.lower() == pk:
-                    rid = str(v)
-                    break
-
-        log_mutation(user, "create", table_name, rid, new_values=coerced)
-
         response: dict = {"message": "Record created", "table": table_name}
 
         if table_name == "transactions":
-            sm = _maybe_credit_sm(coerced, new_id[0] if new_id else rid, background_tasks)
+            sm = _maybe_credit_sm(coerced, new_id if new_id is not None else rid, background_tasks)
             if sm is not None:
                 response["sm_credit"] = sm
 
@@ -753,19 +757,27 @@ def update_record(
         sql = f"UPDATE {table_name} SET {', '.join(set_parts)} WHERE {pk} = %s"
         try:
             cursor.execute(sql, values)
-            conn.commit()
             if cursor.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Record not found")
+            # Build new_values by merging old with actually-written fields
+            new_values = dict(old_values) if old_values else {}
+            new_values.update(coerced)
+            log_mutation(
+                user,
+                "update",
+                table_name,
+                record_id,
+                old_values=old_values,
+                new_values=new_values,
+                conn=conn,
+            )
+            conn.commit()
         except HTTPException:
+            conn.rollback()
             raise
         except Exception as e:
             conn.rollback()
             raise HTTPException(status_code=400, detail=f"Update failed: {e}")
-
-        # Build new_values by merging old with actually-written fields
-        new_values = dict(old_values) if old_values else {}
-        new_values.update(coerced)
-        log_mutation(user, "update", table_name, record_id, old_values=old_values, new_values=new_values)
 
         return {"message": "Record updated", "table": table_name, "id": record_id}
 
@@ -816,11 +828,12 @@ def delete_record(
                     "VALUES (%s, %s, %s, %s)",
                     (table_name, record_id, now, user.user_id),
                 )
-                conn.commit()
                 log_mutation(
                     user, "soft_delete", table_name, record_id,
                     old_values=old_values,
+                    conn=conn,
                 )
+                conn.commit()
                 purge_date = (
                     datetime.now(timezone.utc) + timedelta(days=COLD_STORAGE_DAYS)
                 ).strftime("%Y-%m-%d")
@@ -834,19 +847,21 @@ def delete_record(
                 cursor.execute(
                     f"DELETE FROM {table_name} WHERE {pk} = %s", (record_id,)
                 )
-                conn.commit()
                 if cursor.rowcount == 0:
                     raise HTTPException(status_code=404, detail="Record not found")
                 log_mutation(
                     user, "delete", table_name, record_id,
                     old_values=old_values,
+                    conn=conn,
                 )
+                conn.commit()
                 return {
                     "message": "Record deleted",
                     "table": table_name,
                     "id": record_id,
                 }
         except HTTPException:
+            conn.rollback()
             raise
         except Exception as e:
             conn.rollback()

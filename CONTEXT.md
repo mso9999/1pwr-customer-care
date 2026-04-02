@@ -75,11 +75,11 @@ Windows EC2 / ACCDB assumptions as current production architecture.
 | `om_report.py` | O&M analytics endpoints: customer stats, consumption, sales, ARPU |
 | `crud.py` | Customer CRUD operations (PostgreSQL information_schema introspection) |
 | `auth.py` | Authentication (employee login, JWT tokens) |
-| `db_auth.py` | Auth database (SQLite for user accounts) |
+| `db_auth.py` | SQLite auth store (employee roles, customer passwords, legacy mutation source) |
 | `middleware.py` | Auth middleware, role-based access |
 | `models.py` | Pydantic models |
 | `tariff.py` | Tariff management endpoints (system_config table) |
-| `mutations.py` | Data mutation audit log |
+| `mutations.py` | PostgreSQL mutation audit log with legacy SQLite backfill |
 | `exports.py` | Data export endpoints |
 | `stats.py` | Dashboard statistics |
 | `commission.py` | Commission workflow + bulk status update |
@@ -106,6 +106,9 @@ Windows EC2 / ACCDB assumptions as current production architecture.
 | File | Purpose |
 |------|---------|
 | `.github/workflows/deploy.yml` | CI/CD: build frontend, deploy both components |
+| `scripts/ops/cc_postgres_backup.sh` | Production logical backup job (Postgres + `cc_auth.db` to S3) |
+| `scripts/ops/cc_postgres_restore_verify.sh` | Restore drill script for a disposable restore host |
+| `docs/ops/postgres-backup-recovery.md` | Backup / restore runbook and production ownership boundary |
 | `whatsapp-bridge/whatsapp-customer-care.js` | WhatsApp CC bridge |
 | `docs/whatsapp-customer-care.md` | Full system documentation |
 
@@ -148,6 +151,33 @@ Avoid relying on historical public IPs in old docs.
 | CC Bridge | `ssh ubuntu@<current-cc-linux-host> "pm2 restart whatsapp-cc"` |
 | CC API (LS) | `ssh ubuntu@<current-cc-linux-host> "sudo systemctl restart 1pdb-api"` |
 | CC API (BN) | `ssh ubuntu@<current-cc-linux-host> "sudo systemctl restart 1pdb-api-bn"` |
+
+### Backup and Restore (2026-04-01)
+
+- Production CC host: `EOL` (`i-04291e12e64de36d7`, `af-south-1`). It is under the regional DLM/EBS snapshot policy via the `backup=yes` tag, but snapshots are only host-level DR.
+- Logical backups now run on the production host via:
+  - systemd timer: `cc-postgres-backup.timer`
+  - env file: `/etc/default/cc-postgres-backup`
+  - script: `/usr/local/bin/cc_postgres_backup.sh`
+- Each run writes local artifacts under `/var/backups/1pwr-cc/<UTC timestamp>/` and uploads them to:
+  - `s3://1pwr-cc-backups-758201218523-af-south-1/customer-care/ip-172-31-3-91/<UTC timestamp>/`
+- Artifacts per run:
+  - `onepower_cc.dump`
+  - `onepower_bj.dump`
+  - `cc_auth.db.backup`
+  - `manifest.json`
+  - `*.sha256`
+- Restore drills must run on a disposable restore host or workstation with PostgreSQL tooling and at least ~120 GiB free disk. The production CC root volume was expanded to `120 GiB` on `2026-04-02`, but full restore drills should still stay off the live host to avoid PostgreSQL contention and recovery risk during production operations.
+- Latest verified restore drill:
+  - backup timestamp: `20260401T210624Z`
+  - restore report uploaded beside the backup in S3 as `restore-verify-20260401211803.json`
+  - verified counts:
+    - LS restore: `customers=1465`, `accounts=1464`, `meters=1735`, `cc_mutations=1950`
+    - BN restore: `customers=165`, `accounts=165`, `meters=162`, `cc_mutations=1950`
+- Audit ledger cutover:
+  - migration: `acdb-api/migrations/005_create_cc_mutations.sql`
+  - helper: `scripts/ops/backfill_cc_mutations.py`
+  - both country databases now have their own `cc_mutations` table; the shared legacy SQLite mutation history was backfilled into both during cutover.
 
 ## Site Codes (Lesotho Minigrids)
 

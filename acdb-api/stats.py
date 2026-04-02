@@ -3,10 +3,15 @@ Dashboard statistics endpoints.
 
 Computes aggregated MWh consumed and '000 LSL sold per site
 from the transactions table (consolidated history).
+
+Expensive queries are cached in-memory with a short TTL so that
+the dashboard loads instantly for concurrent/repeated requests.
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+import time
+import threading
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import APIRouter, Depends
 
@@ -16,6 +21,48 @@ from middleware import require_employee
 logger = logging.getLogger("acdb-api.stats")
 
 router = APIRouter(prefix="/api/stats", tags=["stats"])
+
+_cache: Dict[str, Tuple[float, Any]] = {}
+_cache_lock = threading.Lock()
+CACHE_TTL_SECONDS = 600
+
+
+def _get_cached(key: str):
+    with _cache_lock:
+        entry = _cache.get(key)
+        if entry and (time.monotonic() - entry[0]) < CACHE_TTL_SECONDS:
+            return entry[1]
+    return None
+
+
+def _set_cached(key: str, value: Any):
+    with _cache_lock:
+        _cache[key] = (time.monotonic(), value)
+
+
+def warm_stats_cache():
+    """Pre-compute expensive dashboard stats in a background thread.
+
+    Called once at startup so the first user request is served from cache.
+    """
+    def _warm():
+        time.sleep(3)
+        try:
+            from models import CurrentUser
+            fake_user = CurrentUser(
+                user_type="employee", user_id="system",
+                name="cache-warm", role="superadmin",
+            )
+            logger.info("Pre-warming dashboard stats cache...")
+            t0 = time.monotonic()
+            site_summary(fake_user)
+            customer_record_completeness(fake_user)
+            logger.info("Dashboard cache warmed in %.1fs", time.monotonic() - t0)
+        except Exception:
+            logger.exception("Failed to pre-warm dashboard cache")
+
+    t = threading.Thread(target=_warm, daemon=True)
+    t.start()
 
 
 def _get_connection():
@@ -69,6 +116,10 @@ def site_summary(user: CurrentUser = Depends(require_employee)):
     Fallback: ``monthly_consumption`` + ``monthly_transactions`` (aggregate
     tables populated by Koios import, typical for BN and new countries).
     """
+    cached = _get_cached("site-summary")
+    if cached is not None:
+        return cached
+
     results: Dict[str, Dict[str, float]] = {}
     source_table = "transactions"
 
@@ -147,7 +198,7 @@ def site_summary(user: CurrentUser = Depends(require_employee)):
             "lsl_thousands": round(data["lsl_thousands"], 2),
         })
 
-    return {
+    response = {
         "sites": sites,
         "totals": {
             "mwh": round(total_mwh, 2),
@@ -156,6 +207,8 @@ def site_summary(user: CurrentUser = Depends(require_employee)):
         "source_table": source_table,
         "site_count": len(sites),
     }
+    _set_cached("site-summary", response)
+    return response
 
 
 @router.get("/customer-record-completeness")
@@ -172,6 +225,10 @@ def customer_record_completeness(user: CurrentUser = Depends(require_employee)):
     ends at the earlier of the latest loaded hourly record or
     ``date_service_terminated`` (if present).
     """
+    cached = _get_cached("customer-record-completeness")
+    if cached is not None:
+        return cached
+
     empty_totals = {
         "customer_count": 0,
         "customers_with_account": 0,
@@ -276,6 +333,14 @@ def customer_record_completeness(user: CurrentUser = Depends(require_employee)):
                 FROM customer_accounts ca
                 LEFT JOIN first_transaction ft ON ft.account_number = ca.account_number
             ),
+            hourly_stats AS (
+                SELECT account_number,
+                       COUNT(DISTINCT reading_hour)::bigint AS actual_records,
+                       MIN(reading_hour) AS first_record_at,
+                       MAX(reading_hour) AS last_record_at
+                FROM hourly_consumption
+                GROUP BY account_number
+            ),
             records_by_account AS (
                 SELECT
                     sw.customer_pk,
@@ -289,24 +354,13 @@ def customer_record_completeness(user: CurrentUser = Depends(require_employee)):
                             THEN 0::bigint
                         ELSE FLOOR(EXTRACT(EPOCH FROM (sw.window_end - sw.window_start)) / 3600)::bigint
                     END AS expected_records,
-                    COUNT(DISTINCT h.reading_hour)::bigint AS actual_records,
-                    MIN(h.reading_hour) AS first_record_at,
-                    MAX(h.reading_hour) AS last_record_at
+                    COALESCE(hs.actual_records, 0)::bigint AS actual_records,
+                    hs.first_record_at,
+                    hs.last_record_at
                 FROM service_windows sw
-                LEFT JOIN hourly_consumption h
+                LEFT JOIN hourly_stats hs
                     ON sw.account_number IS NOT NULL
-                   AND h.account_number = sw.account_number
-                   AND sw.window_start IS NOT NULL
-                   AND sw.window_end IS NOT NULL
-                   AND h.reading_hour >= sw.window_start
-                   AND h.reading_hour < sw.window_end
-                GROUP BY
-                    sw.customer_pk,
-                    sw.customer_id_legacy,
-                    sw.customer_type,
-                    sw.account_number,
-                    sw.window_start,
-                    sw.window_end
+                   AND hs.account_number = sw.account_number
             )
             SELECT
                 customer_type,
@@ -376,10 +430,12 @@ def customer_record_completeness(user: CurrentUser = Depends(require_employee)):
             "completeness percentages are unavailable."
         )
 
-    return {
+    response = {
         "rows": rows,
         "totals": totals,
         "data_as_of": data_as_of.isoformat() if data_as_of else None,
         "record_source": "hourly_consumption",
         "note": note,
     }
+    _set_cached("customer-record-completeness", response)
+    return response

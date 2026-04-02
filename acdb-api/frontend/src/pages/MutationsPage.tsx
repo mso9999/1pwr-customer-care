@@ -9,6 +9,14 @@ function actionBadge(action: string) {
     create: 'bg-green-100 text-green-800',
     update: 'bg-yellow-100 text-yellow-800',
     delete: 'bg-red-100 text-red-800',
+    soft_delete: 'bg-red-100 text-red-800',
+    restore: 'bg-sky-100 text-sky-800',
+    assign: 'bg-blue-100 text-blue-800',
+    decommission: 'bg-orange-100 text-orange-800',
+    batch_status: 'bg-orange-100 text-orange-800',
+    bulk_import: 'bg-indigo-100 text-indigo-800',
+    password_registered: 'bg-teal-100 text-teal-800',
+    password_changed: 'bg-teal-100 text-teal-800',
     revert_create: 'bg-purple-100 text-purple-800',
     revert_update: 'bg-purple-100 text-purple-800',
     revert_delete: 'bg-purple-100 text-purple-800',
@@ -18,6 +26,16 @@ function actionBadge(action: string) {
       {action}
     </span>
   );
+}
+
+function formatMutationValue(value: unknown) {
+  if (value === undefined || value === null) {
+    return <span className="italic text-gray-300">null</span>;
+  }
+  if (typeof value === 'object') {
+    return JSON.stringify(value);
+  }
+  return String(value);
 }
 
 // Diff viewer for old vs new values
@@ -44,10 +62,10 @@ function DiffView({ oldVals, newVals }: { oldVals: Record<string, unknown> | nul
               <tr key={key} className={changed ? 'bg-amber-50' : ''}>
                 <td className="px-3 py-1.5 font-mono text-xs text-gray-700 whitespace-nowrap">{key}</td>
                 <td className={`px-3 py-1.5 text-xs break-all ${changed && ov !== undefined ? 'text-red-700 line-through' : 'text-gray-500'}`}>
-                  {ov !== undefined && ov !== null ? String(ov) : <span className="italic text-gray-300">null</span>}
+                  {formatMutationValue(ov)}
                 </td>
                 <td className={`px-3 py-1.5 text-xs break-all ${changed && nv !== undefined ? 'text-green-700 font-medium' : 'text-gray-500'}`}>
-                  {nv !== undefined && nv !== null ? String(nv) : <span className="italic text-gray-300">null</span>}
+                  {formatMutationValue(nv)}
                 </td>
               </tr>
             );
@@ -61,6 +79,7 @@ function DiffView({ oldVals, newVals }: { oldVals: Record<string, unknown> | nul
 export default function MutationsPage() {
   const { user } = useAuth();
   const canRevert = user?.role === 'superadmin' || user?.role === 'onm_team';
+  const canRevertAction = (action: string) => ['create', 'update', 'delete'].includes(action);
 
   const [mutations, setMutations] = useState<Mutation[]>([]);
   const [total, setTotal] = useState(0);
@@ -166,6 +185,14 @@ export default function MutationsPage() {
           <option value="create">Create</option>
           <option value="update">Update</option>
           <option value="delete">Delete</option>
+          <option value="soft_delete">Soft Delete</option>
+          <option value="restore">Restore</option>
+          <option value="assign">Assign Meter</option>
+          <option value="decommission">Decommission Meter</option>
+          <option value="batch_status">Batch Status</option>
+          <option value="bulk_import">Bulk Import</option>
+          <option value="password_registered">Password Registered</option>
+          <option value="password_changed">Password Changed</option>
         </select>
       </div>
 
@@ -256,7 +283,7 @@ export default function MutationsPage() {
                   <span className="ml-2">{actionBadge(selectedMutation.action)}</span>
                 </h2>
                 <div className="flex items-center gap-2">
-                  {canRevert && !selectedMutation.reverted && (
+                  {canRevert && !selectedMutation.reverted && canRevertAction(selectedMutation.action) && (
                     <button
                       onClick={() => handleRevert(selectedMutation.id)}
                       disabled={reverting}

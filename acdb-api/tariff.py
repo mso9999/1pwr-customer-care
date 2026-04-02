@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 from db_auth import get_auth_db
 from models import CCRole, CurrentUser
 from middleware import require_employee
-from mutations import log_mutation
+from mutations import try_log_mutation
 
 logger = logging.getLogger("acdb-api.tariff")
 
@@ -361,7 +361,7 @@ def update_global_rate(
         )
 
     # Also log to cc_mutations for unified audit trail
-    log_mutation(
+    try_log_mutation(
         user, "update", "system_config", "tariff_rate",
         old_values={"value": old_rate},
         new_values={"value": req.rate_lsl, "effective_from": eff},
@@ -423,7 +423,7 @@ def update_concession_rate(
              user.user_id, user.name or user.user_id, req.notes or ""),
         )
 
-    log_mutation(
+    try_log_mutation(
         user, "update", "cc_tariff_overrides", f"concession:{code}",
         old_values={"rate_lsl": previous_rate} if previous_rate else None,
         new_values={"rate_lsl": req.rate_lsl, "effective_from": eff, "scope": "concession", "scope_key": code},
@@ -483,7 +483,7 @@ def update_customer_rate(
              user.user_id, user.name or user.user_id, req.notes or ""),
         )
 
-    log_mutation(
+    try_log_mutation(
         user, "update", "cc_tariff_overrides", f"customer:{cid}",
         old_values={"rate_lsl": previous_rate} if previous_rate else None,
         new_values={"rate_lsl": req.rate_lsl, "effective_from": eff, "scope": "customer", "scope_key": cid},
@@ -536,7 +536,7 @@ def delete_concession_override(
              user.user_id, user.name or user.user_id, "Override removed"),
         )
 
-    log_mutation(
+    try_log_mutation(
         user, "delete", "cc_tariff_overrides", f"concession:{code}",
         old_values={"rate_lsl": old_rate, "scope": "concession", "scope_key": code},
     )
@@ -581,7 +581,7 @@ def delete_customer_override(
              user.user_id, user.name or user.user_id, "Override removed"),
         )
 
-    log_mutation(
+    try_log_mutation(
         user, "delete", "cc_tariff_overrides", f"customer:{cid}",
         old_values={"rate_lsl": old_rate, "scope": "customer", "scope_key": cid},
     )

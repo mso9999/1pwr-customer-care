@@ -28,51 +28,37 @@ def _get_connection():
 def list_tables(user: CurrentUser = Depends(require_employee)):
     """
     List all user tables in the database with row counts and column counts.
-    Excludes system tables.
+    Uses pg_stat_user_tables for approximate row counts (single query).
     """
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        # Get all public tables
-        cursor.execute(
-            "SELECT table_name FROM information_schema.tables "
-            "WHERE table_schema = 'public' AND table_type = 'BASE TABLE' "
-            "ORDER BY table_name"
-        )
-        table_names = [r[0] for r in cursor.fetchall()]
-        logger.info("Discovered %d tables in database", len(table_names))
+        cursor.execute("""
+            SELECT t.table_name,
+                   COALESCE(c.reltuples, -1)::bigint AS row_count,
+                   COUNT(col.column_name)::int AS column_count
+            FROM information_schema.tables t
+            LEFT JOIN pg_class c
+                   ON c.relname = t.table_name
+                  AND c.relnamespace = 'public'::regnamespace
+            LEFT JOIN information_schema.columns col
+                   ON col.table_schema = t.table_schema
+                  AND col.table_name = t.table_name
+            WHERE t.table_schema = 'public'
+              AND t.table_type = 'BASE TABLE'
+            GROUP BY t.table_name, c.reltuples
+            ORDER BY t.table_name
+        """)
 
         tables = []
-        for name in table_names:
-            # Get row count (approximate for large tables)
-            try:
-                cursor.execute(
-                    "SELECT reltuples::bigint FROM pg_class WHERE relname = %s",
-                    (name,),
-                )
-                result = cursor.fetchone()
-                row_count = result[0] if result else -1
-                # If stats are stale (0 for non-empty table), do exact count
-                if row_count == 0:
-                    cursor.execute(f"SELECT COUNT(*) FROM {name}")
-                    row_count = cursor.fetchone()[0]
-            except Exception as e:
-                logger.debug("Could not count rows in %s: %s", name, e)
-                row_count = -1
+        for row in cursor.fetchall():
+            tables.append(TableInfo(
+                name=row[0],
+                row_count=max(row[1], 0),
+                column_count=row[2],
+            ))
 
-            # Get column count
-            try:
-                cursor.execute(
-                    "SELECT COUNT(*) FROM information_schema.columns "
-                    "WHERE table_schema = 'public' AND table_name = %s",
-                    (name,),
-                )
-                col_count = cursor.fetchone()[0]
-            except Exception:
-                col_count = -1
-
-            tables.append(TableInfo(name=name, row_count=row_count, column_count=col_count))
-
+        logger.info("Discovered %d tables in database", len(tables))
         return tables
 
 

@@ -16,6 +16,7 @@ from db_auth import (
     set_employee_role,
 )
 from auth import lookup_employee
+from mutations import try_log_mutation
 
 logger = logging.getLogger("acdb-api.admin")
 
@@ -48,6 +49,7 @@ def assign_role(
     user: CurrentUser = Depends(require_role(CCRole.superadmin)),
 ):
     """Assign a CC role to an employee. Enriches with HR portal data if available."""
+    existing_role = get_employee_role(req.employee_id)
     emp = lookup_employee(req.employee_id)
     if not emp:
         # Allow assignment even if HR portal is unreachable — employee ID
@@ -56,6 +58,19 @@ def assign_role(
         emp = {"employee_id": req.employee_id, "name": req.employee_id, "email": ""}
 
     set_employee_role(req.employee_id, req.cc_role.value, user.user_id)
+    try_log_mutation(
+        user,
+        "create" if existing_role is None else "update",
+        "cc_employee_roles",
+        req.employee_id,
+        old_values={"cc_role": existing_role} if existing_role is not None else None,
+        new_values={
+            "employee_id": req.employee_id,
+            "cc_role": req.cc_role.value,
+            "assigned_by": user.user_id,
+        },
+        metadata={"origin": "admin_role_assignment"},
+    )
     logger.info("Role %s assigned to %s by %s", req.cc_role.value, req.employee_id, user.user_id)
 
     return RoleAssignmentResponse(
@@ -80,6 +95,19 @@ def update_role(
         raise HTTPException(status_code=404, detail=f"No role assignment for '{employee_id}'")
 
     set_employee_role(employee_id, req.cc_role.value, user.user_id)
+    try_log_mutation(
+        user,
+        "update",
+        "cc_employee_roles",
+        employee_id,
+        old_values={"employee_id": employee_id, "cc_role": existing},
+        new_values={
+            "employee_id": employee_id,
+            "cc_role": req.cc_role.value,
+            "assigned_by": user.user_id,
+        },
+        metadata={"origin": "admin_role_assignment"},
+    )
     logger.info("Role updated to %s for %s by %s", req.cc_role.value, employee_id, user.user_id)
 
     emp = lookup_employee(employee_id)
@@ -99,10 +127,20 @@ def remove_role(
     user: CurrentUser = Depends(require_role(CCRole.superadmin)),
 ):
     """Remove an employee's CC role assignment (reverts to generic)."""
+    existing = get_employee_role(employee_id)
     deleted = delete_employee_role(employee_id)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"No role assignment for '{employee_id}'")
 
+    try_log_mutation(
+        user,
+        "delete",
+        "cc_employee_roles",
+        employee_id,
+        old_values={"employee_id": employee_id, "cc_role": existing},
+        new_values={"employee_id": employee_id, "cc_role": CCRole.generic.value},
+        metadata={"origin": "admin_role_assignment", "manual_assignment": False},
+    )
     logger.info("Role removed for %s by %s", employee_id, user.user_id)
     return {"message": f"Role removed for {employee_id}. They will default to 'generic'."}
 

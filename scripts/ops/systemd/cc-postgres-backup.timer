@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily 1PWR CC logical backup
+
+[Timer]
+OnCalendar=*-*-* 02:30:00
+RandomizedDelaySec=15m
+Persistent=true
+Unit=cc-postgres-backup.service
+
+[Install]
+WantedBy=timers.target

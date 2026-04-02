@@ -2556,3 +2556,250 @@ Key evidence:
 
 ### Protocol Feedback
 - The task description in the issue was outdated. Future issues should reference the current state of the codebase or link to the relevant commit history.
+## Session 2026-04-01 202604011053 (Backup and deploy customer onboarding fixes)
+
+### What Was Done
+- Verified live AWS access, identified the production CC instance as `EOL` (`i-04291e12e64de36d7`) in `af-south-1`, and confirmed it was not previously covered by the existing DLM snapshot policy because it lacked the required `backup=yes` tag.
+- Added the `backup=yes` tag to the live instance so the regional DLM policy now targets it for future daily/weekly EBS snapshots.
+- Created a manual pre-deploy EBS snapshot of the production root volume:
+  - `snap-087801c1ec2286de9`
+- Confirmed there were no existing self-owned EBS snapshots for the live root volume before this manual backup, and no AWS Backup plans/vault-protected resources were active for the host in `af-south-1`.
+- Applied the new optional `customers.gender` schema change directly on both production country databases before deploy:
+  - `onepower_cc`
+  - `onepower_bj`
+- Added mutation logging to `registration.py` so customer registration now writes audit records for both the created `customers` row and linked `accounts` row.
+- Committed and pushed the customer onboarding/schema fixes:
+  - commit: `a6ac341`
+- Verified GitHub Actions production deploy succeeded:
+  - run: `23842729618`
+  - both `deploy-frontend` and `deploy-backend` completed successfully
+
+### Key Decisions
+- Used a manual EBS snapshot as the immediate pre-deploy recovery point rather than waiting for the first scheduled DLM run, because the instance had not actually been under automated snapshot protection.
+- Applied the schema change directly in both live databases before pushing because the backend deploy does not appear to run SQL migrations automatically, and the shared registration code would otherwise fail on the missing `gender` column.
+- Kept the existing DLM policy model and aligned the instance with it via tags instead of creating a second overlapping backup mechanism during the deploy window.
+
+### What Next Session Should Know
+- `cc.1pwrafrica.com` is currently deployed with the onboarding fixes and optional customer gender support.
+- The manual pre-deploy snapshot exists as `snap-087801c1ec2286de9`; at the time of deployment it was still in `pending` state, but it was created before the production changes were applied.
+- The instance now has `backup=yes`, so future automatic DLM snapshots should start on the next scheduled policy run.
+- This repo was clean immediately after the deploy; only this session-log update was left uncommitted locally afterward.
+
+### Senescence Notes
+- No major degradation noticed here. The main risk was assuming the presence of an enabled DLM policy meant the live host was protected; checking tags and actual snapshot inventory exposed the real gap.
+
+### Protocol Feedback
+- `CONTEXT.md` would benefit from explicitly recording the current production EC2 instance ID / region and noting that the DLM policy depends on instance tagging rather than automatically covering all CC hosts.
+
+## Session 2026-04-01 202604011044 (Add commissioning LED status for China retest)
+
+### What Was Done
+- Added a commissioning-only status LED driver in the firmware repo and wired it into the existing Wi-Fi and MQTT flow so the China prototype now exposes connection state on the board LED.
+- Added Kconfig options for the commissioning LED GPIO and polarity, defaulting the ESP32-C3 prototype build to LED0 on GPIO3.
+- Rebuilt the `CN-PROTOTYPE-01` / `OneMeter121` commissioning package and refreshed the sendable zip at:
+  - `/tmp/onepwr-aws-mesh-review/releases/commissioning/CN-PROTOTYPE-01-OneMeter121.zip`
+- Updated the generated package `README.txt` and the factory commissioning SOP so the LED status meanings are included in the manufacturer handoff.
+
+### Key Decisions
+- Kept the LED implementation commissioning-only so production meter behavior stays untouched while we improve remote observability for factory support.
+- Used direct hooks from the existing provisioning / Wi-Fi / MQTT code paths instead of a second connection state machine, which keeps the LED behavior aligned with the real runtime events that matter for China troubleshooting.
+- Chose four operator-facing states for the first pass:
+  - slow blink = waiting for Wi-Fi / provisioning
+  - double blink = Wi-Fi connected, trying AWS IoT
+  - solid on = cloud connected
+  - triple blink repeating = repeated cloud connection failure
+
+### What Next Session Should Know
+- The updated China package is built and ready to send; Finder was already pointed at the refreshed zip.
+- The build succeeded after one compile fix to the new LED polarity macro.
+- A full bench canary from factory flash through OTA is still pending before we can call the commissioning path fully validated end-to-end.
+
+### Senescence Notes
+- No notable degradation in this step. The main risk was assuming MQTT manager events alone would cover the initial cloud-failure loop; adding a direct failure hook in the connection task avoided that blind spot.
+
+### Protocol Feedback
+- The existing continuity docs were enough to resume the firmware/package workflow quickly. A dedicated note in `CONTEXT.md` about the current China prototype package path and Thing name would make future retest handoffs even faster.
+
+## Session 2026-04-01 202604011204 (Fix commissioning Wi-Fi auto-connect after reboot)
+
+### What Was Done
+- Traced the reboot behavior from the China serial log and confirmed the device was not losing Wi-Fi credentials after power loss; it was reaching `Wi-Fi already provisioned, starting STA mode.` and then idling.
+- Fixed the commissioning firmware by adding the missing initial `esp_wifi_connect()` call in the already-provisioned STA startup path.
+- Updated the package README template and factory SOP to state that, once provisioned, a normal power restart should reconnect to the saved Wi-Fi automatically.
+- Rebuilt and re-zipped the China commissioning package at:
+  - `/tmp/onepwr-aws-mesh-review/releases/commissioning/CN-PROTOTYPE-01-OneMeter121.zip`
+
+### Key Decisions
+- Kept the fix narrowly scoped to the commissioning startup path instead of changing the shared Wi-Fi event handler behavior, so the production mesh build is unaffected.
+- Treated the reboot problem as separate from the AWS connectivity problem: reboot auto-connect was a firmware bug; post-Wi-Fi MQTT failure still points to network reachability to AWS IoT.
+
+### What Next Session Should Know
+- The refreshed package includes both the LED status changes and the reboot auto-connect fix.
+- The remaining known blocker for China is still the cloud path: the device gets Wi-Fi and TLS, but MQTT is closed before CONNACK and AWS IoT logs remain empty for `OneMeter121`.
+- The end-to-end bench canary from flash through OTA is still pending.
+
+### Senescence Notes
+- No material degradation noticed here. The decisive clue was the reboot log showing the provisioned path without any follow-up connect attempt, which avoided over-attributing the symptom to NVS loss or clock issues.
+
+### Protocol Feedback
+- The previous session notes were enough to resume quickly. A small explicit note in `CONTEXT.md` about the commissioning build's current known limitations and the China thing name would reduce rediscovery further.
+
+## Session 2026-04-01 202604011320 (Show generated customer IDs after CC registration)
+
+### What Was Done
+- Updated `acdb-api/frontend/src/pages/NewCustomerWizard.tsx` so the new-customer flow no longer discards the registration response and immediately redirects back to the customer list.
+- Added a dedicated post-create success state that shows:
+  - generated numeric `customer_id_legacy`
+  - generated `account_number`
+  - customer name
+  - site / community
+- Added clear actions from the success screen to:
+  - open the created customer record directly
+  - create another customer
+  - return to the customers list
+- Verified the frontend still type-checks with:
+  - `cd acdb-api/frontend && npx tsc -b --noEmit`
+
+### Key Decisions
+- Kept the change frontend-only because the backend registration API already returns both IDs; the immediate problem was discoverability, not ID generation.
+- Chose an explicit success screen over another redirect so O&M can capture the generated identifiers before navigating away.
+
+### What Next Session Should Know
+- New customers created through CC now expose their generated numeric customer ID immediately in the wizard success view.
+- Existing ACDB-only records still do not have a normal self-service path for preserving old legacy IDs through CC create/import; that remains a controlled migration topic, not a UI bug.
+- A likely next UX improvement would be to also surface the numeric customer ID more visibly in the main customers list if field teams still need it there.
+
+### Senescence Notes
+- No meaningful degradation noticed in this step. The main risk was assuming ID generation was broken when the real issue was that the UI redirected before showing the returned identifiers.
+
+### Protocol Feedback
+- The continuity docs correctly reinforced that `1PDB` is canonical and ACDB is deprecated. A short operator-facing note in product docs about `customer_id_legacy` versus `account_number` would likely reduce repeated field confusion.
+
+## Session 2026-04-01 202604012040 (Audit and backup hardening)
+
+### What Was Done
+- Closed the app-side audit gaps in the CC backend:
+  - admin role assignment/update/delete now emits audit events
+  - customer password registration/change now emits metadata-only audit events
+  - bulk import now logs created `customers`/`accounts` rows and a batch summary
+  - meter assignment, decommission, and batch status now log richer before/after state
+  - generic CRUD restore/create/update/delete now writes audit rows in the same Postgres transaction
+- Moved the mutation ledger to PostgreSQL:
+  - added `acdb-api/migrations/005_create_cc_mutations.sql`
+  - rewired `acdb-api/mutations.py` to read/write PostgreSQL
+  - changed revert handling to append a reversal event instead of mutating the original row
+  - added `scripts/ops/backfill_cc_mutations.py`
+- Applied the `cc_mutations` migration directly on both live country databases:
+  - `onepower_cc`
+  - `onepower_bj`
+- Deployed the updated backend and frontend manually to `cc.1pwrafrica.com` after a successful local `npx tsc -b --noEmit` and frontend production build.
+- Ran the SQLite-to-Postgres audit backfill on both live country backends and confirmed each now reports `1950` mutation rows from `/api/mutations`.
+- Implemented production logical backups on the CC Linux host:
+  - created S3 bucket `1pwr-cc-backups-758201218523-af-south-1`
+  - enabled bucket public-access block, SSE-S3 encryption, versioning, and lifecycle retention
+  - created IAM role/profile `cc-postgres-backup-role` / `cc-postgres-backup-profile`
+  - attached the profile to the production CC instance
+  - installed `/usr/local/bin/cc_postgres_backup.sh`
+  - enabled `cc-postgres-backup.timer`
+- Ran two successful logical backup uploads from production:
+  - pre-cutover: `20260401T205920Z`
+  - post-cutover: `20260401T210624Z`
+- Verified the post-cutover backup contains:
+  - `onepower_cc.dump`
+  - `onepower_bj.dump`
+  - `cc_auth.db.backup`
+  - `manifest.json`
+  - checksums
+- Ran a full restore drill against the post-cutover backup on a disposable Ubuntu restore instance (not on production), uploaded the report to S3, and terminated the temporary instance afterward.
+
+### Key Decisions
+- Kept `cc_employee_roles` and `cc_customer_passwords` in SQLite for now, but moved the audit ledger itself into PostgreSQL so Postgres-backed business writes can be audited in-store.
+- Used append-only reversal events in `cc_mutations` instead of updating the original audit row’s reverted flag.
+- Treated the production CC host as backup-source only, not restore-target: its root disk is only `30 GiB`, so a real restore drill belongs on a disposable restore environment with much more free space.
+- Installed the logical backup timer on production, but did not leave the restore-drill systemd service installed there after proving the host was the wrong place to run it.
+
+### What Next Session Should Know
+- `cc.1pwrafrica.com` is live with the PostgreSQL-backed mutation ledger and the mutation UI now reads from the new store.
+- The shared legacy SQLite mutation history was backfilled into both country databases, so both LS and BN currently show `1950` historical mutation rows.
+- Production logical backups now land in:
+  - `s3://1pwr-cc-backups-758201218523-af-south-1/customer-care/ip-172-31-3-91/<timestamp>/`
+- Latest validated restore drill:
+  - backup timestamp: `20260401T210624Z`
+  - report: `restore-verify-20260401211803.json`
+  - LS counts: `customers=1465`, `accounts=1464`, `meters=1735`, `cc_mutations=1950`
+  - BN counts: `customers=165`, `accounts=165`, `meters=162`, `cc_mutations=1950`
+- Production host backup config lives at:
+  - `/etc/default/cc-postgres-backup`
+  - timer: `cc-postgres-backup.timer`
+- The restore runbook is now in `docs/ops/postgres-backup-recovery.md`.
+
+### Senescence Notes
+- Mild degradation started when the first restore drill failures blurred together; writing the exact failure modes down (prod-host disk limit, temp-copy disk limit) and moving to a disposable restore host kept the session recoverable.
+- Future sessions should avoid retrying a restore on the production host; that path is now known-bad for capacity reasons.
+
+### Protocol Feedback
+- `CONTEXT.md` was missing the live backup path, current production instance identity, and the crucial fact that the production root volume is too small for a restore drill. Those gaps were updated directly this session.
+
+## Session 2026-04-02 202604020756 (Expand production root volume)
+
+### What Was Done
+- Confirmed the production CC root EBS volume was still `30 GiB`:
+  - volume: `vol-074546e0c620fff18`
+  - instance: `i-04291e12e64de36d7`
+- Took a pre-change safety snapshot:
+  - `snap-0cabf867c10b54124`
+- Expanded the production root EBS volume from `30 GiB` to `120 GiB`.
+- Grew the live Ubuntu root partition and ext4 filesystem online with no reboot:
+  - `growpart /dev/nvme0n1 1`
+  - `resize2fs /dev/nvme0n1p1`
+- Verified the root filesystem now reports roughly:
+  - size: `116G`
+  - used: `27G`
+  - free: `89G`
+- Verified `https://cc.1pwrafrica.com/api/health` still returns `200` after the expansion.
+
+### Key Decisions
+- Expanded directly to `120 GiB` rather than a smaller incremental bump so the host has meaningful operational headroom instead of another near-term disk squeeze.
+- Kept the change online because the current root layout (`/dev/nvme0n1p1` on ext4) supports safe in-place growth without downtime.
+- Even after expansion, kept the documented guidance that restore drills belong on disposable restore hosts, not on the production CC server.
+
+### What Next Session Should Know
+- The production CC host now has sufficient free root space for normal operation and backup growth.
+- The pre-expand snapshot `snap-0cabf867c10b54124` exists as the safety point for this change.
+- Backup and restore docs were updated so they no longer claim the production root volume is `30 GiB`.
+
+### Senescence Notes
+- No notable degradation here. The change was straightforward once the root device layout was confirmed.
+
+### Protocol Feedback
+- The earlier context note about the production root volume being only `30 GiB` was no longer true after this change and was corrected immediately in both `CONTEXT.md` and the backup runbook.
+- `SESSION_LOG.md` continuity was useful for the earlier snapshot/tagging work, but it had not yet captured the logical backup hardening or audit-ledger cutover until now.
+
+## Session 2026-04-02 202604021200 (Customer ID Fix + Dashboard Perf)
+
+### What Was Done
+- **Removed accidental registration**: Deleted unintended `cc_customer_passwords` entry for account `0011SEH` that was created during investigation.
+- **Fixed customer_id_legacy generation**: Root cause was the `customer_id_legacy` column in the `customers` table had no default and no sequence. Created `customers_legacy_id_seq` (starting at 6728, above the max existing legacy ID of 6727), set it as the column default, and backfilled 4 NULL rows (customer ids 2953-2956). Migration recorded as `006_customer_id_legacy_sequence.sql`.
+- **Fixed dashboard performance**: Diagnosed the `customer-record-completeness` endpoint taking 76 seconds due to a massive JOIN against 17.8M `hourly_consumption` rows. Implemented:
+  1. **Server-side caching** (10-min TTL) for `site-summary` and `customer-record-completeness` endpoints — cached responses serve in <5ms.
+  2. **Cache pre-warming** on server startup via a background thread, so the first user login after a restart gets instant results.
+  3. **Query optimization**: replaced the correlated LEFT JOIN with a pre-aggregated `hourly_stats` CTE.
+  4. **Schema endpoint optimization**: replaced N+1 per-table queries with a single joined query.
+- Result: dashboard load went from 76+ seconds to <100ms for all endpoints (after initial warm).
+
+### Key Decisions
+- Used in-memory cache (10-min TTL) rather than materialized views — simpler, no schema changes, and the dashboard doesn't need real-time data.
+- Cache warm runs as a daemon thread 3 seconds after startup, tolerates failure gracefully.
+- Chose sequence-based default for `customer_id_legacy` over trigger, since it's simpler and the column is always populated by INSERT.
+
+### What Next Session Should Know
+- `customer_id_legacy` now auto-generates for all new customers. Existing duplicates for `Thuso Morethi` (rows 2953, 2954, 2956) may need cleanup — only row 2956 is linked to account `0011SEH`.
+- Dashboard stats cache TTL is 600 seconds. If data freshness requirements change, adjust `CACHE_TTL_SECONDS` in `stats.py`.
+- The `hourly_consumption` table has 17.8M rows — any new queries against it should be mindful of performance.
+
+### Senescence Notes
+- No degradation observed in this session.
+
+### Protocol Feedback
+- CONTEXT.md was helpful for understanding the backend file layout.
+- SESSION_LOG.md continuity from the prior session was essential for understanding the production state after the backup/audit work.

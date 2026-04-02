@@ -241,7 +241,7 @@ from schema import router as schema_router
 from crud import router as crud_router, customer_router, customer_data_router, _ensure_soft_delete_table
 from exports import router as export_router
 from admin import router as admin_router
-from stats import router as stats_router
+from stats import router as stats_router, warm_stats_cache
 from mutations import router as mutations_router
 from om_report import router as om_report_router
 from sync_ugridplan import router as sync_router
@@ -282,6 +282,7 @@ app.include_router(financing_router)
 app.include_router(verification_router)
 app.include_router(tickets_router)
 ensure_meter_assignments_table()
+warm_stats_cache()
 
 
 # ---- Country config ----

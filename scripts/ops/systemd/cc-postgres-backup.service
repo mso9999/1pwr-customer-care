@@ -1,0 +1,13 @@
+[Unit]
+Description=1PWR CC logical backup to S3
+After=network-online.target postgresql.service
+Wants=network-online.target
+Requires=postgresql.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/default/cc-postgres-backup
+ExecStart=/usr/local/bin/cc_postgres_backup.sh
+
+[Install]
+WantedBy=multi-user.target

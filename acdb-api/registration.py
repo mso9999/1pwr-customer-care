@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from country_config import COUNTRY
 from middleware import require_employee, require_role
 from models import CurrentUser
-from mutations import log_mutation
+from mutations import log_mutation, try_log_mutation
 
 logger = logging.getLogger("cc-api.registration")
 
@@ -155,91 +155,110 @@ def register_customer(
     """Register a new customer with auto-generated account number."""
     with _get_connection() as conn:
         cursor = conn.cursor()
+        try:
+            community = req.community.upper()
 
-        community = req.community.upper()
+            # Generate account number
+            account_number = generate_account_number(conn, community)
 
-        # Generate account number
-        account_number = generate_account_number(conn, community)
+            resolved_customer_type = _infer_customer_type(req.customer_type, req.plot_number)
+            gender = _normalize_gender_for_storage(req.gender)
+            phone = _normalize_phone_for_storage(req.phone)
+            cell_phone_1 = _normalize_phone_for_storage(req.cell_phone_1)
+            cell_phone_2 = _normalize_phone_for_storage(req.cell_phone_2)
 
-        resolved_customer_type = _infer_customer_type(req.customer_type, req.plot_number)
-        gender = _normalize_gender_for_storage(req.gender)
-        phone = _normalize_phone_for_storage(req.phone)
-        cell_phone_1 = _normalize_phone_for_storage(req.cell_phone_1)
-        cell_phone_2 = _normalize_phone_for_storage(req.cell_phone_2)
+            # Insert customer
+            cursor.execute("""
+                INSERT INTO customers (
+                    first_name, middle_name, gender, last_name, community, phone, cell_phone_1,
+                    cell_phone_2, email, national_id, plot_number,
+                    street_address, city, district, customer_type,
+                    gps_lat, gps_lon, date_service_connected, is_active,
+                    created_by, updated_by
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    TRUE, %s, %s
+                ) RETURNING id, customer_id_legacy
+            """, (
+                req.first_name, req.middle_name, gender, req.last_name, community,
+                phone, cell_phone_1, cell_phone_2,
+                req.email, req.national_id, req.plot_number,
+                req.street_address, req.city, req.district,
+                resolved_customer_type, req.gps_lat, req.gps_lon, req.date_service_connected,
+                user.user_id, user.user_id,
+            ))
 
-        # Insert customer
-        cursor.execute("""
-            INSERT INTO customers (
-                first_name, middle_name, gender, last_name, community, phone, cell_phone_1,
-                cell_phone_2, email, national_id, plot_number,
-                street_address, city, district, customer_type,
-                gps_lat, gps_lon, date_service_connected, is_active,
-                created_by, updated_by
-            ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                TRUE, %s, %s
-            ) RETURNING id, customer_id_legacy
-        """, (
-            req.first_name, req.middle_name, gender, req.last_name, community,
-            phone, cell_phone_1, cell_phone_2,
-            req.email, req.national_id, req.plot_number,
-            req.street_address, req.city, req.district,
-            resolved_customer_type, req.gps_lat, req.gps_lon, req.date_service_connected,
-            user.user_id, user.user_id,
-        ))
+            row = cursor.fetchone()
+            customer_pg_id = row[0]
+            customer_legacy_id = row[1]
 
-        row = cursor.fetchone()
-        customer_pg_id = row[0]
-        customer_legacy_id = row[1]
+            # Extract sequence number from account number
+            seq = int(account_number[:4])
 
-        # Extract sequence number from account number
-        seq = int(account_number[:4])
+            # Create account record
+            cursor.execute("""
+                INSERT INTO accounts (
+                    account_number, customer_id, meter_id, community,
+                    account_sequence, created_by
+                ) VALUES (%s, %s, %s, %s, %s, %s)
+            """, (account_number, customer_pg_id, req.meter_id, community, seq, user.user_id))
 
-        # Create account record
-        cursor.execute("""
-            INSERT INTO accounts (
-                account_number, customer_id, meter_id, community,
-                account_sequence, created_by
-            ) VALUES (%s, %s, %s, %s, %s, %s)
-        """, (account_number, customer_pg_id, req.meter_id, community, seq, user.user_id))
-
-        conn.commit()
-
-        customer_values = {
-            "id": customer_pg_id,
-            "customer_id_legacy": customer_legacy_id,
-            "first_name": req.first_name,
-            "middle_name": req.middle_name,
-            "gender": gender,
-            "last_name": req.last_name,
-            "community": community,
-            "phone": phone,
-            "cell_phone_1": cell_phone_1,
-            "cell_phone_2": cell_phone_2,
-            "email": req.email,
-            "national_id": req.national_id,
-            "plot_number": req.plot_number,
-            "street_address": req.street_address,
-            "city": req.city,
-            "district": req.district,
-            "customer_type": resolved_customer_type,
-            "gps_lat": req.gps_lat,
-            "gps_lon": req.gps_lon,
-            "date_service_connected": req.date_service_connected,
-            "is_active": True,
-            "created_by": user.user_id,
-            "updated_by": user.user_id,
-        }
-        account_values = {
-            "account_number": account_number,
-            "customer_id": customer_pg_id,
-            "meter_id": req.meter_id,
-            "community": community,
-            "account_sequence": seq,
-            "created_by": user.user_id,
-        }
-        log_mutation(user, "create", "customers", str(customer_pg_id), new_values=customer_values)
-        log_mutation(user, "create", "accounts", account_number, new_values=account_values)
+            customer_values = {
+                "id": customer_pg_id,
+                "customer_id_legacy": customer_legacy_id,
+                "first_name": req.first_name,
+                "middle_name": req.middle_name,
+                "gender": gender,
+                "last_name": req.last_name,
+                "community": community,
+                "phone": phone,
+                "cell_phone_1": cell_phone_1,
+                "cell_phone_2": cell_phone_2,
+                "email": req.email,
+                "national_id": req.national_id,
+                "plot_number": req.plot_number,
+                "street_address": req.street_address,
+                "city": req.city,
+                "district": req.district,
+                "customer_type": resolved_customer_type,
+                "gps_lat": req.gps_lat,
+                "gps_lon": req.gps_lon,
+                "date_service_connected": req.date_service_connected,
+                "is_active": True,
+                "created_by": user.user_id,
+                "updated_by": user.user_id,
+            }
+            account_values = {
+                "account_number": account_number,
+                "customer_id": customer_pg_id,
+                "meter_id": req.meter_id,
+                "community": community,
+                "account_sequence": seq,
+                "created_by": user.user_id,
+            }
+            log_mutation(
+                user,
+                "create",
+                "customers",
+                str(customer_pg_id),
+                new_values=customer_values,
+                conn=conn,
+            )
+            log_mutation(
+                user,
+                "create",
+                "accounts",
+                account_number,
+                new_values=account_values,
+                conn=conn,
+            )
+            conn.commit()
+        except HTTPException:
+            conn.rollback()
+            raise
+        except Exception as e:
+            conn.rollback()
+            raise HTTPException(status_code=400, detail=f"Customer registration failed: {e}")
 
         logger.info(
             "Customer registered: %s %s -> %s by %s",
@@ -308,11 +327,14 @@ async def bulk_import_customers(
     imported = 0
     skipped = 0
     errors = []
+    imported_accounts: list[str] = []
+    total_rows = 0
 
     with _get_connection() as conn:
         cursor = conn.cursor()
 
         for row_num, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+            total_rows = row_num - 1
             row_dict = dict(zip(headers, row))
 
             first_name = str(row_dict.get("first_name", "")).strip()
@@ -322,6 +344,7 @@ async def bulk_import_customers(
                 skipped += 1
                 continue
 
+            cursor.execute("SAVEPOINT bulk_import_row")
             try:
                 account_number = generate_account_number(conn, community_upper)
                 seq = int(account_number[:4])
@@ -336,7 +359,7 @@ async def bulk_import_customers(
                         gps_lat, gps_lon, is_active,
                         created_by
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, %s)
-                    RETURNING id
+                    RETURNING id, customer_id_legacy
                 """, (
                     # Preserve explicit HH1/HH2/HH3/etc. when present, but do not
                     # persist aggregate HH as though it were an atomic type.
@@ -352,7 +375,9 @@ async def bulk_import_customers(
                     float(row_dict["gps_lon"]) if row_dict.get("gps_lon") else None,
                     user.user_id,
                 ))
-                customer_pg_id = cursor.fetchone()[0]
+                customer_pg_row = cursor.fetchone()
+                customer_pg_id = customer_pg_row[0]
+                customer_legacy_id = customer_pg_row[1]
 
                 cursor.execute("""
                     INSERT INTO accounts (
@@ -361,23 +386,84 @@ async def bulk_import_customers(
                     ) VALUES (%s, %s, %s, %s, %s)
                 """, (account_number, customer_pg_id, community_upper, seq, user.user_id))
 
+                customer_values = {
+                    "id": customer_pg_id,
+                    "customer_id_legacy": customer_legacy_id,
+                    "first_name": first_name,
+                    "gender": gender,
+                    "last_name": last_name,
+                    "community": community_upper,
+                    "phone": _normalize_phone_for_storage(str(row_dict.get("phone", "") or "").strip() or None),
+                    "national_id": str(row_dict.get("national_id", "") or "").strip() or None,
+                    "plot_number": str(row_dict.get("plot_number", "") or "").strip() or None,
+                    "customer_type": _infer_customer_type(
+                        str(row_dict.get("customer_type", "") or "").strip() or None,
+                        str(row_dict.get("plot_number", "") or "").strip() or None,
+                    ),
+                    "gps_lat": float(row_dict["gps_lat"]) if row_dict.get("gps_lat") else None,
+                    "gps_lon": float(row_dict["gps_lon"]) if row_dict.get("gps_lon") else None,
+                    "created_by": user.user_id,
+                }
+                account_values = {
+                    "account_number": account_number,
+                    "customer_id": customer_pg_id,
+                    "community": community_upper,
+                    "account_sequence": seq,
+                    "created_by": user.user_id,
+                }
+                log_mutation(
+                    user,
+                    "create",
+                    "customers",
+                    str(customer_pg_id),
+                    new_values=customer_values,
+                    conn=conn,
+                )
+                log_mutation(
+                    user,
+                    "create",
+                    "accounts",
+                    account_number,
+                    new_values=account_values,
+                    conn=conn,
+                )
+                cursor.execute("RELEASE SAVEPOINT bulk_import_row")
                 imported += 1
-
+                imported_accounts.append(account_number)
             except Exception as e:
-                errors.append({"row": row_num, "error": str(e)})
-                conn.rollback()
+                cursor.execute("ROLLBACK TO SAVEPOINT bulk_import_row")
+                cursor.execute("RELEASE SAVEPOINT bulk_import_row")
+                errors.append({
+                    "row": row_num,
+                    "error": e.detail if isinstance(e, HTTPException) else str(e),
+                })
 
-        if imported > 0:
-            conn.commit()
+        conn.commit()
 
     wb.close()
+    if imported > 0:
+        try_log_mutation(
+            user,
+            "bulk_import",
+            "customers",
+            community_upper,
+            new_values={
+                "community": community_upper,
+                "filename": file.filename,
+                "imported": imported,
+                "skipped": skipped,
+                "error_count": len(errors),
+                "account_numbers": imported_accounts,
+            },
+            metadata={"total_rows": total_rows},
+        )
     logger.info(
         "Bulk import: %d imported, %d skipped, %d errors from %s by %s",
         imported, skipped, len(errors), file.filename, user.user_id,
     )
 
     return BulkImportResult(
-        total_rows=row_num - 1 if 'row_num' in dir() else 0,
+        total_rows=total_rows,
         imported=imported,
         skipped=skipped,
         errors=errors[:20],  # Cap error list
