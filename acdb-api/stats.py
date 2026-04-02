@@ -463,31 +463,65 @@ _FX_TO_USD = {
 def _country_monthly_revenue(conn, country: str, currency: str, months: int) -> List[Dict[str, Any]]:
     """Query monthly_transactions for a single country DB.
 
+    Handles two data shapes:
+      - Per-customer rows (LS): COUNT(DISTINCT account_number) for paying customers
+      - Site-level aggregates (BJ): account_number like 'SITE_%'; falls back to
+        counting accounts with consumption in that month.
+
     Returns list of {month, revenue_local, paying_customers, currency, country}.
     """
     cursor = conn.cursor()
+
+    cutoff = f"to_char(NOW() - interval '{int(months)} months', 'YYYY-MM')"
+
     cursor.execute(
         "SELECT year_month, "
-        "       SUM(amount_lsl)::numeric(14,2) AS revenue, "
-        "       COUNT(DISTINCT account_number) AS paying_customers "
+        f"      SUM(amount_lsl)::numeric(14,2) AS revenue, "
+        "       COUNT(DISTINCT account_number) AS acct_count, "
+        "       COUNT(DISTINCT CASE WHEN amount_lsl > 0 "
+        "                             AND account_number NOT LIKE 'SITE_%%' "
+        "                             THEN account_number END) AS real_acct_count "
         "FROM monthly_transactions "
-        "WHERE amount_lsl > 0 "
-        "  AND year_month >= to_char(NOW() - interval '%s months', 'YYYY-MM') "
+        f"WHERE year_month >= {cutoff} "
         "GROUP BY year_month "
-        "ORDER BY year_month",
-        (months,),
+        "ORDER BY year_month"
     )
-    rows = cursor.fetchall()
-    return [
-        {
-            "month": str(r[0]),
-            "revenue_local": float(r[1]),
-            "paying_customers": int(r[2]),
+    raw = cursor.fetchall()
+
+    has_consumption_table = _table_exists(cursor, "monthly_consumption") or _table_exists(cursor, "hourly_consumption")
+
+    results = []
+    for r in raw:
+        ym = str(r[0])
+        revenue = float(r[1])
+        real_accts = int(r[3])
+
+        if real_accts > 0:
+            paying = real_accts
+        elif has_consumption_table:
+            try:
+                cursor.execute(
+                    "SELECT COUNT(DISTINCT account_number) "
+                    "FROM monthly_consumption "
+                    "WHERE year_month = %s AND kwh > 0",
+                    (ym,),
+                )
+                row = cursor.fetchone()
+                paying = int(row[0]) if row and row[0] else 0
+            except Exception:
+                conn.rollback()
+                paying = int(r[2])
+        else:
+            paying = int(r[2])
+
+        results.append({
+            "month": ym,
+            "revenue_local": revenue,
+            "paying_customers": paying,
             "currency": currency,
             "country": country,
-        }
-        for r in rows
-    ]
+        })
+    return results
 
 
 def _country_active_connections(conn) -> int:
