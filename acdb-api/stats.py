@@ -253,8 +253,6 @@ def customer_record_completeness(user: CurrentUser = Depends(require_employee)):
 
     with _get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SET LOCAL statement_timeout = '120s'")
-        cursor.execute("SET LOCAL work_mem = '16MB'")
 
         if not _table_exists(cursor, "customers") or not _table_exists(cursor, "accounts"):
             return {
@@ -295,7 +293,7 @@ def customer_record_completeness(user: CurrentUser = Depends(require_employee)):
             "c.date_service_terminated::timestamp" if has_terminated else "NULL::timestamp"
         )
 
-        cursor.execute("SELECT date_trunc('hour', MAX(reading_hour)) FROM hourly_consumption")
+        cursor.execute("SELECT MAX(last_record_at) FROM mv_hourly_account_summary")
         data_as_of = cursor.fetchone()[0]
 
         completeness_sql = f"""
@@ -345,14 +343,6 @@ def customer_record_completeness(user: CurrentUser = Depends(require_employee)):
                 FROM customer_accounts ca
                 LEFT JOIN first_transaction ft ON ft.account_number = ca.account_number
             ),
-            hourly_stats AS (
-                SELECT account_number,
-                       COUNT(DISTINCT reading_hour)::bigint AS actual_records,
-                       MIN(reading_hour) AS first_record_at,
-                       MAX(reading_hour) AS last_record_at
-                FROM hourly_consumption
-                GROUP BY account_number
-            ),
             records_by_account AS (
                 SELECT
                     sw.customer_pk,
@@ -366,11 +356,11 @@ def customer_record_completeness(user: CurrentUser = Depends(require_employee)):
                             THEN 0::bigint
                         ELSE FLOOR(EXTRACT(EPOCH FROM (sw.window_end - sw.window_start)) / 3600)::bigint
                     END AS expected_records,
-                    COALESCE(hs.actual_records, 0)::bigint AS actual_records,
+                    COALESCE(hs.distinct_hours, 0)::bigint AS actual_records,
                     hs.first_record_at,
                     hs.last_record_at
                 FROM service_windows sw
-                LEFT JOIN hourly_stats hs
+                LEFT JOIN mv_hourly_account_summary hs
                     ON sw.account_number IS NOT NULL
                    AND hs.account_number = sw.account_number
             )

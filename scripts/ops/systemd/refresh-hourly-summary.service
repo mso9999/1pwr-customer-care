@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh mv_hourly_account_summary materialized view
+After=postgresql.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/refresh_hourly_summary.sh onepower_cc
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=refresh-hourly-summary
