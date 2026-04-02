@@ -1301,15 +1301,12 @@ def consumption_by_tenure(
 ):
     """
     Average monthly kWh consumption as a function of tenure (months since
-    first reading/transaction), segmented by customer type (HH, SME, etc.)
+    first reading), segmented by customer type (HH, SME, etc.)
     with +/- 1 standard deviation bands.
 
-    Data source priority:
-      1. monthly_consumption -- actual meter readings imported from Koios /
-         ThunderCloud via the historical ACCDB import pipeline
-         (now archived under legacy/accdb/import_meter_readings.py).
-      2. transactions -- kWh vended per transaction (fallback if meter
-         readings not yet imported).
+    Data source: monthly_consumption table only (actual meter readings).
+    This excludes transaction/vending data to avoid conflating purchased kWh
+    with consumed kWh.
 
     Customer type is resolved from the meters table first, then from the
     static JSON mapping (meter_customer_types.json) as a fallback.
@@ -1399,13 +1396,11 @@ def consumption_by_tenure(
                 return ct
             return _lookup_type(acct)
 
-        # -- Merge ALL data sources for comprehensive tenure analysis --
         parsed_rows: List[tuple] = []
         acct_first_txn: Dict[str, datetime] = {}
         debug_info: Dict[str, Any] = {"acct_type_map_size": len(acct_type)}
 
-        # -- Source 1: monthly_consumption (actual meter readings) --
-        consumption_acct_months: Set[Tuple[str, str]] = set()
+        # -- monthly_consumption (actual meter readings) --
         consumption_rows: list = []
 
         try:
@@ -1447,8 +1442,6 @@ def consumption_by_tenure(
             except (ValueError, IndexError):
                 continue
 
-            ym_key = f"{dt.year:04d}-{dt.month:02d}"
-            consumption_acct_months.add((acct, ym_key))
             parsed_rows.append((acct, ctype, dt, kwh))
             cons_added += 1
             if acct not in acct_first_txn or dt < acct_first_txn[acct]:
@@ -1460,78 +1453,9 @@ def consumption_by_tenure(
             "unmatched": cons_unmatched,
             "added": cons_added,
         }
-
-        # -- Source 2: transactions (comprehensive vended kWh) --
-        history_rows: list = []
-        try:
-            cursor.execute(
-                "SELECT meter_id, account_number, transaction_date, kwh_value "
-                "FROM transactions"
-            )
-            history_rows = cursor.fetchall()
-        except Exception as e:
-            logger.warning("Failed to read transactions for tenure: %s", e)
-
-        # Extend type mapping from history rows
-        for row in history_rows:
-            mid = str(row[0] or "").strip()
-            acct = str(row[1] or "").strip()
-            if not acct or acct in acct_type:
-                continue
-            ctype = _lookup_type(mid)
-            if ctype:
-                acct_type[acct] = ctype
-        acct_type_lower.update({k.lower(): v for k, v in acct_type.items()})
-
-        hist_added = 0
-        hist_skipped_overlap = 0
-        hist_matched = 0
-        hist_unmatched = 0
-
-        for row in history_rows:
-            mid = str(row[0] or "").strip()
-            acct = str(row[1] or "").strip()
-            if not acct:
-                continue
-
-            ctype = _resolve_type(acct, mid)
-            if not ctype:
-                hist_unmatched += 1
-                continue
-            hist_matched += 1
-
-            txn_dt = _parse_dt(row[2])
-            if txn_dt is None:
-                continue
-            try:
-                kwh = float(row[3] or 0)
-            except (ValueError, TypeError):
-                continue
-
-            ym_key = f"{txn_dt.year:04d}-{txn_dt.month:02d}"
-            if (acct, ym_key) in consumption_acct_months:
-                hist_skipped_overlap += 1
-                continue
-
-            parsed_rows.append((acct, ctype, txn_dt, kwh))
-            hist_added += 1
-            if acct not in acct_first_txn or txn_dt < acct_first_txn[acct]:
-                acct_first_txn[acct] = txn_dt
-
-        debug_info["transactions"] = {
-            "rows": len(history_rows),
-            "matched": hist_matched,
-            "unmatched": hist_unmatched,
-            "added": hist_added,
-            "skipped_overlap": hist_skipped_overlap,
-        }
         debug_info["total_unique_accounts"] = len(acct_first_txn)
 
-        data_source = (
-            "merged (consumption + vended)"
-            if cons_added > 0
-            else "vended"
-        )
+        data_source = "metered"
 
         if not acct_first_txn:
             return {
