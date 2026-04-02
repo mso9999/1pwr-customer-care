@@ -40,26 +40,36 @@ def _set_cached(key: str, value: Any):
         _cache[key] = (time.monotonic(), value)
 
 
-def warm_stats_cache():
-    """Pre-compute expensive dashboard stats in a background thread.
+_warm_scheduled = False
 
-    Called once at startup so the first user request is served from cache.
+
+def warm_stats_cache():
+    """Schedule a deferred, low-priority cache warm in a background thread.
+
+    Waits 120 seconds after boot to avoid contending with other startup
+    work and heavy import jobs.  Uses statement_timeout to bail out if
+    the query takes too long, preventing runaway memory consumption.
     """
+    global _warm_scheduled
+    if _warm_scheduled:
+        return
+    _warm_scheduled = True
+
     def _warm():
-        time.sleep(3)
+        time.sleep(120)
         try:
             from models import CurrentUser
             fake_user = CurrentUser(
                 user_type="employee", user_id="system",
                 name="cache-warm", role="superadmin",
             )
-            logger.info("Pre-warming dashboard stats cache...")
+            logger.info("Pre-warming dashboard stats cache (deferred)...")
             t0 = time.monotonic()
             site_summary(fake_user)
             customer_record_completeness(fake_user)
             logger.info("Dashboard cache warmed in %.1fs", time.monotonic() - t0)
         except Exception:
-            logger.exception("Failed to pre-warm dashboard cache")
+            logger.warning("Cache warm-up failed (non-fatal); first user request will compute live")
 
     t = threading.Thread(target=_warm, daemon=True)
     t.start()
@@ -243,6 +253,8 @@ def customer_record_completeness(user: CurrentUser = Depends(require_employee)):
 
     with _get_connection() as conn:
         cursor = conn.cursor()
+        cursor.execute("SET LOCAL statement_timeout = '120s'")
+        cursor.execute("SET LOCAL work_mem = '16MB'")
 
         if not _table_exists(cursor, "customers") or not _table_exists(cursor, "accounts"):
             return {
