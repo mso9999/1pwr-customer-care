@@ -112,6 +112,90 @@ def _get_primary_key(conn, table_name: str) -> Optional[str]:
     return cols[0] if cols else None
 
 
+def _resolve_lookup_column(conn, table_name: str, pk: str, record_id: str) -> str:
+    """Return the best column to look up *record_id*.
+
+    If *record_id* is compatible with the PK type, return the PK.
+    Otherwise probe unique columns for a match so the frontend can
+    pass natural keys (e.g. account_number) instead of integer PKs.
+    """
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT format_type(a.atttypid, a.atttypmod) "
+        "FROM pg_attribute a "
+        "WHERE a.attrelid = %s::regclass AND a.attname = %s",
+        (table_name, pk),
+    )
+    row = cursor.fetchone()
+    pk_type = (row[0] if row else "").lower()
+
+    if "int" in pk_type:
+        try:
+            int(record_id)
+            return pk
+        except (ValueError, TypeError):
+            pass
+    else:
+        return pk
+
+    cursor.execute(
+        "SELECT a.attname "
+        "FROM pg_index i "
+        "JOIN pg_attribute a ON a.attrelid = i.indrelid "
+        "  AND a.attnum = ANY(i.indkey) "
+        "WHERE i.indrelid = %s::regclass "
+        "  AND i.indisunique AND NOT i.indisprimary "
+        "  AND array_length(i.indkey, 1) = 1",
+        (table_name,),
+    )
+    for (col,) in cursor.fetchall():
+        try:
+            cursor.execute(
+                f"SELECT 1 FROM {table_name} WHERE {col} = %s LIMIT 1",
+                (record_id,),
+            )
+            if cursor.fetchone():
+                return col
+        except Exception:
+            conn.rollback()
+
+    return pk
+
+
+# ---------------------------------------------------------------------------
+# Account health / orphan detection
+# (Must be defined before parameterized /{table_name} routes)
+# ---------------------------------------------------------------------------
+
+@router.get("/accounts/orphaned", tags=["accounts"])
+def list_orphaned_accounts(user: CurrentUser = Depends(require_employee)):
+    """Return account numbers whose linked customer is missing or soft-deleted."""
+    with _get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT a.account_number, "
+            "  CASE "
+            "    WHEN c.id IS NULL THEN 'missing_customer' "
+            "    WHEN sd.record_id IS NOT NULL THEN 'customer_in_cold_storage' "
+            "    ELSE NULL "
+            "  END AS orphan_reason "
+            "FROM accounts a "
+            "LEFT JOIN customers c ON c.id = a.customer_id "
+            "LEFT JOIN soft_deletes sd "
+            "  ON sd.table_name = 'customers' "
+            "  AND sd.record_id = CAST(a.customer_id AS TEXT) "
+            "WHERE c.id IS NULL OR sd.record_id IS NOT NULL"
+        )
+        rows = cursor.fetchall()
+        return {
+            "orphaned": [
+                {"account_number": r[0], "reason": r[1]}
+                for r in rows
+            ],
+            "count": len(rows),
+        }
+
+
 # ---------------------------------------------------------------------------
 # List (paginated)
 # ---------------------------------------------------------------------------
@@ -417,12 +501,16 @@ def get_record(
         if not pk:
             raise HTTPException(status_code=400, detail="Cannot determine primary key")
 
+        lookup_col = _resolve_lookup_column(conn, table_name, pk, record_id)
         cursor = conn.cursor()
-        sql = f"SELECT * FROM {table_name} WHERE {pk} = %s"
-        cursor.execute(sql, (record_id,))
-        row = cursor.fetchone()
+        row = None
+        try:
+            cursor.execute(f"SELECT * FROM {table_name} WHERE {lookup_col} = %s", (record_id,))
+            row = cursor.fetchone()
+        except Exception:
+            conn.rollback()
 
-        # Fallback: for customers, try account_number resolution
+        # Fallback: for customers, try account_number resolution via join
         if not row and table_name == "customers":
             import re as _re_fallback
             if _re_fallback.match(r"^\d{3,4}[A-Za-z]{2,4}$", record_id):
@@ -431,12 +519,6 @@ def get_record(
                     "JOIN customers c ON a.customer_id = c.id "
                     "WHERE a.account_number = %s LIMIT 1",
                     (record_id.upper(),),
-                )
-                row = cursor.fetchone()
-            elif record_id.isdigit():
-                cursor.execute(
-                    "SELECT * FROM customers WHERE customer_id_legacy = %s",
-                    (record_id,),
                 )
                 row = cursor.fetchone()
 
@@ -741,10 +823,33 @@ def update_record(
         if not pk:
             raise HTTPException(status_code=400, detail="Cannot determine primary key")
 
+        lookup_col = _resolve_lookup_column(conn, table_name, pk, record_id)
+
         # Capture old values before the update
         cursor = conn.cursor()
-        cursor.execute(f"SELECT * FROM {table_name} WHERE {pk} = %s", (record_id,))
-        old_row = cursor.fetchone()
+        old_row = None
+        try:
+            cursor.execute(f"SELECT * FROM {table_name} WHERE {lookup_col} = %s", (record_id,))
+            old_row = cursor.fetchone()
+        except Exception:
+            conn.rollback()
+
+        if not old_row and table_name == "customers":
+            import re as _re_upd
+            if _re_upd.match(r"^\d{3,4}[A-Za-z]{2,4}$", record_id):
+                cursor.execute(
+                    "SELECT c.* FROM accounts a "
+                    "JOIN customers c ON a.customer_id = c.id "
+                    "WHERE a.account_number = %s LIMIT 1",
+                    (record_id.upper(),),
+                )
+                old_row = cursor.fetchone()
+                if old_row:
+                    real_id = _row_to_dict(cursor, old_row).get(pk)
+                    if real_id is not None:
+                        record_id = str(real_id)
+                        lookup_col = pk
+
         old_values = _row_to_dict(cursor, old_row) if old_row else None
 
         coerced = _coerce_values(cursor, table_name, req.data)
@@ -754,7 +859,7 @@ def update_record(
         set_parts = [f"{col} = %s" for col in coerced.keys()]
         values = list(coerced.values()) + [record_id]
 
-        sql = f"UPDATE {table_name} SET {', '.join(set_parts)} WHERE {pk} = %s"
+        sql = f"UPDATE {table_name} SET {', '.join(set_parts)} WHERE {lookup_col} = %s"
         try:
             cursor.execute(sql, values)
             if cursor.rowcount == 0:
@@ -805,9 +910,31 @@ def delete_record(
         if not pk:
             raise HTTPException(status_code=400, detail="Cannot determine primary key")
 
+        lookup_col = _resolve_lookup_column(conn, table_name, pk, record_id)
         cursor = conn.cursor()
-        cursor.execute(f"SELECT * FROM {table_name} WHERE {pk} = %s", (record_id,))
-        old_row = cursor.fetchone()
+        old_row = None
+        try:
+            cursor.execute(f"SELECT * FROM {table_name} WHERE {lookup_col} = %s", (record_id,))
+            old_row = cursor.fetchone()
+        except Exception:
+            conn.rollback()
+
+        if not old_row and table_name == "customers":
+            import re as _re_del
+            if _re_del.match(r"^\d{3,4}[A-Za-z]{2,4}$", record_id):
+                cursor.execute(
+                    "SELECT c.* FROM accounts a "
+                    "JOIN customers c ON a.customer_id = c.id "
+                    "WHERE a.account_number = %s LIMIT 1",
+                    (record_id.upper(),),
+                )
+                old_row = cursor.fetchone()
+                if old_row:
+                    real_id = _row_to_dict(cursor, old_row).get(pk)
+                    if real_id is not None:
+                        record_id = str(real_id)
+                        lookup_col = pk
+
         old_values = _row_to_dict(cursor, old_row) if old_row else None
 
         if not old_row:
@@ -845,7 +972,7 @@ def delete_record(
                 }
             else:
                 cursor.execute(
-                    f"DELETE FROM {table_name} WHERE {pk} = %s", (record_id,)
+                    f"DELETE FROM {table_name} WHERE {lookup_col} = %s", (record_id,)
                 )
                 if cursor.rowcount == 0:
                     raise HTTPException(status_code=404, detail="Record not found")

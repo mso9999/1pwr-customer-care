@@ -9,14 +9,21 @@ the dashboard loads instantly for concurrent/repeated requests.
 """
 
 import logging
+import os
 import time
 import threading
 from typing import Any, Dict, List, Optional, Tuple
 
-from fastapi import APIRouter, Depends
+import psycopg2
+from fastapi import APIRouter, Depends, Query
 
 from models import CurrentUser
 from middleware import require_employee
+
+BJ_DATABASE_URL = os.environ.get(
+    "BJ_DATABASE_URL",
+    "postgresql://cc_api:gKkYLkzYwSRPNoSwuC87YVqbzCmnhI4e@localhost:5432/onepower_bj",
+)
 
 logger = logging.getLogger("acdb-api.stats")
 
@@ -441,3 +448,161 @@ def customer_record_completeness(user: CurrentUser = Depends(require_employee)):
     }
     _set_cached("customer-record-completeness", response)
     return response
+
+
+# ---------------------------------------------------------------------------
+# Cross-country revenue / ARPU summary (rolling 12 months)
+# ---------------------------------------------------------------------------
+
+_FX_TO_USD = {
+    "LSL": 0.054,
+    "XOF": 0.0016,
+}
+
+
+def _country_monthly_revenue(conn, country: str, currency: str, months: int) -> List[Dict[str, Any]]:
+    """Query monthly_transactions for a single country DB.
+
+    Returns list of {month, revenue_local, paying_customers, currency, country}.
+    """
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT year_month, "
+        "       SUM(amount_lsl)::numeric(14,2) AS revenue, "
+        "       COUNT(DISTINCT account_number) AS paying_customers "
+        "FROM monthly_transactions "
+        "WHERE amount_lsl > 0 "
+        "  AND year_month >= to_char(NOW() - interval '%s months', 'YYYY-MM') "
+        "GROUP BY year_month "
+        "ORDER BY year_month",
+        (months,),
+    )
+    rows = cursor.fetchall()
+    return [
+        {
+            "month": str(r[0]),
+            "revenue_local": float(r[1]),
+            "paying_customers": int(r[2]),
+            "currency": currency,
+            "country": country,
+        }
+        for r in rows
+    ]
+
+
+def _country_active_connections(conn) -> int:
+    """Count active connections (accounts with active meters, non-deleted customers)."""
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT COUNT(DISTINCT a.account_number) "
+            "FROM accounts a "
+            "JOIN meters m ON m.account_number = a.account_number "
+            "  AND m.status = 'active' "
+            "LEFT JOIN soft_deletes sd "
+            "  ON sd.table_name = 'customers' "
+            "  AND sd.record_id = CAST(a.customer_id AS TEXT) "
+            "WHERE sd.record_id IS NULL"
+        )
+        row = cursor.fetchone()
+        return int(row[0]) if row else 0
+    except Exception:
+        conn.rollback()
+        return 0
+
+
+@router.get("/revenue-summary")
+def revenue_summary(
+    user: CurrentUser = Depends(require_employee),
+    months: int = Query(default=12, ge=3, le=36, description="Rolling window in months"),
+):
+    """
+    Cross-country 12-month rolling revenue, customer count, and ARPU.
+
+    Returns per-country monthly breakdowns in local currency, plus
+    a consolidated USD-equivalent series.
+    """
+    cache_key = f"revenue-summary-{months}"
+    cached = _get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    countries: List[Dict[str, Any]] = []
+
+    # -- Lesotho (onepower_cc) --
+    try:
+        with _get_connection() as conn:
+            ls_months = _country_monthly_revenue(conn, "LS", "LSL", months)
+            ls_connections = _country_active_connections(conn)
+            countries.append({
+                "country": "LS",
+                "country_name": "Lesotho",
+                "currency": "LSL",
+                "fx_to_usd": _FX_TO_USD["LSL"],
+                "active_connections": ls_connections,
+                "months": ls_months,
+            })
+    except Exception as e:
+        logger.warning("LS revenue query failed: %s", e)
+
+    # -- Benin (onepower_bj) --
+    try:
+        bj_conn = psycopg2.connect(BJ_DATABASE_URL)
+        bj_conn.autocommit = True
+        try:
+            bj_months = _country_monthly_revenue(bj_conn, "BJ", "XOF", months)
+            bj_connections = _country_active_connections(bj_conn)
+            countries.append({
+                "country": "BJ",
+                "country_name": "Benin",
+                "currency": "XOF",
+                "fx_to_usd": _FX_TO_USD["XOF"],
+                "active_connections": bj_connections,
+                "months": bj_months,
+            })
+        finally:
+            bj_conn.close()
+    except Exception as e:
+        logger.warning("BJ revenue query failed: %s", e)
+
+    # -- Build consolidated USD series --
+    monthly_index: Dict[str, Dict[str, Any]] = {}
+    for c in countries:
+        fx = c["fx_to_usd"]
+        for m in c["months"]:
+            key = m["month"]
+            if key not in monthly_index:
+                monthly_index[key] = {
+                    "month": key,
+                    "revenue_usd": 0.0,
+                    "total_paying_customers": 0,
+                    "per_country": {},
+                }
+            monthly_index[key]["revenue_usd"] += round(m["revenue_local"] * fx, 2)
+            monthly_index[key]["total_paying_customers"] += m["paying_customers"]
+            monthly_index[key]["per_country"][c["country"]] = {
+                "revenue_local": m["revenue_local"],
+                "paying_customers": m["paying_customers"],
+                "currency": m["currency"],
+                "revenue_usd": round(m["revenue_local"] * fx, 2),
+            }
+
+    consolidated = sorted(monthly_index.values(), key=lambda x: x["month"])
+    for entry in consolidated:
+        cust = entry["total_paying_customers"]
+        entry["arpu_usd"] = round(entry["revenue_usd"] / cust, 2) if cust > 0 else 0.0
+
+    # Per-country ARPU
+    for c in countries:
+        for m in c["months"]:
+            m["arpu_local"] = round(m["revenue_local"] / m["paying_customers"], 2) if m["paying_customers"] > 0 else 0.0
+
+    result = {
+        "countries": countries,
+        "consolidated": consolidated,
+        "fx_rates": _FX_TO_USD,
+        "fx_note": "Approximate indicative rates; not live market rates.",
+        "window_months": months,
+    }
+    _set_cached(cache_key, result)
+    return result

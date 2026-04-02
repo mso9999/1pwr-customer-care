@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LabelList } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LabelList, ComposedChart, Line, CartesianGrid, Legend } from 'recharts';
 import {
   listTables,
   listSites,
   getSiteSummary,
   getCustomerRecordCompleteness,
+  getRevenueSummary,
   type CustomerRecordCompletenessResponse,
+  type RevenueSummaryResponse,
   type TableInfo,
   type SiteStat,
 } from '../lib/api';
@@ -32,6 +34,7 @@ export default function DashboardPage() {
   const [siteData, setSiteData] = useState<SiteRow[]>([]);
   const [totals, setTotals] = useState({ mwh: 0, revenue_thousands: 0 });
   const [recordCompleteness, setRecordCompleteness] = useState<CustomerRecordCompletenessResponse | null>(null);
+  const [revenueSummary, setRevenueSummary] = useState<RevenueSummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
   const formatPercent = (value: number | null | undefined) => {
@@ -60,7 +63,8 @@ export default function DashboardPage() {
       listSites().catch(() => ({ sites: [], total_sites: 0 })),
       getSiteSummary().catch(() => ({ sites: [], totals: { mwh: 0, lsl_thousands: 0 } })),
       getCustomerRecordCompleteness().catch(() => null),
-    ]).then(([t, sitesResp, stats, completeness]) => {
+      getRevenueSummary(12).catch(() => null),
+    ]).then(([t, sitesResp, stats, completeness, revenue]) => {
       setTables(t);
 
       const statsMap = new Map<string, SiteStat>();
@@ -82,6 +86,7 @@ export default function DashboardPage() {
       const raw = stats.totals || { mwh: 0, lsl_thousands: 0 };
       setTotals({ mwh: raw.mwh, revenue_thousands: raw.lsl_thousands });
       setRecordCompleteness(completeness);
+      setRevenueSummary(revenue);
     }).finally(() => setLoading(false));
   }, [country]);
 
@@ -128,6 +133,215 @@ export default function DashboardPage() {
           <p className="text-2xl sm:text-3xl font-bold text-purple-700">{siteData.length}</p>
         </div>
       </div>
+
+      {/* Revenue / ARPU — rolling 12 months, cross-country */}
+      {revenueSummary && revenueSummary.consolidated.length > 0 && (() => {
+        const cons = revenueSummary.consolidated;
+        const countryKeys = revenueSummary.countries.map(c => c.country);
+        const COUNTRY_COLORS: Record<string, string> = { LS: '#3b82f6', BJ: '#10b981' };
+        const COUNTRY_FLAGS: Record<string, string> = { LS: '\u{1F1F1}\u{1F1F8}', BJ: '\u{1F1E7}\u{1F1EF}' };
+
+        const chartData = cons.map(m => {
+          const entry: Record<string, any> = {
+            month: m.month.slice(2),
+            revenue_usd: m.revenue_usd,
+            arpu_usd: m.arpu_usd,
+            customers: m.total_paying_customers,
+          };
+          for (const ck of countryKeys) {
+            const pc = m.per_country[ck];
+            entry[`rev_${ck}`] = pc?.revenue_usd ?? 0;
+          }
+          return entry;
+        });
+
+        const latest = cons[cons.length - 1];
+        const prev = cons.length >= 2 ? cons[cons.length - 2] : null;
+        const totalRevUsd = cons.reduce((s, m) => s + m.revenue_usd, 0);
+        const avgArpu = cons.length > 0
+          ? cons.reduce((s, m) => s + m.arpu_usd, 0) / cons.length
+          : 0;
+        const totalConnections = revenueSummary.countries.reduce((s, c) => s + c.active_connections, 0);
+
+        const fmtUsd = (v: number) => `$${v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+        const fmtLocal = (v: number, cur: string) => `${v.toLocaleString(undefined, { maximumFractionDigits: 0 })} ${cur}`;
+
+        const pctChange = (curr: number, prev: number | undefined) => {
+          if (!prev || prev === 0) return null;
+          return ((curr - prev) / prev) * 100;
+        };
+        const revChange = prev ? pctChange(latest.revenue_usd, prev.revenue_usd) : null;
+
+        return (
+          <div className="bg-white rounded-lg shadow p-4 sm:p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
+              <div>
+                <h2 className="text-base sm:text-lg font-semibold text-gray-700">Portfolio Revenue &amp; ARPU</h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Rolling {revenueSummary.window_months}-month view &middot; All values converted to USD at indicative rates
+                </p>
+              </div>
+              <div className="flex gap-3 text-xs text-gray-500">
+                {revenueSummary.countries.map(c => (
+                  <span key={c.country}>
+                    {COUNTRY_FLAGS[c.country] || ''} {c.country_name}: {c.active_connections.toLocaleString()} connections &middot; 1 {c.currency} = ${c.fx_to_usd}
+                  </span>
+                ))}
+              </div>
+            </div>
+
+            {/* KPI strip */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="bg-gradient-to-br from-blue-50 to-white rounded-xl p-4 border border-blue-100">
+                <p className="text-xs text-gray-500 uppercase tracking-wide">Active Connections</p>
+                <p className="text-2xl font-bold text-blue-700 mt-1">{totalConnections.toLocaleString()}</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  {revenueSummary.countries.map(c => `${c.country}: ${c.active_connections.toLocaleString()}`).join(' / ')}
+                </p>
+              </div>
+              <div className="bg-gradient-to-br from-green-50 to-white rounded-xl p-4 border border-green-100">
+                <p className="text-xs text-gray-500 uppercase tracking-wide">{revenueSummary.window_months}-Month Revenue</p>
+                <p className="text-2xl font-bold text-green-700 mt-1">{fmtUsd(totalRevUsd)}</p>
+                <p className="text-xs text-gray-400 mt-1">
+                  {revenueSummary.countries.map(c => {
+                    const total = c.months.reduce((s, m) => s + m.revenue_local, 0);
+                    return `${c.country}: ${fmtLocal(total, c.currency)}`;
+                  }).join(' / ')}
+                </p>
+              </div>
+              <div className="bg-gradient-to-br from-amber-50 to-white rounded-xl p-4 border border-amber-100">
+                <p className="text-xs text-gray-500 uppercase tracking-wide">Latest Month ARPU</p>
+                <p className="text-2xl font-bold text-amber-700 mt-1">{fmtUsd(latest.arpu_usd)}</p>
+                {revChange !== null && (
+                  <p className={`text-xs mt-1 ${revChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+                    {revChange >= 0 ? '\u25B2' : '\u25BC'} {Math.abs(revChange).toFixed(1)}% vs prior month
+                  </p>
+                )}
+              </div>
+              <div className="bg-gradient-to-br from-purple-50 to-white rounded-xl p-4 border border-purple-100">
+                <p className="text-xs text-gray-500 uppercase tracking-wide">Avg Monthly ARPU</p>
+                <p className="text-2xl font-bold text-purple-700 mt-1">{fmtUsd(avgArpu)}</p>
+                <p className="text-xs text-gray-400 mt-1">{revenueSummary.window_months}-month average</p>
+              </div>
+            </div>
+
+            {/* Stacked bar (revenue USD by country) + line (ARPU) */}
+            <div>
+              <h3 className="text-sm font-medium text-gray-600 mb-2">Monthly Revenue (USD) &amp; ARPU</h3>
+              <ResponsiveContainer width="100%" height={280}>
+                <ComposedChart data={chartData} margin={{ top: 5, right: 20, left: 5, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                  <YAxis yAxisId="rev" tick={{ fontSize: 11 }} tickFormatter={(v: number) => `$${(v / 1000).toFixed(0)}k`} />
+                  <YAxis yAxisId="arpu" orientation="right" tick={{ fontSize: 11 }} tickFormatter={(v: number) => `$${v.toFixed(0)}`} />
+                  <Tooltip
+                    formatter={(value: any, name: any) => {
+                      const n = String(name ?? '');
+                      if (n.startsWith('rev_')) {
+                        const cc = n.replace('rev_', '');
+                        return [fmtUsd(value), `${cc} Revenue`];
+                      }
+                      if (n === 'arpu_usd') return [fmtUsd(value), 'ARPU (USD)'];
+                      return [value, n];
+                    }}
+                    labelFormatter={(label: any) => `20${label}`}
+                  />
+                  <Legend formatter={(value: string) => {
+                    if (value.startsWith('rev_')) {
+                      const cc = value.replace('rev_', '');
+                      const cn = revenueSummary.countries.find(c => c.country === cc);
+                      return `${cn?.country_name || cc} Revenue`;
+                    }
+                    if (value === 'arpu_usd') return 'ARPU (USD)';
+                    return value;
+                  }} />
+                  {countryKeys.map(ck => (
+                    <Bar key={ck} yAxisId="rev" dataKey={`rev_${ck}`} stackId="revenue"
+                      fill={COUNTRY_COLORS[ck] || '#6b7280'} radius={ck === countryKeys[countryKeys.length - 1] ? [3, 3, 0, 0] : undefined} />
+                  ))}
+                  <Line yAxisId="arpu" type="monotone" dataKey="arpu_usd" stroke="#d97706" strokeWidth={2}
+                    dot={{ r: 3 }} activeDot={{ r: 5 }} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Per-country monthly table */}
+            <details className="group">
+              <summary className="cursor-pointer text-sm font-medium text-gray-600 hover:text-blue-600 select-none">
+                Monthly Breakdown by Country
+                <span className="ml-1 text-xs text-gray-400 group-open:hidden">(click to expand)</span>
+              </summary>
+              <div className="overflow-x-auto mt-3">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 border-b">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium text-gray-600">Month</th>
+                      {revenueSummary.countries.map(c => (
+                        <th key={`${c.country}-rev`} className="px-3 py-2 text-right font-medium text-gray-600">{c.country_name} Revenue ({c.currency})</th>
+                      ))}
+                      <th className="px-3 py-2 text-right font-medium text-gray-600">Total (USD)</th>
+                      {revenueSummary.countries.map(c => (
+                        <th key={`${c.country}-cust`} className="px-3 py-2 text-right font-medium text-gray-600">{c.country_name} Customers</th>
+                      ))}
+                      <th className="px-3 py-2 text-right font-medium text-gray-600">ARPU (USD)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y">
+                    {cons.map(m => (
+                      <tr key={m.month} className="hover:bg-gray-50">
+                        <td className="px-3 py-2 font-medium">{m.month}</td>
+                        {revenueSummary.countries.map(c => {
+                          const pc = m.per_country[c.country];
+                          return (
+                            <td key={`${c.country}-rev`} className="px-3 py-2 text-right tabular-nums">
+                              {pc ? fmtLocal(pc.revenue_local, c.currency) : '—'}
+                            </td>
+                          );
+                        })}
+                        <td className="px-3 py-2 text-right font-medium tabular-nums">{fmtUsd(m.revenue_usd)}</td>
+                        {revenueSummary.countries.map(c => {
+                          const pc = m.per_country[c.country];
+                          return (
+                            <td key={`${c.country}-cust`} className="px-3 py-2 text-right tabular-nums">
+                              {pc ? pc.paying_customers.toLocaleString() : '—'}
+                            </td>
+                          );
+                        })}
+                        <td className="px-3 py-2 text-right font-semibold tabular-nums">{fmtUsd(m.arpu_usd)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-gray-50 border-t font-medium">
+                    <tr>
+                      <td className="px-3 py-2">Total / Avg</td>
+                      {revenueSummary.countries.map(c => {
+                        const total = c.months.reduce((s, m) => s + m.revenue_local, 0);
+                        return (
+                          <td key={`${c.country}-rev`} className="px-3 py-2 text-right tabular-nums">
+                            {fmtLocal(total, c.currency)}
+                          </td>
+                        );
+                      })}
+                      <td className="px-3 py-2 text-right tabular-nums">{fmtUsd(totalRevUsd)}</td>
+                      {revenueSummary.countries.map(c => {
+                        const avg = c.months.length > 0
+                          ? Math.round(c.months.reduce((s, m) => s + m.paying_customers, 0) / c.months.length)
+                          : 0;
+                        return (
+                          <td key={`${c.country}-cust`} className="px-3 py-2 text-right tabular-nums">
+                            ~{avg.toLocaleString()} avg
+                          </td>
+                        );
+                      })}
+                      <td className="px-3 py-2 text-right tabular-nums">{fmtUsd(avgArpu)} avg</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </details>
+          </div>
+        );
+      })()}
 
       {recordCompleteness && (
         <div className="bg-white rounded-lg shadow p-4 sm:p-5">

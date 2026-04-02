@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import { listRows, deleteRecord, type PaginatedResponse } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
+type OrphanInfo = { account_number: string; reason: string };
+
 export default function AccountsPage() {
   const [data, setData] = useState<PaginatedResponse | null>(null);
   const [page, setPage] = useState(1);
@@ -11,17 +13,29 @@ export default function AccountsPage() {
   const [filterSite, setFilterSite] = useState('');
   const [sites, setSites] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const { canWrite, canWriteCustomers } = useAuth();
+  const { canWrite, canWriteCustomers, token } = useAuth();
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
 
+  const [orphanMap, setOrphanMap] = useState<Map<string, string>>(new Map());
+
   useEffect(() => {
     fetch('/api/sites').then(r => r.json()).then(d => {
       setSites((d.sites || []).map((s: any) => s.concession));
     }).catch(() => {});
-  }, []);
+    if (token) {
+      fetch('/api/tables/accounts/orphaned', { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.json())
+        .then(d => {
+          const m = new Map<string, string>();
+          (d.orphaned || []).forEach((o: OrphanInfo) => m.set(o.account_number, o.reason));
+          setOrphanMap(m);
+        })
+        .catch(() => {});
+    }
+  }, [token]);
 
   const fetchData = useCallback(() => {
     setLoading(true);
@@ -66,6 +80,18 @@ export default function AccountsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
+  const refreshOrphans = useCallback(() => {
+    if (!token) return;
+    fetch('/api/tables/accounts/orphaned', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => {
+        const m = new Map<string, string>();
+        (d.orphaned || []).forEach((o: OrphanInfo) => m.set(o.account_number, o.reason));
+        setOrphanMap(m);
+      })
+      .catch(() => {});
+  }, [token]);
+
   const handleDelete = async () => {
     setShowConfirm(false);
     setBusy(true);
@@ -77,7 +103,25 @@ export default function AccountsPage() {
     setSelected(new Set());
     setBusy(false);
     fetchData();
+    refreshOrphans();
     if (failed) alert(`${failed} of ${ids.length} records failed to delete.`);
+  };
+
+  const orphanBadge = (acct: string) => {
+    const reason = orphanMap.get(acct);
+    if (!reason) return null;
+    const label = reason === 'customer_in_cold_storage' ? 'Customer deleted' : 'No customer linked';
+    return (
+      <span
+        title={label}
+        className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-amber-100 text-amber-800 text-[10px] font-semibold rounded-full uppercase tracking-wide"
+      >
+        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+        </svg>
+        {label}
+      </span>
+    );
   };
 
   return (
@@ -91,6 +135,19 @@ export default function AccountsPage() {
           </Link>
         )}
       </div>
+
+      {/* Orphan alert */}
+      {orphanMap.size > 0 && (
+        <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+          <svg className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+          </svg>
+          <div className="text-sm">
+            <span className="font-semibold text-amber-800">{orphanMap.size} orphaned account{orphanMap.size !== 1 ? 's' : ''}</span>
+            <span className="text-amber-700"> — linked customer is deleted or missing. Consider deleting these accounts or restoring the customer from Cold Storage.</span>
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="space-y-2 sm:space-y-0 sm:flex sm:gap-3 sm:flex-wrap">
@@ -198,7 +255,10 @@ export default function AccountsPage() {
                         </td>
                       )}
                       <td className="px-4 py-2">
-                        <Link to={`/customer-data?account=${acct}`} className="text-blue-600 hover:underline font-mono font-medium">{acct}</Link>
+                        <div className="flex items-center gap-2">
+                          <Link to={`/customer-data?account=${acct}`} className="text-blue-600 hover:underline font-mono font-medium">{acct}</Link>
+                          {orphanBadge(acct)}
+                        </div>
                       </td>
                       <td className="px-4 py-2">
                         {cid ? <Link to={`/customers/${cid}`} className="text-blue-600 hover:underline">#{cid}</Link> : <span className="text-gray-400">--</span>}
@@ -233,7 +293,10 @@ export default function AccountsPage() {
                       <input type="checkbox" checked={isSelected} onChange={() => toggleOne(acct)} className="w-4 h-4 mt-1 rounded border-gray-300 text-blue-600 focus:ring-blue-500 shrink-0" />
                     )}
                     <div className="flex-1 min-w-0">
-                      <Link to={`/customer-data?account=${acct}`} className="font-mono text-sm font-medium text-blue-700">{acct}</Link>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <Link to={`/customer-data?account=${acct}`} className="font-mono text-sm font-medium text-blue-700">{acct}</Link>
+                        {orphanBadge(acct)}
+                      </div>
                       <div className="mt-1.5 text-xs text-gray-500 space-y-0.5">
                         {cid && <p>Customer: <Link to={`/customers/${cid}`} className="text-blue-600 hover:underline">#{cid}</Link></p>}
                         {mid && <p>Meter: <span className="font-mono">{mid}</span></p>}

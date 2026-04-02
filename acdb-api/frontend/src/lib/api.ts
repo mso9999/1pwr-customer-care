@@ -1463,6 +1463,51 @@ export async function recordManualPayment(data: {
   return request('/payments/record', { method: 'POST', body: JSON.stringify(data) });
 }
 
+// ── Cross-country Revenue Summary ──
+
+export interface RevenueCountryMonth {
+  month: string;
+  revenue_local: number;
+  paying_customers: number;
+  currency: string;
+  country: string;
+  arpu_local: number;
+}
+
+export interface RevenueCountry {
+  country: string;
+  country_name: string;
+  currency: string;
+  fx_to_usd: number;
+  active_connections: number;
+  months: RevenueCountryMonth[];
+}
+
+export interface RevenueConsolidatedMonth {
+  month: string;
+  revenue_usd: number;
+  total_paying_customers: number;
+  arpu_usd: number;
+  per_country: Record<string, {
+    revenue_local: number;
+    paying_customers: number;
+    currency: string;
+    revenue_usd: number;
+  }>;
+}
+
+export interface RevenueSummaryResponse {
+  countries: RevenueCountry[];
+  consolidated: RevenueConsolidatedMonth[];
+  fx_rates: Record<string, number>;
+  fx_note: string;
+  window_months: number;
+}
+
+export async function getRevenueSummary(months = 12): Promise<RevenueSummaryResponse> {
+  return request(`/stats/revenue-summary?months=${months}`);
+}
+
 // Health is at root level, not under /api
 export async function getHealth() {
   const res = await fetch('/health');
