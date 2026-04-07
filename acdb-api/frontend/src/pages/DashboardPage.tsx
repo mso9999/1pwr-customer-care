@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LabelList, ComposedChart, Line, CartesianGrid, Legend } from 'recharts';
 import {
@@ -32,9 +32,10 @@ export default function DashboardPage() {
 
   const [tables, setTables] = useState<TableInfo[]>([]);
   const [siteData, setSiteData] = useState<SiteRow[]>([]);
-  const [totals, setTotals] = useState({ mwh: 0, revenue_thousands: 0 });
   const [recordCompleteness, setRecordCompleteness] = useState<CustomerRecordCompletenessResponse | null>(null);
   const [revenueSummary, setRevenueSummary] = useState<RevenueSummaryResponse | null>(null);
+  const [enabledCountries, setEnabledCountries] = useState<Set<string>>(new Set());
+  const [enabledSites, setEnabledSites] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
 
   const formatPercent = (value: number | null | undefined) => {
@@ -83,19 +84,50 @@ export default function DashboardPage() {
       });
 
       setSiteData(merged);
-      const raw = stats.totals || { mwh: 0, lsl_thousands: 0 };
-      setTotals({ mwh: raw.mwh, revenue_thousands: raw.lsl_thousands });
+      setEnabledSites(new Set(merged.map(s => s.concession)));
       setRecordCompleteness(completeness);
       setRevenueSummary(revenue);
+      if (revenue) {
+        setEnabledCountries(new Set(revenue.countries.map(c => c.country)));
+      }
     }).finally(() => setLoading(false));
   }, [country]);
 
-  const totalCustomers = siteData.reduce((sum, s) => sum + s.customer_count, 0);
+  const allSites = enabledSites.size === siteData.length;
+
+  const filteredSites = useMemo(
+    () => siteData.filter(s => enabledSites.has(s.concession)),
+    [siteData, enabledSites],
+  );
+
+  const filteredTotals = useMemo(() => ({
+    mwh: filteredSites.reduce((s, r) => s + r.mwh, 0),
+    revenue_thousands: filteredSites.reduce((s, r) => s + r.revenue_thousands, 0),
+  }), [filteredSites]);
+
+  const totalCustomers = filteredSites.reduce((sum, s) => sum + s.customer_count, 0);
   const totalTables = tables.length;
+
+  const toggleSite = (code: string) => {
+    setEnabledSites(prev => {
+      const next = new Set(prev);
+      if (next.has(code)) {
+        if (next.size > 1) next.delete(code);
+      } else {
+        next.add(code);
+      }
+      return next;
+    });
+  };
+
+  const toggleAllSites = () => {
+    if (allSites) return;
+    setEnabledSites(new Set(siteData.map(s => s.concession)));
+  };
 
   if (loading) return <div className="text-center py-16 text-gray-400">Loading dashboard...</div>;
 
-  const barData = siteData.map(s => ({
+  const barData = filteredSites.map(s => ({
     ...s,
     label: `${s.mwh.toFixed(1)} MWh / ${s.revenue_thousands.toFixed(1)}k ${currency}`,
   }));
@@ -114,63 +146,138 @@ export default function DashboardPage() {
         )}
       </div>
 
+      {/* Site filter strip */}
+      {siteData.length > 1 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide mr-1">Sites</span>
+          <button
+            onClick={toggleAllSites}
+            className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
+              allSites
+                ? 'bg-gray-700 text-white border-transparent shadow-sm'
+                : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'
+            }`}
+          >
+            All ({siteData.length})
+          </button>
+          {siteData.map((s, i) => {
+            const on = enabledSites.has(s.concession);
+            return (
+              <button
+                key={s.concession}
+                onClick={() => toggleSite(s.concession)}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
+                  on
+                    ? 'border-transparent text-white shadow-sm'
+                    : 'border-gray-200 text-gray-400 bg-white hover:border-gray-300'
+                }`}
+                style={on ? { backgroundColor: COLORS[i % COLORS.length] } : undefined}
+              >
+                {s.concession}
+                <span className={`text-[10px] ${on ? 'text-white/80' : 'text-gray-300'}`}>
+                  {s.customer_count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="bg-white rounded-lg shadow p-4 sm:p-5">
-          <p className="text-xs sm:text-sm text-gray-500">Customers</p>
+          <p className="text-xs sm:text-sm text-gray-500">Registered Customers</p>
           <p className="text-2xl sm:text-3xl font-bold text-blue-700">{totalCustomers.toLocaleString()}</p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            {allSites
+              ? `${currentCountry?.name ?? country} \u00b7 all sites`
+              : `${filteredSites.map(s => s.concession).join(', ')}`}
+          </p>
         </div>
         <div className="bg-white rounded-lg shadow p-4 sm:p-5">
-          <p className="text-xs sm:text-sm text-gray-500">Total MWh</p>
-          <p className="text-2xl sm:text-3xl font-bold text-green-700">{totals.mwh.toLocaleString(undefined, { maximumFractionDigits: 1 })}</p>
+          <p className="text-xs sm:text-sm text-gray-500">All-Time MWh</p>
+          <p className="text-2xl sm:text-3xl font-bold text-green-700">{filteredTotals.mwh.toLocaleString(undefined, { maximumFractionDigits: 1 })}</p>
+          <p className="text-xs text-gray-400 mt-0.5">Cumulative energy delivered</p>
         </div>
         <div className="bg-white rounded-lg shadow p-4 sm:p-5">
-          <p className="text-xs sm:text-sm text-gray-500">'000 {currency} Sold</p>
-          <p className="text-2xl sm:text-3xl font-bold text-amber-700">{totals.revenue_thousands.toLocaleString(undefined, { maximumFractionDigits: 1 })}</p>
+          <p className="text-xs sm:text-sm text-gray-500">All-Time Revenue</p>
+          <p className="text-2xl sm:text-3xl font-bold text-amber-700">'000 {currency} {filteredTotals.revenue_thousands.toLocaleString(undefined, { maximumFractionDigits: 1 })}</p>
+          <p className="text-xs text-gray-400 mt-0.5">Cumulative &middot; {currentCountry?.name ?? country} only</p>
         </div>
         <div className="bg-white rounded-lg shadow p-4 sm:p-5">
           <p className="text-xs sm:text-sm text-gray-500">Sites</p>
-          <p className="text-2xl sm:text-3xl font-bold text-purple-700">{siteData.length}</p>
+          <p className="text-2xl sm:text-3xl font-bold text-purple-700">
+            {allSites ? siteData.length : `${filteredSites.length} / ${siteData.length}`}
+          </p>
         </div>
       </div>
 
       {/* Revenue / ARPU — rolling 12 months, cross-country */}
       {revenueSummary && revenueSummary.consolidated.length > 0 && (() => {
-        const cons = revenueSummary.consolidated;
-        const countryKeys = revenueSummary.countries.map(c => c.country);
+        const allCountryKeys = revenueSummary.countries.map(c => c.country);
+        const activeKeys = allCountryKeys.filter(k => enabledCountries.has(k));
         const COUNTRY_COLORS: Record<string, string> = { LS: '#3b82f6', BJ: '#10b981' };
         const COUNTRY_FLAGS: Record<string, string> = { LS: '\u{1F1F1}\u{1F1F8}', BJ: '\u{1F1E7}\u{1F1EF}' };
+        const activeCountries = revenueSummary.countries.filter(c => enabledCountries.has(c.country));
 
-        const chartData = cons.map(m => {
+        const toggleCountry = (code: string) => {
+          setEnabledCountries(prev => {
+            const next = new Set(prev);
+            if (next.has(code)) {
+              if (next.size > 1) next.delete(code);
+            } else {
+              next.add(code);
+            }
+            return next;
+          });
+        };
+
+        const fmtUsd = (v: number) => `$${v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+        const fmtLocal = (v: number, cur: string) => `${v.toLocaleString(undefined, { maximumFractionDigits: 0 })} ${cur}`;
+
+        const recomputed = revenueSummary.consolidated.map(m => {
+          let revUsd = 0;
+          let customers = 0;
+          for (const ck of activeKeys) {
+            const pc = m.per_country[ck];
+            if (pc) {
+              revUsd += pc.revenue_usd;
+              customers += pc.paying_customers;
+            }
+          }
+          const rawArpu = customers > 0 ? revUsd / customers : 0;
+          const fraction = m.month_fraction ?? 1;
+          const prorated = fraction > 0 && fraction < 1 ? rawArpu / fraction : rawArpu;
+          return { ...m, f_revenue_usd: revUsd, f_customers: customers, f_arpu: rawArpu, f_arpu_prorated: prorated };
+        });
+
+        const chartData = recomputed.map(m => {
           const entry: Record<string, any> = {
             month: m.month.slice(2),
-            revenue_usd: m.revenue_usd,
-            arpu_usd: m.arpu_usd,
-            customers: m.total_paying_customers,
+            revenue_usd: m.f_revenue_usd,
+            arpu_usd: m.f_arpu_prorated,
+            customers: m.f_customers,
           };
-          for (const ck of countryKeys) {
+          for (const ck of activeKeys) {
             const pc = m.per_country[ck];
             entry[`rev_${ck}`] = pc?.revenue_usd ?? 0;
           }
           return entry;
         });
 
-        const latest = cons[cons.length - 1];
-        const prev = cons.length >= 2 ? cons[cons.length - 2] : null;
-        const totalRevUsd = cons.reduce((s, m) => s + m.revenue_usd, 0);
-        const avgArpu = cons.length > 0
-          ? cons.reduce((s, m) => s + m.arpu_usd, 0) / cons.length
+        const latest = recomputed[recomputed.length - 1];
+        const prev = recomputed.length >= 2 ? recomputed[recomputed.length - 2] : null;
+        const totalRevUsd = recomputed.reduce((s, m) => s + m.f_revenue_usd, 0);
+        const avgArpu = recomputed.length > 0
+          ? recomputed.reduce((s, m) => s + m.f_arpu_prorated, 0) / recomputed.length
           : 0;
-        const totalConnections = revenueSummary.countries.reduce((s, c) => s + c.active_connections, 0);
+        const totalConnections = activeCountries.reduce((s, c) => s + c.active_connections, 0);
 
-        const fmtUsd = (v: number) => `$${v.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
-        const fmtLocal = (v: number, cur: string) => `${v.toLocaleString(undefined, { maximumFractionDigits: 0 })} ${cur}`;
-
-        const pctChange = (curr: number, prev: number | undefined) => {
-          if (!prev || prev === 0) return null;
-          return ((curr - prev) / prev) * 100;
+        const pctChange = (curr: number, base: number | undefined) => {
+          if (!base || base === 0) return null;
+          return ((curr - base) / base) * 100;
         };
-        const revChange = prev ? pctChange(latest.revenue_usd, prev.revenue_usd) : null;
+        const revChange = prev ? pctChange(latest.f_arpu_prorated, prev.f_arpu_prorated) : null;
 
         return (
           <div className="bg-white rounded-lg shadow p-4 sm:p-5 space-y-4">
@@ -181,13 +288,37 @@ export default function DashboardPage() {
                   Rolling {revenueSummary.window_months}-month view &middot; All values converted to USD at indicative rates
                 </p>
               </div>
-              <div className="flex gap-3 text-xs text-gray-500">
-                {revenueSummary.countries.map(c => (
-                  <span key={c.country}>
-                    {COUNTRY_FLAGS[c.country] || ''} {c.country_name}: {c.active_connections.toLocaleString()} connections &middot; 1 {c.currency} = ${c.fx_to_usd}
-                  </span>
-                ))}
+              <div className="flex items-center gap-2">
+                {revenueSummary.countries.map(c => {
+                  const on = enabledCountries.has(c.country);
+                  return (
+                    <button
+                      key={c.country}
+                      onClick={() => toggleCountry(c.country)}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all border ${
+                        on
+                          ? 'border-transparent text-white shadow-sm'
+                          : 'border-gray-200 text-gray-400 bg-white hover:border-gray-300'
+                      }`}
+                      style={on ? { backgroundColor: COUNTRY_COLORS[c.country] || '#6b7280' } : undefined}
+                    >
+                      {COUNTRY_FLAGS[c.country] || ''} {c.country_name}
+                      <span className={`text-[10px] ${on ? 'text-white/80' : 'text-gray-300'}`}>
+                        {c.active_connections.toLocaleString()}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
+            </div>
+
+            {/* FX legend */}
+            <div className="flex gap-3 text-xs text-gray-400">
+              {activeCountries.map(c => (
+                <span key={c.country}>
+                  1 {c.currency} = ${c.fx_to_usd}
+                </span>
+              ))}
             </div>
 
             {/* KPI strip */}
@@ -196,14 +327,15 @@ export default function DashboardPage() {
                 <p className="text-xs text-gray-500 uppercase tracking-wide">Active Connections</p>
                 <p className="text-2xl font-bold text-blue-700 mt-1">{totalConnections.toLocaleString()}</p>
                 <p className="text-xs text-gray-400 mt-1">
-                  {revenueSummary.countries.map(c => `${c.country}: ${c.active_connections.toLocaleString()}`).join(' / ')}
+                  {activeCountries.map(c => `${c.country}: ${c.active_connections.toLocaleString()}`).join(' / ')}
                 </p>
+                <p className="text-xs text-gray-400">Accounts with active meter</p>
               </div>
               <div className="bg-gradient-to-br from-green-50 to-white rounded-xl p-4 border border-green-100">
                 <p className="text-xs text-gray-500 uppercase tracking-wide">{revenueSummary.window_months}-Month Revenue</p>
                 <p className="text-2xl font-bold text-green-700 mt-1">{fmtUsd(totalRevUsd)}</p>
                 <p className="text-xs text-gray-400 mt-1">
-                  {revenueSummary.countries.map(c => {
+                  {activeCountries.map(c => {
                     const total = c.months.reduce((s, m) => s + m.revenue_local, 0);
                     return `${c.country}: ${fmtLocal(total, c.currency)}`;
                   }).join(' / ')}
@@ -211,7 +343,12 @@ export default function DashboardPage() {
               </div>
               <div className="bg-gradient-to-br from-amber-50 to-white rounded-xl p-4 border border-amber-100">
                 <p className="text-xs text-gray-500 uppercase tracking-wide">Latest Month ARPU</p>
-                <p className="text-2xl font-bold text-amber-700 mt-1">{fmtUsd(latest.arpu_usd)}</p>
+                <p className="text-2xl font-bold text-amber-700 mt-1">{fmtUsd(latest.f_arpu_prorated)}</p>
+                {latest.month_fraction != null && latest.month_fraction < 1 && (
+                  <p className="text-xs text-amber-500 mt-0.5">
+                    Prorated ({Math.round(latest.month_fraction * 100)}% of month elapsed)
+                  </p>
+                )}
                 {revChange !== null && (
                   <p className={`text-xs mt-1 ${revChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
                     {revChange >= 0 ? '\u25B2' : '\u25BC'} {Math.abs(revChange).toFixed(1)}% vs prior month
@@ -239,7 +376,8 @@ export default function DashboardPage() {
                       const n = String(name ?? '');
                       if (n.startsWith('rev_')) {
                         const cc = n.replace('rev_', '');
-                        return [fmtUsd(value), `${cc} Revenue`];
+                        const cn = revenueSummary.countries.find(c => c.country === cc);
+                        return [fmtUsd(value), `${cn?.country_name || cc} Revenue`];
                       }
                       if (n === 'arpu_usd') return [fmtUsd(value), 'ARPU (USD)'];
                       return [value, n];
@@ -255,9 +393,9 @@ export default function DashboardPage() {
                     if (value === 'arpu_usd') return 'ARPU (USD)';
                     return value;
                   }} />
-                  {countryKeys.map(ck => (
+                  {activeKeys.map(ck => (
                     <Bar key={ck} yAxisId="rev" dataKey={`rev_${ck}`} stackId="revenue"
-                      fill={COUNTRY_COLORS[ck] || '#6b7280'} radius={ck === countryKeys[countryKeys.length - 1] ? [3, 3, 0, 0] : undefined} />
+                      fill={COUNTRY_COLORS[ck] || '#6b7280'} radius={ck === activeKeys[activeKeys.length - 1] ? [3, 3, 0, 0] : undefined} />
                   ))}
                   <Line yAxisId="arpu" type="monotone" dataKey="arpu_usd" stroke="#d97706" strokeWidth={2}
                     dot={{ r: 3 }} activeDot={{ r: 5 }} />
@@ -276,21 +414,21 @@ export default function DashboardPage() {
                   <thead className="bg-gray-50 border-b">
                     <tr>
                       <th className="px-3 py-2 text-left font-medium text-gray-600">Month</th>
-                      {revenueSummary.countries.map(c => (
+                      {activeCountries.map(c => (
                         <th key={`${c.country}-rev`} className="px-3 py-2 text-right font-medium text-gray-600">{c.country_name} Revenue ({c.currency})</th>
                       ))}
                       <th className="px-3 py-2 text-right font-medium text-gray-600">Total (USD)</th>
-                      {revenueSummary.countries.map(c => (
-                        <th key={`${c.country}-cust`} className="px-3 py-2 text-right font-medium text-gray-600">{c.country_name} Customers</th>
+                      {activeCountries.map(c => (
+                        <th key={`${c.country}-cust`} className="px-3 py-2 text-right font-medium text-gray-600">{c.country_name} Paying</th>
                       ))}
                       <th className="px-3 py-2 text-right font-medium text-gray-600">ARPU (USD)</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
-                    {cons.map(m => (
+                    {recomputed.map(m => (
                       <tr key={m.month} className="hover:bg-gray-50">
                         <td className="px-3 py-2 font-medium">{m.month}</td>
-                        {revenueSummary.countries.map(c => {
+                        {activeCountries.map(c => {
                           const pc = m.per_country[c.country];
                           return (
                             <td key={`${c.country}-rev`} className="px-3 py-2 text-right tabular-nums">
@@ -298,8 +436,8 @@ export default function DashboardPage() {
                             </td>
                           );
                         })}
-                        <td className="px-3 py-2 text-right font-medium tabular-nums">{fmtUsd(m.revenue_usd)}</td>
-                        {revenueSummary.countries.map(c => {
+                        <td className="px-3 py-2 text-right font-medium tabular-nums">{fmtUsd(m.f_revenue_usd)}</td>
+                        {activeCountries.map(c => {
                           const pc = m.per_country[c.country];
                           return (
                             <td key={`${c.country}-cust`} className="px-3 py-2 text-right tabular-nums">
@@ -307,14 +445,14 @@ export default function DashboardPage() {
                             </td>
                           );
                         })}
-                        <td className="px-3 py-2 text-right font-semibold tabular-nums">{fmtUsd(m.arpu_usd)}</td>
+                        <td className="px-3 py-2 text-right font-semibold tabular-nums">{fmtUsd(m.f_arpu)}</td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot className="bg-gray-50 border-t font-medium">
                     <tr>
                       <td className="px-3 py-2">Total / Avg</td>
-                      {revenueSummary.countries.map(c => {
+                      {activeCountries.map(c => {
                         const total = c.months.reduce((s, m) => s + m.revenue_local, 0);
                         return (
                           <td key={`${c.country}-rev`} className="px-3 py-2 text-right tabular-nums">
@@ -323,7 +461,7 @@ export default function DashboardPage() {
                         );
                       })}
                       <td className="px-3 py-2 text-right tabular-nums">{fmtUsd(totalRevUsd)}</td>
-                      {revenueSummary.countries.map(c => {
+                      {activeCountries.map(c => {
                         const avg = c.months.length > 0
                           ? Math.round(c.months.reduce((s, m) => s + m.paying_customers, 0) / c.months.length)
                           : 0;
@@ -355,9 +493,9 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
             <div className="bg-white rounded-xl shadow p-4 border-l-4 border-blue-500">
-              <p className="text-xs text-gray-500 uppercase">Customers</p>
+              <p className="text-xs text-gray-500 uppercase">Registered Customers</p>
               <p className="text-2xl font-bold text-gray-800 mt-1">
                 {recordCompleteness.totals.customer_count.toLocaleString()}
               </p>
@@ -491,12 +629,15 @@ export default function DashboardPage() {
         {/* Pie chart: distribution */}
         <div className="bg-white rounded-lg shadow p-4 sm:p-5">
           <h2 className="text-base sm:text-lg font-semibold text-gray-700 mb-3 sm:mb-4">Customer Distribution</h2>
-          {siteData.length > 0 ? (
+          {filteredSites.length > 0 ? (
             <>
               <ResponsiveContainer width="100%" height={250}>
                 <PieChart>
                   <Pie
-                    data={siteData}
+                    data={filteredSites.map(s => ({
+                      ...s,
+                      fill: COLORS[siteData.findIndex(d => d.concession === s.concession) % COLORS.length],
+                    }))}
                     dataKey="customer_count"
                     nameKey="concession"
                     cx="50%"
@@ -504,20 +645,23 @@ export default function DashboardPage() {
                     outerRadius={80}
                     label={false}
                   >
-                    {siteData.map((_, i) => (
-                      <Cell key={i} fill={COLORS[i % COLORS.length]} />
+                    {filteredSites.map(s => (
+                      <Cell key={s.concession} fill={COLORS[siteData.findIndex(d => d.concession === s.concession) % COLORS.length]} />
                     ))}
                   </Pie>
                   <Tooltip />
                 </PieChart>
               </ResponsiveContainer>
               <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 justify-center">
-                {siteData.map((s, i) => (
-                  <div key={s.concession} className="flex items-center gap-1.5 text-xs text-gray-600">
-                    <span className="w-2.5 h-2.5 rounded-full inline-block shrink-0" style={{ backgroundColor: COLORS[i % COLORS.length] }} />
-                    {s.concession} ({s.customer_count})
-                  </div>
-                ))}
+                {filteredSites.map(s => {
+                  const idx = siteData.findIndex(d => d.concession === s.concession);
+                  return (
+                    <div key={s.concession} className="flex items-center gap-1.5 text-xs text-gray-600">
+                      <span className="w-2.5 h-2.5 rounded-full inline-block shrink-0" style={{ backgroundColor: COLORS[idx % COLORS.length] }} />
+                      {s.concession} ({s.customer_count})
+                    </div>
+                  );
+                })}
               </div>
             </>
           ) : (
@@ -529,7 +673,7 @@ export default function DashboardPage() {
       {/* Per-site stats table */}
       <div className="bg-white rounded-lg shadow p-4 sm:p-5">
         <h2 className="text-base sm:text-lg font-semibold text-gray-700 mb-3">Site Performance</h2>
-        {siteData.length > 0 ? (
+        {filteredSites.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b">
@@ -542,7 +686,7 @@ export default function DashboardPage() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {siteData.map(s => (
+                {filteredSites.map(s => (
                   <tr key={s.concession} className="hover:bg-gray-50">
                     <td className="px-3 py-2 font-medium">{s.concession}</td>
                     <td className="px-3 py-2 text-right">{s.customer_count.toLocaleString()}</td>
@@ -554,17 +698,19 @@ export default function DashboardPage() {
                   </tr>
                 ))}
               </tbody>
-              <tfoot className="bg-gray-50 border-t font-medium">
-                <tr>
-                  <td className="px-3 py-2">Total</td>
-                  <td className="px-3 py-2 text-right">{totalCustomers.toLocaleString()}</td>
-                  <td className="px-3 py-2 text-right">{totals.mwh.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
-                  <td className="px-3 py-2 text-right">{totals.revenue_thousands.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
-                  <td className="px-3 py-2 text-right text-gray-500">
-                    {totalCustomers > 0 ? (totals.mwh / totalCustomers).toFixed(2) : '--'}
-                  </td>
-                </tr>
-              </tfoot>
+              {filteredSites.length > 1 && (
+                <tfoot className="bg-gray-50 border-t font-medium">
+                  <tr>
+                    <td className="px-3 py-2">Total</td>
+                    <td className="px-3 py-2 text-right">{totalCustomers.toLocaleString()}</td>
+                    <td className="px-3 py-2 text-right">{filteredTotals.mwh.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
+                    <td className="px-3 py-2 text-right">{filteredTotals.revenue_thousands.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
+                    <td className="px-3 py-2 text-right text-gray-500">
+                      {totalCustomers > 0 ? (filteredTotals.mwh / totalCustomers).toFixed(2) : '--'}
+                    </td>
+                  </tr>
+                </tfoot>
+              )}
             </table>
           </div>
         ) : (

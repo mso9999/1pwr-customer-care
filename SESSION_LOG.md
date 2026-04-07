@@ -2803,3 +2803,31 @@ Key evidence:
 ### Protocol Feedback
 - CONTEXT.md was helpful for understanding the backend file layout.
 - SESSION_LOG.md continuity from the prior session was essential for understanding the production state after the backup/audit work.
+
+## Session 2026-04-02 202604021300 (Benin Data Backfill & Hourly Import)
+
+### What Was Done
+- **Gap analysis**: Compared `onepower_bj.hourly_consumption` (525K rows, Jul 2025 – Feb 2026) with the Koios Excel export (`SAM - Consommation horaire Clients.xlsx`, 59 SAM customers, Feb 2024 – Feb 2026). Found 17 months of SAM hourly history missing from DB.
+- **Excel backfill**: Built `scripts/ops/backfill_benin_hourly.py` to parse the Excel, map 57 customer-name columns to account numbers via token-set matching (56 auto-matched, 1 manual override). Ran on production — upserted 361,873 records (`source=import`). DB went from 525K to 887K rows.
+- **Koios hourly API**: Discovered the existing `import_benin.py` only pulls monthly aggregates — no hourly. The Koios API supports `granularity=daily` which returns 15-minute heartbeat readings. Built `scripts/ops/import_benin_hourly.py` to fetch daily data, aggregate to hourly buckets per account, and upsert into `hourly_consumption` (`source=koios`).
+- **5-week gap backfill**: Ran the hourly importer for Feb 26 – Apr 1 (35 days), importing 70,563 records for both GBO and SAM sites. DB now at **952,330 rows** spanning **Feb 2024 – Mar 2026**.
+- **Automated ongoing import**: Installed `import_benin_hourly.py` at `/opt/1pdb-bn/` on production. Updated `periodic_import.sh` to also run hourly import (yesterday + today) every 6 hours alongside the existing monthly import.
+
+### Key Decisions
+- Mapped Excel customer names to DB account numbers using accent-normalized token-set matching. 3 columns skipped: "Sam climatiseur", "SAM POWERHOUSE" (site-level, not customer), "FANGNON KOLEY AYAHOUNDO" (manually mapped to 0075SAM).
+- Used `ON CONFLICT (meter_id, reading_hour) DO UPDATE` for idempotent upserts — safe to re-run.
+- Koios daily API returns 15-min heartbeats; we aggregate `kilowatt_hours` by account + hour for `hourly_consumption`.
+- The Koios live API is confirmed working (pulled March 2026 data today). Both GBO and SAM sites are live.
+
+### What Next Session Should Know
+- The `onepower_bj` database does NOT have `mv_hourly_account_summary` — only `onepower_cc` (Lesotho) does. If Benin ever needs the completeness dashboard, a matview would need to be created there too.
+- Two sets of Koios API credentials exist: one in `periodic_import.sh` (hardcoded), one in `/opt/1pdb-bn/.env`. Both work. The .env has shell-unfriendly chars in the secret.
+- The Excel file only covers SAM customers. GBO hourly data comes exclusively from the Koios API (daily granularity).
+- Apr 1 had no data from Koios (likely not yet available). The next timer run (~17:33 UTC) will pick it up.
+
+### Senescence Notes
+- No degradation observed.
+
+### Protocol Feedback
+- The conversation summary was essential for reconstructing the full context of the Benin data work.
+- CONTEXT.md should be updated to document the Benin import infrastructure (`/opt/1pdb-bn/`, timer, scripts).

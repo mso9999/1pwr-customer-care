@@ -1488,6 +1488,8 @@ export interface RevenueConsolidatedMonth {
   revenue_usd: number;
   total_paying_customers: number;
   arpu_usd: number;
+  arpu_usd_prorated: number;
+  month_fraction: number;
   per_country: Record<string, {
     revenue_local: number;
     paying_customers: number;

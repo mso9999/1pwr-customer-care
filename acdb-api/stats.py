@@ -8,10 +8,12 @@ Expensive queries are cached in-memory with a short TTL so that
 the dashboard loads instantly for concurrent/repeated requests.
 """
 
+import calendar
 import logging
 import os
 import time
 import threading
+from datetime import date, timezone, datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 import psycopg2
@@ -622,14 +624,35 @@ def revenue_summary(
             }
 
     consolidated = sorted(monthly_index.values(), key=lambda x: x["month"])
+
+    today = datetime.now(timezone.utc).date()
+    current_ym = today.strftime("%Y-%m")
+    days_in_current = calendar.monthrange(today.year, today.month)[1]
+    current_fraction = today.day / days_in_current
+
     for entry in consolidated:
         cust = entry["total_paying_customers"]
-        entry["arpu_usd"] = round(entry["revenue_usd"] / cust, 2) if cust > 0 else 0.0
+        raw_arpu = round(entry["revenue_usd"] / cust, 2) if cust > 0 else 0.0
+        entry["arpu_usd"] = raw_arpu
+
+        if entry["month"] == current_ym and current_fraction > 0:
+            entry["month_fraction"] = round(current_fraction, 4)
+            entry["arpu_usd_prorated"] = round(raw_arpu / current_fraction, 2)
+        else:
+            entry["month_fraction"] = 1.0
+            entry["arpu_usd_prorated"] = raw_arpu
 
     # Per-country ARPU
     for c in countries:
         for m in c["months"]:
-            m["arpu_local"] = round(m["revenue_local"] / m["paying_customers"], 2) if m["paying_customers"] > 0 else 0.0
+            raw = round(m["revenue_local"] / m["paying_customers"], 2) if m["paying_customers"] > 0 else 0.0
+            m["arpu_local"] = raw
+            if m["month"] == current_ym and current_fraction > 0:
+                m["month_fraction"] = round(current_fraction, 4)
+                m["arpu_local_prorated"] = round(raw / current_fraction, 2)
+            else:
+                m["month_fraction"] = 1.0
+                m["arpu_local_prorated"] = raw
 
     result = {
         "countries": countries,
