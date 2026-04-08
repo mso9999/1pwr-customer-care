@@ -340,28 +340,25 @@ def customer_growth_by_site(
 
     Uses MIN(transaction_date) per account as the "active since" date rather
     than date_service_connected (which can be bulk-set retroactively).
-    Returns one entry per site per quarter where new customers first transacted.
+    Site is derived from the account number suffix (same as _extract_site).
     """
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        sql = (
-            "SELECT community, account_number, MIN(transaction_date) AS first_txn "
+        cursor.execute(
+            "SELECT account_number, MIN(transaction_date) AS first_txn "
             "FROM transactions "
-            "WHERE transaction_date IS NOT NULL AND community IS NOT NULL "
+            "WHERE transaction_date IS NOT NULL "
+            "GROUP BY account_number"
         )
-        params: list = []
-        if site:
-            sql += "AND UPPER(community) = %s "
-            params.append(site.upper())
-        sql += "GROUP BY community, account_number"
-        cursor.execute(sql, params)
         rows = cursor.fetchall()
 
         site_quarterly: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
-        for community, _acct, first_txn in rows:
-            s = (community or "").strip().upper()
-            if not s or s not in KNOWN_SITES:
+        for acct, first_txn in rows:
+            s = _extract_site(acct)
+            if not s:
+                continue
+            if site and s != site.upper():
                 continue
             q = _date_to_quarter(first_txn)
             if q:
