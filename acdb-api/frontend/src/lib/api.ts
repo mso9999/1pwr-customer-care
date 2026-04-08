@@ -1510,6 +1510,79 @@ export async function getRevenueSummary(months = 12): Promise<RevenueSummaryResp
   return request(`/stats/revenue-summary?months=${months}`);
 }
 
+// ---------------------------------------------------------------------------
+// Tickets / Maintenance Log
+// ---------------------------------------------------------------------------
+
+export interface Ticket {
+  id: number;
+  ugp_ticket_id: string;
+  source: string;
+  phone: string | null;
+  customer_id: number | null;
+  account_number: string | null;
+  site_code: string | null;
+  fault_description: string | null;
+  category: string | null;
+  priority: string | null;
+  reported_by: string | null;
+  created_at: string;
+  ticket_name: string | null;
+  failure_time: string | null;
+  services_affected: string | null;
+  troubleshooting_steps: string | null;
+  cause_of_fault: string | null;
+  precautions: string | null;
+  restoration_time: string | null;
+  resolution_approach: string | null;
+  duration: string | null;
+  status: string;
+  updated_at: string | null;
+  resolved_by: string | null;
+}
+
+export interface TicketsResponse {
+  tickets: Ticket[];
+  total: number;
+  count: number;
+}
+
+export async function listTickets(params: {
+  limit?: number; offset?: number; site_code?: string;
+  status?: string; search?: string;
+} = {}): Promise<TicketsResponse> {
+  const qs = new URLSearchParams();
+  if (params.limit) qs.set('limit', String(params.limit));
+  if (params.offset) qs.set('offset', String(params.offset));
+  if (params.site_code) qs.set('site_code', params.site_code);
+  if (params.status) qs.set('status', params.status);
+  if (params.search) qs.set('search', params.search);
+  return request(`/tickets?${qs}`);
+}
+
+export async function getTicket(id: number | string): Promise<Ticket> {
+  return request(`/tickets/${encodeURIComponent(id)}`);
+}
+
+export async function createTicket(data: Partial<Ticket>): Promise<{ status: string; id: number }> {
+  return request('/tickets', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function updateTicket(id: number, data: Partial<Ticket>): Promise<{ status: string; id: number }> {
+  return request(`/tickets/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+}
+
+export async function downloadTicketsExcel(params: {
+  site_code?: string; status?: string; quarter?: string;
+} = {}): Promise<void> {
+  const qs = new URLSearchParams();
+  if (params.site_code) qs.set('site_code', params.site_code);
+  if (params.status) qs.set('status', params.status);
+  if (params.quarter) qs.set('quarter', params.quarter);
+  const q = qs.toString();
+  return downloadFile(`/tickets/export${q ? `?${q}` : ''}`, 'Maintenance_Log.xlsx');
+}
+
 // Health is at root level, not under /api
 export async function getHealth() {
   const res = await fetch('/health');

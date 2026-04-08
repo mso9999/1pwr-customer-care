@@ -31,6 +31,7 @@ import RecordPaymentPage from './pages/RecordPaymentPage';
 import PaymentVerificationPage from './pages/PaymentVerificationPage';
 import PipelinePage from './pages/PipelinePage';
 import HelpPage from './pages/HelpPage';
+import TicketsPage from './pages/TicketsPage';
 
 function HomeRedirect() {
   const { user, loading } = useAuth();
@@ -73,6 +74,7 @@ export default function App() {
             <Route path="record-payment" element={<ProtectedRoute requireEmployee><RecordPaymentPage /></ProtectedRoute>} />
             <Route path="payment-verification" element={<ProtectedRoute requireEmployee><PaymentVerificationPage /></ProtectedRoute>} />
             <Route path="pipeline" element={<ProtectedRoute requireEmployee><PipelinePage /></ProtectedRoute>} />
+            <Route path="tickets" element={<ProtectedRoute requireEmployee><TicketsPage /></ProtectedRoute>} />
             <Route path="help" element={<ProtectedRoute requireEmployee><HelpPage /></ProtectedRoute>} />
             {/* Customer routes */}
             <Route path="my/dashboard" element={<CustomerDashboardPage />} />
