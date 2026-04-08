@@ -1,0 +1,29 @@
+{
+  "title": "Record Payment",
+  "fields": {
+    "accountNumber": "Account Number",
+    "amount": "Amount (M)",
+    "debtHint": "Ones digit 1 or 9 indicates dedicated debt payment.",
+    "meterId": "Meter ID (optional)",
+    "note": "Note (optional)"
+  },
+  "recording": "Recording…",
+  "recordPayment": "Record Payment",
+  "success": {
+    "title": "Payment Recorded",
+    "transactionId": "Transaction ID",
+    "amount": "Amount",
+    "kwhVended": "kWh Vended",
+    "newBalance": "New Balance",
+    "electricityPortion": "Electricity Portion",
+    "debtPortion": "Debt Portion",
+    "smCreditOk": "SM Credit OK",
+    "smCreditFailed": "SM Credit Failed"
+  },
+  "validation": {
+    "accountRequired": "Account number is required",
+    "amountRequired": "Amount is required",
+    "amountPositive": "Amount must be positive"
+  },
+  "recordFailed": "Payment recording failed"
+}

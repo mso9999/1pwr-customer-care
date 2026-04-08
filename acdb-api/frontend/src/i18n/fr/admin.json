@@ -1,0 +1,19 @@
+{
+  "title": "Gestion des rôles employés",
+  "assignRole": "Attribuer un rôle",
+  "employeeId": "ID employé",
+  "ccRole": "Rôle CC",
+  "adding": "Ajout en cours…",
+  "assign": "Attribuer",
+  "colEmployeeId": "ID employé",
+  "colName": "Nom",
+  "colEmail": "E-mail",
+  "colRole": "Rôle CC",
+  "colAssignedBy": "Attribué par",
+  "colActions": "Actions",
+  "remove": "Retirer",
+  "loading": "Chargement…",
+  "empty": "Aucune attribution de rôle.",
+  "removeConfirm": "Retirer le rôle de {{name}} ? Il/elle perdra l'accès à ce rôle CC.",
+  "removeFailed": "Échec du retrait du rôle"
+}

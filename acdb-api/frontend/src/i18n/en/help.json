@@ -1,0 +1,26 @@
+{
+  "title": "Help & Instructions",
+  "subtitle": "1PWR Customer Care Portal — Operating Manual",
+  "tableOfContents": "Table of Contents",
+  "searchPlaceholder": "Search sections…",
+  "sections": {
+    "overview": "Overview",
+    "loginRoles": "Login & Roles",
+    "customerManagement": "Customer Management",
+    "commissioning": "Commissioning",
+    "payments": "Payments",
+    "metering": "Metering",
+    "reporting": "Reporting",
+    "financing": "Financing",
+    "tariffs": "Tariffs",
+    "dataExport": "Data Export",
+    "systemAdmin": "System Administration"
+  },
+  "tip": "Tip:",
+  "important": "Important:",
+  "featureMap": {
+    "category": "Category",
+    "feature": "Feature",
+    "page": "Page"
+  }
+}

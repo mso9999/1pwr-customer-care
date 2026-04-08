@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { recordManualPayment, type RecordPaymentResult } from '../lib/api';
 
 export default function RecordPaymentPage() {
+  const { t } = useTranslation(['recordPayment', 'common']);
   const [form, setForm] = useState({ account_number: '', amount: '', meter_id: '', note: '' });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -33,13 +35,13 @@ export default function RecordPaymentPage() {
 
   return (
     <div className="max-w-xl mx-auto">
-      <h1 className="text-2xl font-bold text-gray-800 mb-6">Record Payment</h1>
+      <h1 className="text-2xl font-bold text-gray-800 mb-6">{t('recordPayment:title')}</h1>
 
       <form onSubmit={handleSubmit} className="bg-white rounded-xl border p-6 space-y-4">
         {error && <div className="bg-red-50 text-red-700 text-sm rounded-lg p-3">{error}</div>}
 
         <label className="block">
-          <span className="text-sm font-medium text-gray-700">Account Number</span>
+          <span className="text-sm font-medium text-gray-700">{t('recordPayment:fields.accountNumber')}</span>
           <input
             type="text"
             value={form.account_number}
@@ -50,7 +52,7 @@ export default function RecordPaymentPage() {
         </label>
 
         <label className="block">
-          <span className="text-sm font-medium text-gray-700">Amount (M)</span>
+          <span className="text-sm font-medium text-gray-700">{t('recordPayment:fields.amount')}</span>
           <input
             type="number"
             step="0.01"
@@ -61,13 +63,13 @@ export default function RecordPaymentPage() {
           />
           {form.amount && isDedicated && (
             <p className="text-xs text-amber-600 mt-1">
-              Amount ends in {onesDigit} — will be treated as a dedicated debt payment if the customer has active financing.
+              {t('recordPayment:fields.debtHint')}
             </p>
           )}
         </label>
 
         <label className="block">
-          <span className="text-sm font-medium text-gray-700">Meter ID <span className="text-gray-400">(optional)</span></span>
+          <span className="text-sm font-medium text-gray-700">{t('recordPayment:fields.meterId')}</span>
           <input
             type="text"
             value={form.meter_id}
@@ -77,7 +79,7 @@ export default function RecordPaymentPage() {
         </label>
 
         <label className="block">
-          <span className="text-sm font-medium text-gray-700">Note <span className="text-gray-400">(optional)</span></span>
+          <span className="text-sm font-medium text-gray-700">{t('recordPayment:fields.note')}</span>
           <textarea
             value={form.note}
             onChange={e => setForm({ ...form, note: e.target.value })}
@@ -91,38 +93,38 @@ export default function RecordPaymentPage() {
           disabled={submitting}
           className="w-full py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition"
         >
-          {submitting ? 'Recording...' : 'Record Payment'}
+          {submitting ? t('recordPayment:recording') : t('recordPayment:recordPayment')}
         </button>
       </form>
 
       {result && (
         <div className="mt-6 bg-green-50 border border-green-200 rounded-xl p-5">
-          <h3 className="font-bold text-green-800 mb-3">Payment Recorded</h3>
+          <h3 className="font-bold text-green-800 mb-3">{t('recordPayment:success.title')}</h3>
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div>
-              <span className="text-gray-500">Transaction ID</span>
+              <span className="text-gray-500">{t('recordPayment:success.transactionId')}</span>
               <p className="font-medium">#{result.transaction_id}</p>
             </div>
             <div>
-              <span className="text-gray-500">Amount</span>
+              <span className="text-gray-500">{t('recordPayment:success.amount')}</span>
               <p className="font-medium">M {result.amount?.toFixed(2)}</p>
             </div>
             <div>
-              <span className="text-gray-500">kWh Vended</span>
+              <span className="text-gray-500">{t('recordPayment:success.kwhVended')}</span>
               <p className="font-medium">{result.kwh?.toFixed(4)} kWh</p>
             </div>
             <div>
-              <span className="text-gray-500">New Balance</span>
+              <span className="text-gray-500">{t('recordPayment:success.newBalance')}</span>
               <p className="font-medium">{result.balance_kwh?.toFixed(4)} kWh</p>
             </div>
             {result.financing && (
               <>
                 <div>
-                  <span className="text-gray-500">Electricity Portion</span>
+                  <span className="text-gray-500">{t('recordPayment:success.electricityPortion')}</span>
                   <p className="font-medium text-blue-700">M {result.financing.electricity_portion?.toFixed(2)}</p>
                 </div>
                 <div>
-                  <span className="text-gray-500">Debt Portion</span>
+                  <span className="text-gray-500">{t('recordPayment:success.debtPortion')}</span>
                   <p className="font-medium text-amber-700">M {result.financing.debt_portion?.toFixed(2)}</p>
                 </div>
               </>
@@ -130,7 +132,7 @@ export default function RecordPaymentPage() {
           </div>
           {result.sm_credit && (
             <div className="mt-3 text-xs text-gray-500">
-              SM Credit: {result.sm_credit.success ? 'OK' : 'Failed'} ({result.sm_credit.platform})
+              {result.sm_credit.success ? t('recordPayment:success.smCreditOk') : t('recordPayment:success.smCreditFailed')} ({result.sm_credit.platform})
             </div>
           )}
         </div>

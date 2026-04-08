@@ -1,0 +1,36 @@
+{
+  "title": "Vérification des paiements",
+  "filters": {
+    "pending": "En attente",
+    "verified": "Vérifié",
+    "rejected": "Rejeté",
+    "all": "Tous",
+    "allTypes": "Tous les types",
+    "connectionFee": "Frais de raccordement",
+    "readyboardFee": "Frais du tableau",
+    "electricity": "Électricité",
+    "uncategorized": "Non catégorisé"
+  },
+  "recordCount": "{{count}} enregistrements",
+  "exportXlsx": "Exporter XLSX",
+  "bulk": {
+    "selected_one": "{{count}} sélectionné",
+    "selected_other": "{{count}} sélectionnés",
+    "note": "Note (facultatif)",
+    "verify": "Vérifier",
+    "reject": "Rejeter"
+  },
+  "colDate": "Date",
+  "colAccount": "Compte",
+  "colCustomer": "Client",
+  "colType": "Type",
+  "colAmount": "Montant",
+  "colStatus": "Statut",
+  "colNote": "Note",
+  "empty": {
+    "pending": "Aucune vérification en attente",
+    "verified": "Aucune vérification validée",
+    "rejected": "Aucune vérification rejetée",
+    "all": "Aucune vérification trouvée"
+  }
+}

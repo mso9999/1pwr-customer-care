@@ -1,4 +1,5 @@
 import { Navigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 
 interface Props {
@@ -8,10 +9,11 @@ interface Props {
 }
 
 export default function ProtectedRoute({ children, requireEmployee, requireRole }: Props) {
+  const { t } = useTranslation(['common']);
   const { user, loading } = useAuth();
 
   if (loading) {
-    return <div className="flex justify-center items-center h-64"><div className="text-gray-400">Loading...</div></div>;
+    return <div className="flex justify-center items-center h-64"><div className="text-gray-400">{t('common:loading')}</div></div>;
   }
 
   if (!user) {

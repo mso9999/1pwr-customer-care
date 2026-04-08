@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 
 // ---------------------------------------------------------------------------
 // Section data
@@ -33,16 +34,18 @@ function SubHead({ children }: { children: React.ReactNode }) {
   return <h4 className="text-sm font-bold text-gray-800 mt-5 mb-2">{children}</h4>;
 }
 function Tip({ children }: { children: React.ReactNode }) {
+  const { t } = useTranslation(['help']);
   return (
     <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm text-blue-800 mb-3">
-      <span className="font-semibold">Tip:</span> {children}
+      <span className="font-semibold">{t('help:tip')}</span> {children}
     </div>
   );
 }
 function Warning({ children }: { children: React.ReactNode }) {
+  const { t } = useTranslation(['help']);
   return (
     <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-800 mb-3">
-      <span className="font-semibold">Important:</span> {children}
+      <span className="font-semibold">{t('help:important')}</span> {children}
     </div>
   );
 }
@@ -423,11 +426,26 @@ const SECTIONS: Section[] = [
   },
 ];
 
+const SECTION_TITLE_KEYS: Record<string, string> = {
+  overview: 'help:sections.overview',
+  login: 'help:sections.loginRoles',
+  customers: 'help:sections.customerManagement',
+  commission: 'help:sections.commissioning',
+  payments: 'help:sections.payments',
+  financing: 'help:sections.financing',
+  meters: 'help:sections.metering',
+  reports: 'help:sections.reporting',
+  export: 'help:sections.dataExport',
+  tariffs: 'help:sections.tariffs',
+  admin: 'help:sections.systemAdmin',
+};
+
 // ---------------------------------------------------------------------------
 // Help Page Component
 // ---------------------------------------------------------------------------
 
 export default function HelpPage() {
+  const { t } = useTranslation(['help', 'common']);
   const [activeSection, setActiveSection] = useState(SECTIONS[0].id);
   const [searchQuery, setSearchQuery] = useState('');
   const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -472,7 +490,7 @@ export default function HelpPage() {
       {/* Sidebar TOC - desktop only */}
       <aside className="hidden lg:block w-56 shrink-0 sticky top-20">
         <div className="bg-white rounded-xl border p-4">
-          <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Contents</h3>
+          <h3 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">{t('help:tableOfContents')}</h3>
           <nav className="space-y-0.5">
             {SECTIONS.map(s => (
               <button
@@ -484,7 +502,7 @@ export default function HelpPage() {
                     : 'text-gray-600 hover:bg-gray-50 hover:text-gray-800'
                 }`}
               >
-                {s.title}
+                {SECTION_TITLE_KEYS[s.id] ? t(SECTION_TITLE_KEYS[s.id]) : s.title}
               </button>
             ))}
           </nav>
@@ -495,15 +513,15 @@ export default function HelpPage() {
       <div className="flex-1 min-w-0 max-w-4xl">
         <div className="flex items-center justify-between mb-6 gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-800">Help &amp; Instructions</h1>
-            <p className="text-sm text-gray-500 mt-0.5">1PWR Customer Care Portal — Operating Manual</p>
+            <h1 className="text-2xl font-bold text-gray-800">{t('help:title')}</h1>
+            <p className="text-sm text-gray-500 mt-0.5">{t('help:subtitle')}</p>
           </div>
           <div className="relative">
             <input
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Search sections..."
+              placeholder={t('help:searchPlaceholder')}
               className="pl-9 pr-3 py-2 border rounded-lg text-sm w-48 focus:ring-2 focus:ring-blue-400 focus:outline-none"
             />
             <svg className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -515,7 +533,7 @@ export default function HelpPage() {
         {/* Mobile TOC */}
         <div className="lg:hidden mb-4">
           <details className="bg-white rounded-xl border">
-            <summary className="px-4 py-3 text-sm font-medium text-gray-700 cursor-pointer">Table of Contents</summary>
+            <summary className="px-4 py-3 text-sm font-medium text-gray-700 cursor-pointer">{t('help:tableOfContents')}</summary>
             <div className="px-4 pb-3 space-y-0.5">
               {SECTIONS.map(s => (
                 <button
@@ -523,7 +541,7 @@ export default function HelpPage() {
                   onClick={() => { scrollTo(s.id); }}
                   className="block w-full text-left px-2.5 py-1.5 rounded-lg text-sm text-gray-600 hover:bg-gray-50"
                 >
-                  {s.title}
+                  {SECTION_TITLE_KEYS[s.id] ? t(SECTION_TITLE_KEYS[s.id]) : s.title}
                 </button>
               ))}
             </div>
@@ -542,7 +560,7 @@ export default function HelpPage() {
                 <span className="flex items-center justify-center w-7 h-7 rounded-full bg-blue-100 text-blue-700 text-xs font-bold shrink-0">
                   {idx + 1}
                 </span>
-                <h2 className="text-lg font-bold text-gray-800">{section.title}</h2>
+                <h2 className="text-lg font-bold text-gray-800">{SECTION_TITLE_KEYS[section.id] ? t(SECTION_TITLE_KEYS[section.id]) : section.title}</h2>
               </div>
               {section.content}
             </div>

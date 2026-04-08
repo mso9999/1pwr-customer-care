@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { fetchPortfolios, type CountryEntry, type Portfolio } from '../lib/portfolioService';
 
 export type { CountryEntry, Portfolio };
@@ -41,6 +42,7 @@ const FALLBACK_COUNTRIES: CountryEntry[] = [
 const CountryContext = createContext<CountryContextType | null>(null);
 
 export function CountryProvider({ children }: { children: ReactNode }) {
+  const { i18n } = useTranslation();
   const [country, setCountryState] = useState(
     () => localStorage.getItem('cc_country') || 'LS'
   );
@@ -69,6 +71,12 @@ export function CountryProvider({ children }: { children: ReactNode }) {
 
   // ── Resolve selected portfolio object from stored id ──
   const portfolio = allPortfolios.find((p) => p.id === portfolioId) ?? null;
+
+  useEffect(() => {
+    if (!localStorage.getItem('cc_lang')) {
+      i18n.changeLanguage(country === 'BN' ? 'fr' : 'en');
+    }
+  }, [country, i18n]);
 
   const setCountry = (code: string) => {
     localStorage.setItem('cc_country', code);

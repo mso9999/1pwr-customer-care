@@ -1,0 +1,29 @@
+{
+  "title": "Enregistrer un paiement",
+  "fields": {
+    "accountNumber": "Numéro de compte",
+    "amount": "Montant (M)",
+    "debtHint": "Le chiffre des unités 1 ou 9 indique un paiement dédié à la dette.",
+    "meterId": "ID compteur (facultatif)",
+    "note": "Note (facultatif)"
+  },
+  "recording": "Enregistrement…",
+  "recordPayment": "Enregistrer le paiement",
+  "success": {
+    "title": "Paiement enregistré",
+    "transactionId": "ID de transaction",
+    "amount": "Montant",
+    "kwhVended": "kWh crédités",
+    "newBalance": "Nouveau solde",
+    "electricityPortion": "Part électricité",
+    "debtPortion": "Part dette",
+    "smCreditOk": "Crédit SM OK",
+    "smCreditFailed": "Échec du crédit SM"
+  },
+  "validation": {
+    "accountRequired": "Le numéro de compte est requis",
+    "amountRequired": "Le montant est requis",
+    "amountPositive": "Le montant doit être positif"
+  },
+  "recordFailed": "Échec de l'enregistrement du paiement"
+}

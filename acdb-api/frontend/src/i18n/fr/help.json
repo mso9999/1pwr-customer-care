@@ -1,0 +1,26 @@
+{
+  "title": "Aide et instructions",
+  "subtitle": "Portail Service Client 1PWR — Manuel d'exploitation",
+  "tableOfContents": "Table des matières",
+  "searchPlaceholder": "Rechercher des sections…",
+  "sections": {
+    "overview": "Vue d'ensemble",
+    "loginRoles": "Connexion et rôles",
+    "customerManagement": "Gestion des clients",
+    "commissioning": "Mise en service",
+    "payments": "Paiements",
+    "metering": "Comptage",
+    "reporting": "Rapports",
+    "financing": "Financement",
+    "tariffs": "Tarifs",
+    "dataExport": "Export de données",
+    "systemAdmin": "Administration système"
+  },
+  "tip": "Conseil :",
+  "important": "Important :",
+  "featureMap": {
+    "category": "Catégorie",
+    "feature": "Fonctionnalité",
+    "page": "Page"
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "title": "Mise en service du client",
+  "subtitle": "Générer le contrat et activer le service",
+  "steps": {
+    "identify": "Identifier",
+    "identifyDesc": "Identifier le client",
+    "details": "Détails",
+    "detailsDesc": "Détails de la mise en service",
+    "sign": "Signer",
+    "signDesc": "Capturer la signature",
+    "review": "Vérifier",
+    "reviewDesc": "Vérification et génération"
+  },
+  "fields": {
+    "customerId": "ID client",
+    "customerIdPlaceholder": "ex. 0045MAK ou 5846",
+    "lookingUp": "Recherche du client…",
+    "name": "Nom",
+    "site": "Site",
+    "meter": "Compteur",
+    "account": "Compte",
+    "na": "N/D",
+    "connected": "Raccordé",
+    "contractsOnFile": "Contrats enregistrés",
+    "found": "{{count}} trouvé(s)",
+    "connectionDate": "Date de raccordement",
+    "customerType": "Type de client",
+    "selectType": "Sélectionner un type…",
+    "nationalId": "Numéro d'identité nationale",
+    "phoneNumber": "Numéro de téléphone",
+    "servicePhase": "Phase de service",
+    "ampacity": "Ampérage",
+    "accountNumber": "Numéro de compte",
+    "gpsCoordinates": "Coordonnées GPS",
+    "ugpConnection": "Raccordement UGP",
+    "remove": "Retirer",
+    "linkUgp": "Lier un raccordement uGridPlan"
+  },
+  "signature": {
+    "captured": "Signature capturée",
+    "replace": "Remplacer la signature",
+    "alt": "Signature capturée"
+  },
+  "success": {
+    "title": "Client mis en service",
+    "viewContractEn": "Voir le contrat en anglais",
+    "viewContractSo": "Voir le contrat en sesotho",
+    "ugpSync": "Synchronisation uGridPlan",
+    "updating": "Mise à jour…",
+    "markEnergized": "Marquer comme alimenté en amont",
+    "goToDetail": "Voir la fiche client"
+  },
+  "back": "Retour",
+  "next": "Suivant",
+  "generating": "Génération en cours…",
+  "generateContract": "Générer le contrat et le SMS",
+  "validation": {
+    "customerIdRequired": "L'ID client est requis",
+    "connectionDateRequired": "La date de raccordement est requise",
+    "customerTypeRequired": "Le type de client est requis",
+    "nationalIdRequired": "Le numéro d'identité nationale est requis",
+    "phoneRequired": "Le numéro de téléphone est requis",
+    "accountRequired": "Le numéro de compte est requis",
+    "signatureRequired": "La signature est requise"
+  },
+  "commissionFailed": "Échec de la mise en service"
+}

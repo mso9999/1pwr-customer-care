@@ -1,0 +1,84 @@
+{
+  "title": "Gestion des tarifs",
+  "subtitle": "Gérer les tarifs globaux, par concession et par client",
+  "loading": "Chargement des données tarifaires…",
+  "mutationLogged": "(enregistré dans l'historique des mutations)",
+  "global": {
+    "title": "Tarif global",
+    "update": "Mettre à jour",
+    "unit": "LSL / kWh",
+    "pending": "En attente : {{rate}}",
+    "help": "Tarif par défaut appliqué en l'absence de surcharge par concession ou par client."
+  },
+  "tabs": {
+    "overrides": "Surcharges tarifaires",
+    "history": "Historique des modifications"
+  },
+  "concession": {
+    "title": "Surcharges par concession",
+    "addOverride": "Ajouter une surcharge",
+    "empty": "Aucune surcharge tarifaire par concession.",
+    "concession": "Concession",
+    "rate": "Tarif (LSL/kWh)",
+    "effectiveFrom": "En vigueur à partir de",
+    "setBy": "Défini par",
+    "notes": "Notes",
+    "actions": "Actions",
+    "pending": "(en attente)"
+  },
+  "customer": {
+    "title": "Surcharges par client",
+    "titleCount": "Surcharges par client ({{count}})",
+    "addOverride": "Ajouter une surcharge",
+    "empty": "Aucune surcharge tarifaire par client."
+  },
+  "history": {
+    "title": "Historique des modifications tarifaires",
+    "allScopes": "Toutes les portées",
+    "global": "Global",
+    "concession": "Concession",
+    "customer": "Client",
+    "date": "Date",
+    "scope": "Portée",
+    "key": "Clé",
+    "previous": "Précédent",
+    "newRate": "Nouveau tarif",
+    "effective": "En vigueur",
+    "by": "Par",
+    "notes": "Notes",
+    "removed": "supprimé",
+    "noChanges": "Aucune modification tarifaire enregistrée"
+  },
+  "modal": {
+    "rate": "Tarif (LSL/kWh)",
+    "effectiveFrom": "En vigueur à partir de…",
+    "notes": "Notes…",
+    "cancel": "Annuler",
+    "saving": "Enregistrement…",
+    "save": "Enregistrer"
+  },
+  "addConcession": {
+    "title": "Ajouter une surcharge par concession",
+    "concessionCode": "Code de concession",
+    "concessionCodePlaceholder": "ex. MAK"
+  },
+  "addCustomer": {
+    "title": "Ajouter une surcharge par client",
+    "customerId": "ID client",
+    "customerIdPlaceholder": "ex. 0045MAK"
+  },
+  "deleteConfirm": {
+    "title": "Supprimer la surcharge ?",
+    "body": "La surcharge tarifaire sera supprimée. Le tarif global s'appliquera.",
+    "cancel": "Annuler",
+    "remove": "Supprimer"
+  },
+  "errors": {
+    "ratePositive": "Le tarif doit être positif",
+    "saveFailed": "Échec de l'enregistrement",
+    "deleteFailed": "Échec de la suppression",
+    "loadFailed": "Échec du chargement des données tarifaires",
+    "concessionRequired": "Le code de concession est requis",
+    "customerRequired": "L'ID client est requis"
+  }
+}

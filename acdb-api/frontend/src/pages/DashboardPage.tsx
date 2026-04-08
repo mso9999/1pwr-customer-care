@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LabelList, ComposedChart, Line, CartesianGrid, Legend } from 'recharts';
 import {
   listTables,
@@ -25,6 +26,7 @@ interface SiteRow {
 }
 
 export default function DashboardPage() {
+  const { t } = useTranslation(['dashboard', 'common']);
   const { canWriteCustomers } = useAuth();
   const { country, portfolio, countries } = useCountry();
   const currentCountry = countries.find((c) => c.code === country);
@@ -125,7 +127,7 @@ export default function DashboardPage() {
     setEnabledSites(new Set(siteData.map(s => s.concession)));
   };
 
-  if (loading) return <div className="text-center py-16 text-gray-400">Loading dashboard...</div>;
+  if (loading) return <div className="text-center py-16 text-gray-400">{t('dashboard:dashboard.loading')}</div>;
 
   const barData = filteredSites.map(s => ({
     ...s,
@@ -135,7 +137,7 @@ export default function DashboardPage() {
   return (
     <div className="space-y-4 sm:space-y-6">
       <div className="flex items-baseline gap-3 flex-wrap">
-        <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Dashboard</h1>
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-800">{t('dashboard:dashboard.title')}</h1>
         {portfolio && (
           <span className="text-sm font-medium text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-full">
             {portfolio.name}
@@ -146,10 +148,9 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Site filter strip */}
       {siteData.length > 1 && (
         <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide mr-1">Sites</span>
+          <span className="text-xs font-medium text-gray-500 uppercase tracking-wide mr-1">{t('dashboard:dashboard.filters.sites')}</span>
           <button
             onClick={toggleAllSites}
             className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
@@ -158,7 +159,7 @@ export default function DashboardPage() {
                 : 'bg-white text-gray-400 border-gray-200 hover:border-gray-300'
             }`}
           >
-            All ({siteData.length})
+            {t('dashboard:dashboard.filters.allCount', { count: siteData.length })}
           </button>
           {siteData.map((s, i) => {
             const on = enabledSites.has(s.concession);
@@ -183,36 +184,34 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="bg-white rounded-lg shadow p-4 sm:p-5">
-          <p className="text-xs sm:text-sm text-gray-500">Registered Customers</p>
+          <p className="text-xs sm:text-sm text-gray-500">{t('dashboard:dashboard.cards.registeredCustomers')}</p>
           <p className="text-2xl sm:text-3xl font-bold text-blue-700">{totalCustomers.toLocaleString()}</p>
           <p className="text-xs text-gray-400 mt-0.5">
             {allSites
-              ? `${currentCountry?.name ?? country} \u00b7 all sites`
+              ? `${currentCountry?.name ?? country} \u00b7 ${t('dashboard:dashboard.cards.allSitesSubtitle')}`
               : `${filteredSites.map(s => s.concession).join(', ')}`}
           </p>
         </div>
         <div className="bg-white rounded-lg shadow p-4 sm:p-5">
-          <p className="text-xs sm:text-sm text-gray-500">All-Time MWh</p>
+          <p className="text-xs sm:text-sm text-gray-500">{t('dashboard:dashboard.cards.allTimeMwh')}</p>
           <p className="text-2xl sm:text-3xl font-bold text-green-700">{filteredTotals.mwh.toLocaleString(undefined, { maximumFractionDigits: 1 })}</p>
-          <p className="text-xs text-gray-400 mt-0.5">Cumulative energy delivered</p>
+          <p className="text-xs text-gray-400 mt-0.5">{t('dashboard:dashboard.cards.cumulativeEnergyDelivered')}</p>
         </div>
         <div className="bg-white rounded-lg shadow p-4 sm:p-5">
-          <p className="text-xs sm:text-sm text-gray-500">All-Time Revenue</p>
+          <p className="text-xs sm:text-sm text-gray-500">{t('dashboard:dashboard.cards.allTimeRevenue')}</p>
           <p className="text-2xl sm:text-3xl font-bold text-amber-700">'000 {currency} {filteredTotals.revenue_thousands.toLocaleString(undefined, { maximumFractionDigits: 1 })}</p>
           <p className="text-xs text-gray-400 mt-0.5">Cumulative &middot; {currentCountry?.name ?? country} only</p>
         </div>
         <div className="bg-white rounded-lg shadow p-4 sm:p-5">
-          <p className="text-xs sm:text-sm text-gray-500">Sites</p>
+          <p className="text-xs sm:text-sm text-gray-500">{t('dashboard:dashboard.cards.sites')}</p>
           <p className="text-2xl sm:text-3xl font-bold text-purple-700">
             {allSites ? siteData.length : `${filteredSites.length} / ${siteData.length}`}
           </p>
         </div>
       </div>
 
-      {/* Revenue / ARPU — rolling 12 months, cross-country */}
       {revenueSummary && revenueSummary.consolidated.length > 0 && (() => {
         const allCountryKeys = revenueSummary.countries.map(c => c.country);
         const activeKeys = allCountryKeys.filter(k => enabledCountries.has(k));
@@ -283,9 +282,9 @@ export default function DashboardPage() {
           <div className="bg-white rounded-lg shadow p-4 sm:p-5 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2">
               <div>
-                <h2 className="text-base sm:text-lg font-semibold text-gray-700">Portfolio Revenue &amp; ARPU</h2>
+                <h2 className="text-base sm:text-lg font-semibold text-gray-700">{t('dashboard:dashboard.portfolio.title')}</h2>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  Rolling {revenueSummary.window_months}-month view &middot; All values converted to USD at indicative rates
+                  {t('dashboard:dashboard.portfolio.subtitle', { months: revenueSummary.window_months })}
                 </p>
               </div>
               <div className="flex items-center gap-2">
@@ -312,7 +311,6 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* FX legend */}
             <div className="flex gap-3 text-xs text-gray-400">
               {activeCountries.map(c => (
                 <span key={c.country}>
@@ -321,18 +319,17 @@ export default function DashboardPage() {
               ))}
             </div>
 
-            {/* KPI strip */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               <div className="bg-gradient-to-br from-blue-50 to-white rounded-xl p-4 border border-blue-100">
-                <p className="text-xs text-gray-500 uppercase tracking-wide">Active Connections</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wide">{t('dashboard:dashboard.kpi.activeConnections')}</p>
                 <p className="text-2xl font-bold text-blue-700 mt-1">{totalConnections.toLocaleString()}</p>
                 <p className="text-xs text-gray-400 mt-1">
                   {activeCountries.map(c => `${c.country}: ${c.active_connections.toLocaleString()}`).join(' / ')}
                 </p>
-                <p className="text-xs text-gray-400">Accounts with active meter</p>
+                <p className="text-xs text-gray-400">{t('dashboard:dashboard.kpi.accountsWithActiveMeter')}</p>
               </div>
               <div className="bg-gradient-to-br from-green-50 to-white rounded-xl p-4 border border-green-100">
-                <p className="text-xs text-gray-500 uppercase tracking-wide">{revenueSummary.window_months}-Month Revenue</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wide">{t('dashboard:dashboard.kpi.monthRevenue', { months: revenueSummary.window_months })}</p>
                 <p className="text-2xl font-bold text-green-700 mt-1">{fmtUsd(totalRevUsd)}</p>
                 <p className="text-xs text-gray-400 mt-1">
                   {activeCountries.map(c => {
@@ -342,29 +339,28 @@ export default function DashboardPage() {
                 </p>
               </div>
               <div className="bg-gradient-to-br from-amber-50 to-white rounded-xl p-4 border border-amber-100">
-                <p className="text-xs text-gray-500 uppercase tracking-wide">Latest Month ARPU</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wide">{t('dashboard:dashboard.kpi.latestMonthArpu')}</p>
                 <p className="text-2xl font-bold text-amber-700 mt-1">{fmtUsd(latest.f_arpu_prorated)}</p>
                 {latest.month_fraction != null && latest.month_fraction < 1 && (
                   <p className="text-xs text-amber-500 mt-0.5">
-                    Prorated ({Math.round(latest.month_fraction * 100)}% of month elapsed)
+                    {t('dashboard:dashboard.kpi.prorated', { pct: Math.round(latest.month_fraction * 100) })}
                   </p>
                 )}
                 {revChange !== null && (
                   <p className={`text-xs mt-1 ${revChange >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    {revChange >= 0 ? '\u25B2' : '\u25BC'} {Math.abs(revChange).toFixed(1)}% vs prior month
+                    {revChange >= 0 ? '\u25B2' : '\u25BC'} {t('dashboard:dashboard.kpi.vsPriorMonth', { pct: Math.abs(revChange).toFixed(1) })}
                   </p>
                 )}
               </div>
               <div className="bg-gradient-to-br from-purple-50 to-white rounded-xl p-4 border border-purple-100">
-                <p className="text-xs text-gray-500 uppercase tracking-wide">Avg Monthly ARPU</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wide">{t('dashboard:dashboard.kpi.avgMonthlyArpu')}</p>
                 <p className="text-2xl font-bold text-purple-700 mt-1">{fmtUsd(avgArpu)}</p>
-                <p className="text-xs text-gray-400 mt-1">{revenueSummary.window_months}-month average</p>
+                <p className="text-xs text-gray-400 mt-1">{t('dashboard:dashboard.kpi.monthAverageSubtitle', { months: revenueSummary.window_months })}</p>
               </div>
             </div>
 
-            {/* Stacked bar (revenue USD by country) + line (ARPU) */}
             <div>
-              <h3 className="text-sm font-medium text-gray-600 mb-2">Monthly Revenue (USD) &amp; ARPU</h3>
+              <h3 className="text-sm font-medium text-gray-600 mb-2">{t('dashboard:dashboard.charts.monthlyRevenueAndArpu')}</h3>
               <ResponsiveContainer width="100%" height={280}>
                 <ComposedChart data={chartData} margin={{ top: 5, right: 20, left: 5, bottom: 5 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
@@ -377,9 +373,9 @@ export default function DashboardPage() {
                       if (n.startsWith('rev_')) {
                         const cc = n.replace('rev_', '');
                         const cn = revenueSummary.countries.find(c => c.country === cc);
-                        return [fmtUsd(value), `${cn?.country_name || cc} Revenue`];
+                        return [fmtUsd(value), `${cn?.country_name || cc} ${t('dashboard:dashboard.charts.revenueLegendSuffix')}`];
                       }
-                      if (n === 'arpu_usd') return [fmtUsd(value), 'ARPU (USD)'];
+                      if (n === 'arpu_usd') return [fmtUsd(value), t('dashboard:dashboard.charts.arpuLegend')];
                       return [value, n];
                     }}
                     labelFormatter={(label: any) => `20${label}`}
@@ -388,9 +384,9 @@ export default function DashboardPage() {
                     if (value.startsWith('rev_')) {
                       const cc = value.replace('rev_', '');
                       const cn = revenueSummary.countries.find(c => c.country === cc);
-                      return `${cn?.country_name || cc} Revenue`;
+                      return `${cn?.country_name || cc} ${t('dashboard:dashboard.charts.revenueLegendSuffix')}`;
                     }
-                    if (value === 'arpu_usd') return 'ARPU (USD)';
+                    if (value === 'arpu_usd') return t('dashboard:dashboard.charts.arpuLegend');
                     return value;
                   }} />
                   {activeKeys.map(ck => (
@@ -403,25 +399,24 @@ export default function DashboardPage() {
               </ResponsiveContainer>
             </div>
 
-            {/* Per-country monthly table */}
             <details className="group">
               <summary className="cursor-pointer text-sm font-medium text-gray-600 hover:text-blue-600 select-none">
-                Monthly Breakdown by Country
-                <span className="ml-1 text-xs text-gray-400 group-open:hidden">(click to expand)</span>
+                {t('dashboard:dashboard.breakdown.summary')}
+                <span className="ml-1 text-xs text-gray-400 group-open:hidden">{t('dashboard:dashboard.breakdown.clickToExpand')}</span>
               </summary>
               <div className="overflow-x-auto mt-3">
                 <table className="w-full text-sm">
                   <thead className="bg-gray-50 border-b">
                     <tr>
-                      <th className="px-3 py-2 text-left font-medium text-gray-600">Month</th>
+                      <th className="px-3 py-2 text-left font-medium text-gray-600">{t('dashboard:dashboard.breakdown.table.month')}</th>
                       {activeCountries.map(c => (
-                        <th key={`${c.country}-rev`} className="px-3 py-2 text-right font-medium text-gray-600">{c.country_name} Revenue ({c.currency})</th>
+                        <th key={`${c.country}-rev`} className="px-3 py-2 text-right font-medium text-gray-600">{c.country_name} {t('dashboard:dashboard.breakdown.table.revenueSuffix')} ({c.currency})</th>
                       ))}
-                      <th className="px-3 py-2 text-right font-medium text-gray-600">Total (USD)</th>
+                      <th className="px-3 py-2 text-right font-medium text-gray-600">{t('dashboard:dashboard.breakdown.table.totalUsd')}</th>
                       {activeCountries.map(c => (
-                        <th key={`${c.country}-cust`} className="px-3 py-2 text-right font-medium text-gray-600">{c.country_name} Paying</th>
+                        <th key={`${c.country}-cust`} className="px-3 py-2 text-right font-medium text-gray-600">{c.country_name} {t('dashboard:dashboard.breakdown.table.payingSuffix')}</th>
                       ))}
-                      <th className="px-3 py-2 text-right font-medium text-gray-600">ARPU (USD)</th>
+                      <th className="px-3 py-2 text-right font-medium text-gray-600">{t('dashboard:dashboard.breakdown.table.arpuUsd')}</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
@@ -451,7 +446,7 @@ export default function DashboardPage() {
                   </tbody>
                   <tfoot className="bg-gray-50 border-t font-medium">
                     <tr>
-                      <td className="px-3 py-2">Total / Avg</td>
+                      <td className="px-3 py-2">{t('dashboard:dashboard.breakdown.footer.totalAvg')}</td>
                       {activeCountries.map(c => {
                         const total = c.months.reduce((s, m) => s + m.revenue_local, 0);
                         return (
@@ -467,11 +462,11 @@ export default function DashboardPage() {
                           : 0;
                         return (
                           <td key={`${c.country}-cust`} className="px-3 py-2 text-right tabular-nums">
-                            ~{avg.toLocaleString()} avg
+                            ~{avg.toLocaleString()} {t('dashboard:dashboard.breakdown.footer.avgSuffix')}
                           </td>
                         );
                       })}
-                      <td className="px-3 py-2 text-right tabular-nums">{fmtUsd(avgArpu)} avg</td>
+                      <td className="px-3 py-2 text-right tabular-nums">{fmtUsd(avgArpu)} {t('dashboard:dashboard.breakdown.footer.avgSuffix')}</td>
                     </tr>
                   </tfoot>
                 </table>
@@ -485,35 +480,35 @@ export default function DashboardPage() {
         <div className="bg-white rounded-lg shadow p-4 sm:p-5">
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2 mb-4">
             <div>
-              <h2 className="text-base sm:text-lg font-semibold text-gray-700">1PDB Record Completeness</h2>
+              <h2 className="text-base sm:text-lg font-semibold text-gray-700">{t('dashboard:dashboard.completeness.title')}</h2>
               <p className="text-xs text-gray-500 mt-1">{recordCompleteness.note}</p>
             </div>
             <div className="text-xs text-gray-400">
-              Data through {formatTimestamp(recordCompleteness.data_as_of)}
+              {t('dashboard:dashboard.completeness.dataThrough', { date: formatTimestamp(recordCompleteness.data_as_of) })}
             </div>
           </div>
 
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
             <div className="bg-white rounded-xl shadow p-4 border-l-4 border-blue-500">
-              <p className="text-xs text-gray-500 uppercase">Registered Customers</p>
+              <p className="text-xs text-gray-500 uppercase">{t('dashboard:dashboard.completeness.kpi.registeredCustomers')}</p>
               <p className="text-2xl font-bold text-gray-800 mt-1">
                 {recordCompleteness.totals.customer_count.toLocaleString()}
               </p>
             </div>
             <div className="bg-white rounded-xl shadow p-4 border-l-4 border-purple-500">
-              <p className="text-xs text-gray-500 uppercase">Commissioned</p>
+              <p className="text-xs text-gray-500 uppercase">{t('dashboard:dashboard.completeness.kpi.commissioned')}</p>
               <p className="text-2xl font-bold text-gray-800 mt-1">
                 {recordCompleteness.totals.commissioned_customers.toLocaleString()}
               </p>
             </div>
             <div className="bg-white rounded-xl shadow p-4 border-l-4 border-amber-500">
-              <p className="text-xs text-gray-500 uppercase">Hourly Records</p>
+              <p className="text-xs text-gray-500 uppercase">{t('dashboard:dashboard.completeness.kpi.hourlyRecords')}</p>
               <p className="text-2xl font-bold text-gray-800 mt-1">
                 {recordCompleteness.totals.actual_records.toLocaleString()}
               </p>
             </div>
             <div className="bg-white rounded-xl shadow p-4 border-l-4 border-green-500">
-              <p className="text-xs text-gray-500 uppercase">Overall Complete</p>
+              <p className="text-xs text-gray-500 uppercase">{t('dashboard:dashboard.completeness.kpi.overallComplete')}</p>
               <p className="text-2xl font-bold text-gray-800 mt-1">
                 {formatPercent(recordCompleteness.totals.completeness_pct)}
               </p>
@@ -525,13 +520,13 @@ export default function DashboardPage() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b">
                   <tr>
-                    <th className="px-3 py-2 text-left font-medium text-gray-600">Customer Type</th>
-                    <th className="px-3 py-2 text-right font-medium text-gray-600">Customers</th>
-                    <th className="px-3 py-2 text-right font-medium text-gray-600">Commissioned</th>
-                    <th className="px-3 py-2 text-right font-medium text-gray-600">Accounts with Data</th>
-                    <th className="px-3 py-2 text-right font-medium text-gray-600">Hourly Records</th>
-                    <th className="px-3 py-2 text-right font-medium text-gray-600">Expected Records</th>
-                    <th className="px-3 py-2 text-right font-medium text-gray-600">% Complete</th>
+                    <th className="px-3 py-2 text-left font-medium text-gray-600">{t('dashboard:dashboard.completeness.table.customerType')}</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">{t('dashboard:dashboard.completeness.table.customers')}</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">{t('dashboard:dashboard.completeness.table.commissioned')}</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">{t('dashboard:dashboard.completeness.table.accountsWithData')}</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">{t('dashboard:dashboard.completeness.table.hourlyRecords')}</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">{t('dashboard:dashboard.completeness.table.expectedRecords')}</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">{t('dashboard:dashboard.completeness.table.pctComplete')}</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -553,7 +548,7 @@ export default function DashboardPage() {
                 </tbody>
                 <tfoot className="bg-gray-50 border-t font-medium">
                   <tr>
-                    <td className="px-3 py-2">Total</td>
+                    <td className="px-3 py-2">{t('common:total')}</td>
                     <td className="px-3 py-2 text-right">{recordCompleteness.totals.customer_count.toLocaleString()}</td>
                     <td className="px-3 py-2 text-right">{recordCompleteness.totals.commissioned_customers.toLocaleString()}</td>
                     <td className="px-3 py-2 text-right">{recordCompleteness.totals.accounts_with_records.toLocaleString()}</td>
@@ -569,38 +564,35 @@ export default function DashboardPage() {
               </table>
             </div>
           ) : (
-            <p className="text-gray-400 text-center py-6">No hourly record completeness data available yet.</p>
+            <p className="text-gray-400 text-center py-6">{t('dashboard:dashboard.completeness.empty')}</p>
           )}
         </div>
       )}
 
-      {/* Quick actions */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <Link to="/help" className="bg-white rounded-lg shadow p-4 sm:p-5 hover:bg-blue-50 transition border border-transparent hover:border-blue-200 group">
-          <p className="text-xs sm:text-sm text-gray-500 group-hover:text-blue-600">Help & Instructions</p>
-          <p className="text-sm font-semibold text-gray-700 group-hover:text-blue-700 mt-1">Operating Manual</p>
+          <p className="text-xs sm:text-sm text-gray-500 group-hover:text-blue-600">{t('dashboard:dashboard.quickLinks.helpInstructions')}</p>
+          <p className="text-sm font-semibold text-gray-700 group-hover:text-blue-700 mt-1">{t('dashboard:dashboard.quickLinks.operatingManual')}</p>
         </Link>
         <Link to="/pipeline" className="bg-white rounded-lg shadow p-4 sm:p-5 hover:bg-blue-50 transition border border-transparent hover:border-blue-200 group">
-          <p className="text-xs sm:text-sm text-gray-500 group-hover:text-blue-600">Onboarding</p>
-          <p className="text-sm font-semibold text-gray-700 group-hover:text-blue-700 mt-1">Pipeline Funnel</p>
+          <p className="text-xs sm:text-sm text-gray-500 group-hover:text-blue-600">{t('dashboard:dashboard.quickLinks.onboarding')}</p>
+          <p className="text-sm font-semibold text-gray-700 group-hover:text-blue-700 mt-1">{t('dashboard:dashboard.quickLinks.pipelineFunnel')}</p>
         </Link>
         <Link to="/record-payment" className="bg-white rounded-lg shadow p-4 sm:p-5 hover:bg-blue-50 transition border border-transparent hover:border-blue-200 group">
-          <p className="text-xs sm:text-sm text-gray-500 group-hover:text-blue-600">Payments</p>
-          <p className="text-sm font-semibold text-gray-700 group-hover:text-blue-700 mt-1">Record Payment</p>
+          <p className="text-xs sm:text-sm text-gray-500 group-hover:text-blue-600">{t('dashboard:dashboard.quickLinks.payments')}</p>
+          <p className="text-sm font-semibold text-gray-700 group-hover:text-blue-700 mt-1">{t('dashboard:dashboard.quickLinks.recordPayment')}</p>
         </Link>
         {canWriteCustomers && (
           <Link to="/commission" className="bg-white rounded-lg shadow p-4 sm:p-5 hover:bg-blue-50 transition border border-transparent hover:border-blue-200 group">
-            <p className="text-xs sm:text-sm text-gray-500 group-hover:text-blue-600">Customers</p>
-            <p className="text-sm font-semibold text-gray-700 group-hover:text-blue-700 mt-1">Commission</p>
+            <p className="text-xs sm:text-sm text-gray-500 group-hover:text-blue-600">{t('dashboard:dashboard.quickLinks.customersHeading')}</p>
+            <p className="text-sm font-semibold text-gray-700 group-hover:text-blue-700 mt-1">{t('dashboard:dashboard.quickLinks.commission')}</p>
           </Link>
         )}
       </div>
 
-      {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-        {/* Bar chart: customers per site with MWh/LSL callouts */}
         <div className="bg-white rounded-lg shadow p-4 sm:p-5">
-          <h2 className="text-base sm:text-lg font-semibold text-gray-700 mb-3 sm:mb-4">Customers per Site</h2>
+          <h2 className="text-base sm:text-lg font-semibold text-gray-700 mb-3 sm:mb-4">{t('dashboard:dashboard.charts.customersPerSite')}</h2>
           {barData.length > 0 ? (
             <ResponsiveContainer width="100%" height={Math.max(250, barData.length * 45)}>
               <BarChart data={barData} layout="vertical" margin={{ left: 10, right: 140 }}>
@@ -608,7 +600,7 @@ export default function DashboardPage() {
                 <YAxis dataKey="concession" type="category" width={40} tick={{ fontSize: 11 }} />
                 <Tooltip
                   formatter={(value: any, name: any) => {
-                    if (name === 'customer_count') return [value, 'Customers'];
+                    if (name === 'customer_count') return [value, t('dashboard:dashboard.tooltip.customers')];
                     return [value, name];
                   }}
                 />
@@ -622,13 +614,12 @@ export default function DashboardPage() {
               </BarChart>
             </ResponsiveContainer>
           ) : (
-            <p className="text-gray-400 text-center py-8">No site data available</p>
+            <p className="text-gray-400 text-center py-8">{t('dashboard:dashboard.siteCharts.noSiteData')}</p>
           )}
         </div>
 
-        {/* Pie chart: distribution */}
         <div className="bg-white rounded-lg shadow p-4 sm:p-5">
-          <h2 className="text-base sm:text-lg font-semibold text-gray-700 mb-3 sm:mb-4">Customer Distribution</h2>
+          <h2 className="text-base sm:text-lg font-semibold text-gray-700 mb-3 sm:mb-4">{t('dashboard:dashboard.charts.customerDistribution')}</h2>
           {filteredSites.length > 0 ? (
             <>
               <ResponsiveContainer width="100%" height={250}>
@@ -665,24 +656,23 @@ export default function DashboardPage() {
               </div>
             </>
           ) : (
-            <p className="text-gray-400 text-center py-8">No data</p>
+            <p className="text-gray-400 text-center py-8">{t('common:noData')}</p>
           )}
         </div>
       </div>
 
-      {/* Per-site stats table */}
       <div className="bg-white rounded-lg shadow p-4 sm:p-5">
-        <h2 className="text-base sm:text-lg font-semibold text-gray-700 mb-3">Site Performance</h2>
+        <h2 className="text-base sm:text-lg font-semibold text-gray-700 mb-3">{t('dashboard:dashboard.sitePerformance.title')}</h2>
         {filteredSites.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b">
                 <tr>
-                  <th className="px-3 py-2 text-left font-medium text-gray-600">Site</th>
-                  <th className="px-3 py-2 text-right font-medium text-gray-600">Customers</th>
-                  <th className="px-3 py-2 text-right font-medium text-gray-600">MWh</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600">{t('common:site')}</th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-600">{t('dashboard:dashboard.tooltip.customers')}</th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-600">{t('dashboard:dashboard.sitePerformance.mwh')}</th>
                   <th className="px-3 py-2 text-right font-medium text-gray-600">'000 {currency}</th>
-                  <th className="px-3 py-2 text-right font-medium text-gray-600">MWh/Customer</th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-600">{t('dashboard:dashboard.sitePerformance.mwhPerCustomer')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -701,7 +691,7 @@ export default function DashboardPage() {
               {filteredSites.length > 1 && (
                 <tfoot className="bg-gray-50 border-t font-medium">
                   <tr>
-                    <td className="px-3 py-2">Total</td>
+                    <td className="px-3 py-2">{t('common:total')}</td>
                     <td className="px-3 py-2 text-right">{totalCustomers.toLocaleString()}</td>
                     <td className="px-3 py-2 text-right">{filteredTotals.mwh.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
                     <td className="px-3 py-2 text-right">{filteredTotals.revenue_thousands.toLocaleString(undefined, { maximumFractionDigits: 1 })}</td>
@@ -714,18 +704,17 @@ export default function DashboardPage() {
             </table>
           </div>
         ) : (
-          <p className="text-gray-400 text-center py-4">No data</p>
+          <p className="text-gray-400 text-center py-4">{t('common:noData')}</p>
         )}
       </div>
 
-      {/* Quick access: tables */}
       <div className="bg-white rounded-lg shadow p-4 sm:p-5">
-        <h2 className="text-base sm:text-lg font-semibold text-gray-700 mb-3">Database Tables ({totalTables})</h2>
+        <h2 className="text-base sm:text-lg font-semibold text-gray-700 mb-3">{t('dashboard:dashboard.databaseTables', { count: totalTables })}</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
-          {tables.map((t) => (
-            <Link key={t.name} to={`/tables/${t.name}`} className="p-3 bg-gray-50 hover:bg-blue-50 active:bg-blue-100 rounded-lg border text-sm transition">
-              <div className="font-medium text-gray-800 truncate">{t.name}</div>
-              <div className="text-xs text-gray-400">{t.row_count.toLocaleString()} rows &middot; {t.column_count} cols</div>
+          {tables.map((tbl) => (
+            <Link key={tbl.name} to={`/tables/${tbl.name}`} className="p-3 bg-gray-50 hover:bg-blue-50 active:bg-blue-100 rounded-lg border text-sm transition">
+              <div className="font-medium text-gray-800 truncate">{tbl.name}</div>
+              <div className="text-xs text-gray-400">{tbl.row_count.toLocaleString()} {t('common:rows')} &middot; {tbl.column_count} {t('common:cols')}</div>
             </Link>
           ))}
         </div>

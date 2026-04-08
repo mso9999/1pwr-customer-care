@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { listRows, deleteRecord, listColdStorage, restoreRecord, downloadCustomersExport, type PaginatedResponse } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -21,6 +22,7 @@ export default function CustomersPage() {
   const [sites, setSites] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const { canWriteCustomers } = useAuth();
+  const { t } = useTranslation(['customers', 'common']);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -106,7 +108,7 @@ export default function CustomersPage() {
     setSelected(new Set());
     setBusy(false);
     fetchData();
-    if (failed) alert(`${failed} of ${ids.length} records failed to move to cold storage.`);
+    if (failed) alert(t('customers:alertMoveFailed', { count: failed, failed, total: ids.length }));
   };
 
   const handleRestore = async () => {
@@ -120,7 +122,7 @@ export default function CustomersPage() {
     setSelected(new Set());
     setBusy(false);
     fetchData();
-    if (failed) alert(`${failed} of ${ids.length} records failed to restore.`);
+    if (failed) alert(t('customers:alertRestoreFailed', { count: failed, failed, total: ids.length }));
   };
 
   // --- Confirmation modal ---
@@ -142,28 +144,20 @@ export default function CustomersPage() {
             )}
           </div>
           <h3 className="text-lg font-semibold text-gray-800">
-            {confirmAction === 'delete' ? 'Delete Customers' : 'Restore Customers'}
+            {confirmAction === 'delete' ? t('customers:modalDeleteTitle') : t('customers:modalRestoreTitle')}
           </h3>
         </div>
         <p className="text-sm text-gray-600 mb-6">
-          {confirmAction === 'delete' ? (
-            <>
-              Move <strong>{selected.size}</strong> customer record{selected.size !== 1 ? 's' : ''} to cold storage?
-              They can be restored within 30 days before permanent deletion.
-            </>
-          ) : (
-            <>
-              Restore <strong>{selected.size}</strong> customer record{selected.size !== 1 ? 's' : ''} from cold storage?
-              They will reappear in the active customer list.
-            </>
-          )}
+          {confirmAction === 'delete'
+            ? t('customers:moveToColdStorage', { count: selected.size })
+            : t('customers:restoreFromColdStorage', { count: selected.size })}
         </p>
         <div className="flex gap-3">
           <button
             onClick={() => setConfirmAction(null)}
             className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-200 transition"
           >
-            Cancel
+            {t('customers:cancel')}
           </button>
           <button
             onClick={confirmAction === 'delete' ? handleDelete : handleRestore}
@@ -173,7 +167,7 @@ export default function CustomersPage() {
                 : 'bg-green-600 hover:bg-green-700'
             }`}
           >
-            {confirmAction === 'delete' ? `Delete ${selected.size}` : `Restore ${selected.size}`}
+            {confirmAction === 'delete' ? t('customers:deleteCount', { count: selected.size }) : t('customers:restoreCount', { count: selected.size })}
           </button>
         </div>
       </div>
@@ -227,12 +221,12 @@ export default function CustomersPage() {
         <td className="px-4 py-2">
           {tab === 'cold' ? (
             <span className="px-2 py-0.5 bg-amber-100 text-amber-800 text-xs rounded-full font-medium">
-              {daysLeft(row['deleted_at'])}d left
+              {t('customers:daysLeft', { days: daysLeft(row['deleted_at']) })}
             </span>
           ) : terminated ? (
-            <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs rounded-full">Terminated</span>
+            <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs rounded-full">{t('customers:statusTerminated')}</span>
           ) : (
-            <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">Active</span>
+            <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">{t('customers:statusActive')}</span>
           )}
         </td>
       </tr>
@@ -260,12 +254,12 @@ export default function CustomersPage() {
         <div className="flex flex-col items-end gap-1 ml-3 shrink-0">
           {tab === 'cold' ? (
             <span className="px-2 py-0.5 bg-amber-100 text-amber-800 text-xs rounded-full font-medium">
-              {daysLeft(row['deleted_at'])}d left
+              {t('customers:daysLeft', { days: daysLeft(row['deleted_at']) })}
             </span>
           ) : terminated ? (
-            <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs rounded-full">Terminated</span>
+            <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs rounded-full">{t('customers:statusTerminated')}</span>
           ) : (
-            <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">Active</span>
+            <span className="px-2 py-0.5 bg-green-100 text-green-700 text-xs rounded-full">{t('customers:statusActive')}</span>
           )}
           <span className="text-xs text-gray-400">{site}</span>
         </div>
@@ -299,7 +293,7 @@ export default function CustomersPage() {
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-2">
-        <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Customers</h1>
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-800">{t('customers:title')}</h1>
         <div className="flex flex-wrap gap-2">
           {tab === 'active' && (
             <button
@@ -314,22 +308,22 @@ export default function CustomersPage() {
               className="px-4 py-2.5 bg-green-600 text-white rounded-xl text-sm font-medium hover:bg-green-700 active:bg-green-800 disabled:opacity-50 transition flex items-center gap-1.5"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-              {exporting ? 'Exporting...' : 'Download'}
+              {exporting ? t('common:exporting') : t('customers:download')}
             </button>
           )}
           {canWriteCustomers && tab === 'active' && (
             <>
               <Link to="/assign-meter" className="px-4 py-2.5 bg-emerald-600 text-white rounded-xl text-sm font-medium hover:bg-emerald-700 active:bg-emerald-800 transition flex items-center gap-1.5">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                Assign Meter
+                {t('customers:assignMeter')}
               </Link>
               <Link to="/commission" className="px-4 py-2.5 bg-amber-600 text-white rounded-xl text-sm font-medium hover:bg-amber-700 active:bg-amber-800 transition flex items-center gap-1.5">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-                Commission
+                {t('customers:commission')}
               </Link>
               <Link to="/customers/new" className="px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 active:bg-blue-800 transition flex items-center gap-1.5">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                Add Customer
+                {t('customers:addCustomer')}
               </Link>
             </>
           )}
@@ -347,7 +341,7 @@ export default function CustomersPage() {
                 : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
-            Active Customers
+            {t('customers:tabActive')}
           </button>
           <button
             onClick={() => switchTab('cold')}
@@ -360,7 +354,7 @@ export default function CustomersPage() {
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
             </svg>
-            Cold Storage
+            {t('customers:tabColdStorage')}
           </button>
         </div>
       )}
@@ -372,17 +366,17 @@ export default function CustomersPage() {
             <input
               value={searchInput}
               onChange={e => setSearchInput(e.target.value)}
-              placeholder="Search name, ID, plot..."
+              placeholder={t('customers:searchPlaceholder')}
               className="flex-1 sm:w-64 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
             />
-            <button type="submit" className="px-3 py-2 bg-gray-100 border rounded-lg text-sm hover:bg-gray-200 whitespace-nowrap">Search</button>
+            <button type="submit" className="px-3 py-2 bg-gray-100 border rounded-lg text-sm hover:bg-gray-200 whitespace-nowrap">{t('customers:search')}</button>
           </form>
           <select
             value={filterSite}
             onChange={e => { setFilterSite(e.target.value); setPage(1); }}
             className="w-full sm:w-auto px-3 py-2 border rounded-lg text-sm bg-white"
           >
-            <option value="">All Sites</option>
+            <option value="">{t('customers:allSites')}</option>
             {sites.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
@@ -395,8 +389,7 @@ export default function CustomersPage() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
           <p className="text-sm text-amber-800">
-            These records were deleted and will be <strong>permanently purged after 30 days</strong>.
-            Select records and click <strong>Restore</strong> to move them back to the active list.
+            {t('customers:bannerColdStorage')}
           </p>
         </div>
       )}
@@ -405,14 +398,14 @@ export default function CustomersPage() {
       {canWriteCustomers && selected.size > 0 && (
         <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
           <span className="text-sm font-medium text-blue-800">
-            {selected.size} record{selected.size !== 1 ? 's' : ''} selected
+            {t('customers:recordsSelected', { count: selected.size })}
           </span>
           <div className="flex gap-2">
             <button
               onClick={() => setSelected(new Set())}
               className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition"
             >
-              Clear
+              {t('customers:clear')}
             </button>
             {tab === 'active' ? (
               <button
@@ -423,7 +416,7 @@ export default function CustomersPage() {
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                 </svg>
-                Delete
+                {t('customers:delete')}
               </button>
             ) : (
               <button
@@ -434,7 +427,7 @@ export default function CustomersPage() {
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6" />
                 </svg>
-                Restore
+                {t('customers:restore')}
               </button>
             )}
           </div>
@@ -445,7 +438,7 @@ export default function CustomersPage() {
 
       {/* Content */}
       {loading || busy ? (
-        <div className="text-center py-8 text-gray-400">{busy ? (tab === 'cold' ? 'Restoring...' : 'Deleting...') : 'Loading...'}</div>
+        <div className="text-center py-8 text-gray-400">{busy ? (tab === 'cold' ? t('common:restoring') : t('common:deleting')) : t('common:loading')}</div>
       ) : !data || data.rows.length === 0 ? (
         <div className="text-center py-12 text-gray-400">
           {tab === 'cold' ? (
@@ -453,9 +446,9 @@ export default function CustomersPage() {
               <svg className="w-12 h-12 mx-auto text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
               </svg>
-              <p>Cold storage is empty</p>
+              <p>{t('customers:emptyColdStorage')}</p>
             </div>
-          ) : 'No customers found'}
+          ) : t('customers:emptyNoCustomers')}
         </div>
       ) : (
         <>
@@ -474,13 +467,13 @@ export default function CustomersPage() {
                       />
                     </th>
                   )}
-                  <th className="px-4 py-3 text-left font-medium text-gray-600">Account</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-600">Name</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-600">Phone</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-600">Site</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-600">District</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">{t('customers:colAccount')}</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">{t('customers:colName')}</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">{t('customers:colPhone')}</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">{t('customers:colSite')}</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">{t('customers:colDistrict')}</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">
-                    {tab === 'cold' ? 'Purge In' : 'Status'}
+                    {tab === 'cold' ? t('customers:colPurgeIn') : t('customers:colStatus')}
                   </th>
                 </tr>
               </thead>
@@ -497,7 +490,7 @@ export default function CustomersPage() {
                 onClick={toggleAll}
                 className="text-sm text-blue-600 font-medium px-1 py-1"
               >
-                {allSelected ? 'Deselect All' : 'Select All'}
+                {allSelected ? t('customers:deselectAll') : t('customers:selectAll')}
               </button>
             )}
             {data.rows.map(renderMobileCard)}
@@ -505,18 +498,18 @@ export default function CustomersPage() {
 
           {/* Pagination */}
           <div className="flex items-center justify-between text-sm text-gray-500">
-            <span className="text-xs sm:text-sm">Page {data.page}/{data.pages} ({data.total.toLocaleString()})</span>
+            <span className="text-xs sm:text-sm">{t('common:pagination.page', { page: data.page, pages: data.pages, total: data.total.toLocaleString() })}</span>
             <div className="flex gap-2">
               <button
                 disabled={page <= 1}
                 onClick={() => setPage(p => p - 1)}
                 className="px-3 py-1.5 border rounded disabled:opacity-30 hover:bg-gray-100 text-sm"
-              >Prev</button>
+              >{t('common:pagination.prev')}</button>
               <button
                 disabled={page >= data.pages}
                 onClick={() => setPage(p => p + 1)}
                 className="px-3 py-1.5 border rounded disabled:opacity-30 hover:bg-gray-100 text-sm"
-              >Next</button>
+              >{t('common:pagination.next')}</button>
             </div>
           </div>
         </>

@@ -1,0 +1,67 @@
+{
+  "title": "Commission Customer",
+  "subtitle": "Generate contract and connect service",
+  "steps": {
+    "identify": "Identify",
+    "identifyDesc": "Identify Customer",
+    "details": "Details",
+    "detailsDesc": "Commission Details",
+    "sign": "Sign",
+    "signDesc": "Capture Signature",
+    "review": "Review",
+    "reviewDesc": "Review & Generate"
+  },
+  "fields": {
+    "customerId": "Customer ID",
+    "customerIdPlaceholder": "e.g. 0045MAK or 5846",
+    "lookingUp": "Looking up customer…",
+    "name": "Name",
+    "site": "Site",
+    "meter": "Meter",
+    "account": "Account",
+    "na": "N/A",
+    "connected": "Connected",
+    "contractsOnFile": "Contracts on file",
+    "found": "{{count}} found",
+    "connectionDate": "Connection Date",
+    "customerType": "Customer Type",
+    "selectType": "Select type…",
+    "nationalId": "National ID",
+    "phoneNumber": "Phone Number",
+    "servicePhase": "Service Phase",
+    "ampacity": "Ampacity",
+    "accountNumber": "Account Number",
+    "gpsCoordinates": "GPS Coordinates",
+    "ugpConnection": "UGP Connection",
+    "remove": "Remove",
+    "linkUgp": "Link uGridPlan Connection"
+  },
+  "signature": {
+    "captured": "Signature captured",
+    "replace": "Replace Signature",
+    "alt": "Captured signature"
+  },
+  "success": {
+    "title": "Customer Commissioned",
+    "viewContractEn": "View English Contract",
+    "viewContractSo": "View Sesotho Contract",
+    "ugpSync": "uGridPlan Sync",
+    "updating": "Updating…",
+    "markEnergized": "Mark Upstream as Energized",
+    "goToDetail": "Go to Customer Detail"
+  },
+  "back": "Back",
+  "next": "Next",
+  "generating": "Generating…",
+  "generateContract": "Generate Contract & SMS",
+  "validation": {
+    "customerIdRequired": "Customer ID is required",
+    "connectionDateRequired": "Connection date is required",
+    "customerTypeRequired": "Customer type is required",
+    "nationalIdRequired": "National ID is required",
+    "phoneRequired": "Phone number is required",
+    "accountRequired": "Account number is required",
+    "signatureRequired": "Signature is required"
+  },
+  "commissionFailed": "Commissioning failed"
+}

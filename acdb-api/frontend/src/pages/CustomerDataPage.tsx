@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Cell, Legend,
@@ -60,6 +61,7 @@ interface TxnFormProps {
 }
 
 function TransactionFormModal({ initial, accountNumber, meterId, defaultRate, onSave, onCancel }: TxnFormProps) {
+  const { t } = useTranslation(['customerData', 'common']);
   const isEdit = !!initial;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -74,7 +76,7 @@ function TransactionFormModal({ initial, accountNumber, meterId, defaultRate, on
   const [balance, setBalance] = useState(initial?.balance?.toString() || '');
 
   const handleSubmit = async () => {
-    if (!amount.trim() && !kwh.trim()) { setError('Amount or kWh is required'); return; }
+    if (!amount.trim() && !kwh.trim()) { setError(t('customerData:amountOrKwhRequired')); return; }
     setSaving(true);
     setError('');
 
@@ -97,7 +99,7 @@ function TransactionFormModal({ initial, accountNumber, meterId, defaultRate, on
       }
       onSave();
     } catch (e: any) {
-      setError(e.message || 'Save failed');
+      setError(e.message || t('customerData:saveFailed'));
     } finally {
       setSaving(false);
     }
@@ -106,10 +108,10 @@ function TransactionFormModal({ initial, accountNumber, meterId, defaultRate, on
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onCancel}>
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 sm:p-6 space-y-4" onClick={e => e.stopPropagation()}>
-        <h3 className="text-lg font-bold text-gray-800">{isEdit ? 'Edit Transaction' : 'Add Transaction'}</h3>
+        <h3 className="text-lg font-bold text-gray-800">{isEdit ? t('customerData:editTransaction') : t('customerData:addTransaction')}</h3>
 
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Date / Time</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">{t('customerData:dateTime')}</label>
           <input type="datetime-local" value={txnDate} onChange={e => setTxnDate(e.target.value)}
             className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none" />
         </div>
@@ -119,24 +121,24 @@ function TransactionFormModal({ initial, accountNumber, meterId, defaultRate, on
             isPayment ? 'border-green-400 bg-green-50' : 'border-gray-200 hover:border-gray-300'
           }`}>
             <input type="radio" checked={isPayment} onChange={() => setIsPayment(true)} className="sr-only" />
-            <span className={`text-sm font-medium ${isPayment ? 'text-green-700' : 'text-gray-500'}`}>Payment</span>
+            <span className={`text-sm font-medium ${isPayment ? 'text-green-700' : 'text-gray-500'}`}>{t('customerData:payment')}</span>
           </label>
           <label className={`flex-1 flex items-center gap-2 px-4 py-3 border-2 rounded-xl cursor-pointer transition ${
             !isPayment ? 'border-amber-400 bg-amber-50' : 'border-gray-200 hover:border-gray-300'
           }`}>
             <input type="radio" checked={!isPayment} onChange={() => setIsPayment(false)} className="sr-only" />
-            <span className={`text-sm font-medium ${!isPayment ? 'text-amber-700' : 'text-gray-500'}`}>Consumption</span>
+            <span className={`text-sm font-medium ${!isPayment ? 'text-amber-700' : 'text-gray-500'}`}>{t('customerData:consumption')}</span>
           </label>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Amount (LSL)</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">{t('customerData:amountLSL')}</label>
             <input type="number" step="0.01" value={amount} onChange={e => setAmount(e.target.value)}
               className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none" />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">kWh</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">{t('customerData:kwh')}</label>
             <input type="number" step="0.01" value={kwh} onChange={e => setKwh(e.target.value)}
               className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none" />
           </div>
@@ -144,13 +146,13 @@ function TransactionFormModal({ initial, accountNumber, meterId, defaultRate, on
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Rate (LSL/kWh)</label>
+            <label className="block text-xs font-medium text-gray-500 mb-1">{t('customerData:rateLSL')}</label>
             <input type="number" step="0.01" value={rate} onChange={e => setRate(e.target.value)}
               className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none" />
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Balance (optional)</label>
-            <input type="number" step="0.1" value={balance} onChange={e => setBalance(e.target.value)} placeholder="Auto"
+            <label className="block text-xs font-medium text-gray-500 mb-1">{t('customerData:balanceOptional')}</label>
+            <input type="number" step="0.1" value={balance} onChange={e => setBalance(e.target.value)} placeholder={t('customerData:auto')}
               className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none" />
           </div>
         </div>
@@ -160,11 +162,11 @@ function TransactionFormModal({ initial, accountNumber, meterId, defaultRate, on
         <div className="flex gap-3 pt-2">
           <button onClick={onCancel}
             className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-xl font-medium text-sm hover:bg-gray-200 transition">
-            Cancel
+            {t('common:cancel')}
           </button>
           <button onClick={handleSubmit} disabled={saving}
             className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 disabled:opacity-50 transition">
-            {saving ? 'Saving...' : isEdit ? 'Update' : 'Create'}
+            {saving ? t('common:saving') : isEdit ? t('common:update') : t('common:create')}
           </button>
         </div>
       </div>
@@ -177,6 +179,7 @@ function TransactionFormModal({ initial, accountNumber, meterId, defaultRate, on
 // ---------------------------------------------------------------------------
 
 export default function CustomerDataPage() {
+  const { t } = useTranslation(['customerData', 'common']);
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const { canWrite } = useAuth();
@@ -228,23 +231,23 @@ export default function CustomerDataPage() {
   const handleTxnSaved = useCallback(() => {
     setShowForm(false);
     setEditingTxn(null);
-    setCrudSuccess(editingTxn ? 'Transaction updated' : 'Transaction created');
+    setCrudSuccess(editingTxn ? t('customerData:transactionUpdated') : t('customerData:transactionCreated'));
     setRefreshKey(k => k + 1);
     setTimeout(() => setCrudSuccess(''), 4000);
-  }, [editingTxn]);
+  }, [editingTxn, t]);
 
   const handleDelete = useCallback(async (txn: Transaction) => {
     setCrudError('');
     try {
       await deleteRecord(TXN_TABLE, String(txn.id));
       setDeleteConfirm(null);
-      setCrudSuccess('Transaction deleted');
+      setCrudSuccess(t('customerData:transactionDeleted'));
       setRefreshKey(k => k + 1);
       setTimeout(() => setCrudSuccess(''), 4000);
     } catch (e: any) {
       setCrudError(e.message || 'Delete failed');
     }
-  }, []);
+  }, [t]);
 
   // Trigger lookup
   const doLookup = () => {
@@ -302,8 +305,8 @@ export default function CustomerDataPage() {
       {/* Header + search */}
       <div className="flex flex-col sm:flex-row sm:items-end gap-4">
         <div className="flex-1">
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Customer Data Lookup</h1>
-          <p className="text-sm text-gray-400 mt-0.5">View transaction history, consumption, and balance for any customer account</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-800">{t('customerData:title')}</h1>
+          <p className="text-sm text-gray-400 mt-0.5">{t('customerData:subtitle')}</p>
         </div>
         <div className="flex gap-2">
           <input
@@ -311,7 +314,7 @@ export default function CustomerDataPage() {
             value={inputVal}
             onChange={e => setInputVal(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && doLookup()}
-            placeholder="Account # or Customer ID"
+            placeholder={t('customerData:placeholder')}
             className="px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none w-56"
           />
           <button
@@ -319,7 +322,7 @@ export default function CustomerDataPage() {
             disabled={loading}
             className="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 active:bg-blue-800 disabled:opacity-50 transition"
           >
-            {loading ? 'Loading...' : 'Lookup'}
+            {loading ? t('common:loading') : t('customerData:lookup')}
           </button>
         </div>
       </div>
@@ -333,15 +336,15 @@ export default function CustomerDataPage() {
           <svg className="w-16 h-16 mx-auto mb-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
-          <p className="text-lg font-medium">Enter an account number or customer ID to get started</p>
-          <p className="text-sm mt-1">e.g. 0045MAK, 0003MAS, 0005KET &mdash; or a numeric customer ID like 5974</p>
+          <p className="text-lg font-medium">{t('customerData:enterAccount')}</p>
+          <p className="text-sm mt-1">{t('customerData:exampleAccounts')}</p>
         </div>
       )}
 
       {loading && (
         <div className="text-center py-16">
           <span className="animate-spin inline-block w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full" />
-          <p className="text-gray-400 mt-3">Loading customer data...</p>
+          <p className="text-gray-400 mt-3">{t('customerData:loadingData')}</p>
         </div>
       )}
 
@@ -363,7 +366,7 @@ export default function CustomerDataPage() {
                       >
                         {account}
                       </button>
-                      {data.meter?.community ? <> &middot; Site: {String(data.meter.community)}</> : null}
+                      {data.meter?.community ? <> &middot; {t('common:site')}: {String(data.meter.community)}</> : null}
                     </p>
                   </>
                 ) : (
@@ -377,7 +380,7 @@ export default function CustomerDataPage() {
                       </button>
                     </h2>
                     <p className="text-sm text-gray-400 truncate mt-0.5">
-                      {data.meter?.community ? <>Site: {String(data.meter.community)}</> : null}
+                      {data.meter?.community ? <>{t('common:site')}: {String(data.meter.community)}</> : null}
                     </p>
                   </>
                 )}
@@ -385,8 +388,8 @@ export default function CustomerDataPage() {
             </div>
             {data.meter && (
               <div className="text-sm text-gray-500 shrink-0 flex flex-col items-end gap-0.5">
-                <span>Meter: <span className="font-mono text-gray-700">{data.meter.meterid}</span></span>
-                {data.meter.customer_type && <span>Type: <span className="font-semibold">{data.meter.customer_type}</span></span>}
+                <span>{t('customerData:meter')}: <span className="font-mono text-gray-700">{data.meter.meterid}</span></span>
+                {data.meter.customer_type && <span>{t('customerData:type')}: <span className="font-semibold">{data.meter.customer_type}</span></span>}
                 {data.meter.village && <span>{data.meter.village}</span>}
               </div>
             )}
@@ -395,7 +398,7 @@ export default function CustomerDataPage() {
           {/* Tariff info banner */}
           {data.tariff && (
             <div className="flex items-center gap-2 text-xs bg-gray-50 border rounded-lg px-3 py-2">
-              <span className="text-gray-500">Tariff:</span>
+              <span className="text-gray-500">{t('customerData:tariff')}:</span>
               <span className="font-bold text-gray-800">{data.tariff.rate_lsl} {data.dashboard?.currency_code || 'LSL'}/kWh</span>
               <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
                 data.tariff.source === 'customer' ? 'bg-purple-100 text-purple-700' :
@@ -419,7 +422,7 @@ export default function CustomerDataPage() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                   <span className="text-sm font-medium text-gray-700">
-                    Meter History — {meterHistory.length} meter{meterHistory.length !== 1 ? 's' : ''} on this account
+                    {meterHistory.length === 1 ? t('customerData:meterHistory', { count: meterHistory.length }) : t('customerData:meterHistoryPlural', { count: meterHistory.length })}
                   </span>
                 </div>
                 <svg className={`w-4 h-4 text-gray-400 transition-transform ${showMeterHistory ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -429,14 +432,14 @@ export default function CustomerDataPage() {
               {showMeterHistory && (
                 <div className="px-4 pb-4">
                   <p className="text-xs text-gray-400 mb-3">
-                    Consumption data from all meters is aggregated continuously under this account.
+                    {t('customerData:aggregationNote')}
                   </p>
                   <div className="relative pl-6">
                     <div className="absolute left-2.5 top-1 bottom-1 w-px bg-gray-200" />
                     {meterHistory.map((a, i) => {
                       const isActive = !a.removed_at;
                       const fromDate = a.assigned_at ? new Date(a.assigned_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '?';
-                      const toDate = a.removed_at ? new Date(a.removed_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : 'present';
+                      const toDate = a.removed_at ? new Date(a.removed_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : t('customerData:present');
                       return (
                         <div key={a.id || i} className="relative mb-3 last:mb-0">
                           <div className={`absolute -left-3.5 top-1.5 w-3 h-3 rounded-full border-2 ${
@@ -455,13 +458,13 @@ export default function CustomerDataPage() {
                                 </span>
                               )}
                               {isActive && (
-                                <span className="px-2 py-0.5 text-[10px] rounded-full font-medium bg-green-200 text-green-700">current</span>
+                                <span className="px-2 py-0.5 text-[10px] rounded-full font-medium bg-green-200 text-green-700">{t('customerData:current')}</span>
                               )}
                             </div>
                             <p className="text-xs text-gray-500 mt-1">{fromDate} — {toDate}</p>
                             {a.platform && <p className="text-xs text-gray-400">{a.platform}</p>}
                             {a.replaced_by && (
-                              <p className="text-xs text-gray-400 mt-0.5">Replaced by: <span className="font-mono">{a.replaced_by}</span></p>
+                              <p className="text-xs text-gray-400 mt-0.5">{t('customerData:replacedBy')}: <span className="font-mono">{a.replaced_by}</span></p>
                             )}
                           </div>
                         </div>
@@ -476,19 +479,19 @@ export default function CustomerDataPage() {
           {/* Stats row */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <Stat
-              label="Balance"
+              label={t('customerData:balance')}
               value={`${d.balance_kwh.toFixed(1)} kWh`}
               sub={d.balance_currency != null ? `${d.currency_code || 'LSL'} ${d.balance_currency.toFixed(2)}` : undefined}
               color="green"
             />
-            <Stat label="Avg Consumption" value={`${d.avg_kwh_per_day.toFixed(1)} kWh/day`} color="blue" />
+            <Stat label={t('customerData:avgConsumption')} value={`${d.avg_kwh_per_day.toFixed(1)} kWh/day`} color="blue" />
             <Stat
-              label="Est. Recharge"
+              label={t('customerData:estRecharge')}
               value={fmtRecharge(d.estimated_recharge_seconds)}
               color={d.estimated_recharge_seconds < 86400 * 3 ? 'red' : 'amber'}
             />
             <Stat
-              label="Last Payment"
+              label={t('customerData:lastPayment')}
               value={d.last_payment ? `${d.currency_code || 'LSL'} ${d.last_payment.amount.toFixed(0)}` : '--'}
               sub={d.last_payment?.date || undefined}
               color="blue"
@@ -497,21 +500,21 @@ export default function CustomerDataPage() {
 
           {/* Totals */}
           <div className="grid grid-cols-2 gap-3">
-            <Stat label="Total Consumption (all time)" value={`${d.total_kwh_all_time.toFixed(0)} kWh`} color="blue" />
-            <Stat label="Total Purchases (all time)" value={`${d.currency_code || 'LSL'} ${d.total_lsl_all_time.toFixed(0)}`} color="green" />
+            <Stat label={t('customerData:totalConsumption')} value={`${d.total_kwh_all_time.toFixed(0)} kWh`} color="blue" />
+            <Stat label={t('customerData:totalPurchases')} value={`${d.currency_code || 'LSL'} ${d.total_lsl_all_time.toFixed(0)}`} color="green" />
           </div>
 
           {/* Financing section */}
           {financing && financing.active_agreements > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-bold text-amber-800">Active Financing</h3>
+                <h3 className="text-sm font-bold text-amber-800">{t('customerData:activeFinancing')}</h3>
                 <span className="text-xs bg-amber-200 text-amber-800 px-2 py-0.5 rounded-full font-medium">
-                  {financing.active_agreements} agreement{financing.active_agreements > 1 ? 's' : ''}
+                  {t('customerData:agreements', { count: financing.active_agreements })}
                 </span>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-3">
-                <Stat label="Total Outstanding" value={`M ${financing.total_outstanding.toFixed(2)}`} color="red" />
+                <Stat label={t('customerData:totalOutstanding')} value={`M ${financing.total_outstanding.toFixed(2)}`} color="red" />
               </div>
               <div className="space-y-2">
                 {financing.agreements.filter(a => a.status === 'active').map(a => (
@@ -527,8 +530,8 @@ export default function CustomerDataPage() {
                       />
                     </div>
                     <div className="flex justify-between text-xs text-gray-500 mt-1">
-                      <span>Paid: M {(Number(a.total_owed) - Number(a.outstanding_balance)).toFixed(2)}</span>
-                      <span>Total: M {Number(a.total_owed).toFixed(2)}</span>
+                      <span>{t('customerData:paid')}: M {(Number(a.total_owed) - Number(a.outstanding_balance)).toFixed(2)}</span>
+                      <span>{t('common:total')}: M {Number(a.total_owed).toFixed(2)}</span>
                     </div>
                   </div>
                 ))}
@@ -539,11 +542,11 @@ export default function CustomerDataPage() {
           {/* Tabs */}
           <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
             {([
-              ['transactions', `Transactions (${data.transaction_count})`],
-              ['24h', 'Last 24 Hours'],
-              ['7d', 'Last 7 Days'],
-              ['30d', 'Last 30 Days'],
-              ['12m', 'Last 12 Months'],
+              ['transactions', t('customerData:transactionsTab', { count: data.transaction_count })],
+              ['24h', t('customerData:last24h')],
+              ['7d', t('customerData:last7d')],
+              ['30d', t('customerData:last30d')],
+              ['12m', t('customerData:last12m')],
             ] as const).map(([key, label]) => (
               <button
                 key={key}
@@ -563,7 +566,7 @@ export default function CustomerDataPage() {
               <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
-              {crudSuccess} (logged in mutation history)
+              {crudSuccess} {t('customerData:mutationLogged')}
             </div>
           )}
           {crudError && (
@@ -576,7 +579,7 @@ export default function CustomerDataPage() {
               {/* Add transaction button */}
               {canEditTxns && (
                 <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between">
-                  <span className="text-xs text-gray-500 font-medium uppercase tracking-wide">Transaction History</span>
+                  <span className="text-xs text-gray-500 font-medium uppercase tracking-wide">{t('customerData:transactionHistory')}</span>
                   <button
                     onClick={() => { setEditingTxn(null); setShowForm(true); setCrudError(''); }}
                     className="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 active:bg-blue-800 transition flex items-center gap-1.5"
@@ -584,7 +587,7 @@ export default function CustomerDataPage() {
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                     </svg>
-                    Add Transaction
+                    {t('customerData:addTransaction')}
                   </button>
                 </div>
               )}
@@ -593,46 +596,46 @@ export default function CustomerDataPage() {
                   <thead>
                     <tr className="bg-gray-50 text-left">
                       <th className="px-4 py-3 font-medium text-gray-500 cursor-pointer select-none" onClick={() => toggleSort('date')}>
-                        Date {sortIcon('date')}
+                        {t('customerData:date')} {sortIcon('date')}
                       </th>
-                      <th className="px-4 py-3 font-medium text-gray-500">Type</th>
+                      <th className="px-4 py-3 font-medium text-gray-500">{t('customerData:type')}</th>
                       <th className="px-4 py-3 font-medium text-gray-500 text-right cursor-pointer select-none" onClick={() => toggleSort('amount_lsl')}>
-                        Amount (LSL) {sortIcon('amount_lsl')}
+                        {t('customerData:amountLSL')} {sortIcon('amount_lsl')}
                       </th>
                       <th className="px-4 py-3 font-medium text-gray-500 text-right cursor-pointer select-none" onClick={() => toggleSort('kwh')}>
-                        kWh {sortIcon('kwh')}
+                        {t('customerData:kwh')} {sortIcon('kwh')}
                       </th>
-                      <th className="px-4 py-3 font-medium text-gray-500 text-right">Rate</th>
+                      <th className="px-4 py-3 font-medium text-gray-500 text-right">{t('customerData:rate')}</th>
                       <th className="px-4 py-3 font-medium text-gray-500 text-right cursor-pointer select-none" onClick={() => toggleSort('balance')}>
-                        Balance {sortIcon('balance')}
+                        {t('customerData:balanceCol')} {sortIcon('balance')}
                       </th>
-                      <th className="px-4 py-3 font-medium text-gray-500">Meter</th>
-                      {canEditTxns && <th className="px-4 py-3 font-medium text-gray-500 text-right w-24">Actions</th>}
+                      <th className="px-4 py-3 font-medium text-gray-500">{t('customerData:meter')}</th>
+                      {canEditTxns && <th className="px-4 py-3 font-medium text-gray-500 text-right w-24">{t('customerData:actions')}</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {paged.map((t: Transaction) => (
-                      <tr key={t.id} className="hover:bg-gray-50 group">
-                        <td className="px-4 py-2.5 text-gray-700 whitespace-nowrap">{t.date?.slice(0, 16) || '--'}</td>
+                    {paged.map((txn: Transaction) => (
+                      <tr key={txn.id} className="hover:bg-gray-50 group">
+                        <td className="px-4 py-2.5 text-gray-700 whitespace-nowrap">{txn.date?.slice(0, 16) || '--'}</td>
                         <td className="px-4 py-2.5">
                           <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
-                            t.is_payment ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
+                            txn.is_payment ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'
                           }`}>
-                            {t.is_payment ? 'Payment' : 'Consumption'}
+                            {txn.is_payment ? t('customerData:payment') : t('customerData:consumption')}
                           </span>
                         </td>
-                        <td className={`px-4 py-2.5 text-right font-mono ${t.is_payment ? 'text-green-600' : 'text-gray-600'}`}>
-                          {t.is_payment ? '+' : ''}{t.amount_lsl.toFixed(2)}
+                        <td className={`px-4 py-2.5 text-right font-mono ${txn.is_payment ? 'text-green-600' : 'text-gray-600'}`}>
+                          {txn.is_payment ? '+' : ''}{txn.amount_lsl.toFixed(2)}
                         </td>
-                        <td className="px-4 py-2.5 text-right font-mono text-gray-700">{t.kwh.toFixed(2)}</td>
-                        <td className="px-4 py-2.5 text-right font-mono text-gray-400">{t.rate.toFixed(2)}</td>
-                        <td className="px-4 py-2.5 text-right font-mono text-gray-700">{t.balance != null ? t.balance.toFixed(1) : '--'}</td>
-                        <td className="px-4 py-2.5 text-gray-400 text-xs font-mono truncate max-w-[120px]">{t.meter || '--'}</td>
+                        <td className="px-4 py-2.5 text-right font-mono text-gray-700">{txn.kwh.toFixed(2)}</td>
+                        <td className="px-4 py-2.5 text-right font-mono text-gray-400">{txn.rate.toFixed(2)}</td>
+                        <td className="px-4 py-2.5 text-right font-mono text-gray-700">{txn.balance != null ? txn.balance.toFixed(1) : '--'}</td>
+                        <td className="px-4 py-2.5 text-gray-400 text-xs font-mono truncate max-w-[120px]">{txn.meter || '--'}</td>
                         {canEditTxns && (
                           <td className="px-4 py-2.5 text-right">
                             <div className="opacity-0 group-hover:opacity-100 transition flex items-center justify-end gap-1">
                               <button
-                                onClick={() => { setEditingTxn(t); setShowForm(true); setCrudError(''); }}
+                                onClick={() => { setEditingTxn(txn); setShowForm(true); setCrudError(''); }}
                                 className="p-1.5 rounded-lg hover:bg-blue-50 text-blue-500 hover:text-blue-700 transition"
                                 title="Edit"
                               >
@@ -641,7 +644,7 @@ export default function CustomerDataPage() {
                                 </svg>
                               </button>
                               <button
-                                onClick={() => { setDeleteConfirm(t); setCrudError(''); }}
+                                onClick={() => { setDeleteConfirm(txn); setCrudError(''); }}
                                 className="p-1.5 rounded-lg hover:bg-red-50 text-red-400 hover:text-red-600 transition"
                                 title="Delete"
                               >
@@ -655,7 +658,7 @@ export default function CustomerDataPage() {
                       </tr>
                     ))}
                     {paged.length === 0 && (
-                      <tr><td colSpan={canEditTxns ? 8 : 7} className="px-4 py-8 text-center text-gray-400">No transactions found</td></tr>
+                      <tr><td colSpan={canEditTxns ? 8 : 7} className="px-4 py-8 text-center text-gray-400">{t('customerData:noTransactions')}</td></tr>
                     )}
                   </tbody>
                 </table>
@@ -664,20 +667,20 @@ export default function CustomerDataPage() {
               {totalPages > 1 && (
                 <div className="flex items-center justify-between px-4 py-3 border-t bg-gray-50">
                   <p className="text-xs text-gray-500">
-                    Showing {(page - 1) * perPage + 1}-{Math.min(page * perPage, sorted.length)} of {sorted.length}
+                    {t('customerData:showing')} {(page - 1) * perPage + 1}-{Math.min(page * perPage, sorted.length)} of {sorted.length}
                   </p>
                   <div className="flex gap-1">
                     <button
                       onClick={() => setPage(p => Math.max(1, p - 1))}
                       disabled={page === 1}
                       className="px-3 py-1.5 bg-white border rounded-lg text-xs disabled:opacity-40 hover:bg-gray-100"
-                    >Prev</button>
+                    >{t('common:prev')}</button>
                     <span className="px-3 py-1.5 text-xs text-gray-600">{page} / {totalPages}</span>
                     <button
                       onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                       disabled={page === totalPages}
                       className="px-3 py-1.5 bg-white border rounded-lg text-xs disabled:opacity-40 hover:bg-gray-100"
-                    >Next</button>
+                    >{t('common:next')}</button>
                   </div>
                 </div>
               )}
@@ -694,10 +697,10 @@ export default function CustomerDataPage() {
             return (
               <div className="bg-white rounded-xl border p-5">
                 <h3 className="text-sm font-semibold text-gray-700 mb-1">
-                  Hourly Consumption — Last 24 Hours (kWh)
+                  {t('customerData:hourlyConsumption24')}
                 </h3>
                 {isMulti && (
-                  <p className="text-xs text-gray-400 mb-3">Both meters measure the same load. Close agreement confirms accuracy.</p>
+                  <p className="text-xs text-gray-400 mb-3">{t('customerData:bothMetersNote')}</p>
                 )}
                 <ResponsiveContainer width="100%" height={300}>
                   <BarChart data={pts}>
@@ -730,13 +733,13 @@ export default function CustomerDataPage() {
 
           {tab === '7d' && (
             <div className="bg-white rounded-xl border p-5">
-              <h3 className="text-sm font-semibold text-gray-700 mb-4">Daily Consumption - Last 7 Days (kWh)</h3>
+              <h3 className="text-sm font-semibold text-gray-700 mb-4">{t('customerData:dailyConsumption7')}</h3>
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={d.daily_7d}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                   <XAxis dataKey="date" tick={{ fontSize: 11 }} tickFormatter={v => v.slice(5)} />
                   <YAxis tick={{ fontSize: 11 }} />
-                  <Tooltip formatter={(v) => [`${Number(v ?? 0).toFixed(2)} kWh`, 'Consumption']} />
+                  <Tooltip formatter={(v) => [`${Number(v ?? 0).toFixed(2)} kWh`, t('customerData:consumption')]} />
                   <Bar dataKey="kwh" radius={[4, 4, 0, 0]}>
                     {d.daily_7d.map((_, i) => (
                       <Cell key={i} fill={i === d.daily_7d.length - 1 ? '#3b82f6' : '#93c5fd'} />
@@ -749,13 +752,13 @@ export default function CustomerDataPage() {
 
           {tab === '30d' && (
             <div className="bg-white rounded-xl border p-5">
-              <h3 className="text-sm font-semibold text-gray-700 mb-4">Daily Consumption - Last 30 Days (kWh)</h3>
+              <h3 className="text-sm font-semibold text-gray-700 mb-4">{t('customerData:dailyConsumption30')}</h3>
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={d.daily_30d}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                   <XAxis dataKey="date" tick={{ fontSize: 10 }} tickFormatter={v => v.slice(5)} interval={4} />
                   <YAxis tick={{ fontSize: 11 }} />
-                  <Tooltip formatter={(v) => [`${Number(v ?? 0).toFixed(2)} kWh`, 'Consumption']} />
+                  <Tooltip formatter={(v) => [`${Number(v ?? 0).toFixed(2)} kWh`, t('customerData:consumption')]} />
                   <Line type="monotone" dataKey="kwh" stroke="#3b82f6" strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
@@ -764,13 +767,13 @@ export default function CustomerDataPage() {
 
           {tab === '12m' && (
             <div className="bg-white rounded-xl border p-5">
-              <h3 className="text-sm font-semibold text-gray-700 mb-4">Monthly Consumption - Last 12 Months (kWh)</h3>
+              <h3 className="text-sm font-semibold text-gray-700 mb-4">{t('customerData:monthlyConsumption12')}</h3>
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={d.monthly_12m}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                   <XAxis dataKey="month" tick={{ fontSize: 11 }} />
                   <YAxis tick={{ fontSize: 11 }} />
-                  <Tooltip formatter={(v) => [`${Number(v ?? 0).toFixed(1)} kWh`, 'Consumption']} />
+                  <Tooltip formatter={(v) => [`${Number(v ?? 0).toFixed(1)} kWh`, t('customerData:consumption')]} />
                   <Bar dataKey="kwh" fill="#3b82f6" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -795,21 +798,18 @@ export default function CustomerDataPage() {
       {deleteConfirm && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setDeleteConfirm(null)}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-4" onClick={e => e.stopPropagation()}>
-            <h3 className="text-lg font-bold text-gray-800">Delete Transaction?</h3>
+            <h3 className="text-lg font-bold text-gray-800">{t('customerData:deleteTransaction')}</h3>
             <p className="text-sm text-gray-500">
-              This will delete the {deleteConfirm.is_payment ? 'payment' : 'consumption'} of{' '}
-              <span className="font-mono font-medium">LSL {deleteConfirm.amount_lsl.toFixed(2)}</span>{' '}
-              from {deleteConfirm.date?.slice(0, 10) || 'unknown date'}.
-              The change will be logged and can be reverted from the Mutations page.
+              {t('customerData:deleteDescription')}
             </p>
             <div className="flex gap-3">
               <button onClick={() => setDeleteConfirm(null)}
                 className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-xl font-medium text-sm hover:bg-gray-200 transition">
-                Cancel
+                {t('common:cancel')}
               </button>
               <button onClick={() => handleDelete(deleteConfirm)}
                 className="flex-1 py-3 bg-red-600 text-white rounded-xl font-semibold text-sm hover:bg-red-700 transition">
-                Delete
+                {t('common:delete')}
               </button>
             </div>
           </div>

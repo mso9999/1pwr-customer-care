@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   getCommissionData,
   executeCommission,
@@ -75,7 +76,8 @@ function GPSCapture({ lat, lng, onChange }: { lat: string; lng: string; onChange
 // ---------------------------------------------------------------------------
 
 function ProgressBar({ current }: { current: number }) {
-  const labels = ['Identify', 'Details', 'Sign', 'Review'];
+  const { t } = useTranslation(['commission', 'common']);
+  const labels = [t('commission:steps.identify'), t('commission:steps.details'), t('commission:steps.sign'), t('commission:steps.review')];
   return (
     <div className="flex items-center gap-1.5 mb-6">
       {labels.map((label, i) => (
@@ -252,7 +254,6 @@ function UGPConnectionPicker({ site, accountNumber, onSelect, onClose }: UGPPick
         )}
       </div>
 
-      {/* Split confirmation overlay */}
       {splitTarget && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50" onClick={() => setSplitTarget(null)}>
           <div className="bg-white rounded-2xl shadow-2xl max-w-sm mx-4 p-5 space-y-4" onClick={e => e.stopPropagation()}>
@@ -293,21 +294,19 @@ function UGPConnectionPicker({ site, accountNumber, onSelect, onClose }: UGPPick
 // ---------------------------------------------------------------------------
 
 export default function CommissionCustomerPage() {
+  const { t } = useTranslation(['commission', 'common']);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const prefilledCustomerId = searchParams.get('customer') || '';
   const prefilledAccount = searchParams.get('account') || '';
 
-  // Step tracking
   const [step, setStep] = useState(0);
 
-  // Step 1 - Identify
   const [customerId, setCustomerId] = useState(prefilledCustomerId);
   const [customerData, setCustomerData] = useState<CommissionData | null>(null);
   const [lookupLoading, setLookupLoading] = useState(false);
   const [lookupError, setLookupError] = useState('');
 
-  // Step 2 - Commission Details
   const [connectionDate, setConnectionDate] = useState(new Date().toISOString().slice(0, 10));
   const [customerType, setCustomerType] = useState('');
   const [nationalId, setNationalId] = useState('');
@@ -318,23 +317,18 @@ export default function CommissionCustomerPage() {
   const [gpsLng, setGpsLng] = useState('');
   const [accountNumber, setAccountNumber] = useState(prefilledAccount);
 
-  // UGP connection binding
   const [surveyId, setSurveyId] = useState('');
   const [showUGPPicker, setShowUGPPicker] = useState(false);
 
-  // Step 3 - Signature
   const [signatureB64, setSignatureB64] = useState('');
 
-  // General UI state
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<CommissionResult | null>(null);
 
-  // UGP upstream conductor state
   const [energizing, setEnergizing] = useState(false);
   const [energizeResult, setEnergizeResult] = useState<{ updated: number; failed: number } | null>(null);
 
-  // Auto-lookup customer when ID entered
   useEffect(() => {
     if (!customerId.trim()) {
       setCustomerData(null);
@@ -350,7 +344,6 @@ export default function CommissionCustomerPage() {
           if (cancelled) return;
           setCustomerData(data);
 
-          // Pre-fill from fetched data
           const c = data.customer;
           if (c.customer_type && !customerType) setCustomerType(c.customer_type);
           if (c.national_id && !nationalId) setNationalId(c.national_id);
@@ -366,21 +359,20 @@ export default function CommissionCustomerPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customerId]);
 
-  // Step validation
   const validateStep = (): string | null => {
     if (step === 0) {
-      if (!customerId.trim()) return 'Customer or Account Number is required';
+      if (!customerId.trim()) return t('commission:validation.customerIdRequired');
       if (!customerData) return 'Please enter a valid Customer ID or Account Number';
     }
     if (step === 1) {
-      if (!connectionDate) return 'Connection date is required';
-      if (!customerType) return 'Customer type is required';
-      if (!nationalId.trim()) return 'National ID is required';
-      if (!phoneNumber.trim()) return 'Phone number is required';
-      if (!accountNumber.trim()) return 'Account number is required';
+      if (!connectionDate) return t('commission:validation.connectionDateRequired');
+      if (!customerType) return t('commission:validation.customerTypeRequired');
+      if (!nationalId.trim()) return t('commission:validation.nationalIdRequired');
+      if (!phoneNumber.trim()) return t('commission:validation.phoneRequired');
+      if (!accountNumber.trim()) return t('commission:validation.accountRequired');
     }
     if (step === 2) {
-      if (!signatureB64) return 'Please capture or upload the customer signature';
+      if (!signatureB64) return t('commission:validation.signatureRequired');
     }
     return null;
   };
@@ -397,7 +389,6 @@ export default function CommissionCustomerPage() {
     setStep(s => Math.max(s - 1, 0));
   };
 
-  // Execute commissioning
   const handleSubmit = async () => {
     setSaving(true);
     setError('');
@@ -421,7 +412,7 @@ export default function CommissionCustomerPage() {
       });
       setResult(res);
     } catch (e: any) {
-      setError(e.message || 'Commissioning failed');
+      setError(e.message || t('commission:commissionFailed'));
     } finally {
       setSaving(false);
     }
@@ -435,49 +426,49 @@ export default function CommissionCustomerPage() {
     <div className="space-y-5">
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">
-          Customer ID <span className="text-red-400">*</span>
+          {t('commission:fields.customerId')} <span className="text-red-400">*</span>
         </label>
         <input
           type="text"
           value={customerId}
           onChange={e => setCustomerId(e.target.value)}
-          placeholder="e.g. 0045MAK or 5846"
+          placeholder={t('commission:fields.customerIdPlaceholder')}
           className="w-full px-4 py-3.5 border border-gray-300 rounded-xl text-base focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none"
         />
-        {lookupLoading && <p className="text-xs text-gray-400 mt-1">Looking up customer...</p>}
+        {lookupLoading && <p className="text-xs text-gray-400 mt-1">{t('commission:fields.lookingUp')}</p>}
         {lookupError && <p className="text-xs text-red-500 mt-1">{lookupError}</p>}
       </div>
 
       {customerData && (
         <div className="bg-gray-50 rounded-xl border p-4 space-y-2">
           <div className="flex justify-between">
-            <span className="text-sm text-gray-500">Name</span>
+            <span className="text-sm text-gray-500">{t('commission:fields.name')}</span>
             <span className="text-sm font-medium">{customerData.customer.first_name} {customerData.customer.last_name}</span>
           </div>
           <div className="flex justify-between">
-            <span className="text-sm text-gray-500">Site</span>
+            <span className="text-sm text-gray-500">{t('commission:fields.site')}</span>
             <span className="text-sm font-medium">{customerData.customer.concession}</span>
           </div>
           {customerData.meter && (
             <div className="flex justify-between">
-              <span className="text-sm text-gray-500">Meter</span>
+              <span className="text-sm text-gray-500">{t('commission:fields.meter')}</span>
               <span className="text-sm font-medium">{customerData.meter.meter_id}</span>
             </div>
           )}
           <div className="flex justify-between">
-            <span className="text-sm text-gray-500">Account</span>
-            <span className="text-sm font-medium">{customerData.account_number || 'N/A'}</span>
+            <span className="text-sm text-gray-500">{t('commission:fields.account')}</span>
+            <span className="text-sm font-medium">{customerData.account_number || t('commission:fields.na')}</span>
           </div>
           {customerData.customer.date_connected && (
             <div className="flex justify-between">
-              <span className="text-sm text-gray-500">Connected</span>
+              <span className="text-sm text-gray-500">{t('commission:fields.connected')}</span>
               <span className="text-sm font-medium">{customerData.customer.date_connected}</span>
             </div>
           )}
           {customerData.existing_contracts.length > 0 && (
             <div className="flex justify-between">
-              <span className="text-sm text-gray-500">Contracts on file</span>
-              <span className="text-sm font-medium text-green-600">{customerData.existing_contracts.length} found</span>
+              <span className="text-sm text-gray-500">{t('commission:fields.contractsOnFile')}</span>
+              <span className="text-sm font-medium text-green-600">{t('commission:fields.found', { count: customerData.existing_contracts.length })}</span>
             </div>
           )}
         </div>
@@ -488,61 +479,60 @@ export default function CommissionCustomerPage() {
   const renderStep1 = () => (
     <div className="space-y-4">
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">Connection Date <span className="text-red-400">*</span></label>
+        <label className="block text-sm font-medium text-gray-700 mb-2">{t('commission:fields.connectionDate')} <span className="text-red-400">*</span></label>
         <input type="date" value={connectionDate} onChange={e => setConnectionDate(e.target.value)}
           className="w-full px-4 py-3.5 border border-gray-300 rounded-xl text-base focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none" />
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">Customer Type <span className="text-red-400">*</span></label>
+        <label className="block text-sm font-medium text-gray-700 mb-2">{t('commission:fields.customerType')} <span className="text-red-400">*</span></label>
         <select value={customerType} onChange={e => setCustomerType(e.target.value)}
           className="w-full px-4 py-3.5 border border-gray-300 rounded-xl text-base bg-white focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none appearance-none">
-          <option value="">Select type...</option>
-          {CUSTOMER_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+          <option value="">{t('commission:fields.selectType')}</option>
+          {CUSTOMER_TYPES.map(ct => <option key={ct} value={ct}>{ct}</option>)}
         </select>
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">National ID <span className="text-red-400">*</span></label>
+        <label className="block text-sm font-medium text-gray-700 mb-2">{t('commission:fields.nationalId')} <span className="text-red-400">*</span></label>
         <input type="text" value={nationalId} onChange={e => setNationalId(e.target.value)} placeholder="ID or passport number"
           className="w-full px-4 py-3.5 border border-gray-300 rounded-xl text-base focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none" />
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">Phone Number <span className="text-red-400">*</span></label>
+        <label className="block text-sm font-medium text-gray-700 mb-2">{t('commission:fields.phoneNumber')} <span className="text-red-400">*</span></label>
         <input type="tel" value={phoneNumber} onChange={e => setPhoneNumber(e.target.value)} placeholder="+266 ..."
           className="w-full px-4 py-3.5 border border-gray-300 rounded-xl text-base focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none" />
       </div>
 
       <div className="flex gap-3">
         <div className="flex-1">
-          <label className="block text-sm font-medium text-gray-700 mb-2">Service Phase</label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">{t('commission:fields.servicePhase')}</label>
           <select value={servicePhase} onChange={e => setServicePhase(e.target.value)}
             className="w-full px-4 py-3.5 border border-gray-300 rounded-xl text-base bg-white focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none appearance-none">
             {SERVICE_PHASES.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
         </div>
         <div className="flex-1">
-          <label className="block text-sm font-medium text-gray-700 mb-2">Ampacity</label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">{t('commission:fields.ampacity')}</label>
           <input type="text" value={ampacity} onChange={e => setAmpacity(e.target.value)}
             className="w-full px-4 py-3.5 border border-gray-300 rounded-xl text-base focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none" />
         </div>
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">Account Number <span className="text-red-400">*</span></label>
+        <label className="block text-sm font-medium text-gray-700 mb-2">{t('commission:fields.accountNumber')} <span className="text-red-400">*</span></label>
         <input type="text" value={accountNumber} onChange={e => setAccountNumber(e.target.value)}
           className="w-full px-4 py-3.5 border border-gray-300 rounded-xl text-base focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none" />
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">GPS Coordinates</label>
+        <label className="block text-sm font-medium text-gray-700 mb-2">{t('commission:fields.gpsCoordinates')}</label>
         <GPSCapture lat={gpsLat} lng={gpsLng} onChange={(lat, lng) => { setGpsLat(lat); setGpsLng(lng); }} />
       </div>
 
-      {/* UGP Connection Binding */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">UGP Connection</label>
+        <label className="block text-sm font-medium text-gray-700 mb-2">{t('commission:fields.ugpConnection')}</label>
         {surveyId ? (
           <div className="flex items-center gap-2 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
             <svg className="w-5 h-5 text-blue-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -550,7 +540,7 @@ export default function CommissionCustomerPage() {
             </svg>
             <span className="flex-1 text-sm font-medium text-blue-800">{surveyId}</span>
             <button type="button" onClick={() => setSurveyId('')} className="text-xs text-blue-600 hover:text-blue-800 underline">
-              Remove
+              {t('commission:fields.remove')}
             </button>
           </div>
         ) : (
@@ -563,7 +553,7 @@ export default function CommissionCustomerPage() {
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
             </svg>
-            Link uGridPlan Connection
+            {t('commission:fields.linkUgp')}
           </button>
         )}
       </div>
@@ -593,16 +583,16 @@ export default function CommissionCustomerPage() {
             <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
-            <p className="text-green-700 font-medium text-sm">Signature captured</p>
+            <p className="text-green-700 font-medium text-sm">{t('commission:signature.captured')}</p>
             <img
               src={`data:image/jpeg;base64,${signatureB64}`}
-              alt="Captured signature"
+              alt={t('commission:signature.alt')}
               className="max-w-[200px] max-h-[80px] border rounded"
             />
           </div>
           <button type="button" onClick={() => setSignatureB64('')}
             className="w-full py-3 bg-gray-100 text-gray-600 rounded-xl font-medium text-sm hover:bg-gray-200 active:bg-gray-300 transition">
-            Replace Signature
+            {t('commission:signature.replace')}
           </button>
         </div>
       ) : (
@@ -619,7 +609,7 @@ export default function CommissionCustomerPage() {
             <svg className="w-12 h-12 text-green-600 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <h3 className="text-lg font-bold text-green-800">Customer Commissioned</h3>
+            <h3 className="text-lg font-bold text-green-800">{t('commission:success.title')}</h3>
             <p className="text-sm text-green-700">
               {result.sms_sent
                 ? 'Contract links sent to customer via SMS.'
@@ -630,15 +620,14 @@ export default function CommissionCustomerPage() {
           <div className="space-y-2">
             <a href={result.contract_en_url} target="_blank" rel="noopener noreferrer"
               className="block w-full py-3 bg-blue-600 text-white rounded-xl font-medium text-center hover:bg-blue-700 transition">
-              View English Contract
+              {t('commission:success.viewContractEn')}
             </a>
             <a href={result.contract_so_url} target="_blank" rel="noopener noreferrer"
               className="block w-full py-3 bg-blue-600 text-white rounded-xl font-medium text-center hover:bg-blue-700 transition">
-              View Sesotho Contract
+              {t('commission:success.viewContractSo')}
             </a>
           </div>
 
-          {/* UGP Sync Status */}
           {result.ugp_sync && (
             <div className={`rounded-xl border p-4 space-y-2 ${
               result.ugp_sync.updated ? 'bg-blue-50 border-blue-200' : 'bg-yellow-50 border-yellow-200'
@@ -647,7 +636,7 @@ export default function CommissionCustomerPage() {
                 <svg className="w-5 h-5 text-blue-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                 </svg>
-                <span className="text-sm font-semibold text-gray-800">uGridPlan Sync</span>
+                <span className="text-sm font-semibold text-gray-800">{t('commission:success.ugpSync')}</span>
               </div>
               {result.ugp_sync.updated ? (
                 <p className="text-sm text-blue-700">
@@ -659,7 +648,6 @@ export default function CommissionCustomerPage() {
                 </p>
               )}
 
-              {/* Upstream conductor warnings */}
               {result.ugp_sync.upstream_warnings.length > 0 && !energizeResult && (
                 <div className="mt-3 space-y-2">
                   <p className="text-sm font-medium text-amber-800">
@@ -695,14 +683,13 @@ export default function CommissionCustomerPage() {
                     {energizing ? (
                       <span className="flex items-center justify-center gap-2">
                         <span className="animate-spin inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
-                        Updating...
+                        {t('commission:success.updating')}
                       </span>
-                    ) : 'Mark Upstream as Energized'}
+                    ) : t('commission:success.markEnergized')}
                   </button>
                 </div>
               )}
 
-              {/* Energize result */}
               {energizeResult && (
                 <div className={`mt-2 p-3 rounded-lg text-sm ${
                   energizeResult.failed === 0 ? 'bg-green-50 text-green-700' : 'bg-yellow-50 text-yellow-700'
@@ -717,26 +704,25 @@ export default function CommissionCustomerPage() {
 
           <button type="button" onClick={() => navigate(`/customers/${accountNumber || customerId}`)}
             className="w-full py-3 bg-gray-100 text-gray-700 rounded-xl font-medium text-sm hover:bg-gray-200 transition">
-            Go to Customer Detail
+            {t('commission:success.goToDetail')}
           </button>
         </div>
       );
     }
 
-    // Review before submission
     const items = [
       { label: 'Customer', value: `${customerData?.customer.first_name} ${customerData?.customer.last_name} (${accountNumber || customerId})` },
-      { label: 'Account', value: accountNumber },
-      { label: 'Site', value: customerData?.customer.concession || '' },
-      { label: 'Type', value: customerType },
-      { label: 'Connection Date', value: connectionDate },
-      { label: 'National ID', value: nationalId },
-      { label: 'Phone', value: phoneNumber },
-      { label: 'Service Phase', value: servicePhase },
-      { label: 'Ampacity', value: ampacity },
+      { label: t('commission:fields.account'), value: accountNumber },
+      { label: t('commission:fields.site'), value: customerData?.customer.concession || '' },
+      { label: t('commission:fields.customerType'), value: customerType },
+      { label: t('commission:fields.connectionDate'), value: connectionDate },
+      { label: t('commission:fields.nationalId'), value: nationalId },
+      { label: t('commission:fields.phoneNumber'), value: phoneNumber },
+      { label: t('commission:fields.servicePhase'), value: servicePhase },
+      { label: t('commission:fields.ampacity'), value: ampacity },
     ];
     if (gpsLat && gpsLng) items.push({ label: 'GPS', value: `${gpsLat}, ${gpsLng}` });
-    if (surveyId) items.push({ label: 'UGP Connection', value: surveyId });
+    if (surveyId) items.push({ label: t('commission:fields.ugpConnection'), value: surveyId });
 
     return (
       <div className="space-y-4">
@@ -761,7 +747,7 @@ export default function CommissionCustomerPage() {
   // Layout
   // ---------------------------------------------------------------------------
 
-  const stepTitles = ['Identify Customer', 'Commission Details', 'Capture Signature', 'Review & Generate'];
+  const stepTitles = [t('commission:steps.identifyDesc'), t('commission:steps.detailsDesc'), t('commission:steps.signDesc'), t('commission:steps.reviewDesc')];
   const stepDescs = [
     'Enter the Customer ID to look up their record',
     'Fill in commissioning details',
@@ -771,7 +757,6 @@ export default function CommissionCustomerPage() {
 
   return (
     <div className="max-w-lg mx-auto pb-8">
-      {/* Header */}
       <div className="flex items-center gap-3 mb-6">
         <button onClick={() => navigate(-1)}
           className="p-2 -ml-2 rounded-lg hover:bg-gray-100 active:bg-gray-200 transition" aria-label="Go back">
@@ -780,15 +765,13 @@ export default function CommissionCustomerPage() {
           </svg>
         </button>
         <div>
-          <h1 className="text-xl font-bold text-gray-800">Commission Customer</h1>
-          <p className="text-sm text-gray-400">Generate contract and connect service</p>
+          <h1 className="text-xl font-bold text-gray-800">{t('commission:title')}</h1>
+          <p className="text-sm text-gray-400">{t('commission:subtitle')}</p>
         </div>
       </div>
 
-      {/* Progress */}
       <ProgressBar current={step} />
 
-      {/* Step card */}
       <div className="bg-white rounded-2xl shadow-sm border p-5 sm:p-6 min-h-[320px]">
         <div className="mb-5">
           <h2 className="text-lg font-semibold text-gray-800">{stepTitles[step]}</h2>
@@ -805,19 +788,18 @@ export default function CommissionCustomerPage() {
         )}
       </div>
 
-      {/* Navigation */}
       {!result && (
         <div className="flex gap-3 mt-6">
           {step > 0 && (
             <button onClick={goBack}
               className="flex-1 py-4 bg-gray-100 text-gray-700 rounded-xl font-medium text-base hover:bg-gray-200 active:bg-gray-300 transition">
-              Back
+              {t('commission:back')}
             </button>
           )}
           {step < TOTAL_STEPS - 1 ? (
             <button onClick={goNext}
               className="flex-1 py-4 bg-blue-600 text-white rounded-xl font-semibold text-base hover:bg-blue-700 active:bg-blue-800 transition">
-              Next
+              {t('commission:next')}
             </button>
           ) : (
             <button onClick={handleSubmit} disabled={saving}
@@ -825,9 +807,9 @@ export default function CommissionCustomerPage() {
               {saving ? (
                 <span className="flex items-center justify-center gap-2">
                   <span className="animate-spin inline-block w-5 h-5 border-2 border-white border-t-transparent rounded-full" />
-                  Generating...
+                  {t('commission:generating')}
                 </span>
-              ) : 'Generate Contract & SMS'}
+              ) : t('commission:generateContract')}
             </button>
           )}
         </div>

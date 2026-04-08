@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { getPendingVerifications, verifyPayments, verificationExportUrl, type PaymentVerification } from '../lib/api';
 
 export default function PaymentVerificationPage() {
+  const { t } = useTranslation(['paymentVerification', 'common']);
   const [rows, setRows] = useState<PaymentVerification[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -70,42 +72,42 @@ export default function PaymentVerificationPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-800 mb-6">Payment Verification</h1>
+      <h1 className="text-2xl font-bold text-gray-800 mb-6">{t('paymentVerification:title')}</h1>
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="text-sm border rounded-lg px-3 py-2">
-          <option value="pending">Pending</option>
-          <option value="verified">Verified</option>
-          <option value="rejected">Rejected</option>
-          <option value="">All</option>
+          <option value="pending">{t('paymentVerification:filters.pending')}</option>
+          <option value="verified">{t('paymentVerification:filters.verified')}</option>
+          <option value="rejected">{t('paymentVerification:filters.rejected')}</option>
+          <option value="">{t('paymentVerification:filters.all')}</option>
         </select>
         <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} className="text-sm border rounded-lg px-3 py-2">
-          <option value="">All Types</option>
-          <option value="connection_fee">Connection Fee</option>
-          <option value="readyboard_fee">Readyboard Fee</option>
-          <option value="electricity">Electricity</option>
-          <option value="uncategorized">Uncategorized</option>
+          <option value="">{t('paymentVerification:filters.allTypes')}</option>
+          <option value="connection_fee">{t('paymentVerification:filters.connectionFee')}</option>
+          <option value="readyboard_fee">{t('paymentVerification:filters.readyboardFee')}</option>
+          <option value="electricity">{t('paymentVerification:filters.electricity')}</option>
+          <option value="uncategorized">{t('paymentVerification:filters.uncategorized')}</option>
         </select>
-        <span className="text-sm text-gray-500">{total} record{total !== 1 ? 's' : ''}</span>
+        <span className="text-sm text-gray-500">{t('paymentVerification:recordCount', { count: total })}</span>
         <a
           href={verificationExportUrl(statusFilter, typeFilter || undefined)}
           className="ml-auto px-4 py-2 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 no-underline"
           download
         >
-          Export XLSX
+          {t('paymentVerification:exportXlsx')}
         </a>
       </div>
 
       {/* Bulk actions */}
       {selected.size > 0 && statusFilter === 'pending' && (
         <div className="bg-blue-50 rounded-xl p-4 mb-4 flex flex-wrap items-center gap-3">
-          <span className="text-sm font-medium text-blue-800">{selected.size} selected</span>
+          <span className="text-sm font-medium text-blue-800">{t('paymentVerification:bulk.selected', { count: selected.size })}</span>
           <input
             type="text"
             value={actionNote}
             onChange={e => setActionNote(e.target.value)}
-            placeholder="Note (optional)"
+            placeholder={t('paymentVerification:bulk.note')}
             className="text-sm border rounded-lg px-3 py-1.5 flex-1 min-w-[200px]"
           />
           <button
@@ -113,14 +115,14 @@ export default function PaymentVerificationPage() {
             disabled={busy}
             className="px-4 py-1.5 bg-green-600 text-white text-sm rounded-lg hover:bg-green-700 disabled:opacity-50"
           >
-            Verify
+            {t('paymentVerification:bulk.verify')}
           </button>
           <button
             onClick={() => handleAction('reject')}
             disabled={busy}
             className="px-4 py-1.5 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 disabled:opacity-50"
           >
-            Reject
+            {t('paymentVerification:bulk.reject')}
           </button>
         </div>
       )}
@@ -139,13 +141,13 @@ export default function PaymentVerificationPage() {
                     <input type="checkbox" checked={selected.size === rows.length && rows.length > 0} onChange={toggleAll} />
                   </th>
                 )}
-                <th className="px-4 py-3">Date</th>
-                <th className="px-4 py-3">Account</th>
-                <th className="px-4 py-3">Customer</th>
-                <th className="px-4 py-3">Type</th>
-                <th className="px-4 py-3 text-right">Amount</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Note</th>
+                <th className="px-4 py-3">{t('paymentVerification:colDate')}</th>
+                <th className="px-4 py-3">{t('paymentVerification:colAccount')}</th>
+                <th className="px-4 py-3">{t('paymentVerification:colCustomer')}</th>
+                <th className="px-4 py-3">{t('paymentVerification:colType')}</th>
+                <th className="px-4 py-3 text-right">{t('paymentVerification:colAmount')}</th>
+                <th className="px-4 py-3">{t('paymentVerification:colStatus')}</th>
+                <th className="px-4 py-3">{t('paymentVerification:colNote')}</th>
               </tr>
             </thead>
             <tbody>
@@ -176,7 +178,7 @@ export default function PaymentVerificationPage() {
               {rows.length === 0 && (
                 <tr>
                   <td colSpan={statusFilter === 'pending' ? 8 : 7} className="text-center py-8 text-gray-400">
-                    No {statusFilter || ''} verifications found
+                    {t(`paymentVerification:empty.${statusFilter || 'all'}`)}
                   </td>
                 </tr>
               )}

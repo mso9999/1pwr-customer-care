@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   listTickets, createTicket, updateTicket, downloadTicketsExcel,
   type Ticket, type TicketsResponse,
@@ -40,6 +41,7 @@ const priorityColor: Record<string, string> = {
 };
 
 export default function TicketsPage() {
+  const { t } = useTranslation(['tickets', 'common']);
   const [data, setData] = useState<TicketsResponse | null>(null);
   const [offset, setOffset] = useState(0);
   const [search, setSearch] = useState('');
@@ -67,7 +69,7 @@ export default function TicketsPage() {
     })
       .then(d => {
         setData(d);
-        const allSites = Array.from(new Set(d.tickets.map(t => t.site_code).filter(Boolean) as string[]));
+        const allSites = Array.from(new Set(d.tickets.map(tk => tk.site_code).filter(Boolean) as string[]));
         setSites(prev => {
           const merged = new Set([...prev, ...allSites]);
           return Array.from(merged).sort();
@@ -95,7 +97,7 @@ export default function TicketsPage() {
 
   const handleCreate = async () => {
     if (!editData.ticket_name && !editData.fault_description) {
-      setError('Ticket name or fault description is required');
+      setError(t('tickets:ticketRequired'));
       return;
     }
     setSaving(true);
@@ -126,25 +128,25 @@ export default function TicketsPage() {
     }
   };
 
-  const startEdit = (t: Ticket) => {
-    setEditId(t.id);
+  const startEdit = (tk: Ticket) => {
+    setEditId(tk.id);
     setEditData({
-      ticket_name: t.ticket_name || '',
-      site_code: t.site_code || '',
-      fault_description: t.fault_description || '',
-      failure_time: t.failure_time || '',
-      services_affected: t.services_affected || '',
-      troubleshooting_steps: t.troubleshooting_steps || '',
-      cause_of_fault: t.cause_of_fault || '',
-      precautions: t.precautions || '',
-      restoration_time: t.restoration_time || '',
-      resolution_approach: t.resolution_approach || '',
-      duration: t.duration || '',
-      status: t.status || 'open',
-      priority: t.priority || '',
-      category: t.category || '',
-      reported_by: t.reported_by || '',
-      resolved_by: t.resolved_by || '',
+      ticket_name: tk.ticket_name || '',
+      site_code: tk.site_code || '',
+      fault_description: tk.fault_description || '',
+      failure_time: tk.failure_time || '',
+      services_affected: tk.services_affected || '',
+      troubleshooting_steps: tk.troubleshooting_steps || '',
+      cause_of_fault: tk.cause_of_fault || '',
+      precautions: tk.precautions || '',
+      restoration_time: tk.restoration_time || '',
+      resolution_approach: tk.resolution_approach || '',
+      duration: tk.duration || '',
+      status: tk.status || 'open',
+      priority: tk.priority || '',
+      category: tk.category || '',
+      reported_by: tk.reported_by || '',
+      resolved_by: tk.resolved_by || '',
     });
     setShowCreate(false);
   };
@@ -186,10 +188,10 @@ export default function TicketsPage() {
   const TicketForm = ({ onSubmit, submitLabel }: { onSubmit: () => void; submitLabel: string }) => (
     <div className="bg-white rounded-xl shadow-lg border p-4 sm:p-6 mb-6 space-y-4">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        <Field label="Ticket Name (Site / Asset)" field="ticket_name" />
-        <Field label="Site Code" field="site_code" />
+        <Field label={t('tickets:ticketName')} field="ticket_name" />
+        <Field label={t('tickets:siteCode')} field="site_code" />
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Priority</label>
+          <label className="block text-xs font-medium text-gray-600 mb-1">{t('tickets:priority')}</label>
           <select
             className="w-full px-3 py-2 border rounded-lg text-sm"
             value={editData.priority ?? ''}
@@ -200,7 +202,7 @@ export default function TicketsPage() {
           </select>
         </div>
         <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Status</label>
+          <label className="block text-xs font-medium text-gray-600 mb-1">{t('tickets:status')}</label>
           <select
             className="w-full px-3 py-2 border rounded-lg text-sm"
             value={editData.status ?? 'open'}
@@ -209,20 +211,20 @@ export default function TicketsPage() {
             {STATUSES.map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
           </select>
         </div>
-        <Field label="Category" field="category" />
-        <Field label="Reported By" field="reported_by" />
-        <Field label="Failure Time" field="failure_time" type="datetime-local" />
-        <Field label="Restoration Time" field="restoration_time" type="datetime-local" />
-        <Field label="Duration" field="duration" />
-        <Field label="Resolved By" field="resolved_by" />
+        <Field label={t('tickets:category')} field="category" />
+        <Field label={t('tickets:reportedBy')} field="reported_by" />
+        <Field label={t('tickets:failureTime')} field="failure_time" type="datetime-local" />
+        <Field label={t('tickets:restorationTime')} field="restoration_time" type="datetime-local" />
+        <Field label={t('tickets:duration')} field="duration" />
+        <Field label={t('tickets:resolvedBy')} field="resolved_by" />
       </div>
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Field label="Fault Description" field="fault_description" rows={3} />
-        <Field label="Service(s) Affected" field="services_affected" rows={3} />
-        <Field label="Troubleshooting Steps" field="troubleshooting_steps" rows={3} />
-        <Field label="Cause of Fault" field="cause_of_fault" rows={3} />
-        <Field label="Precautions" field="precautions" rows={3} />
-        <Field label="Resolution Approach" field="resolution_approach" rows={3} />
+        <Field label={t('tickets:faultDescription')} field="fault_description" rows={3} />
+        <Field label={t('tickets:servicesAffected')} field="services_affected" rows={3} />
+        <Field label={t('tickets:troubleshootingSteps')} field="troubleshooting_steps" rows={3} />
+        <Field label={t('tickets:causeOfFault')} field="cause_of_fault" rows={3} />
+        <Field label={t('tickets:precautions')} field="precautions" rows={3} />
+        <Field label={t('tickets:resolutionApproach')} field="resolution_approach" rows={3} />
       </div>
       <div className="flex gap-3 pt-2">
         <button
@@ -230,13 +232,13 @@ export default function TicketsPage() {
           disabled={saving}
           className="px-5 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition"
         >
-          {saving ? 'Saving...' : submitLabel}
+          {saving ? t('common:saving') : submitLabel}
         </button>
         <button
           onClick={() => { setShowCreate(false); setEditId(null); setEditData({}); }}
           className="px-5 py-2.5 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition"
         >
-          Cancel
+          {t('common:cancel')}
         </button>
       </div>
     </div>
@@ -246,8 +248,8 @@ export default function TicketsPage() {
     <div className="p-4 sm:p-6 max-w-[1400px] mx-auto">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
         <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Maintenance Log</h1>
-          <p className="text-sm text-gray-500 mt-0.5">O&M Corrective (Fault) Maintenance Tickets</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-gray-800">{t('tickets:title')}</h1>
+          <p className="text-sm text-gray-500 mt-0.5">{t('tickets:subtitle')}</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
@@ -256,7 +258,7 @@ export default function TicketsPage() {
             className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50 transition flex items-center gap-1.5"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-            {exporting ? 'Exporting...' : 'Download Excel'}
+            {exporting ? t('common:exporting') : t('tickets:downloadExcel')}
           </button>
           {canWrite && (
             <button
@@ -264,7 +266,7 @@ export default function TicketsPage() {
               className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition flex items-center gap-1.5"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-              New Ticket
+              {t('tickets:newTicket')}
             </button>
           )}
         </div>
@@ -277,8 +279,8 @@ export default function TicketsPage() {
         </div>
       )}
 
-      {showCreate && <TicketForm onSubmit={handleCreate} submitLabel="Create Ticket" />}
-      {editId !== null && <TicketForm onSubmit={handleUpdate} submitLabel="Save Changes" />}
+      {showCreate && <TicketForm onSubmit={handleCreate} submitLabel={t('tickets:createTicket')} />}
+      {editId !== null && <TicketForm onSubmit={handleUpdate} submitLabel={t('tickets:saveChanges')} />}
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 mb-4">
@@ -288,13 +290,13 @@ export default function TicketsPage() {
         >
           <input
             type="text"
-            placeholder="Search tickets..."
+            placeholder={t('tickets:searchPlaceholder')}
             className="flex-1 px-3 py-2 border rounded-lg text-sm"
             value={searchInput}
             onChange={e => setSearchInput(e.target.value)}
           />
           <button type="submit" className="px-4 py-2 bg-gray-100 rounded-lg text-sm font-medium hover:bg-gray-200 transition">
-            Search
+            {t('common:search')}
           </button>
         </form>
         <select
@@ -302,7 +304,7 @@ export default function TicketsPage() {
           value={filterSite}
           onChange={e => { setFilterSite(e.target.value); setOffset(0); }}
         >
-          <option value="">All Sites</option>
+          <option value="">{t('common:allSites')}</option>
           {sites.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
         <select
@@ -310,7 +312,7 @@ export default function TicketsPage() {
           value={filterStatus}
           onChange={e => { setFilterStatus(e.target.value); setOffset(0); }}
         >
-          <option value="">All Statuses</option>
+          <option value="">{t('common:allStatuses')}</option>
           {STATUSES.map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
         </select>
       </div>
@@ -320,50 +322,50 @@ export default function TicketsPage() {
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-              <th className="px-4 py-3">Ticket</th>
-              <th className="px-4 py-3">Site</th>
-              <th className="px-4 py-3">Failure Time</th>
-              <th className="px-4 py-3">Fault</th>
-              <th className="px-4 py-3">Status</th>
-              <th className="px-4 py-3">Priority</th>
-              <th className="px-4 py-3">Duration</th>
-              <th className="px-4 py-3">Actions</th>
+              <th className="px-4 py-3">{t('tickets:ticket')}</th>
+              <th className="px-4 py-3">{t('tickets:site')}</th>
+              <th className="px-4 py-3">{t('tickets:failureTime')}</th>
+              <th className="px-4 py-3">{t('tickets:fault')}</th>
+              <th className="px-4 py-3">{t('tickets:status')}</th>
+              <th className="px-4 py-3">{t('tickets:priority')}</th>
+              <th className="px-4 py-3">{t('tickets:duration')}</th>
+              <th className="px-4 py-3">{t('tickets:actions')}</th>
             </tr>
           </thead>
           <tbody className="divide-y">
             {loading ? (
-              <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">Loading...</td></tr>
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">{t('common:loading')}</td></tr>
             ) : (data?.tickets.length ?? 0) === 0 ? (
-              <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No tickets found</td></tr>
-            ) : data?.tickets.map(t => (
-              <tr key={t.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setExpandedId(expandedId === t.id ? null : t.id)}>
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">{t('tickets:noTickets')}</td></tr>
+            ) : data?.tickets.map(tk => (
+              <tr key={tk.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => setExpandedId(expandedId === tk.id ? null : tk.id)}>
                 <td className="px-4 py-3">
-                  <div className="font-medium text-gray-800">{t.ticket_name || t.fault_description?.slice(0, 40) || `#${t.id}`}</div>
-                  <div className="text-xs text-gray-400 mt-0.5">#{t.id}</div>
+                  <div className="font-medium text-gray-800">{tk.ticket_name || tk.fault_description?.slice(0, 40) || `#${tk.id}`}</div>
+                  <div className="text-xs text-gray-400 mt-0.5">#{tk.id}</div>
                 </td>
-                <td className="px-4 py-3 font-mono text-xs">{t.site_code || '--'}</td>
-                <td className="px-4 py-3 text-xs">{fmtDate(t.failure_time || t.created_at)}</td>
-                <td className="px-4 py-3 max-w-[250px] truncate text-gray-600">{t.fault_description || '--'}</td>
+                <td className="px-4 py-3 font-mono text-xs">{tk.site_code || '--'}</td>
+                <td className="px-4 py-3 text-xs">{fmtDate(tk.failure_time || tk.created_at)}</td>
+                <td className="px-4 py-3 max-w-[250px] truncate text-gray-600">{tk.fault_description || '--'}</td>
                 <td className="px-4 py-3">
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColor[t.status] || 'bg-gray-100'}`}>
-                    {t.status.replace('_', ' ')}
+                  <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColor[tk.status] || 'bg-gray-100'}`}>
+                    {tk.status.replace('_', ' ')}
                   </span>
                 </td>
                 <td className="px-4 py-3">
-                  {t.priority ? (
-                    <span className={`px-2 py-0.5 rounded text-xs font-bold ${priorityColor[t.priority] || 'bg-gray-400 text-white'}`}>
-                      {t.priority}
+                  {tk.priority ? (
+                    <span className={`px-2 py-0.5 rounded text-xs font-bold ${priorityColor[tk.priority] || 'bg-gray-400 text-white'}`}>
+                      {tk.priority}
                     </span>
                   ) : '--'}
                 </td>
-                <td className="px-4 py-3 text-xs">{t.duration || '--'}</td>
+                <td className="px-4 py-3 text-xs">{tk.duration || '--'}</td>
                 <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
                   {canWrite && (
                     <button
-                      onClick={() => startEdit(t)}
+                      onClick={() => startEdit(tk)}
                       className="text-blue-600 hover:text-blue-800 text-xs font-medium"
                     >
-                      Edit
+                      {t('common:edit')}
                     </button>
                   )}
                 </td>
@@ -373,44 +375,44 @@ export default function TicketsPage() {
         </table>
 
         {/* Expanded detail row */}
-        {expandedId && data?.tickets.filter(t => t.id === expandedId).map(t => (
-          <div key={`detail-${t.id}`} className="border-t bg-blue-50/40 px-6 py-4">
+        {expandedId && data?.tickets.filter(tk => tk.id === expandedId).map(tk => (
+          <div key={`detail-${tk.id}`} className="border-t bg-blue-50/40 px-6 py-4">
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
               <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase">Services Affected</p>
-                <p className="mt-1 text-gray-700 whitespace-pre-wrap">{t.services_affected || '--'}</p>
+                <p className="text-xs font-semibold text-gray-500 uppercase">{t('tickets:servicesAffected')}</p>
+                <p className="mt-1 text-gray-700 whitespace-pre-wrap">{tk.services_affected || '--'}</p>
               </div>
               <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase">Troubleshooting Steps</p>
-                <p className="mt-1 text-gray-700 whitespace-pre-wrap">{t.troubleshooting_steps || '--'}</p>
+                <p className="text-xs font-semibold text-gray-500 uppercase">{t('tickets:troubleshootingSteps')}</p>
+                <p className="mt-1 text-gray-700 whitespace-pre-wrap">{tk.troubleshooting_steps || '--'}</p>
               </div>
               <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase">Cause of Fault</p>
-                <p className="mt-1 text-gray-700 whitespace-pre-wrap">{t.cause_of_fault || '--'}</p>
+                <p className="text-xs font-semibold text-gray-500 uppercase">{t('tickets:causeOfFault')}</p>
+                <p className="mt-1 text-gray-700 whitespace-pre-wrap">{tk.cause_of_fault || '--'}</p>
               </div>
               <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase">Precautions</p>
-                <p className="mt-1 text-gray-700 whitespace-pre-wrap">{t.precautions || '--'}</p>
+                <p className="text-xs font-semibold text-gray-500 uppercase">{t('tickets:precautions')}</p>
+                <p className="mt-1 text-gray-700 whitespace-pre-wrap">{tk.precautions || '--'}</p>
               </div>
               <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase">Resolution Approach</p>
-                <p className="mt-1 text-gray-700 whitespace-pre-wrap">{t.resolution_approach || '--'}</p>
+                <p className="text-xs font-semibold text-gray-500 uppercase">{t('tickets:resolutionApproach')}</p>
+                <p className="mt-1 text-gray-700 whitespace-pre-wrap">{tk.resolution_approach || '--'}</p>
               </div>
               <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase">Restoration Time</p>
-                <p className="mt-1 text-gray-700">{fmtDate(t.restoration_time)}</p>
+                <p className="text-xs font-semibold text-gray-500 uppercase">{t('tickets:restorationTime')}</p>
+                <p className="mt-1 text-gray-700">{fmtDate(tk.restoration_time)}</p>
               </div>
               <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase">Reported By</p>
-                <p className="mt-1 text-gray-700">{t.reported_by || '--'}</p>
+                <p className="text-xs font-semibold text-gray-500 uppercase">{t('tickets:reportedBy')}</p>
+                <p className="mt-1 text-gray-700">{tk.reported_by || '--'}</p>
               </div>
               <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase">Resolved By</p>
-                <p className="mt-1 text-gray-700">{t.resolved_by || '--'}</p>
+                <p className="text-xs font-semibold text-gray-500 uppercase">{t('tickets:resolvedBy')}</p>
+                <p className="mt-1 text-gray-700">{tk.resolved_by || '--'}</p>
               </div>
               <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase">Category</p>
-                <p className="mt-1 text-gray-700">{t.category || '--'}</p>
+                <p className="text-xs font-semibold text-gray-500 uppercase">{t('tickets:category')}</p>
+                <p className="mt-1 text-gray-700">{tk.category || '--'}</p>
               </div>
             </div>
           </div>
@@ -420,48 +422,48 @@ export default function TicketsPage() {
       {/* Mobile cards */}
       <div className="md:hidden space-y-3">
         {loading ? (
-          <p className="text-center text-gray-400 py-8">Loading...</p>
+          <p className="text-center text-gray-400 py-8">{t('common:loading')}</p>
         ) : (data?.tickets.length ?? 0) === 0 ? (
-          <p className="text-center text-gray-400 py-8">No tickets found</p>
-        ) : data?.tickets.map(t => (
-          <div key={t.id} className="bg-white rounded-xl shadow border p-4" onClick={() => setExpandedId(expandedId === t.id ? null : t.id)}>
+          <p className="text-center text-gray-400 py-8">{t('tickets:noTickets')}</p>
+        ) : data?.tickets.map(tk => (
+          <div key={tk.id} className="bg-white rounded-xl shadow border p-4" onClick={() => setExpandedId(expandedId === tk.id ? null : tk.id)}>
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <p className="font-medium text-gray-800 text-sm truncate">
-                  {t.ticket_name || t.fault_description?.slice(0, 40) || `#${t.id}`}
+                  {tk.ticket_name || tk.fault_description?.slice(0, 40) || `#${tk.id}`}
                 </p>
-                <p className="text-xs text-gray-400 mt-0.5 font-mono">{t.site_code || '--'} &middot; #{t.id}</p>
+                <p className="text-xs text-gray-400 mt-0.5 font-mono">{tk.site_code || '--'} &middot; #{tk.id}</p>
               </div>
               <div className="flex flex-col items-end gap-1">
-                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColor[t.status] || 'bg-gray-100'}`}>
-                  {t.status.replace('_', ' ')}
+                <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${statusColor[tk.status] || 'bg-gray-100'}`}>
+                  {tk.status.replace('_', ' ')}
                 </span>
-                {t.priority && (
-                  <span className={`px-2 py-0.5 rounded text-xs font-bold ${priorityColor[t.priority] || 'bg-gray-400 text-white'}`}>
-                    {t.priority}
+                {tk.priority && (
+                  <span className={`px-2 py-0.5 rounded text-xs font-bold ${priorityColor[tk.priority] || 'bg-gray-400 text-white'}`}>
+                    {tk.priority}
                   </span>
                 )}
               </div>
             </div>
-            <p className="text-xs text-gray-600 mt-2 line-clamp-2">{t.fault_description || '--'}</p>
+            <p className="text-xs text-gray-600 mt-2 line-clamp-2">{tk.fault_description || '--'}</p>
             <div className="flex justify-between items-center mt-2 text-xs text-gray-400">
-              <span>{fmtDate(t.failure_time || t.created_at)}</span>
-              <span>{t.duration || '--'}</span>
+              <span>{fmtDate(tk.failure_time || tk.created_at)}</span>
+              <span>{tk.duration || '--'}</span>
             </div>
-            {expandedId === t.id && (
+            {expandedId === tk.id && (
               <div className="mt-3 pt-3 border-t space-y-2 text-xs">
-                {t.services_affected && <div><span className="font-semibold text-gray-500">Services Affected:</span> <span className="text-gray-700">{t.services_affected}</span></div>}
-                {t.troubleshooting_steps && <div><span className="font-semibold text-gray-500">Troubleshooting:</span> <span className="text-gray-700">{t.troubleshooting_steps}</span></div>}
-                {t.cause_of_fault && <div><span className="font-semibold text-gray-500">Cause:</span> <span className="text-gray-700">{t.cause_of_fault}</span></div>}
-                {t.precautions && <div><span className="font-semibold text-gray-500">Precautions:</span> <span className="text-gray-700">{t.precautions}</span></div>}
-                {t.resolution_approach && <div><span className="font-semibold text-gray-500">Resolution:</span> <span className="text-gray-700">{t.resolution_approach}</span></div>}
-                {t.restoration_time && <div><span className="font-semibold text-gray-500">Restored:</span> <span className="text-gray-700">{fmtDate(t.restoration_time)}</span></div>}
+                {tk.services_affected && <div><span className="font-semibold text-gray-500">{t('tickets:servicesAffected')}:</span> <span className="text-gray-700">{tk.services_affected}</span></div>}
+                {tk.troubleshooting_steps && <div><span className="font-semibold text-gray-500">{t('tickets:troubleshootingSteps')}:</span> <span className="text-gray-700">{tk.troubleshooting_steps}</span></div>}
+                {tk.cause_of_fault && <div><span className="font-semibold text-gray-500">{t('tickets:causeOfFault')}:</span> <span className="text-gray-700">{tk.cause_of_fault}</span></div>}
+                {tk.precautions && <div><span className="font-semibold text-gray-500">{t('tickets:precautions')}:</span> <span className="text-gray-700">{tk.precautions}</span></div>}
+                {tk.resolution_approach && <div><span className="font-semibold text-gray-500">{t('tickets:resolutionApproach')}:</span> <span className="text-gray-700">{tk.resolution_approach}</span></div>}
+                {tk.restoration_time && <div><span className="font-semibold text-gray-500">{t('tickets:restorationTime')}:</span> <span className="text-gray-700">{fmtDate(tk.restoration_time)}</span></div>}
                 {canWrite && (
                   <button
-                    onClick={e => { e.stopPropagation(); startEdit(t); }}
+                    onClick={e => { e.stopPropagation(); startEdit(tk); }}
                     className="mt-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium"
                   >
-                    Edit
+                    {t('common:edit')}
                   </button>
                 )}
               </div>
@@ -473,22 +475,22 @@ export default function TicketsPage() {
       {/* Pagination */}
       {total > PAGE_SIZE && (
         <div className="flex items-center justify-between mt-4 text-sm text-gray-500">
-          <span>{total} ticket{total !== 1 ? 's' : ''}</span>
+          <span>{t('tickets:tickets', { count: total })}</span>
           <div className="flex gap-2">
             <button
               disabled={page <= 1}
               onClick={() => setOffset(Math.max(0, offset - PAGE_SIZE))}
               className="px-3 py-1.5 bg-white border rounded-lg hover:bg-gray-50 disabled:opacity-40 transition"
             >
-              Previous
+              {t('common:pagination.previous')}
             </button>
-            <span className="px-3 py-1.5">Page {page} / {totalPages}</span>
+            <span className="px-3 py-1.5">{t('common:pagination.page', { page, pages: totalPages, total })}</span>
             <button
               disabled={page >= totalPages}
               onClick={() => setOffset(offset + PAGE_SIZE)}
               className="px-3 py-1.5 bg-white border rounded-lg hover:bg-gray-50 disabled:opacity-40 transition"
             >
-              Next
+              {t('common:pagination.next')}
             </button>
           </div>
         </div>

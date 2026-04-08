@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { listRows, listColumns, type PaginatedResponse, type ColumnInfo } from '../lib/api';
 
 export default function TableBrowserPage() {
+  const { t } = useTranslation(['tables', 'common']);
   const { name } = useParams<{ name: string }>();
   const [data, setData] = useState<PaginatedResponse | null>(null);
   const [columns, setColumns] = useState<ColumnInfo[]>([]);
@@ -38,9 +40,9 @@ export default function TableBrowserPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-        <Link to="/tables" className="text-blue-600 hover:underline text-sm">&larr; Tables</Link>
+        <Link to="/tables" className="text-blue-600 hover:underline text-sm">&larr; {t('common:nav.tables')}</Link>
         <h1 className="text-xl sm:text-2xl font-bold text-gray-800 truncate">{name}</h1>
-        {data && <span className="text-xs sm:text-sm text-gray-400">{data.total.toLocaleString()} rows</span>}
+        {data && <span className="text-xs sm:text-sm text-gray-400">{data.total.toLocaleString()} {t('common:rows')}</span>}
       </div>
 
       {/* Column info */}
@@ -63,16 +65,16 @@ export default function TableBrowserPage() {
         <input
           value={searchInput}
           onChange={e => setSearchInput(e.target.value)}
-          placeholder="Search..."
+          placeholder={t('tables:searchPlaceholder')}
           className="flex-1 sm:flex-none sm:w-64 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
         />
-        <button type="submit" className="px-3 py-2 bg-gray-100 border rounded-lg text-sm hover:bg-gray-200">Search</button>
+        <button type="submit" className="px-3 py-2 bg-gray-100 border rounded-lg text-sm hover:bg-gray-200">{t('common:search')}</button>
         {search && <button type="button" onClick={() => { setSearch(''); setSearchInput(''); setPage(1); }} className="px-2 py-2 text-sm text-gray-500 hover:text-red-600">Clear</button>}
       </form>
 
       {/* Data */}
       {loading ? (
-        <div className="text-center py-8 text-gray-400">Loading...</div>
+        <div className="text-center py-8 text-gray-400">{t('common:loading')}</div>
       ) : !data || data.rows.length === 0 ? (
         <div className="text-center py-8 text-gray-400">No rows found</div>
       ) : (
@@ -124,10 +126,10 @@ export default function TableBrowserPage() {
 
           {/* Pagination */}
           <div className="flex items-center justify-between text-sm text-gray-500">
-            <span className="text-xs sm:text-sm">Page {data.page}/{data.pages}</span>
+            <span className="text-xs sm:text-sm">{t('common:page')} {data.page}/{data.pages}</span>
             <div className="flex gap-2">
-              <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="px-3 py-1.5 border rounded disabled:opacity-30 hover:bg-gray-100 text-sm">Prev</button>
-              <button disabled={page >= data.pages} onClick={() => setPage(p => p + 1)} className="px-3 py-1.5 border rounded disabled:opacity-30 hover:bg-gray-100 text-sm">Next</button>
+              <button disabled={page <= 1} onClick={() => setPage(p => p - 1)} className="px-3 py-1.5 border rounded disabled:opacity-30 hover:bg-gray-100 text-sm">{t('common:prev')}</button>
+              <button disabled={page >= data.pages} onClick={() => setPage(p => p + 1)} className="px-3 py-1.5 border rounded disabled:opacity-30 hover:bg-gray-100 text-sm">{t('common:next')}</button>
             </div>
           </div>
         </>

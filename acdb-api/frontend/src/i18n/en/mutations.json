@@ -1,0 +1,48 @@
+{
+  "title": "Mutation Log",
+  "totalMutations": "{{count}} total mutations",
+  "filters": {
+    "tablePlaceholder": "Filter by table…",
+    "userPlaceholder": "Filter by user…",
+    "allActions": "All actions",
+    "create": "Create",
+    "update": "Update",
+    "softDelete": "Soft Delete",
+    "restore": "Restore",
+    "assignMeter": "Assign Meter",
+    "decommission": "Decommission",
+    "commission": "Commission"
+  },
+  "table": {
+    "id": "#",
+    "timestamp": "Timestamp",
+    "user": "User",
+    "action": "Action",
+    "tableName": "Table",
+    "record": "Record",
+    "status": "Status",
+    "reverted": "Reverted",
+    "active": "Active"
+  },
+  "detail": {
+    "title": "Mutation #{{id}}",
+    "reverting": "Reverting…",
+    "revert": "Revert",
+    "close": "Close",
+    "table": "Table",
+    "recordId": "Record ID",
+    "user": "User",
+    "time": "Time",
+    "revertedBy": "Reverted by {{user}} at {{time}}",
+    "field": "Field",
+    "oldValue": "Old Value",
+    "newValue": "New Value",
+    "noData": "No data",
+    "null": "null"
+  },
+  "loading": "Loading…",
+  "empty": "No mutations recorded yet",
+  "loadingDetails": "Loading details…",
+  "revertConfirm": "Revert this mutation? This will undo the change.",
+  "revertFailed": "Revert failed: {{error}}"
+}

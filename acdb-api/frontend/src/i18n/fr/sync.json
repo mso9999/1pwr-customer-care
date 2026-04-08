@@ -1,0 +1,56 @@
+{
+  "title": "Synchronisation uGridPLAN",
+  "subtitle": "Synchroniser les données clients entre CC et uGridPLAN",
+  "discovering": "Découverte en cours…",
+  "discoverProjects": "Découvrir les projets",
+  "addSite": "Ajouter un site",
+  "cancel": "Annuler",
+  "addMapping": {
+    "title": "Ajouter une correspondance Site-Projet",
+    "siteCode": "Code du site",
+    "projectName": "Nom du projet uGridPLAN",
+    "siteName": "Nom du site (facultatif)",
+    "saving": "Enregistrement…",
+    "save": "Enregistrer la correspondance"
+  },
+  "stats": {
+    "configuredSites": "Sites configurés",
+    "syncedCustomers": "Clients synchronisés",
+    "withType": "Avec type",
+    "customerTypes": "Types de clients"
+  },
+  "typeDistribution": "Répartition par type de client",
+  "table": {
+    "title": "Sites configurés",
+    "site": "Site",
+    "projectName": "Nom du projet",
+    "synced": "Synchronisés",
+    "lastSync": "Dernière synchro.",
+    "actions": "Actions",
+    "never": "Jamais",
+    "loading": "Chargement…",
+    "preview": "Aperçu",
+    "syncing": "Synchronisation…",
+    "sync": "Synchroniser",
+    "syncedCount": "{{count}} synchronisés"
+  },
+  "empty": "Aucun site configuré pour la synchronisation.",
+  "preview": {
+    "title": "Aperçu de la synchronisation : {{site}}",
+    "close": "Fermer",
+    "ugpConnections": "Raccordements uGridPLAN",
+    "ccCustomers": "Clients CC",
+    "matched": "Correspondants",
+    "unmatchedUgp": "Sans correspondance (uGP)",
+    "unmatchedCc": "Sans correspondance (CC)",
+    "matchedRecords": "Enregistrements correspondants",
+    "surveyId": "ID enquête",
+    "customerId": "ID client",
+    "method": "Méthode",
+    "type": "Type",
+    "nameCc": "Nom (CC)",
+    "meter": "Compteur",
+    "applySync": "Appliquer la synchro. ({{count}} enregistrements)",
+    "syncing": "Synchronisation…"
+  }
+}

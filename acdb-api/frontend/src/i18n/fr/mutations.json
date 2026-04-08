@@ -1,0 +1,48 @@
+{
+  "title": "Journal des mutations",
+  "totalMutations": "{{count}} mutations au total",
+  "filters": {
+    "tablePlaceholder": "Filtrer par table…",
+    "userPlaceholder": "Filtrer par utilisateur…",
+    "allActions": "Toutes les actions",
+    "create": "Création",
+    "update": "Mise à jour",
+    "softDelete": "Suppression douce",
+    "restore": "Restauration",
+    "assignMeter": "Affectation compteur",
+    "decommission": "Mise hors service",
+    "commission": "Mise en service"
+  },
+  "table": {
+    "id": "#",
+    "timestamp": "Horodatage",
+    "user": "Utilisateur",
+    "action": "Action",
+    "tableName": "Table",
+    "record": "Enregistrement",
+    "status": "Statut",
+    "reverted": "Annulé",
+    "active": "Actif"
+  },
+  "detail": {
+    "title": "Mutation n°{{id}}",
+    "reverting": "Annulation…",
+    "revert": "Annuler",
+    "close": "Fermer",
+    "table": "Table",
+    "recordId": "ID enregistrement",
+    "user": "Utilisateur",
+    "time": "Heure",
+    "revertedBy": "Annulé par {{user}} le {{time}}",
+    "field": "Champ",
+    "oldValue": "Ancienne valeur",
+    "newValue": "Nouvelle valeur",
+    "noData": "Aucune donnée",
+    "null": "nul"
+  },
+  "loading": "Chargement…",
+  "empty": "Aucune mutation enregistrée",
+  "loadingDetails": "Chargement des détails…",
+  "revertConfirm": "Annuler cette mutation ? Cela va défaire la modification.",
+  "revertFailed": "Échec de l'annulation : {{error}}"
+}

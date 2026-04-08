@@ -1,0 +1,17 @@
+{
+  "title": "Check Meters",
+  "subtitle": "Monitor 1Meter vs SparkMeter readings for installed check meters",
+  "loading": "Loading...",
+  "noData": "No check meter data available",
+  "meterSerial": "Meter Serial",
+  "sparkMeter": "SparkMeter",
+  "oneMeter": "1Meter",
+  "delta": "Delta",
+  "lastReading": "Last Reading",
+  "status": "Status",
+  "online": "Online",
+  "offline": "Offline",
+  "stale": "Stale",
+  "lastSeen": "Last Seen",
+  "readings": "Readings"
+}

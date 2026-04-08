@@ -1,0 +1,12 @@
+{
+  "title": "Export Data",
+  "table": "Table",
+  "selectTable": "Select a table…",
+  "format": "Format",
+  "csv": "CSV",
+  "xlsx": "Excel (XLSX)",
+  "filter": "Filter (optional)",
+  "filterPlaceholder": "Search text to filter rows…",
+  "download": "Download {{format}}",
+  "exportFailed": "Export failed: {{error}}"
+}

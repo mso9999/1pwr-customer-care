@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer,
@@ -393,6 +394,7 @@ function CumulativeChart({ data }: { data: CheckMeterComparisonResponse }) {
 }
 
 export default function CheckMeterPage() {
+  const { t } = useTranslation(['checkMeter', 'common']);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [downloadError, setDownloadError] = useState('');
@@ -435,9 +437,9 @@ export default function CheckMeterPage() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Check Meter Comparison</h1>
+          <h1 className="text-2xl font-bold text-gray-900">{t('checkMeter:title')}</h1>
           <p className="text-sm text-gray-500 mt-0.5">
-            SparkMeter (primary) vs 1Meter (check) — hourly kWh readings
+            {t('checkMeter:subtitle')}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -486,7 +488,7 @@ export default function CheckMeterPage() {
         <>
           {data.pairs.length === 0 ? (
             <div className="bg-yellow-50 border border-yellow-200 text-yellow-800 rounded-lg p-4">
-              No check meter pairs found. Ensure meters with role "check" exist alongside "primary" meters on the same accounts.
+              {t('checkMeter:noData')}
             </div>
           ) : (
             <>

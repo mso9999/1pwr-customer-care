@@ -1,0 +1,27 @@
+{
+  "title": "Onboarding Pipeline",
+  "allSites": "All Sites",
+  "commissioningFunnel": "Commissioning Funnel",
+  "stages": {
+    "registered": "Registered",
+    "connectionFeePaid": "Connection Fee Paid",
+    "readyboardFeePaid": "Readyboard Fee Paid",
+    "readyboardTested": "Readyboard Tested",
+    "readyboardInstalled": "Readyboard Installed",
+    "airdacConnected": "Airdac Connected",
+    "meterInstalled": "Meter Installed",
+    "commissioned": "Commissioned"
+  },
+  "stats": {
+    "totalRegistered": "Total Registered",
+    "fullyCommissioned": "Fully Commissioned",
+    "conversionRate": "Conversion Rate",
+    "inProgress": "In Progress"
+  },
+  "table": {
+    "stage": "Stage",
+    "count": "Count",
+    "pctRegistered": "% of Registered",
+    "dropOff": "Drop-off"
+  }
+}

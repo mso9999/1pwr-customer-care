@@ -1,0 +1,84 @@
+{
+  "title": "Tariff Management",
+  "subtitle": "Manage global, concession, and customer-level tariff rates",
+  "loading": "Loading tariff data…",
+  "mutationLogged": "(logged in mutation history)",
+  "global": {
+    "title": "Global Rate",
+    "update": "Update",
+    "unit": "LSL / kWh",
+    "pending": "Pending: {{rate}}",
+    "help": "This is the default rate applied when no concession or customer override exists."
+  },
+  "tabs": {
+    "overrides": "Rate Overrides",
+    "history": "Change History"
+  },
+  "concession": {
+    "title": "Concession Overrides",
+    "addOverride": "Add Override",
+    "empty": "No concession rate overrides.",
+    "concession": "Concession",
+    "rate": "Rate (LSL/kWh)",
+    "effectiveFrom": "Effective From",
+    "setBy": "Set By",
+    "notes": "Notes",
+    "actions": "Actions",
+    "pending": "(pending)"
+  },
+  "customer": {
+    "title": "Customer Overrides",
+    "titleCount": "Customer Overrides ({{count}})",
+    "addOverride": "Add Override",
+    "empty": "No customer rate overrides."
+  },
+  "history": {
+    "title": "Tariff Change History",
+    "allScopes": "All scopes",
+    "global": "Global",
+    "concession": "Concession",
+    "customer": "Customer",
+    "date": "Date",
+    "scope": "Scope",
+    "key": "Key",
+    "previous": "Previous",
+    "newRate": "New Rate",
+    "effective": "Effective",
+    "by": "By",
+    "notes": "Notes",
+    "removed": "removed",
+    "noChanges": "No tariff changes recorded"
+  },
+  "modal": {
+    "rate": "Rate (LSL/kWh)",
+    "effectiveFrom": "Effective From…",
+    "notes": "Notes…",
+    "cancel": "Cancel",
+    "saving": "Saving…",
+    "save": "Save"
+  },
+  "addConcession": {
+    "title": "Add Concession Override",
+    "concessionCode": "Concession Code",
+    "concessionCodePlaceholder": "e.g. MAK"
+  },
+  "addCustomer": {
+    "title": "Add Customer Override",
+    "customerId": "Customer ID",
+    "customerIdPlaceholder": "e.g. 0045MAK"
+  },
+  "deleteConfirm": {
+    "title": "Remove Override?",
+    "body": "This will remove the rate override. The global rate will apply.",
+    "cancel": "Cancel",
+    "remove": "Remove"
+  },
+  "errors": {
+    "ratePositive": "Rate must be positive",
+    "saveFailed": "Save failed",
+    "deleteFailed": "Delete failed",
+    "loadFailed": "Failed to load tariff data",
+    "concessionRequired": "Concession code is required",
+    "customerRequired": "Customer ID is required"
+  }
+}

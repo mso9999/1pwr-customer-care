@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   BarChart, Bar, LineChart, Line, Legend,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
@@ -67,7 +68,7 @@ function shortMonth(m: string): string {
 // ---------------------------------------------------------------------------
 
 function SmartMeterFace({ kwh }: { kwh: number }) {
-  // Seven-segment digital display style
+  const { t } = useTranslation(['customerDashboard', 'common']);
   const display = kwh.toFixed(1);
 
   return (
@@ -79,7 +80,7 @@ function SmartMeterFace({ kwh }: { kwh: number }) {
           {/* Brand label */}
           <div className="text-center mb-2">
             <span className="text-[10px] tracking-[0.3em] uppercase text-gray-400 font-medium">
-              1PWR Smart Meter
+              {t('customerDashboard:meterFace.brand')}
             </span>
           </div>
 
@@ -88,7 +89,7 @@ function SmartMeterFace({ kwh }: { kwh: number }) {
             {/* Units remaining label */}
             <div className="text-center mb-1">
               <span className="text-[10px] uppercase tracking-wider text-green-700 font-medium">
-                Units Remaining
+                {t('customerDashboard:meterFace.unitsRemaining')}
               </span>
             </div>
 
@@ -111,7 +112,7 @@ function SmartMeterFace({ kwh }: { kwh: number }) {
                 className="text-lg font-mono font-semibold tracking-widest"
                 style={{ color: '#39ff14aa' }}
               >
-                kWh
+                {t('customerDashboard:meterFace.kwh')}
               </span>
             </div>
           </div>
@@ -120,11 +121,11 @@ function SmartMeterFace({ kwh }: { kwh: number }) {
           <div className="flex justify-between items-center mt-3 px-2">
             <div className="flex items-center gap-1.5">
               <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_4px_#22c55e]" />
-              <span className="text-[9px] text-gray-400 uppercase">Active</span>
+              <span className="text-[9px] text-gray-400 uppercase">{t('customerDashboard:meterFace.active')}</span>
             </div>
             <div className="flex items-center gap-1.5">
               <div className="w-2 h-2 rounded-full bg-blue-400 shadow-[0_0_4px_#60a5fa]" />
-              <span className="text-[9px] text-gray-400 uppercase">Connected</span>
+              <span className="text-[9px] text-gray-400 uppercase">{t('customerDashboard:meterFace.connected')}</span>
             </div>
             <div className="flex items-center gap-1.5">
               {kwh < 10 ? (
@@ -132,7 +133,7 @@ function SmartMeterFace({ kwh }: { kwh: number }) {
               ) : (
                 <div className="w-2 h-2 rounded-full bg-gray-600" />
               )}
-              <span className="text-[9px] text-gray-400 uppercase">Low</span>
+              <span className="text-[9px] text-gray-400 uppercase">{t('customerDashboard:meterFace.low')}</span>
             </div>
           </div>
         </div>
@@ -194,11 +195,24 @@ const ROLE_BADGES: Record<string, { label: string; color: string }> = {
 };
 
 function MeterInfoCard({ meters }: { meters: MeterInfo[] }) {
+  const { t } = useTranslation(['customerDashboard', 'common']);
   if (!meters.length) return null;
+
+  const pLabel: Record<string, string> = {
+    sparkmeter: t('customerDashboard:meters.sparkMeter'),
+    prototype: t('customerDashboard:meters.oneMeter'),
+    legacy: t('customerDashboard:meters.legacy'),
+  };
+  const rLabel: Record<string, string> = {
+    primary: t('customerDashboard:meters.primary'),
+    check: t('customerDashboard:meters.check'),
+    backup: t('customerDashboard:meters.backup'),
+  };
+
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
       <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">
-        Meters on This Account
+        {t('customerDashboard:meters.title')}
       </h3>
       <div className="space-y-2">
         {meters.map((m) => {
@@ -213,11 +227,11 @@ function MeterInfoCard({ meters }: { meters: MeterInfo[] }) {
                   {m.meter_id}
                 </span>
                 <span className="ml-2 text-xs text-gray-400">
-                  {PLATFORM_LABELS[m.platform] ?? m.platform}
+                  {pLabel[m.platform] ?? PLATFORM_LABELS[m.platform] ?? m.platform}
                 </span>
               </div>
               <span className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full ${badge.color}`}>
-                {badge.label}
+                {rLabel[m.role] ?? badge.label}
               </span>
             </div>
           );
@@ -225,8 +239,7 @@ function MeterInfoCard({ meters }: { meters: MeterInfo[] }) {
       </div>
       {meters.some((m) => m.role === 'check') && (
         <p className="text-[11px] text-gray-400 mt-2">
-          Check meters are installed for verification alongside the primary meter.
-          Dashboard totals use only the primary meter.
+          {t('customerDashboard:meters.checkNote')}
         </p>
       )}
     </div>
@@ -238,6 +251,7 @@ function MeterInfoCard({ meters }: { meters: MeterInfo[] }) {
 // ---------------------------------------------------------------------------
 
 export default function CustomerDashboardPage() {
+  const { t } = useTranslation(['customerDashboard', 'common']);
   const [data, setData] = useState<CustomerDashboard | null>(null);
   const [acct, setAcct] = useState('');
   const [loading, setLoading] = useState(true);
@@ -266,7 +280,7 @@ export default function CustomerDashboardPage() {
     return (
       <div className="text-center py-16">
         <p className="text-red-500 text-lg">{error}</p>
-        <p className="text-gray-400 text-sm mt-2">Unable to load your dashboard. Please try again later.</p>
+        <p className="text-gray-400 text-sm mt-2">{t('customerDashboard:error')}</p>
       </div>
     );
   }
@@ -280,13 +294,13 @@ export default function CustomerDashboardPage() {
     <div className="max-w-2xl mx-auto space-y-6 pb-8">
       {/* Greeting */}
       <div className="text-center pt-2">
-        <h1 className="text-lg font-semibold text-gray-700">Welcome back</h1>
+        <h1 className="text-lg font-semibold text-gray-700">{t('customerDashboard:welcome')}</h1>
         {acct && (
           <Link
             to="/my/profile"
             className="inline-block mt-1 text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline"
           >
-            Account {acct}
+            {t('customerDashboard:accountLabel', { acct })}
           </Link>
         )}
       </div>
@@ -297,12 +311,12 @@ export default function CustomerDashboardPage() {
       {/* Last Payment */}
       {data.last_payment ? (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 text-center">
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Last Payment</p>
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{t('customerDashboard:lastPayment.title')}</p>
           <p className="text-2xl font-bold text-gray-900 mt-1">
             {data.currency_code || 'LSL'} {data.last_payment.amount.toLocaleString('en-ZA', { minimumFractionDigits: 2 })}
           </p>
           <p className="text-sm text-gray-500">
-            received {fmtDate(data.last_payment.date)}
+            {t('customerDashboard:lastPayment.received')} {fmtDate(data.last_payment.date)}
             {data.last_payment.kwh_purchased > 0 && (
               <span className="text-green-600 ml-1">
                 (+{data.last_payment.kwh_purchased.toFixed(1)} kWh)
@@ -312,8 +326,8 @@ export default function CustomerDashboardPage() {
         </div>
       ) : (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 text-center">
-          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Last Payment</p>
-          <p className="text-gray-400 mt-1">No payment records found</p>
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{t('customerDashboard:lastPayment.title')}</p>
+          <p className="text-gray-400 mt-1">{t('customerDashboard:lastPayment.noRecords')}</p>
         </div>
       )}
 
@@ -325,25 +339,25 @@ export default function CustomerDashboardPage() {
       {/* Key Stats Grid */}
       <div className="grid grid-cols-2 gap-3">
         <StatCard
-          label="Avg. Daily Usage"
+          label={t('customerDashboard:stats.avgDailyUsage')}
           value={`${data.avg_kwh_per_day.toFixed(1)} kWh`}
-          sub="past 30 days"
+          sub={t('customerDashboard:stats.past30Days')}
         />
         <StatCard
-          label="Est. Time to Recharge"
+          label={t('customerDashboard:stats.estRecharge')}
           value={countdown}
-          sub="DD:HH:MM"
+          sub={t('customerDashboard:stats.format')}
           warn={lowBalance}
         />
         <StatCard
-          label="Total Consumption"
+          label={t('customerDashboard:stats.totalConsumption')}
           value={`${data.total_kwh_all_time.toLocaleString('en-ZA', { maximumFractionDigits: 0 })} kWh`}
-          sub="all time"
+          sub={t('customerDashboard:stats.allTime')}
         />
         <StatCard
-          label="Total Purchases"
+          label={t('customerDashboard:stats.totalPurchases')}
           value={`${data.currency_code || 'LSL'} ${data.total_lsl_all_time.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-          sub="all time"
+          sub={t('customerDashboard:stats.allTime')}
         />
       </div>
 
@@ -354,9 +368,9 @@ export default function CustomerDashboardPage() {
         const isMulti = sources.length > 1;
         const srcColors: Record<string, string> = { 'SparkMeter': CHART_BLUE, '1Meter Prototype': CHART_AMBER };
         return (
-          <ChartCard title={isMulti ? 'Meter Comparison — Last 24 Hours (kWh / hour)' : 'Last 24 Hours (kWh / hour)'}>
+          <ChartCard title={isMulti ? `${t('customerDashboard:charts.meterComparison24')} (kWh / hour)` : `${t('customerDashboard:charts.last24h')} (kWh / hour)`}>
             {isMulti && (
-              <p className="text-xs text-gray-400 -mt-2 mb-3">Both meters measure the same load. Close agreement confirms accuracy.</p>
+              <p className="text-xs text-gray-400 -mt-2 mb-3">{t('customerDashboard:charts.bothMetersNote')}</p>
             )}
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={pts} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
@@ -396,7 +410,7 @@ export default function CustomerDashboardPage() {
       })()}
 
       {/* 7-Day Bar Chart */}
-      <ChartCard title="Last 7 Days (kWh / day)">
+      <ChartCard title={`${t('customerDashboard:charts.last7d')} (kWh / day)`}>
         <ResponsiveContainer width="100%" height={200}>
           <BarChart data={data.daily_7d} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
@@ -414,7 +428,7 @@ export default function CustomerDashboardPage() {
               width={40}
             />
             <Tooltip
-              formatter={(v: any) => [`${Number(v).toFixed(2)} kWh`, 'Consumption']}
+              formatter={(v: any) => [`${Number(v).toFixed(2)} kWh`, t('customerDashboard:charts.consumption')]}
               labelFormatter={(label: any) => fmtDate(String(label))}
               contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', fontSize: 12 }}
             />
@@ -425,7 +439,7 @@ export default function CustomerDashboardPage() {
 
       {/* Meter Comparison (shown when check meter is present) */}
       {data.meter_comparison && data.meter_comparison.length > 0 && (
-        <ChartCard title="Meter Comparison — Last 7 Days (kWh / day)">
+        <ChartCard title={`${t('customerDashboard:charts.meterComparison7d')} (kWh / day)`}>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={data.meter_comparison} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
@@ -457,13 +471,13 @@ export default function CustomerDashboardPage() {
             </BarChart>
           </ResponsiveContainer>
           <p className="text-[11px] text-gray-400 mt-2 text-center">
-            Both meters measure the same load. Close agreement confirms accuracy.
+            {t('customerDashboard:charts.bothMetersNote')}
           </p>
         </ChartCard>
       )}
 
       {/* 30-Day Line Chart */}
-      <ChartCard title="Last 30 Days (kWh / day)">
+      <ChartCard title={`${t('customerDashboard:charts.last30d')} (kWh / day)`}>
         <ResponsiveContainer width="100%" height={220}>
           <LineChart data={data.daily_30d} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
@@ -482,7 +496,7 @@ export default function CustomerDashboardPage() {
               width={40}
             />
             <Tooltip
-              formatter={(v: any) => [`${Number(v).toFixed(2)} kWh`, 'Consumption']}
+              formatter={(v: any) => [`${Number(v).toFixed(2)} kWh`, t('customerDashboard:charts.consumption')]}
               labelFormatter={(label: any) => fmtDate(String(label))}
               contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', fontSize: 12 }}
             />
@@ -499,7 +513,7 @@ export default function CustomerDashboardPage() {
       </ChartCard>
 
       {/* 12-Month Bar Chart */}
-      <ChartCard title="Last 12 Months (kWh / month)">
+      <ChartCard title={`${t('customerDashboard:charts.last12m')} (kWh / month)`}>
         <ResponsiveContainer width="100%" height={220}>
           <BarChart data={data.monthly_12m} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
@@ -517,7 +531,7 @@ export default function CustomerDashboardPage() {
               width={48}
             />
             <Tooltip
-              formatter={(v: any) => [`${Number(v).toFixed(1)} kWh`, 'Consumption']}
+              formatter={(v: any) => [`${Number(v).toFixed(1)} kWh`, t('customerDashboard:charts.consumption')]}
               labelFormatter={(label: any) => shortMonth(String(label))}
               contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', fontSize: 12 }}
             />

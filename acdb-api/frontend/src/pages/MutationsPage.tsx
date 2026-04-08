@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { listMutations, getMutation, revertMutation } from '../lib/api';
 import type { Mutation } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -40,17 +41,18 @@ function formatMutationValue(value: unknown) {
 
 // Diff viewer for old vs new values
 function DiffView({ oldVals, newVals }: { oldVals: Record<string, unknown> | null; newVals: Record<string, unknown> | null }) {
+  const { t } = useTranslation(['mutations']);
   const allKeys = Array.from(new Set([...Object.keys(oldVals || {}), ...Object.keys(newVals || {})]));
-  if (allKeys.length === 0) return <p className="text-sm text-gray-400 italic">No data</p>;
+  if (allKeys.length === 0) return <p className="text-sm text-gray-400 italic">{t('mutations:detail.noData')}</p>;
 
   return (
     <div className="overflow-x-auto">
       <table className="min-w-full text-sm">
         <thead>
           <tr className="border-b bg-gray-50">
-            <th className="px-3 py-2 text-left font-medium text-gray-600">Field</th>
-            <th className="px-3 py-2 text-left font-medium text-gray-600">Old Value</th>
-            <th className="px-3 py-2 text-left font-medium text-gray-600">New Value</th>
+            <th className="px-3 py-2 text-left font-medium text-gray-600">{t('mutations:detail.field')}</th>
+            <th className="px-3 py-2 text-left font-medium text-gray-600">{t('mutations:detail.oldValue')}</th>
+            <th className="px-3 py-2 text-left font-medium text-gray-600">{t('mutations:detail.newValue')}</th>
           </tr>
         </thead>
         <tbody>
@@ -77,6 +79,7 @@ function DiffView({ oldVals, newVals }: { oldVals: Record<string, unknown> | nul
 }
 
 export default function MutationsPage() {
+  const { t } = useTranslation(['mutations', 'common']);
   const { user } = useAuth();
   const canRevert = user?.role === 'superadmin' || user?.role === 'onm_team';
   const canRevertAction = (action: string) => ['create', 'update', 'delete'].includes(action);
@@ -140,14 +143,14 @@ export default function MutationsPage() {
   };
 
   const handleRevert = async (id: number) => {
-    if (!confirm('Are you sure you want to revert this mutation? This will modify the database.')) return;
+    if (!confirm(t('mutations:revertConfirm'))) return;
     setReverting(true);
     try {
       await revertMutation(id);
       setSelectedMutation(null);
       fetchMutations();
     } catch (e: any) {
-      alert(`Revert failed: ${e.message}`);
+      alert(t('mutations:revertFailed', { error: e.message }));
     } finally {
       setReverting(false);
     }
@@ -156,22 +159,22 @@ export default function MutationsPage() {
   return (
     <div>
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
-        <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Mutation Log</h1>
-        <span className="text-sm text-gray-500">{total} total mutations</span>
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-800">{t('mutations:title')}</h1>
+        <span className="text-sm text-gray-500">{t('mutations:totalMutations', { count: total })}</span>
       </div>
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-2 mb-4">
         <input
           type="text"
-          placeholder="Filter by table..."
+          placeholder={t('mutations:filters.tablePlaceholder')}
           value={tableFilter}
           onChange={(e) => { setTableFilter(e.target.value); setPage(1); }}
           className="border rounded-lg px-3 py-2 text-sm flex-1 focus:ring-2 focus:ring-blue-300 focus:outline-none"
         />
         <input
           type="text"
-          placeholder="Filter by user..."
+          placeholder={t('mutations:filters.userPlaceholder')}
           value={userFilter}
           onChange={(e) => { setUserFilter(e.target.value); setPage(1); }}
           className="border rounded-lg px-3 py-2 text-sm flex-1 focus:ring-2 focus:ring-blue-300 focus:outline-none"
@@ -181,14 +184,14 @@ export default function MutationsPage() {
           onChange={(e) => { setActionFilter(e.target.value); setPage(1); }}
           className="border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-300 focus:outline-none"
         >
-          <option value="">All actions</option>
-          <option value="create">Create</option>
-          <option value="update">Update</option>
+          <option value="">{t('mutations:filters.allActions')}</option>
+          <option value="create">{t('mutations:filters.create')}</option>
+          <option value="update">{t('mutations:filters.update')}</option>
           <option value="delete">Delete</option>
-          <option value="soft_delete">Soft Delete</option>
-          <option value="restore">Restore</option>
-          <option value="assign">Assign Meter</option>
-          <option value="decommission">Decommission Meter</option>
+          <option value="soft_delete">{t('mutations:filters.softDelete')}</option>
+          <option value="restore">{t('mutations:filters.restore')}</option>
+          <option value="assign">{t('mutations:filters.assignMeter')}</option>
+          <option value="decommission">{t('mutations:filters.decommission')}</option>
           <option value="batch_status">Batch Status</option>
           <option value="bulk_import">Bulk Import</option>
           <option value="password_registered">Password Registered</option>
@@ -199,9 +202,9 @@ export default function MutationsPage() {
       {error && <div className="bg-red-50 text-red-700 px-4 py-2 rounded-lg text-sm mb-4">{error}</div>}
 
       {loading ? (
-        <div className="text-center py-12 text-gray-400">Loading...</div>
+        <div className="text-center py-12 text-gray-400">{t('mutations:loading')}</div>
       ) : mutations.length === 0 ? (
-        <div className="text-center py-12 text-gray-400">No mutations recorded yet</div>
+        <div className="text-center py-12 text-gray-400">{t('mutations:empty')}</div>
       ) : (
         <>
           {/* Desktop table */}
@@ -209,13 +212,13 @@ export default function MutationsPage() {
             <table className="min-w-full text-sm">
               <thead className="bg-gray-50 border-b">
                 <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">#</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Timestamp</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Action</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Table</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Record</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('mutations:table.id')}</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('mutations:table.timestamp')}</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('mutations:table.user')}</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('mutations:table.action')}</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('mutations:table.tableName')}</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('mutations:table.record')}</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">{t('mutations:table.status')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -238,9 +241,9 @@ export default function MutationsPage() {
                     <td className="px-4 py-3 font-mono text-xs text-gray-600">{m.record_id}</td>
                     <td className="px-4 py-3">
                       {m.reverted ? (
-                        <span className="text-xs text-purple-600 font-medium">Reverted</span>
+                        <span className="text-xs text-purple-600 font-medium">{t('mutations:table.reverted')}</span>
                       ) : (
-                        <span className="text-xs text-gray-400">Active</span>
+                        <span className="text-xs text-gray-400">{t('mutations:table.active')}</span>
                       )}
                     </td>
                   </tr>
@@ -263,7 +266,7 @@ export default function MutationsPage() {
                   <span className="text-xs text-gray-400 font-mono">#{m.id}</span>
                   <div className="flex items-center gap-2">
                     {actionBadge(m.action)}
-                    {m.reverted && <span className="text-xs text-purple-600 font-medium">Reverted</span>}
+                    {m.reverted && <span className="text-xs text-purple-600 font-medium">{t('mutations:table.reverted')}</span>}
                   </div>
                 </div>
                 <div className="text-sm text-gray-700 font-medium">{m.table_name} &middot; {m.record_id}</div>
@@ -279,7 +282,7 @@ export default function MutationsPage() {
             <div className="mt-4 bg-white rounded-xl shadow-lg border border-blue-200 p-4 sm:p-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
                 <h2 className="text-lg font-bold text-gray-800">
-                  Mutation #{selectedMutation.id}
+                  {t('mutations:detail.title', { id: selectedMutation.id })}
                   <span className="ml-2">{actionBadge(selectedMutation.action)}</span>
                 </h2>
                 <div className="flex items-center gap-2">
@@ -289,45 +292,45 @@ export default function MutationsPage() {
                       disabled={reverting}
                       className="px-4 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 disabled:opacity-50"
                     >
-                      {reverting ? 'Reverting...' : 'Revert'}
+                      {reverting ? t('mutations:detail.reverting') : t('mutations:detail.revert')}
                     </button>
                   )}
                   <button
                     onClick={() => setSelectedMutation(null)}
                     className="px-3 py-2 text-sm text-gray-500 hover:text-gray-800 border rounded-lg"
                   >
-                    Close
+                    {t('mutations:detail.close')}
                   </button>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm mb-4">
                 <div>
-                  <span className="text-gray-400 text-xs">Table</span>
+                  <span className="text-gray-400 text-xs">{t('mutations:detail.table')}</span>
                   <p className="font-mono text-gray-700">{selectedMutation.table_name}</p>
                 </div>
                 <div>
-                  <span className="text-gray-400 text-xs">Record ID</span>
+                  <span className="text-gray-400 text-xs">{t('mutations:detail.recordId')}</span>
                   <p className="font-mono text-gray-700">{selectedMutation.record_id}</p>
                 </div>
                 <div>
-                  <span className="text-gray-400 text-xs">User</span>
+                  <span className="text-gray-400 text-xs">{t('mutations:detail.user')}</span>
                   <p className="text-gray-700">{selectedMutation.user_name || selectedMutation.user_id}</p>
                 </div>
                 <div>
-                  <span className="text-gray-400 text-xs">Time</span>
+                  <span className="text-gray-400 text-xs">{t('mutations:detail.time')}</span>
                   <p className="text-gray-700">{new Date(selectedMutation.timestamp + 'Z').toLocaleString()}</p>
                 </div>
               </div>
 
               {selectedMutation.reverted ? (
                 <div className="bg-purple-50 border border-purple-200 rounded-lg px-4 py-2 text-sm text-purple-700 mb-4">
-                  Reverted by {selectedMutation.reverted_by} at {selectedMutation.reverted_at ? new Date(selectedMutation.reverted_at + 'Z').toLocaleString() : 'unknown'}
+                  {t('mutations:detail.revertedBy', { user: selectedMutation.reverted_by, time: selectedMutation.reverted_at ? new Date(selectedMutation.reverted_at + 'Z').toLocaleString() : 'unknown' })}
                 </div>
               ) : null}
 
               {detailLoading ? (
-                <div className="text-center py-8 text-gray-400">Loading details...</div>
+                <div className="text-center py-8 text-gray-400">{t('mutations:loadingDetails')}</div>
               ) : (
                 <DiffView
                   oldVals={selectedMutation.old_values || null}

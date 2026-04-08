@@ -1,0 +1,27 @@
+{
+  "title": "Pipeline d'intégration",
+  "allSites": "Tous les sites",
+  "commissioningFunnel": "Entonnoir de mise en service",
+  "stages": {
+    "registered": "Enregistré",
+    "connectionFeePaid": "Frais de raccordement payés",
+    "readyboardFeePaid": "Frais du tableau payés",
+    "readyboardTested": "Tableau testé",
+    "readyboardInstalled": "Tableau installé",
+    "airdacConnected": "Airdac raccordé",
+    "meterInstalled": "Compteur installé",
+    "commissioned": "Mis en service"
+  },
+  "stats": {
+    "totalRegistered": "Total enregistrés",
+    "fullyCommissioned": "Entièrement mis en service",
+    "conversionRate": "Taux de conversion",
+    "inProgress": "En cours"
+  },
+  "table": {
+    "stage": "Étape",
+    "count": "Nombre",
+    "pctRegistered": "% des enregistrés",
+    "dropOff": "Abandon"
+  }
+}

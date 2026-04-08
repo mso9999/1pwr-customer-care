@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   listRows,
   deleteRecord,
@@ -13,6 +14,7 @@ import { useAuth } from '../contexts/AuthContext';
 type ModalKind = 'delete' | 'decommission' | 'history' | null;
 
 export default function MetersPage() {
+  const { t } = useTranslation(['meters', 'common']);
   const [data, setData] = useState<PaginatedResponse | null>(null);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -28,12 +30,10 @@ export default function MetersPage() {
   const [busy, setBusy] = useState(false);
   const [modal, setModal] = useState<ModalKind>(null);
 
-  // Decommission form state
   const [decommReason, setDecommReason] = useState('faulty');
   const [decommReplacement, setDecommReplacement] = useState('');
   const [decommNotes, setDecommNotes] = useState('');
 
-  // History modal state
   const [historyMeterId, setHistoryMeterId] = useState('');
   const [historyData, setHistoryData] = useState<MeterAssignment[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -100,7 +100,7 @@ export default function MetersPage() {
     setSelected(new Set());
     setBusy(false);
     fetchData();
-    if (failed) alert(`${failed} of ${ids.length} records failed to delete.`);
+    if (failed) alert(t('meters:deleteFailed', { failed, total: ids.length, count: ids.length }));
   };
 
   const handleDecommission = async () => {
@@ -123,7 +123,7 @@ export default function MetersPage() {
     setDecommReplacement('');
     setDecommNotes('');
     fetchData();
-    if (failed) alert(`${failed} of ${ids.length} records failed to update.`);
+    if (failed) alert(t('meters:updateFailed', { failed, total: ids.length, count: ids.length }));
   };
 
   const openHistory = async (meterId: string) => {
@@ -192,32 +192,31 @@ export default function MetersPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Meters</h1>
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-800">{t('meters:title')}</h1>
         {canWriteCustomers && (
           <Link to="/assign-meter" className="px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 active:bg-blue-800 transition flex items-center gap-1.5">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-            Assign Meter
+            {t('meters:assignMeter')}
           </Link>
         )}
       </div>
 
-      {/* Filters */}
       <div className="space-y-2 sm:space-y-0 sm:flex sm:gap-3 sm:flex-wrap">
         <form onSubmit={handleSearch} className="flex gap-2">
           <input
             value={searchInput}
             onChange={e => setSearchInput(e.target.value)}
-            placeholder="Search meter ID, account..."
+            placeholder={t('meters:searchPlaceholder')}
             className="flex-1 sm:w-64 px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
           />
-          <button type="submit" className="px-3 py-2 bg-gray-100 border rounded-lg text-sm hover:bg-gray-200 whitespace-nowrap">Search</button>
+          <button type="submit" className="px-3 py-2 bg-gray-100 border rounded-lg text-sm hover:bg-gray-200 whitespace-nowrap">{t('meters:search')}</button>
         </form>
         <select
           value={filterSite}
           onChange={e => { setFilterSite(e.target.value); setFilterPlatform(''); setFilterStatus(''); setPage(1); }}
           className="w-full sm:w-auto px-3 py-2 border rounded-lg text-sm bg-white"
         >
-          <option value="">All Sites</option>
+          <option value="">{t('meters:allSites')}</option>
           {sites.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
         <select
@@ -225,7 +224,7 @@ export default function MetersPage() {
           onChange={e => { setFilterPlatform(e.target.value); setFilterSite(''); setFilterStatus(''); setPage(1); }}
           className="w-full sm:w-auto px-3 py-2 border rounded-lg text-sm bg-white"
         >
-          <option value="">All Platforms</option>
+          <option value="">{t('meters:allPlatforms')}</option>
           {['sparkmeter', 'koios', 'prototype'].map(p => <option key={p} value={p}>{p}</option>)}
         </select>
         <select
@@ -233,19 +232,18 @@ export default function MetersPage() {
           onChange={e => { setFilterStatus(e.target.value); setFilterSite(''); setFilterPlatform(''); setPage(1); }}
           className="w-full sm:w-auto px-3 py-2 border rounded-lg text-sm bg-white"
         >
-          <option value="">All Statuses</option>
+          <option value="">{t('meters:allStatuses')}</option>
           {['active', 'maintenance', 'faulty', 'test', 'decommissioned'].map(s => <option key={s} value={s}>{s}</option>)}
         </select>
       </div>
 
-      {/* Selection bar */}
       {canWriteCustomers && selected.size > 0 && (
         <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
           <span className="text-sm font-medium text-blue-800">
-            {selected.size} meter{selected.size !== 1 ? 's' : ''} selected
+            {t('meters:metersSelected', { count: selected.size })}
           </span>
           <div className="flex gap-2">
-            <button onClick={() => setSelected(new Set())} className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition">Clear</button>
+            <button onClick={() => setSelected(new Set())} className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition">{t('meters:clear')}</button>
             <button
               onClick={() => { setDecommReason('faulty'); setDecommReplacement(''); setDecommNotes(''); setModal('decommission'); }}
               disabled={busy}
@@ -254,7 +252,7 @@ export default function MetersPage() {
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
               </svg>
-              Decommission
+              {t('meters:decommission')}
             </button>
             <button
               onClick={() => setModal('delete')}
@@ -264,13 +262,12 @@ export default function MetersPage() {
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
               </svg>
-              Delete
+              {t('meters:delete')}
             </button>
           </div>
         </div>
       )}
 
-      {/* Delete confirm modal */}
       {modal === 'delete' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setModal(null)}>
           <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full mx-4 p-6" onClick={e => e.stopPropagation()}>
@@ -280,20 +277,19 @@ export default function MetersPage() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                 </svg>
               </div>
-              <h3 className="text-lg font-semibold text-gray-800">Delete Meters</h3>
+              <h3 className="text-lg font-semibold text-gray-800">{t('meters:deleteMeters')}</h3>
             </div>
             <p className="text-sm text-gray-600 mb-6">
-              Permanently delete <strong>{selected.size}</strong> meter record{selected.size !== 1 ? 's' : ''}? This cannot be undone.
+              {t('meters:deleteConfirm', { count: selected.size })}
             </p>
             <div className="flex gap-3">
-              <button onClick={() => setModal(null)} className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-200 transition">Cancel</button>
-              <button onClick={handleDelete} className="flex-1 py-2.5 bg-red-600 text-white rounded-xl text-sm font-semibold hover:bg-red-700 transition">Delete {selected.size}</button>
+              <button onClick={() => setModal(null)} className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-200 transition">{t('meters:cancel')}</button>
+              <button onClick={handleDelete} className="flex-1 py-2.5 bg-red-600 text-white rounded-xl text-sm font-semibold hover:bg-red-700 transition">{t('meters:deleteCount', { count: selected.size })}</button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Decommission modal */}
       {modal === 'decommission' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setModal(null)}>
           <div className="bg-white rounded-2xl shadow-xl max-w-md w-full mx-4 p-6" onClick={e => e.stopPropagation()}>
@@ -304,44 +300,44 @@ export default function MetersPage() {
                 </svg>
               </div>
               <div>
-                <h3 className="text-lg font-semibold text-gray-800">Decommission Meter{selected.size > 1 ? 's' : ''}</h3>
-                <p className="text-xs text-gray-500">{selected.size} meter{selected.size !== 1 ? 's' : ''} selected</p>
+                <h3 className="text-lg font-semibold text-gray-800">{t('meters:decommissionMeters')}</h3>
+                <p className="text-xs text-gray-500">{t('meters:metersSelected', { count: selected.size })}</p>
               </div>
             </div>
 
             <div className="space-y-4 mb-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Reason</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t('meters:reason')}</label>
                 <select
                   value={decommReason}
                   onChange={e => setDecommReason(e.target.value)}
                   className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
                 >
-                  <option value="faulty">Faulty</option>
-                  <option value="test">Test Meter</option>
-                  <option value="decommissioned">Decommissioned</option>
-                  <option value="retired">Retired</option>
+                  <option value="faulty">{t('meters:faulty')}</option>
+                  <option value="test">{t('meters:testMeter')}</option>
+                  <option value="decommissioned">{t('meters:decommissioned')}</option>
+                  <option value="retired">{t('meters:retired')}</option>
                 </select>
               </div>
               {selected.size === 1 && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Replacement Meter ID (optional)</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">{t('meters:replacementMeter')}</label>
                   <input
                     value={decommReplacement}
                     onChange={e => setDecommReplacement(e.target.value)}
-                    placeholder="e.g. SMRSD-04-00035EDB"
+                    placeholder={t('meters:replacementPlaceholder')}
                     className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-amber-500 outline-none"
                   />
-                  <p className="text-xs text-gray-400 mt-1">The replacement will inherit this meter's account assignment</p>
+                  <p className="text-xs text-gray-400 mt-1">{t('meters:replacementHint')}</p>
                 </div>
               )}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t('meters:notes')}</label>
                 <textarea
                   value={decommNotes}
                   onChange={e => setDecommNotes(e.target.value)}
                   rows={2}
-                  placeholder="Additional context..."
+                  placeholder={t('meters:notesPlaceholder')}
                   className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-amber-500 outline-none resize-none"
                 />
               </div>
@@ -349,30 +345,26 @@ export default function MetersPage() {
 
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-6">
               <p className="text-xs text-blue-700">
-                <strong>Consumption data is preserved.</strong> Historical readings from
-                {selected.size === 1 ? ' this meter' : ' these meters'} remain associated
-                with the customer account. The meter status will be updated and the assignment
-                history recorded.
+                {t('meters:consumptionPreserved')}
               </p>
             </div>
 
             <div className="flex gap-3">
-              <button onClick={() => setModal(null)} className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-200 transition">Cancel</button>
+              <button onClick={() => setModal(null)} className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-200 transition">{t('meters:cancel')}</button>
               <button onClick={handleDecommission} className="flex-1 py-2.5 bg-amber-600 text-white rounded-xl text-sm font-semibold hover:bg-amber-700 transition">
-                Decommission {selected.size}
+                {t('meters:decommissionCount', { count: selected.size })}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* History modal */}
       {modal === 'history' && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setModal(null)}>
           <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full mx-4 p-6 max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h3 className="text-lg font-semibold text-gray-800">Assignment History</h3>
+                <h3 className="text-lg font-semibold text-gray-800">{t('meters:assignmentHistory')}</h3>
                 <p className="text-sm text-gray-500 font-mono">{historyMeterId}</p>
               </div>
               <button onClick={() => setModal(null)} className="p-1 text-gray-400 hover:text-gray-600">
@@ -383,9 +375,9 @@ export default function MetersPage() {
             </div>
 
             {historyLoading ? (
-              <div className="py-8 text-center text-gray-400">Loading...</div>
+              <div className="py-8 text-center text-gray-400">{t('meters:loading')}</div>
             ) : historyData.length === 0 ? (
-              <div className="py-8 text-center text-gray-400">No assignment history found</div>
+              <div className="py-8 text-center text-gray-400">{t('meters:noHistory')}</div>
             ) : (
               <div className="space-y-3">
                 {historyData.map((a, i) => (
@@ -399,13 +391,13 @@ export default function MetersPage() {
                           {a.removal_reason || 'removed'}
                         </span>
                       ) : (
-                        <span className="px-2 py-0.5 text-xs rounded-full bg-green-200 text-green-700">active</span>
+                        <span className="px-2 py-0.5 text-xs rounded-full bg-green-200 text-green-700">{t('meters:active')}</span>
                       )}
                     </div>
                     <div className="text-xs text-gray-500 space-y-0.5">
-                      <p>Assigned: {fmtDate(a.assigned_at)}</p>
-                      {a.removed_at && <p>Removed: {fmtDate(a.removed_at)}</p>}
-                      {a.replaced_by && <p>Replaced by: <span className="font-mono">{a.replaced_by}</span></p>}
+                      <p>{t('meters:assigned')}: {fmtDate(a.assigned_at)}</p>
+                      {a.removed_at && <p>{t('meters:removed')}: {fmtDate(a.removed_at)}</p>}
+                      {a.replaced_by && <p>{t('meters:replacedBy')}: <span className="font-mono">{a.replaced_by}</span></p>}
                       {a.notes && <p className="text-gray-400 italic">{a.notes}</p>}
                     </div>
                   </div>
@@ -416,14 +408,12 @@ export default function MetersPage() {
         </div>
       )}
 
-      {/* Content */}
       {loading || busy ? (
-        <div className="text-center py-8 text-gray-400">{busy ? 'Processing...' : 'Loading...'}</div>
+        <div className="text-center py-8 text-gray-400">{busy ? t('meters:processing') : t('meters:loading')}</div>
       ) : !data || data.rows.length === 0 ? (
-        <div className="text-center py-8 text-gray-400">No meters found</div>
+        <div className="text-center py-8 text-gray-400">{t('meters:noMeters')}</div>
       ) : (
         <>
-          {/* Desktop table */}
           <div className="hidden md:block bg-white rounded-lg shadow overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b">
@@ -433,13 +423,13 @@ export default function MetersPage() {
                       <input type="checkbox" checked={allSelected} onChange={toggleAll} className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
                     </th>
                   )}
-                  <th className="px-4 py-3 text-left font-medium text-gray-600">Meter ID</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-600">Account</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-600">Customer</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-600">Site</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-600">Platform</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-600">Role</th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-600">Status</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">{t('meters:colMeterId')}</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">{t('meters:colAccount')}</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">{t('meters:colCustomer')}</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">{t('meters:colSite')}</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">{t('meters:colPlatform')}</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">{t('meters:colRole')}</th>
+                  <th className="px-4 py-3 text-left font-medium text-gray-600">{t('meters:colStatus')}</th>
                   <th className="px-4 py-3 w-10"></th>
                 </tr>
               </thead>
@@ -475,7 +465,7 @@ export default function MetersPage() {
                         <button
                           onClick={() => openHistory(mid)}
                           className="p-1 text-gray-400 hover:text-blue-600 rounded transition"
-                          title="View assignment history"
+                          title={t('meters:viewHistory')}
                         >
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -489,11 +479,10 @@ export default function MetersPage() {
             </table>
           </div>
 
-          {/* Mobile cards */}
           <div className="md:hidden space-y-2">
             {canWriteCustomers && data.rows.length > 0 && (
               <button onClick={toggleAll} className="text-sm text-blue-600 font-medium px-1 py-1">
-                {allSelected ? 'Deselect All' : 'Select All'}
+                {allSelected ? t('meters:deselectAll') : t('meters:selectAll')}
               </button>
             )}
             {data.rows.map((row, i) => {
@@ -526,7 +515,7 @@ export default function MetersPage() {
                           <button
                             onClick={() => openHistory(mid)}
                             className="p-1 text-gray-400 hover:text-blue-600 rounded transition"
-                            title="History"
+                            title={t('meters:history')}
                           >
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -535,8 +524,8 @@ export default function MetersPage() {
                         </div>
                       </div>
                       <div className="mt-2 text-xs text-gray-500 space-y-0.5">
-                        {acct && <p>Account: <Link to={`/customer-data?account=${acct}`} className="text-blue-600 hover:underline">{acct}</Link></p>}
-                        {cid && <p>Customer: <Link to={`/customers/${cid}`} className="text-blue-600 hover:underline">#{cid}</Link></p>}
+                        {acct && <p>{t('meters:colAccount')}: <Link to={`/customer-data?account=${acct}`} className="text-blue-600 hover:underline">{acct}</Link></p>}
+                        {cid && <p>{t('meters:colCustomer')}: <Link to={`/customers/${cid}`} className="text-blue-600 hover:underline">#{cid}</Link></p>}
                       </div>
                     </div>
                   </div>
@@ -545,7 +534,6 @@ export default function MetersPage() {
             })}
           </div>
 
-          {/* Pagination */}
           <div className="flex items-center justify-between text-sm text-gray-500">
             <span className="text-xs sm:text-sm">Page {data.page}/{data.pages} ({data.total.toLocaleString()})</span>
             <div className="flex gap-2">

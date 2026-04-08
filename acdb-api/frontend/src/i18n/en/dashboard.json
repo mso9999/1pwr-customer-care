@@ -1,0 +1,96 @@
+{
+  "dashboard": {
+    "title": "Dashboard",
+    "loading": "Loading dashboard...",
+    "filters": {
+      "sites": "Sites",
+      "allCount": "All ({{count}})"
+    },
+    "cards": {
+      "registeredCustomers": "Registered Customers",
+      "allSitesSubtitle": "all sites",
+      "allTimeMwh": "All-Time MWh",
+      "cumulativeEnergyDelivered": "Cumulative energy delivered",
+      "allTimeRevenue": "All-Time Revenue",
+      "sites": "Sites"
+    },
+    "portfolio": {
+      "title": "Portfolio Revenue & ARPU",
+      "subtitle": "Rolling {{months}}-month view · All values converted to USD at indicative rates"
+    },
+    "kpi": {
+      "activeConnections": "Active Connections",
+      "accountsWithActiveMeter": "Accounts with active meter",
+      "monthRevenue": "{{months}}-Month Revenue",
+      "latestMonthArpu": "Latest Month ARPU",
+      "prorated": "Prorated ({{pct}}% of month elapsed)",
+      "vsPriorMonth": "{{pct}}% vs prior month",
+      "avgMonthlyArpu": "Avg Monthly ARPU",
+      "monthAverageSubtitle": "{{months}}-month average"
+    },
+    "charts": {
+      "monthlyRevenueAndArpu": "Monthly Revenue (USD) & ARPU",
+      "revenueLegendSuffix": "Revenue",
+      "arpuLegend": "ARPU (USD)",
+      "customersPerSite": "Customers per Site",
+      "customerDistribution": "Customer Distribution"
+    },
+    "breakdown": {
+      "summary": "Monthly Breakdown by Country",
+      "clickToExpand": "(click to expand)",
+      "table": {
+        "month": "Month",
+        "revenueSuffix": "Revenue",
+        "payingSuffix": "Paying",
+        "totalUsd": "Total (USD)",
+        "arpuUsd": "ARPU (USD)"
+      },
+      "footer": {
+        "totalAvg": "Total / Avg",
+        "avgSuffix": "avg"
+      }
+    },
+    "completeness": {
+      "title": "1PDB Record Completeness",
+      "dataThrough": "Data through {{date}}",
+      "kpi": {
+        "registeredCustomers": "Registered Customers",
+        "commissioned": "Commissioned",
+        "hourlyRecords": "Hourly Records",
+        "overallComplete": "Overall Complete"
+      },
+      "table": {
+        "customerType": "Customer Type",
+        "customers": "Customers",
+        "commissioned": "Commissioned",
+        "accountsWithData": "Accounts with Data",
+        "hourlyRecords": "Hourly Records",
+        "expectedRecords": "Expected Records",
+        "pctComplete": "% Complete"
+      },
+      "empty": "No hourly record completeness data available yet."
+    },
+    "quickLinks": {
+      "helpInstructions": "Help & Instructions",
+      "operatingManual": "Operating Manual",
+      "onboarding": "Onboarding",
+      "pipelineFunnel": "Pipeline Funnel",
+      "payments": "Payments",
+      "recordPayment": "Record Payment",
+      "customersHeading": "Customers",
+      "commission": "Commission"
+    },
+    "siteCharts": {
+      "noSiteData": "No site data available"
+    },
+    "sitePerformance": {
+      "title": "Site Performance",
+      "mwh": "MWh",
+      "mwhPerCustomer": "MWh/Customer"
+    },
+    "databaseTables": "Database Tables ({{count}})",
+    "tooltip": {
+      "customers": "Customers"
+    }
+  }
+}

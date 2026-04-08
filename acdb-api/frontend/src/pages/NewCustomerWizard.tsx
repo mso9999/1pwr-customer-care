@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { listSites, listUGPConnections, registerCustomerRecord, type CustomerRegistrationResult, type UGPConnection } from '../lib/api';
 
 // ---------------------------------------------------------------------------
@@ -67,6 +68,7 @@ interface UGPPickerProps {
 }
 
 function UGPConnectionPicker({ sites, onSelect, onClose }: UGPPickerProps) {
+  const { t } = useTranslation(['newCustomer', 'common']);
   const [site, setSite] = useState('');
   const [connections, setConnections] = useState<UGPConnection[]>([]);
   const [loading, setLoading] = useState(false);
@@ -148,14 +150,13 @@ function UGPConnectionPicker({ sites, onSelect, onClose }: UGPPickerProps) {
         className="bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[85vh] flex flex-col"
         onClick={e => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="px-5 pt-5 pb-3 border-b shrink-0">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
               <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
               </svg>
-              <h3 className="text-lg font-semibold text-gray-800">uGridPlan Connections</h3>
+              <h3 className="text-lg font-semibold text-gray-800">{t('newCustomer:ugp.title')}</h3>
             </div>
             <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg transition">
               <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -164,37 +165,34 @@ function UGPConnectionPicker({ sites, onSelect, onClose }: UGPPickerProps) {
             </button>
           </div>
 
-          {/* Site selector */}
           <select
             value={site}
             onChange={e => { setSite(e.target.value); setSearch(''); }}
             className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm bg-white focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none appearance-none"
           >
-            <option value="">Select a site...</option>
+            <option value="">{t('newCustomer:ugp.selectSite')}</option>
             {sites.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
 
-          {/* Search within connections */}
           {connections.length > 0 && (
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="Filter by Survey ID, type, code..."
+              placeholder={t('newCustomer:ugp.filterPlaceholder')}
               className="w-full mt-2 px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none"
             />
           )}
         </div>
 
-        {/* Content */}
         <div className="flex-1 overflow-y-auto">
           {!site ? (
             <div className="text-center py-12 text-gray-400 text-sm">
-              Select a site to browse connections
+              {t('newCustomer:ugp.selectSitePrompt')}
             </div>
           ) : loading ? (
             <div className="text-center py-12 text-gray-400 text-sm flex items-center justify-center gap-2">
               <span className="animate-spin inline-block w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full" />
-              Loading connections...
+              {t('newCustomer:ugp.loadingConnections')}
             </div>
           ) : error ? (
             <div className="p-4">
@@ -202,27 +200,25 @@ function UGPConnectionPicker({ sites, onSelect, onClose }: UGPPickerProps) {
             </div>
           ) : filtered.length === 0 ? (
             <div className="text-center py-12 text-gray-400 text-sm">
-              {search ? 'No matching connections' : 'No connections found for this site'}
+              {search ? t('newCustomer:ugp.noMatching') : t('newCustomer:ugp.noConnections')}
             </div>
           ) : (
             <div>
-              {/* Unassigned connections first */}
               {unassigned.length > 0 && (
                 <div>
                   <div className="px-4 py-2 bg-green-50 border-b">
                     <p className="text-xs font-semibold text-green-700 uppercase tracking-wide">
-                      Available ({unassigned.length})
+                      {t('newCustomer:ugp.available', { count: unassigned.length })}
                     </p>
                   </div>
                   <div className="divide-y">{unassigned.map(renderRow)}</div>
                 </div>
               )}
-              {/* Already-assigned connections */}
               {assigned.length > 0 && (
                 <div>
                   <div className="px-4 py-2 bg-gray-50 border-b border-t">
                     <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                      Already Assigned ({assigned.length})
+                      {t('newCustomer:ugp.alreadyAssigned', { count: assigned.length })}
                     </p>
                   </div>
                   <div className="divide-y opacity-60">{assigned.map(renderRow)}</div>
@@ -232,10 +228,9 @@ function UGPConnectionPicker({ sites, onSelect, onClose }: UGPPickerProps) {
           )}
         </div>
 
-        {/* Footer count */}
         {site && !loading && connections.length > 0 && (
           <div className="px-4 py-2 border-t bg-gray-50 text-xs text-gray-500 text-center shrink-0">
-            {connections.length} connection{connections.length !== 1 ? 's' : ''} total
+            {t('newCustomer:ugp.connectionsTotal', { count: connections.length })}
             {search && ` · ${filtered.length} matching`}
           </div>
         )}
@@ -249,12 +244,13 @@ function UGPConnectionPicker({ sites, onSelect, onClose }: UGPPickerProps) {
 // ---------------------------------------------------------------------------
 
 function GPSCapture({ lat, lng, onChange }: { lat: string; lng: string; onChange: (lat: string, lng: string) => void }) {
+  const { t } = useTranslation(['newCustomer', 'common']);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const captureGPS = () => {
     if (!navigator.geolocation) {
-      setError('Geolocation not supported');
+      setError(t('newCustomer:fields.gpsNotSupported'));
       return;
     }
     setLoading(true);
@@ -276,7 +272,7 @@ function GPSCapture({ lat, lng, onChange }: { lat: string; lng: string; onChange
     <div className="space-y-3">
       <div className="flex gap-3">
         <div className="flex-1">
-          <label className="block text-xs text-gray-500 mb-1">Latitude</label>
+          <label className="block text-xs text-gray-500 mb-1">{t('newCustomer:fields.latitude')}</label>
           <input
             type="text"
             value={lat}
@@ -286,7 +282,7 @@ function GPSCapture({ lat, lng, onChange }: { lat: string; lng: string; onChange
           />
         </div>
         <div className="flex-1">
-          <label className="block text-xs text-gray-500 mb-1">Longitude</label>
+          <label className="block text-xs text-gray-500 mb-1">{t('newCustomer:fields.longitude')}</label>
           <input
             type="text"
             value={lng}
@@ -305,7 +301,7 @@ function GPSCapture({ lat, lng, onChange }: { lat: string; lng: string; onChange
         {loading ? (
           <>
             <span className="animate-spin inline-block w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full" />
-            Acquiring GPS...
+            {t('newCustomer:fields.acquiringGps')}
           </>
         ) : (
           <>
@@ -313,7 +309,7 @@ function GPSCapture({ lat, lng, onChange }: { lat: string; lng: string; onChange
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
-            Capture Current Location
+            {t('newCustomer:fields.captureLocation')}
           </>
         )}
       </button>
@@ -350,6 +346,7 @@ function ProgressBar({ current, total }: { current: number; total: number }) {
 // ---------------------------------------------------------------------------
 
 export default function NewCustomerWizard() {
+  const { t } = useTranslation(['newCustomer', 'common']);
   const navigate = useNavigate();
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<Record<string, string>>({});
@@ -359,6 +356,32 @@ export default function NewCustomerWizard() {
   const [showUGPPicker, setShowUGPPicker] = useState(false);
   const [ugpLinked, setUgpLinked] = useState('');
   const [createdCustomer, setCreatedCustomer] = useState<CustomerRegistrationResult | null>(null);
+
+  const fieldLabelKey: Record<string, string> = {
+    first_name: 'newCustomer:fields.firstName',
+    last_name: 'newCustomer:fields.lastName',
+    middle_name: 'newCustomer:fields.middleName',
+    gender: 'newCustomer:fields.gender',
+    national_id: 'newCustomer:fields.nationalId',
+    phone: 'newCustomer:fields.phone',
+    cell_phone_1: 'newCustomer:fields.cellPhone',
+    community: 'newCustomer:fields.site',
+    district: 'newCustomer:fields.district',
+    plot_number: 'newCustomer:fields.plotNumber',
+    street_address: 'newCustomer:fields.village',
+    GPS: 'newCustomer:fields.gpsCoordinates',
+    customer_type: 'newCustomer:fields.customerType',
+    date_service_connected: 'newCustomer:fields.dateConnected',
+  };
+
+  const fieldPlaceholderKey: Record<string, string> = {
+    phone: 'newCustomer:fields.phonePlaceholder',
+    cell_phone_1: 'newCustomer:fields.phonePlaceholder',
+    national_id: 'newCustomer:fields.idPlaceholder',
+  };
+
+  const stepTitleKeys = ['newCustomer:steps.personal', 'newCustomer:steps.location', 'newCustomer:steps.service'];
+  const stepDescKeys = ['newCustomer:steps.personalDesc', 'newCustomer:steps.locationDesc', 'newCustomer:steps.serviceDesc'];
 
   useEffect(() => {
     listSites()
@@ -397,7 +420,8 @@ export default function NewCustomerWizard() {
     const s = steps[step];
     for (const f of s.fields) {
       if (f.required && !form[f.key]?.trim()) {
-        return `${f.label} is required`;
+        const label = fieldLabelKey[f.key] ? t(fieldLabelKey[f.key]) : f.label;
+        return t('newCustomer:required', { label });
       }
     }
     return null;
@@ -438,7 +462,7 @@ export default function NewCustomerWizard() {
       });
       setCreatedCustomer(result);
     } catch (e: any) {
-      setError(e.message || 'Failed to create customer');
+      setError(e.message || t('newCustomer:createFailed'));
     } finally {
       setSaving(false);
     }
@@ -449,6 +473,9 @@ export default function NewCustomerWizard() {
   // ---------------------------------------------------------------------------
 
   const renderField = (f: FieldDef) => {
+    const label = fieldLabelKey[f.key] ? t(fieldLabelKey[f.key]) : f.label;
+    const placeholder = fieldPlaceholderKey[f.key] ? t(fieldPlaceholderKey[f.key]) : f.placeholder;
+
     if (f.type === 'ugp_picker') {
       return (
         <div key={f.key} className="col-span-2">
@@ -459,8 +486,8 @@ export default function NewCustomerWizard() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
                 </svg>
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-blue-800 truncate">Linked to {ugpLinked}</p>
-                  <p className="text-xs text-blue-600">Site, GPS, and type populated from uGridPlan</p>
+                  <p className="text-sm font-medium text-blue-800 truncate">{t('newCustomer:ugp.linkedTo', { id: ugpLinked })}</p>
+                  <p className="text-xs text-blue-600">{t('newCustomer:ugp.linkedHint')}</p>
                 </div>
               </div>
               <button
@@ -468,7 +495,7 @@ export default function NewCustomerWizard() {
                 onClick={() => setShowUGPPicker(true)}
                 className="text-xs text-blue-700 font-medium hover:underline shrink-0 ml-2"
               >
-                Change
+                {t('newCustomer:ugp.change')}
               </button>
             </div>
           ) : (
@@ -480,7 +507,7 @@ export default function NewCustomerWizard() {
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
               </svg>
-              Import from uGridPlan
+              {t('newCustomer:ugp.importFromUgp')}
             </button>
           )}
         </div>
@@ -490,7 +517,7 @@ export default function NewCustomerWizard() {
     if (f.type === 'gps') {
       return (
         <div key={f.key} className="col-span-2">
-          <label className="block text-sm font-medium text-gray-700 mb-2">{f.label}</label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">{label}</label>
           <GPSCapture
             lat={form['gps_lat'] || ''}
             lng={form['gps_lon'] || ''}
@@ -508,15 +535,15 @@ export default function NewCustomerWizard() {
       return (
         <div key={f.key} className={f.half ? '' : 'col-span-2 sm:col-span-1'}>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            {f.label} {f.required && <span className="text-red-400">*</span>}
+            {label} {f.required && <span className="text-red-400">*</span>}
           </label>
           <select
             value={form[f.key] || ''}
             onChange={e => set(f.key, e.target.value)}
             className="w-full px-4 py-3.5 border border-gray-300 rounded-xl text-base bg-white focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none appearance-none"
           >
-            <option value="">Select...</option>
-            {opts.map(o => <option key={o} value={o}>{o}</option>)}
+            <option value="">{t('newCustomer:fields.select')}</option>
+            {opts.map(o => <option key={o} value={o}>{f.key === 'gender' ? (o === 'Male' ? t('newCustomer:fields.male') : t('newCustomer:fields.female')) : o}</option>)}
           </select>
         </div>
       );
@@ -525,13 +552,13 @@ export default function NewCustomerWizard() {
     return (
       <div key={f.key} className={f.half ? '' : 'col-span-2 sm:col-span-1'}>
         <label className="block text-sm font-medium text-gray-700 mb-2">
-          {f.label} {f.required && <span className="text-red-400">*</span>}
+          {label} {f.required && <span className="text-red-400">*</span>}
         </label>
         <input
           type={f.type || 'text'}
           value={form[f.key] || ''}
           onChange={e => set(f.key, e.target.value)}
-          placeholder={f.placeholder}
+          placeholder={placeholder}
           className="w-full px-4 py-3.5 border border-gray-300 rounded-xl text-base focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none"
         />
       </div>
@@ -550,28 +577,31 @@ export default function NewCustomerWizard() {
     });
     return (
       <div className="space-y-4">
-        <p className="text-gray-500 text-sm">Review the information below and tap <strong>Create Customer</strong> to save.</p>
+        <p className="text-gray-500 text-sm">{t('newCustomer:review.tapCreate')}</p>
 
         {ugpLinked && (
           <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-xl text-sm text-blue-800">
             <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
             </svg>
-            Linked to uGridPlan: <strong>{ugpLinked}</strong>
+            {t('newCustomer:ugp.linkedTo', { id: ugpLinked })}
           </div>
         )}
 
         <div className="bg-gray-50 rounded-xl border divide-y">
-          {filledFields.map(f => (
-            <div key={f.key} className="flex justify-between items-start px-4 py-3">
-              <span className="text-sm text-gray-500 shrink-0 mr-4">{f.label}</span>
-              <span className="text-sm font-medium text-gray-800 text-right">
-                {f.type === 'gps' ? `${form['gps_lat'] || '--'}, ${form['gps_lon'] || '--'}` : form[f.key]}
-              </span>
-            </div>
-          ))}
+          {filledFields.map(f => {
+            const label = fieldLabelKey[f.key] ? t(fieldLabelKey[f.key]) : f.label;
+            return (
+              <div key={f.key} className="flex justify-between items-start px-4 py-3">
+                <span className="text-sm text-gray-500 shrink-0 mr-4">{label}</span>
+                <span className="text-sm font-medium text-gray-800 text-right">
+                  {f.type === 'gps' ? `${form['gps_lat'] || '--'}, ${form['gps_lon'] || '--'}` : form[f.key]}
+                </span>
+              </div>
+            );
+          })}
           {filledFields.length === 0 && (
-            <div className="px-4 py-6 text-center text-gray-400 text-sm">No information entered yet.</div>
+            <div className="px-4 py-6 text-center text-gray-400 text-sm">{t('newCustomer:review.noInfo')}</div>
           )}
         </div>
       </div>
@@ -588,7 +618,6 @@ export default function NewCustomerWizard() {
 
   return (
     <div className="max-w-lg mx-auto pb-8">
-      {/* Header */}
       <div className="flex items-center gap-3 mb-6">
         <button
           onClick={() => navigate('/customers')}
@@ -599,22 +628,20 @@ export default function NewCustomerWizard() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
         </button>
-        <h1 className="text-xl font-bold text-gray-800">{createdCustomer ? 'Customer Created' : 'New Customer'}</h1>
+        <h1 className="text-xl font-bold text-gray-800">{createdCustomer ? t('newCustomer:customerCreated') : t('newCustomer:title')}</h1>
       </div>
 
       {!createdCustomer && (
         <>
-          {/* Progress */}
           <ProgressBar current={step} total={TOTAL_STEPS} />
 
-          {/* Step content card */}
           <div className="bg-white rounded-2xl shadow-sm border p-5 sm:p-6 min-h-[320px]">
             <div className="mb-5">
               <h2 className="text-lg font-semibold text-gray-800">
-                {isReview ? 'Review & Submit' : currentStep!.title}
+                {isReview ? t('newCustomer:steps.review') : t(stepTitleKeys[step])}
               </h2>
               <p className="text-sm text-gray-400 mt-0.5">
-                {isReview ? 'Confirm all details are correct' : currentStep!.description}
+                {isReview ? t('newCustomer:steps.reviewDesc') : t(stepDescKeys[step])}
               </p>
             </div>
 
@@ -631,14 +658,13 @@ export default function NewCustomerWizard() {
             )}
           </div>
 
-          {/* Navigation buttons */}
           <div className="flex gap-3 mt-6">
             {step > 0 && (
               <button
                 onClick={goBack}
                 className="flex-1 py-4 bg-gray-100 text-gray-700 rounded-xl font-medium text-base hover:bg-gray-200 active:bg-gray-300 transition"
               >
-                Back
+                {t('newCustomer:back')}
               </button>
             )}
             {isReview ? (
@@ -650,16 +676,16 @@ export default function NewCustomerWizard() {
                 {saving ? (
                   <span className="flex items-center justify-center gap-2">
                     <span className="animate-spin inline-block w-5 h-5 border-2 border-white border-t-transparent rounded-full" />
-                    Creating...
+                    {t('newCustomer:creating')}
                   </span>
-                ) : 'Create Customer'}
+                ) : t('newCustomer:createCustomer')}
               </button>
             ) : (
               <button
                 onClick={goNext}
                 className="flex-1 py-4 bg-blue-600 text-white rounded-xl font-semibold text-base hover:bg-blue-700 active:bg-blue-800 transition"
               >
-                Next
+                {t('newCustomer:next')}
               </button>
             )}
           </div>
@@ -674,32 +700,32 @@ export default function NewCustomerWizard() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
               </svg>
               <div>
-                <h2 className="text-lg font-semibold text-green-900">Customer saved to CC / 1PDB</h2>
+                <h2 className="text-lg font-semibold text-green-900">{t('newCustomer:success.savedTo')}</h2>
                 <p className="text-sm text-green-800 mt-1">
-                  Keep these generated identifiers for follow-up work in CC.
+                  {t('newCustomer:success.keepIds')}
                 </p>
               </div>
             </div>
 
             <div className="mt-5 bg-gray-50 rounded-xl border divide-y">
               <div className="flex items-start justify-between gap-4 px-4 py-3">
-                <span className="text-sm text-gray-500">Customer Name</span>
+                <span className="text-sm text-gray-500">{t('newCustomer:success.customerName')}</span>
                 <span className="text-sm font-medium text-gray-900 text-right">{createdName}</span>
               </div>
               <div className="flex items-start justify-between gap-4 px-4 py-3">
-                <span className="text-sm text-gray-500">Customer ID</span>
+                <span className="text-sm text-gray-500">{t('newCustomer:success.customerId')}</span>
                 <span className="text-sm font-semibold font-mono text-gray-900 text-right">
                   {createdCustomer.customer_id_legacy}
                 </span>
               </div>
               <div className="flex items-start justify-between gap-4 px-4 py-3">
-                <span className="text-sm text-gray-500">Account Number</span>
+                <span className="text-sm text-gray-500">{t('newCustomer:success.accountNumber')}</span>
                 <span className="text-sm font-semibold font-mono text-gray-900 text-right">
                   {createdCustomer.account_number}
                 </span>
               </div>
               <div className="flex items-start justify-between gap-4 px-4 py-3">
-                <span className="text-sm text-gray-500">Site</span>
+                <span className="text-sm text-gray-500">{t('newCustomer:success.site')}</span>
                 <span className="text-sm font-medium text-gray-900 text-right">{createdCustomer.community}</span>
               </div>
             </div>
@@ -714,25 +740,24 @@ export default function NewCustomerWizard() {
               onClick={() => navigate(`/customers/${createdCustomer.customer_id_legacy}`)}
               className="flex-1 py-4 bg-blue-600 text-white rounded-xl font-semibold text-base hover:bg-blue-700 active:bg-blue-800 transition"
             >
-              Open Customer Record
+              {t('newCustomer:success.openRecord')}
             </button>
             <button
               onClick={resetWizard}
               className="flex-1 py-4 bg-gray-100 text-gray-700 rounded-xl font-medium text-base hover:bg-gray-200 active:bg-gray-300 transition"
             >
-              Create Another
+              {t('newCustomer:success.createAnother')}
             </button>
           </div>
           <button
             onClick={() => navigate('/customers', { replace: true })}
             className="w-full mt-3 py-3 text-sm text-gray-500 hover:text-gray-700"
           >
-            Back to Customers
+            {t('newCustomer:success.backToCustomers')}
           </button>
         </>
       )}
 
-      {/* uGridPlan picker modal */}
       {showUGPPicker && (
         <UGPConnectionPicker
           sites={sites}

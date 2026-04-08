@@ -1,14 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   getTariffCurrent, updateGlobalRate, updateConcessionRate, updateCustomerRate,
   deleteConcessionOverride, deleteCustomerOverride, getTariffHistory,
   type TariffCurrentResponse, type TariffHistoryEntry,
 } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function fmtDate(iso: string) {
   if (!iso) return '--';
@@ -28,10 +25,6 @@ function SourceBadge({ source }: { source: string }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Rate edit modal
-// ---------------------------------------------------------------------------
-
 interface RateModalProps {
   title: string;
   currentRate?: number;
@@ -40,6 +33,7 @@ interface RateModalProps {
 }
 
 function RateModal({ title, currentRate, onSave, onCancel }: RateModalProps) {
+  const { t } = useTranslation(['tariff', 'common']);
   const [rate, setRate] = useState(currentRate?.toString() || '');
   const [effectiveFrom, setEffectiveFrom] = useState('');
   const [notes, setNotes] = useState('');
@@ -48,13 +42,13 @@ function RateModal({ title, currentRate, onSave, onCancel }: RateModalProps) {
 
   const handleSubmit = async () => {
     const r = parseFloat(rate);
-    if (!r || r <= 0) { setError('Rate must be a positive number'); return; }
+    if (!r || r <= 0) { setError(t('tariff:errors.ratePositive')); return; }
     setSaving(true);
     setError('');
     try {
       await onSave(r, effectiveFrom || '', notes);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Save failed');
+      setError(e instanceof Error ? e.message : t('tariff:errors.saveFailed'));
       setSaving(false);
     }
   };
@@ -65,20 +59,20 @@ function RateModal({ title, currentRate, onSave, onCancel }: RateModalProps) {
         <h3 className="text-lg font-bold text-gray-800">{title}</h3>
 
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Rate (LSL / kWh)</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">{t('tariff:modal.rate')}</label>
           <input type="number" step="0.01" min="0.01" value={rate} onChange={e => setRate(e.target.value)}
             className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none"
             placeholder="e.g. 5.50" autoFocus />
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Effective From (optional, default: now)</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">{t('tariff:modal.effectiveFrom')}</label>
           <input type="datetime-local" value={effectiveFrom} onChange={e => setEffectiveFrom(e.target.value)}
             className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none" />
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Notes (optional)</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">{t('tariff:modal.notes')}</label>
           <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
             className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none"
             placeholder="e.g. Q2 tariff adjustment" />
@@ -89,21 +83,17 @@ function RateModal({ title, currentRate, onSave, onCancel }: RateModalProps) {
         <div className="flex gap-3 pt-2">
           <button onClick={onCancel}
             className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-xl font-medium text-sm hover:bg-gray-200 transition">
-            Cancel
+            {t('tariff:modal.cancel')}
           </button>
           <button onClick={handleSubmit} disabled={saving}
             className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 disabled:opacity-50 transition">
-            {saving ? 'Saving...' : 'Save'}
+            {saving ? t('tariff:modal.saving') : t('tariff:modal.save')}
           </button>
         </div>
       </div>
     </div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Add concession / customer modal
-// ---------------------------------------------------------------------------
 
 interface AddOverrideModalProps {
   scope: 'concession' | 'customer';
@@ -112,6 +102,7 @@ interface AddOverrideModalProps {
 }
 
 function AddOverrideModal({ scope, onSave, onCancel }: AddOverrideModalProps) {
+  const { t } = useTranslation(['tariff', 'common']);
   const [key, setKey] = useState('');
   const [rate, setRate] = useState('');
   const [effectiveFrom, setEffectiveFrom] = useState('');
@@ -122,14 +113,14 @@ function AddOverrideModal({ scope, onSave, onCancel }: AddOverrideModalProps) {
   const handleSubmit = async () => {
     const k = key.trim().toUpperCase();
     const r = parseFloat(rate);
-    if (!k) { setError(`${scope === 'concession' ? 'Concession code' : 'Customer ID'} is required`); return; }
-    if (!r || r <= 0) { setError('Rate must be a positive number'); return; }
+    if (!k) { setError(scope === 'concession' ? t('tariff:errors.concessionRequired') : t('tariff:errors.customerRequired')); return; }
+    if (!r || r <= 0) { setError(t('tariff:errors.ratePositive')); return; }
     setSaving(true);
     setError('');
     try {
       await onSave(k, r, effectiveFrom || '', notes);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Save failed');
+      setError(e instanceof Error ? e.message : t('tariff:errors.saveFailed'));
       setSaving(false);
     }
   };
@@ -138,33 +129,33 @@ function AddOverrideModal({ scope, onSave, onCancel }: AddOverrideModalProps) {
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onCancel}>
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 sm:p-6 space-y-4" onClick={e => e.stopPropagation()}>
         <h3 className="text-lg font-bold text-gray-800">
-          Add {scope === 'concession' ? 'Concession' : 'Customer'} Override
+          {scope === 'concession' ? t('tariff:addConcession.title') : t('tariff:addCustomer.title')}
         </h3>
 
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">
-            {scope === 'concession' ? 'Concession Code (e.g. MAK)' : 'Customer ID'}
+            {scope === 'concession' ? t('tariff:addConcession.concessionCode') : t('tariff:addCustomer.customerId')}
           </label>
           <input type="text" value={key} onChange={e => setKey(e.target.value)}
             className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none"
-            placeholder={scope === 'concession' ? 'MAK' : '5974'} autoFocus />
+            placeholder={scope === 'concession' ? t('tariff:addConcession.concessionCodePlaceholder') : t('tariff:addCustomer.customerIdPlaceholder')} autoFocus />
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Rate (LSL / kWh)</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">{t('tariff:modal.rate')}</label>
           <input type="number" step="0.01" min="0.01" value={rate} onChange={e => setRate(e.target.value)}
             className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none"
             placeholder="5.50" />
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Effective From (optional)</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">{t('tariff:modal.effectiveFrom')}</label>
           <input type="datetime-local" value={effectiveFrom} onChange={e => setEffectiveFrom(e.target.value)}
             className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none" />
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Notes (optional)</label>
+          <label className="block text-xs font-medium text-gray-500 mb-1">{t('tariff:modal.notes')}</label>
           <input type="text" value={notes} onChange={e => setNotes(e.target.value)}
             className="w-full px-3 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none" />
         </div>
@@ -174,11 +165,11 @@ function AddOverrideModal({ scope, onSave, onCancel }: AddOverrideModalProps) {
         <div className="flex gap-3 pt-2">
           <button onClick={onCancel}
             className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-xl font-medium text-sm hover:bg-gray-200 transition">
-            Cancel
+            {t('tariff:modal.cancel')}
           </button>
           <button onClick={handleSubmit} disabled={saving}
             className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-semibold text-sm hover:bg-blue-700 disabled:opacity-50 transition">
-            {saving ? 'Saving...' : 'Save'}
+            {saving ? t('tariff:modal.saving') : t('tariff:modal.save')}
           </button>
         </div>
       </div>
@@ -186,11 +177,8 @@ function AddOverrideModal({ scope, onSave, onCancel }: AddOverrideModalProps) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Main page
-// ---------------------------------------------------------------------------
-
 export default function TariffManagementPage() {
+  const { t } = useTranslation(['tariff', 'common']);
   const { canWrite } = useAuth();
   const [data, setData] = useState<TariffCurrentResponse | null>(null);
   const [history, setHistory] = useState<TariffHistoryEntry[]>([]);
@@ -202,7 +190,6 @@ export default function TariffManagementPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  // Modal state
   const [editGlobal, setEditGlobal] = useState(false);
   const [editConcession, setEditConcession] = useState<string | null>(null);
   const [editCustomer, setEditCustomer] = useState<string | null>(null);
@@ -218,11 +205,11 @@ export default function TariffManagementPage() {
       const d = await getTariffCurrent();
       setData(d);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to load tariff data');
+      setError(e instanceof Error ? e.message : t('tariff:errors.loadFailed'));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [t]);
 
   const reloadHistory = useCallback(async () => {
     try {
@@ -247,7 +234,6 @@ export default function TariffManagementPage() {
     setTimeout(() => setSuccess(''), 4000);
   };
 
-  // Handlers
   const handleGlobalSave = async (rate: number, eff: string, notes: string) => {
     await updateGlobalRate(rate, eff || undefined, notes || undefined);
     setEditGlobal(false);
@@ -303,7 +289,7 @@ export default function TariffManagementPage() {
       reload();
       reloadHistory();
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Delete failed');
+      setError(e instanceof Error ? e.message : t('tariff:errors.deleteFailed'));
       setDeleteConfirm(null);
     }
   };
@@ -312,7 +298,7 @@ export default function TariffManagementPage() {
     return (
       <div className="text-center py-16">
         <span className="animate-spin inline-block w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full" />
-        <p className="text-gray-400 mt-3">Loading tariff data...</p>
+        <p className="text-gray-400 mt-3">{t('tariff:loading')}</p>
       </div>
     );
   }
@@ -320,9 +306,9 @@ export default function TariffManagementPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Tariff Management</h1>
+        <h1 className="text-xl sm:text-2xl font-bold text-gray-800">{t('tariff:title')}</h1>
         <p className="text-sm text-gray-400 mt-0.5">
-          Set global, concession-level, and customer-level electricity tariffs
+          {t('tariff:subtitle')}
         </p>
       </div>
 
@@ -332,46 +318,42 @@ export default function TariffManagementPage() {
           <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
           </svg>
-          {success} (logged in mutation history)
+          {success} {t('tariff:mutationLogged')}
         </div>
       )}
 
-      {/* Global Rate Card */}
       {data && (
         <div className="bg-white rounded-xl border p-5">
           <div className="flex items-center justify-between mb-2">
-            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Global Rate</h2>
+            <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">{t('tariff:global.title')}</h2>
             {canWrite && (
               <button onClick={() => setEditGlobal(true)}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition">
-                Update
+                {t('tariff:global.update')}
               </button>
             )}
           </div>
           <div className="flex items-baseline gap-2">
             <span className="text-4xl font-bold text-blue-700">{data.global_rate}</span>
-            <span className="text-lg text-gray-400">LSL / kWh</span>
+            <span className="text-lg text-gray-400">{t('tariff:global.unit')}</span>
           </div>
           {data.pending_global && (
             <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm">
-              <span className="font-medium text-amber-700">Pending:</span>{' '}
-              {data.pending_global.rate_lsl} LSL/kWh effective {fmtDate(data.pending_global.effective_from)}
+              <span className="font-medium text-amber-700">{t('tariff:global.pending', { rate: `${data.pending_global.rate_lsl} LSL/kWh effective ${fmtDate(data.pending_global.effective_from)}` })}</span>
               {data.pending_global.notes && <span className="text-gray-500"> -- {data.pending_global.notes}</span>}
             </div>
           )}
           <p className="text-xs text-gray-400 mt-2">
-            Applies to all customers unless overridden at the concession or customer level.
-            Synced to the live CC tariff configuration.
+            {t('tariff:global.help')}
           </p>
         </div>
       )}
 
-      {/* Tabs */}
       <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
-        {([['overrides', 'Rate Overrides'], ['history', 'Change History']] as const).map(([key, label]) => (
+        {([['overrides', t('tariff:tabs.overrides')], ['history', t('tariff:tabs.history')]] as const).map(([key, label]) => (
           <button
             key={key}
-            onClick={() => setTab(key)}
+            onClick={() => setTab(key as 'overrides' | 'history')}
             className={`flex-1 py-2.5 rounded-lg text-sm font-medium transition ${
               tab === key ? 'bg-white shadow-sm text-blue-600' : 'text-gray-500 hover:text-gray-700'
             }`}
@@ -383,35 +365,34 @@ export default function TariffManagementPage() {
 
       {tab === 'overrides' && data && (
         <div className="space-y-6">
-          {/* Concession Overrides */}
           <div className="bg-white rounded-xl border overflow-hidden">
             <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between">
-              <span className="text-xs text-gray-500 font-medium uppercase tracking-wide">Concession Overrides</span>
+              <span className="text-xs text-gray-500 font-medium uppercase tracking-wide">{t('tariff:concession.title')}</span>
               {canWrite && (
                 <button onClick={() => setAddConcession(true)}
                   className="px-4 py-2 bg-amber-600 text-white rounded-lg text-xs font-medium hover:bg-amber-700 transition flex items-center gap-1.5">
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                   </svg>
-                  Add Override
+                  {t('tariff:concession.addOverride')}
                 </button>
               )}
             </div>
             {data.concession_overrides.length === 0 ? (
               <div className="px-4 py-8 text-center text-gray-400 text-sm">
-                No concession overrides. All concessions use the global rate.
+                {t('tariff:concession.empty')}
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 text-left">
-                      <th className="px-4 py-3 font-medium text-gray-500">Concession</th>
-                      <th className="px-4 py-3 font-medium text-gray-500 text-right">Rate (LSL/kWh)</th>
-                      <th className="px-4 py-3 font-medium text-gray-500">Effective From</th>
-                      <th className="px-4 py-3 font-medium text-gray-500">Set By</th>
-                      <th className="px-4 py-3 font-medium text-gray-500">Notes</th>
-                      {canWrite && <th className="px-4 py-3 font-medium text-gray-500 text-right w-24">Actions</th>}
+                      <th className="px-4 py-3 font-medium text-gray-500">{t('tariff:concession.concession')}</th>
+                      <th className="px-4 py-3 font-medium text-gray-500 text-right">{t('tariff:concession.rate')}</th>
+                      <th className="px-4 py-3 font-medium text-gray-500">{t('tariff:concession.effectiveFrom')}</th>
+                      <th className="px-4 py-3 font-medium text-gray-500">{t('tariff:concession.setBy')}</th>
+                      <th className="px-4 py-3 font-medium text-gray-500">{t('tariff:concession.notes')}</th>
+                      {canWrite && <th className="px-4 py-3 font-medium text-gray-500 text-right w-24">{t('tariff:concession.actions')}</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -420,7 +401,7 @@ export default function TariffManagementPage() {
                         <td className="px-4 py-2.5 font-mono font-semibold text-gray-800">{o.scope_key}</td>
                         <td className="px-4 py-2.5 text-right font-mono text-amber-700 font-semibold">
                           {o.rate_lsl}
-                          {o.pending && <span className="ml-1.5 text-xs text-amber-500">(pending)</span>}
+                          {o.pending && <span className="ml-1.5 text-xs text-amber-500">{t('tariff:concession.pending')}</span>}
                         </td>
                         <td className="px-4 py-2.5 text-gray-500">{fmtDate(o.effective_from)}</td>
                         <td className="px-4 py-2.5 text-gray-500">{o.set_by_name || o.set_by}</td>
@@ -451,11 +432,10 @@ export default function TariffManagementPage() {
             )}
           </div>
 
-          {/* Customer Overrides */}
           <div className="bg-white rounded-xl border overflow-hidden">
             <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between">
               <span className="text-xs text-gray-500 font-medium uppercase tracking-wide">
-                Customer Overrides ({data.customer_override_count})
+                {t('tariff:customer.titleCount', { count: data.customer_override_count })}
               </span>
               {canWrite && (
                 <button onClick={() => setAddCustomer(true)}
@@ -463,25 +443,25 @@ export default function TariffManagementPage() {
                   <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                   </svg>
-                  Add Override
+                  {t('tariff:customer.addOverride')}
                 </button>
               )}
             </div>
             {data.customer_overrides.length === 0 ? (
               <div className="px-4 py-8 text-center text-gray-400 text-sm">
-                No individual customer overrides.
+                {t('tariff:customer.empty')}
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 text-left">
-                      <th className="px-4 py-3 font-medium text-gray-500">Customer ID</th>
-                      <th className="px-4 py-3 font-medium text-gray-500 text-right">Rate (LSL/kWh)</th>
-                      <th className="px-4 py-3 font-medium text-gray-500">Effective From</th>
-                      <th className="px-4 py-3 font-medium text-gray-500">Set By</th>
-                      <th className="px-4 py-3 font-medium text-gray-500">Notes</th>
-                      {canWrite && <th className="px-4 py-3 font-medium text-gray-500 text-right w-24">Actions</th>}
+                      <th className="px-4 py-3 font-medium text-gray-500">{t('tariff:concession.concession')}</th>
+                      <th className="px-4 py-3 font-medium text-gray-500 text-right">{t('tariff:concession.rate')}</th>
+                      <th className="px-4 py-3 font-medium text-gray-500">{t('tariff:concession.effectiveFrom')}</th>
+                      <th className="px-4 py-3 font-medium text-gray-500">{t('tariff:concession.setBy')}</th>
+                      <th className="px-4 py-3 font-medium text-gray-500">{t('tariff:concession.notes')}</th>
+                      {canWrite && <th className="px-4 py-3 font-medium text-gray-500 text-right w-24">{t('tariff:concession.actions')}</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
@@ -490,7 +470,7 @@ export default function TariffManagementPage() {
                         <td className="px-4 py-2.5 font-mono font-semibold text-gray-800">{o.scope_key}</td>
                         <td className="px-4 py-2.5 text-right font-mono text-purple-700 font-semibold">
                           {o.rate_lsl}
-                          {o.pending && <span className="ml-1.5 text-xs text-purple-500">(pending)</span>}
+                          {o.pending && <span className="ml-1.5 text-xs text-purple-500">{t('tariff:concession.pending')}</span>}
                         </td>
                         <td className="px-4 py-2.5 text-gray-500">{fmtDate(o.effective_from)}</td>
                         <td className="px-4 py-2.5 text-gray-500">{o.set_by_name || o.set_by}</td>
@@ -527,28 +507,28 @@ export default function TariffManagementPage() {
         <div className="bg-white rounded-xl border overflow-hidden">
           <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between flex-wrap gap-2">
             <span className="text-xs text-gray-500 font-medium uppercase tracking-wide">
-              Tariff Change History ({historyTotal})
+              {t('tariff:history.title')} ({historyTotal})
             </span>
             <select value={historyScope} onChange={e => { setHistoryScope(e.target.value); setHistoryPage(1); }}
               className="px-3 py-1.5 border rounded-lg text-xs bg-white">
-              <option value="">All scopes</option>
-              <option value="global">Global</option>
-              <option value="concession">Concession</option>
-              <option value="customer">Customer</option>
+              <option value="">{t('tariff:history.allScopes')}</option>
+              <option value="global">{t('tariff:history.global')}</option>
+              <option value="concession">{t('tariff:history.concession')}</option>
+              <option value="customer">{t('tariff:history.customer')}</option>
             </select>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 text-left">
-                  <th className="px-4 py-3 font-medium text-gray-500">Date</th>
-                  <th className="px-4 py-3 font-medium text-gray-500">Scope</th>
-                  <th className="px-4 py-3 font-medium text-gray-500">Key</th>
-                  <th className="px-4 py-3 font-medium text-gray-500 text-right">Previous</th>
-                  <th className="px-4 py-3 font-medium text-gray-500 text-right">New Rate</th>
-                  <th className="px-4 py-3 font-medium text-gray-500">Effective</th>
-                  <th className="px-4 py-3 font-medium text-gray-500">By</th>
-                  <th className="px-4 py-3 font-medium text-gray-500">Notes</th>
+                  <th className="px-4 py-3 font-medium text-gray-500">{t('tariff:history.date')}</th>
+                  <th className="px-4 py-3 font-medium text-gray-500">{t('tariff:history.scope')}</th>
+                  <th className="px-4 py-3 font-medium text-gray-500">{t('tariff:history.key')}</th>
+                  <th className="px-4 py-3 font-medium text-gray-500 text-right">{t('tariff:history.previous')}</th>
+                  <th className="px-4 py-3 font-medium text-gray-500 text-right">{t('tariff:history.newRate')}</th>
+                  <th className="px-4 py-3 font-medium text-gray-500">{t('tariff:history.effective')}</th>
+                  <th className="px-4 py-3 font-medium text-gray-500">{t('tariff:history.by')}</th>
+                  <th className="px-4 py-3 font-medium text-gray-500">{t('tariff:history.notes')}</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -561,7 +541,7 @@ export default function TariffManagementPage() {
                       {h.previous_rate != null ? h.previous_rate : '--'}
                     </td>
                     <td className="px-4 py-2.5 text-right font-mono font-semibold text-gray-800">
-                      {h.rate_lsl === 0 ? <span className="text-red-500">removed</span> : h.rate_lsl}
+                      {h.rate_lsl === 0 ? <span className="text-red-500">{t('tariff:history.removed')}</span> : h.rate_lsl}
                     </td>
                     <td className="px-4 py-2.5 text-gray-500">{fmtDate(h.effective_from)}</td>
                     <td className="px-4 py-2.5 text-gray-500">{h.set_by_name || h.set_by}</td>
@@ -569,7 +549,7 @@ export default function TariffManagementPage() {
                   </tr>
                 ))}
                 {history.length === 0 && (
-                  <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No tariff changes recorded</td></tr>
+                  <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">{t('tariff:history.noChanges')}</td></tr>
                 )}
               </tbody>
             </table>
@@ -588,20 +568,19 @@ export default function TariffManagementPage() {
         </div>
       )}
 
-      {/* Modals */}
       {editGlobal && data && (
-        <RateModal title="Update Global Rate" currentRate={data.global_rate}
+        <RateModal title={t('tariff:global.title')} currentRate={data.global_rate}
           onSave={handleGlobalSave} onCancel={() => setEditGlobal(false)} />
       )}
       {editConcession && data && (
         <RateModal
-          title={`Update ${editConcession} Rate`}
+          title={`${editConcession}`}
           currentRate={data.concession_overrides.find(o => o.scope_key === editConcession)?.rate_lsl}
           onSave={handleConcessionSave} onCancel={() => setEditConcession(null)} />
       )}
       {editCustomer && data && (
         <RateModal
-          title={`Update Customer ${editCustomer} Rate`}
+          title={`${editCustomer}`}
           currentRate={data.customer_overrides.find(o => o.scope_key === editCustomer)?.rate_lsl}
           onSave={handleCustomerSave} onCancel={() => setEditCustomer(null)} />
       )}
@@ -614,16 +593,15 @@ export default function TariffManagementPage() {
       {deleteConfirm && (
         <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={() => setDeleteConfirm(null)}>
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-5 space-y-4" onClick={e => e.stopPropagation()}>
-            <h3 className="text-lg font-bold text-gray-800">Remove Override?</h3>
+            <h3 className="text-lg font-bold text-gray-800">{t('tariff:deleteConfirm.title')}</h3>
             <p className="text-sm text-gray-500">
-              Remove the {deleteConfirm.scope} override for <span className="font-mono font-medium">{deleteConfirm.key}</span>{' '}
-              (currently {deleteConfirm.rate} LSL/kWh). This will revert to the {deleteConfirm.scope === 'customer' ? 'concession or global' : 'global'} rate.
+              {t('tariff:deleteConfirm.body')}
             </p>
             <div className="flex gap-3">
               <button onClick={() => setDeleteConfirm(null)}
-                className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-xl font-medium text-sm hover:bg-gray-200 transition">Cancel</button>
+                className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-xl font-medium text-sm hover:bg-gray-200 transition">{t('tariff:deleteConfirm.cancel')}</button>
               <button onClick={handleDelete}
-                className="flex-1 py-3 bg-red-600 text-white rounded-xl font-semibold text-sm hover:bg-red-700 transition">Remove</button>
+                className="flex-1 py-3 bg-red-600 text-white rounded-xl font-semibold text-sm hover:bg-red-700 transition">{t('tariff:deleteConfirm.remove')}</button>
             </div>
           </div>
         </div>

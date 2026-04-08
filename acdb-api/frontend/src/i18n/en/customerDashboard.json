@@ -1,0 +1,48 @@
+{
+  "title": "My Dashboard",
+  "meterFace": {
+    "brand": "1PWR Smart Meter",
+    "unitsRemaining": "Units Remaining",
+    "kwh": "kWh",
+    "active": "Active",
+    "connected": "Connected",
+    "low": "Low"
+  },
+  "welcome": "Welcome back",
+  "accountLabel": "Account {{acct}}",
+  "lastPayment": {
+    "title": "Last Payment",
+    "received": "received",
+    "noRecords": "No payment records found"
+  },
+  "meters": {
+    "title": "Meters on This Account",
+    "sparkMeter": "SparkMeter",
+    "oneMeter": "1Meter Prototype",
+    "legacy": "Legacy",
+    "primary": "Primary",
+    "check": "Check",
+    "backup": "Backup",
+    "checkNote": "Check meters are installed in series with primary meters for verification testing."
+  },
+  "stats": {
+    "avgDailyUsage": "Avg. Daily Usage",
+    "past30Days": "past 30 days",
+    "estRecharge": "Est. Time to Recharge",
+    "format": "DD:HH:MM",
+    "totalConsumption": "Total Consumption",
+    "allTime": "all time",
+    "totalPurchases": "Total Purchases"
+  },
+  "charts": {
+    "last24h": "Last 24 Hours",
+    "last7d": "Last 7 Days",
+    "last30d": "Last 30 Days",
+    "last12m": "Last 12 Months",
+    "meterComparison24": "Meter Comparison — Last 24 Hours",
+    "meterComparison7d": "Meter Comparison — Last 7 Days",
+    "bothMetersNote": "Both meters measure the same load. Close agreement confirms accuracy.",
+    "consumption": "Consumption"
+  },
+  "error": "Unable to load your dashboard. Please try again later."
+}

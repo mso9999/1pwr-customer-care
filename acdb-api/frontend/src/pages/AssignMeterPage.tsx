@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { assignMeter, getCommissionData, getRecord, listSites, previewNextAccount } from '../lib/api';
 
 // ---------------------------------------------------------------------------
@@ -18,11 +19,12 @@ interface SiteOption {
 // ---------------------------------------------------------------------------
 
 function GPSCapture({ lat, lng, onChange }: { lat: string; lng: string; onChange: (lat: string, lng: string) => void }) {
+  const { t } = useTranslation(['assignMeter', 'common']);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const captureGPS = () => {
-    if (!navigator.geolocation) { setError('Geolocation not supported'); return; }
+    if (!navigator.geolocation) { setError(t('assignMeter:fields.gpsNotSupported')); return; }
     setLoading(true);
     setError('');
     navigator.geolocation.getCurrentPosition(
@@ -36,12 +38,12 @@ function GPSCapture({ lat, lng, onChange }: { lat: string; lng: string; onChange
     <div className="space-y-3">
       <div className="flex gap-3">
         <div className="flex-1">
-          <label className="block text-xs text-gray-500 mb-1">Latitude</label>
+          <label className="block text-xs text-gray-500 mb-1">{t('assignMeter:fields.latitude')}</label>
           <input type="text" value={lat} onChange={e => onChange(e.target.value, lng)} placeholder="-29.3..."
             className="w-full px-4 py-3 border border-gray-300 rounded-xl text-base focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none" />
         </div>
         <div className="flex-1">
-          <label className="block text-xs text-gray-500 mb-1">Longitude</label>
+          <label className="block text-xs text-gray-500 mb-1">{t('assignMeter:fields.longitude')}</label>
           <input type="text" value={lng} onChange={e => onChange(lat, e.target.value)} placeholder="28.5..."
             className="w-full px-4 py-3 border border-gray-300 rounded-xl text-base focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none" />
         </div>
@@ -49,12 +51,12 @@ function GPSCapture({ lat, lng, onChange }: { lat: string; lng: string; onChange
       <button type="button" onClick={captureGPS} disabled={loading}
         className="w-full py-3 bg-gray-100 border-2 border-dashed border-gray-300 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-200 active:bg-gray-300 disabled:opacity-50 transition flex items-center justify-center gap-2">
         {loading ? (
-          <><span className="animate-spin inline-block w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full" /> Acquiring GPS...</>
+          <><span className="animate-spin inline-block w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full" /> {t('assignMeter:fields.acquiringGps')}</>
         ) : (
           <><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg> Capture Current Location</>
+            </svg> {t('assignMeter:fields.captureLocation')}</>
         )}
       </button>
       {error && <p className="text-red-500 text-xs">{error}</p>}
@@ -76,6 +78,7 @@ async function getNextAccountNumber(siteCode: string): Promise<string> {
 // ---------------------------------------------------------------------------
 
 export default function AssignMeterPage() {
+  const { t } = useTranslation(['assignMeter', 'common']);
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const prefilledCustomerId = searchParams.get('customer') || '';
@@ -186,18 +189,17 @@ export default function AssignMeterPage() {
           }
         })
         .finally(() => { if (!cancelled) setCustomerLoading(false); });
-    }, 500); // debounce
+    }, 500);
     return () => { cancelled = true; clearTimeout(timer); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customerId]);
 
   // Submit
   const handleSubmit = async () => {
-    // Validate
-    if (!customerId.trim()) { setError('Customer ID is required'); return; }
-    if (!meterid.trim()) { setError('Meter ID (serial) is required'); return; }
-    if (!community) { setError('Site / Community is required'); return; }
-    if (!customerType) { setError('Customer type is required'); return; }
+    if (!customerId.trim()) { setError(t('assignMeter:validation.customerIdRequired')); return; }
+    if (!meterid.trim()) { setError(t('assignMeter:validation.meterRequired')); return; }
+    if (!community) { setError(t('assignMeter:validation.siteRequired')); return; }
+    if (!customerType) { setError(t('assignMeter:validation.typeRequired')); return; }
     if (!accountNumber.trim()) { setError('Account number is required'); return; }
 
     setSaving(true);
@@ -222,7 +224,7 @@ export default function AssignMeterPage() {
       setSuccess(result.message);
 
     } catch (e: any) {
-      setError(e.message || 'Failed to assign meter');
+      setError(e.message || t('assignMeter:assignFailed'));
     } finally {
       setSaving(false);
     }
@@ -235,15 +237,15 @@ export default function AssignMeterPage() {
         <button
           onClick={() => navigate(-1)}
           className="p-2 -ml-2 rounded-lg hover:bg-gray-100 active:bg-gray-200 transition"
-          aria-label="Go back"
+          aria-label={t('assignMeter:goBack')}
         >
           <svg className="w-6 h-6 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
           </svg>
         </button>
         <div>
-          <h1 className="text-xl font-bold text-gray-800">Assign Meter</h1>
-          <p className="text-sm text-gray-400">Link a meter and account to a customer</p>
+          <h1 className="text-xl font-bold text-gray-800">{t('assignMeter:title')}</h1>
+          <p className="text-sm text-gray-400">{t('assignMeter:subtitle')}</p>
         </div>
       </div>
 
@@ -261,13 +263,13 @@ export default function AssignMeterPage() {
               onClick={() => navigate(`/commission?customer=${customerId}&account=${accountNumber}`)}
               className="flex-1 py-3.5 bg-green-600 text-white rounded-xl font-semibold text-sm hover:bg-green-700 active:bg-green-800 transition"
             >
-              Commission Customer Now
+              {t('assignMeter:success.commissionNow')}
             </button>
             <button
               onClick={() => navigate(`/customers/${customerId}`)}
               className="flex-1 py-3.5 bg-gray-100 text-gray-700 rounded-xl font-medium text-sm hover:bg-gray-200 active:bg-gray-300 transition"
             >
-              Done
+              {t('assignMeter:success.done')}
             </button>
           </div>
         </div>
@@ -279,16 +281,16 @@ export default function AssignMeterPage() {
         {/* Customer ID */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Customer ID <span className="text-red-400">*</span>
+            {t('assignMeter:fields.customerId')} <span className="text-red-400">*</span>
           </label>
           <input
             type="text"
             value={customerId}
             onChange={e => setCustomerId(e.target.value)}
-            placeholder="e.g. 45"
+            placeholder={t('assignMeter:fields.customerIdPlaceholder')}
             className="w-full px-4 py-3.5 border border-gray-300 rounded-xl text-base focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none"
           />
-          {customerLoading && <p className="text-xs text-gray-400 mt-1">Looking up customer...</p>}
+          {customerLoading && <p className="text-xs text-gray-400 mt-1">{t('assignMeter:fields.lookingUp')}</p>}
           {customerName && !customerLoading && (
             <p className="text-xs text-green-600 mt-1 flex items-center gap-1">
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -302,7 +304,7 @@ export default function AssignMeterPage() {
         {/* Meter ID (serial) */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Meter Serial Number <span className="text-red-400">*</span>
+            {t('assignMeter:fields.meterSerial')} <span className="text-red-400">*</span>
           </label>
           <input
             type="text"
@@ -316,14 +318,14 @@ export default function AssignMeterPage() {
         {/* Site / Community */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Site (Community) <span className="text-red-400">*</span>
+            {t('assignMeter:fields.site')} <span className="text-red-400">*</span>
           </label>
           <select
             value={community}
             onChange={e => setCommunity(e.target.value)}
             className="w-full px-4 py-3.5 border border-gray-300 rounded-xl text-base bg-white focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none appearance-none"
           >
-            <option value="">Select site...</option>
+            <option value="">{t('assignMeter:fields.selectSite')}</option>
             {sites.map(s => <option key={s.code} value={s.code}>{s.label}</option>)}
           </select>
         </div>
@@ -331,41 +333,41 @@ export default function AssignMeterPage() {
         {/* Customer Type */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Customer Type <span className="text-red-400">*</span>
+            {t('assignMeter:fields.customerType')} <span className="text-red-400">*</span>
           </label>
           <select
             value={customerType}
             onChange={e => setCustomerType(e.target.value)}
             className="w-full px-4 py-3.5 border border-gray-300 rounded-xl text-base bg-white focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none appearance-none"
           >
-            <option value="">Select type...</option>
-            {CUSTOMER_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+            <option value="">{t('assignMeter:fields.selectType')}</option>
+            {CUSTOMER_TYPES.map(ct => <option key={ct} value={ct}>{ct}</option>)}
           </select>
         </div>
 
         {/* Account Number (auto-generated) */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Account Number <span className="text-red-400">*</span>
+            {t('assignMeter:fields.accountNumber')} <span className="text-red-400">*</span>
           </label>
           <div className="relative">
             <input
               type="text"
               value={accountNumber}
               onChange={e => setAccountNumber(e.target.value)}
-              placeholder="Auto-generated..."
+              placeholder={t('assignMeter:fields.accountPlaceholder')}
               className="w-full px-4 py-3.5 border border-gray-300 rounded-xl text-base focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none"
             />
             {acctLoading && (
               <span className="absolute right-3 top-1/2 -translate-y-1/2 animate-spin w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full" />
             )}
           </div>
-          <p className="text-xs text-gray-400 mt-1">Auto-generated from site. You can override if needed.</p>
+          <p className="text-xs text-gray-400 mt-1">{t('assignMeter:fields.accountHint')}</p>
         </div>
 
         {/* Village Name */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">Village Name</label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">{t('assignMeter:fields.villageName')}</label>
           <input
             type="text"
             value={villageName}
@@ -377,7 +379,7 @@ export default function AssignMeterPage() {
 
         {/* Connection Date */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">Connection Date</label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">{t('assignMeter:fields.connectionDate')}</label>
           <input
             type="date"
             value={connectDate}
@@ -388,7 +390,7 @@ export default function AssignMeterPage() {
 
         {/* GPS */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">GPS Coordinates</label>
+          <label className="block text-sm font-medium text-gray-700 mb-2">{t('assignMeter:fields.gpsCoordinates')}</label>
           <GPSCapture
             lat={latitude}
             lng={longitude}
@@ -413,9 +415,9 @@ export default function AssignMeterPage() {
         {saving ? (
           <span className="flex items-center justify-center gap-2">
             <span className="animate-spin inline-block w-5 h-5 border-2 border-white border-t-transparent rounded-full" />
-            Assigning...
+            {t('assignMeter:assigning')}
           </span>
-        ) : 'Assign Meter'}
+        ) : t('assignMeter:assignMeter')}
       </button>
     </div>
   );

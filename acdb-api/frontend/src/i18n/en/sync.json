@@ -1,0 +1,56 @@
+{
+  "title": "uGridPLAN Sync",
+  "subtitle": "Synchronize customer data between CC and uGridPLAN",
+  "discovering": "Discovering…",
+  "discoverProjects": "Discover Projects",
+  "addSite": "Add Site",
+  "cancel": "Cancel",
+  "addMapping": {
+    "title": "Add Site-to-ProjectID Mapping",
+    "siteCode": "Site code",
+    "projectName": "uGridPLAN Project Name",
+    "siteName": "Site name (optional)",
+    "saving": "Saving…",
+    "save": "Save Mapping"
+  },
+  "stats": {
+    "configuredSites": "Configured Sites",
+    "syncedCustomers": "Synced Customers",
+    "withType": "With Type",
+    "customerTypes": "Customer Types"
+  },
+  "typeDistribution": "Customer Type Distribution",
+  "table": {
+    "title": "Configured Sites",
+    "site": "Site",
+    "projectName": "Project Name",
+    "synced": "Synced",
+    "lastSync": "Last Sync",
+    "actions": "Actions",
+    "never": "Never",
+    "loading": "Loading…",
+    "preview": "Preview",
+    "syncing": "Syncing…",
+    "sync": "Sync",
+    "syncedCount": "{{count}} synced"
+  },
+  "empty": "No sites configured for sync.",
+  "preview": {
+    "title": "Sync Preview: {{site}}",
+    "close": "Close",
+    "ugpConnections": "uGridPLAN Connections",
+    "ccCustomers": "CC Customers",
+    "matched": "Matched",
+    "unmatchedUgp": "Unmatched (uGP)",
+    "unmatchedCc": "Unmatched (CC)",
+    "matchedRecords": "Matched Records",
+    "surveyId": "Survey ID",
+    "customerId": "Customer ID",
+    "method": "Method",
+    "type": "Type",
+    "nameCc": "Name (CC)",
+    "meter": "Meter",
+    "applySync": "Apply Sync ({{count}} records)",
+    "syncing": "Syncing…"
+  }
+}

@@ -1,0 +1,96 @@
+{
+  "dashboard": {
+    "title": "Tableau de bord",
+    "loading": "Chargement du tableau de bord…",
+    "filters": {
+      "sites": "Sites",
+      "allCount": "Tous ({{count}})"
+    },
+    "cards": {
+      "registeredCustomers": "Clients enregistrés",
+      "allSitesSubtitle": "tous les sites",
+      "allTimeMwh": "MWh depuis toujours",
+      "cumulativeEnergyDelivered": "Énergie cumulée livrée",
+      "allTimeRevenue": "Revenu depuis toujours",
+      "sites": "Sites"
+    },
+    "portfolio": {
+      "title": "Revenus et ARPU du portefeuille",
+      "subtitle": "Vue glissante de {{months}} mois · Toutes les valeurs converties en USD aux taux indicatifs"
+    },
+    "kpi": {
+      "activeConnections": "Raccordements actifs",
+      "accountsWithActiveMeter": "Comptes avec compteur actif",
+      "monthRevenue": "Revenu sur {{months}} mois",
+      "latestMonthArpu": "ARPU du dernier mois",
+      "prorated": "Proratisé ({{pct}} % du mois écoulé)",
+      "vsPriorMonth": "{{pct}} % par rapport au mois précédent",
+      "avgMonthlyArpu": "ARPU mensuel moyen",
+      "monthAverageSubtitle": "Moyenne sur {{months}} mois"
+    },
+    "charts": {
+      "monthlyRevenueAndArpu": "Revenu mensuel (USD) et ARPU",
+      "revenueLegendSuffix": "Revenu",
+      "arpuLegend": "ARPU (USD)",
+      "customersPerSite": "Clients par site",
+      "customerDistribution": "Répartition des clients"
+    },
+    "breakdown": {
+      "summary": "Ventilation mensuelle par pays",
+      "clickToExpand": "(cliquer pour développer)",
+      "table": {
+        "month": "Mois",
+        "revenueSuffix": "Revenu",
+        "payingSuffix": "Payants",
+        "totalUsd": "Total (USD)",
+        "arpuUsd": "ARPU (USD)"
+      },
+      "footer": {
+        "totalAvg": "Total / Moy.",
+        "avgSuffix": "moy."
+      }
+    },
+    "completeness": {
+      "title": "Complétude des enregistrements 1PDB",
+      "dataThrough": "Données jusqu'au {{date}}",
+      "kpi": {
+        "registeredCustomers": "Clients enregistrés",
+        "commissioned": "Mis en service",
+        "hourlyRecords": "Enregistrements horaires",
+        "overallComplete": "Complétude globale"
+      },
+      "table": {
+        "customerType": "Type de client",
+        "customers": "Clients",
+        "commissioned": "Mis en service",
+        "accountsWithData": "Comptes avec données",
+        "hourlyRecords": "Enregistrements horaires",
+        "expectedRecords": "Enregistrements attendus",
+        "pctComplete": "% Complet"
+      },
+      "empty": "Aucune donnée de complétude des enregistrements horaires disponible."
+    },
+    "quickLinks": {
+      "helpInstructions": "Aide et instructions",
+      "operatingManual": "Manuel d'exploitation",
+      "onboarding": "Intégration",
+      "pipelineFunnel": "Entonnoir pipeline",
+      "payments": "Paiements",
+      "recordPayment": "Enregistrer un paiement",
+      "customersHeading": "Clients",
+      "commission": "Mise en service"
+    },
+    "siteCharts": {
+      "noSiteData": "Aucune donnée de site disponible"
+    },
+    "sitePerformance": {
+      "title": "Performance des sites",
+      "mwh": "MWh",
+      "mwhPerCustomer": "MWh/Client"
+    },
+    "databaseTables": "Tables de la base de données ({{count}})",
+    "tooltip": {
+      "customers": "Clients"
+    }
+  }
+}

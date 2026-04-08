@@ -1,0 +1,23 @@
+{
+  "title": "Customer Care",
+  "subtitle": "Lesotho Minigrid Portal",
+  "employee": "Employee",
+  "customer": "Customer",
+  "employeeId": "Employee ID",
+  "accountNumber": "Account Number",
+  "enterEmployeeId": "Enter employee ID",
+  "accountNumberExample": "e.g. 0045MAK",
+  "password": "Password",
+  "enterOtp": "Enter OTP",
+  "choosePassword": "Choose a password (min 6 chars)",
+  "yourPassword": "Your password",
+  "pleaseWait": "Please wait...",
+  "createAccount": "Create Account",
+  "signIn": "Sign In",
+  "registrationSuccess": "Registration successful! You can now log in.",
+  "loginFailed": "Login failed",
+  "firstTime": "First time?",
+  "registerHere": "Register here",
+  "alreadyRegistered": "Already registered?",
+  "signInLink": "Sign in"
+}

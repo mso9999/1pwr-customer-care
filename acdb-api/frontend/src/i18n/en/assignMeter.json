@@ -1,0 +1,39 @@
+{
+  "title": "Assign Meter",
+  "subtitle": "Link a meter and account to a customer",
+  "goBack": "Go back",
+  "success": {
+    "commissionNow": "Commission Customer Now",
+    "done": "Done"
+  },
+  "fields": {
+    "customerId": "Customer ID",
+    "customerIdPlaceholder": "e.g. 0045MAK or 5846",
+    "lookingUp": "Looking up customer…",
+    "meterSerial": "Meter Serial Number",
+    "site": "Site (Community)",
+    "selectSite": "Select site…",
+    "customerType": "Customer Type",
+    "selectType": "Select type…",
+    "accountNumber": "Account Number",
+    "accountPlaceholder": "Auto-generated…",
+    "accountHint": "Leave blank for auto-generation, or enter to override.",
+    "villageName": "Village Name",
+    "connectionDate": "Connection Date",
+    "gpsCoordinates": "GPS Coordinates",
+    "latitude": "Latitude",
+    "longitude": "Longitude",
+    "acquiringGps": "Acquiring GPS…",
+    "captureLocation": "Capture Current Location",
+    "gpsNotSupported": "Geolocation not supported"
+  },
+  "assigning": "Assigning…",
+  "assignMeter": "Assign Meter",
+  "validation": {
+    "customerIdRequired": "Customer ID is required",
+    "meterRequired": "Meter serial number is required",
+    "siteRequired": "Site is required",
+    "typeRequired": "Customer type is required"
+  },
+  "assignFailed": "Assignment failed"
+}

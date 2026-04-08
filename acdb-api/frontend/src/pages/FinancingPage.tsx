@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   getFinancingProducts, createFinancingProduct, updateFinancingProduct,
   getFinancingAgreements, getFinancingAgreement,
@@ -14,6 +15,7 @@ function ProductModal({ product, onClose, onSaved }: {
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const { t } = useTranslation(['financing']);
   const [form, setForm] = useState({
     name: product?.name ?? '',
     default_principal: product?.default_principal ?? 0,
@@ -61,22 +63,22 @@ function ProductModal({ product, onClose, onSaved }: {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
       <form onSubmit={handleSubmit} className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6 space-y-4 max-h-[90vh] overflow-y-auto">
-        <h3 className="text-lg font-bold">{product ? 'Edit Product' : 'New Product Template'}</h3>
+        <h3 className="text-lg font-bold">{product ? t('financing:products.editProduct') : t('financing:products.newProductTemplate')}</h3>
         {error && <p className="text-red-600 text-sm">{error}</p>}
-        {field('Product Name', 'name', 'text')}
+        {field(t('financing:products.productName'), 'name', 'text')}
         <div className="grid grid-cols-2 gap-3">
-          {field('Default Principal (M)', 'default_principal')}
-          {field('Interest Rate (decimal)', 'default_interest_rate', 'number', '0.01')}
-          {field('Setup Fee (M)', 'default_setup_fee')}
-          {field('Repayment Fraction', 'default_repayment_fraction', 'number', '0.01')}
-          {field('Penalty Rate (decimal)', 'default_penalty_rate', 'number', '0.01')}
-          {field('Grace Days', 'default_penalty_grace_days', 'number', '1')}
-          {field('Penalty Interval (days)', 'default_penalty_interval_days', 'number', '1')}
+          {field(t('financing:products.defaultPrincipal'), 'default_principal')}
+          {field(t('financing:products.interestRate'), 'default_interest_rate', 'number', '0.01')}
+          {field(t('financing:products.setupFee'), 'default_setup_fee')}
+          {field(t('financing:products.repaymentFraction'), 'default_repayment_fraction', 'number', '0.01')}
+          {field(t('financing:products.penaltyRate'), 'default_penalty_rate', 'number', '0.01')}
+          {field(t('financing:products.graceDays'), 'default_penalty_grace_days', 'number', '1')}
+          {field(t('financing:products.penaltyInterval'), 'default_penalty_interval_days', 'number', '1')}
         </div>
         <div className="flex justify-end gap-3 pt-2">
-          <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
+          <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">{t('financing:cancel')}</button>
           <button type="submit" disabled={saving} className="px-5 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">
-            {saving ? 'Saving...' : product ? 'Update' : 'Create'}
+            {saving ? t('financing:saving') : product ? t('financing:update') : t('financing:create')}
           </button>
         </div>
       </form>
@@ -89,6 +91,7 @@ function ProductModal({ product, onClose, onSaved }: {
 // ---------------------------------------------------------------------------
 
 function LedgerModal({ agreement, onClose }: { agreement: FinancingAgreement; onClose: () => void }) {
+  const { t } = useTranslation(['financing']);
   const [detail, setDetail] = useState<FinancingAgreement | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -109,7 +112,7 @@ function LedgerModal({ agreement, onClose }: { agreement: FinancingAgreement; on
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl p-6 max-h-[85vh] overflow-y-auto">
         <div className="flex justify-between items-start mb-4">
           <div>
-            <h3 className="text-lg font-bold">Agreement #{agreement.id}</h3>
+            <h3 className="text-lg font-bold">{t('financing:ledger.title', { id: agreement.id })}</h3>
             <p className="text-sm text-gray-500">{agreement.account_number} — {agreement.description}</p>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
@@ -117,15 +120,15 @@ function LedgerModal({ agreement, onClose }: { agreement: FinancingAgreement; on
 
         <div className="grid grid-cols-3 gap-3 mb-4 text-sm">
           <div className="bg-gray-50 rounded-lg p-3">
-            <div className="text-gray-500 text-xs">Total Owed</div>
+            <div className="text-gray-500 text-xs">{t('financing:ledger.totalOwed')}</div>
             <div className="font-bold">M {agreement.total_owed?.toFixed(2)}</div>
           </div>
           <div className="bg-gray-50 rounded-lg p-3">
-            <div className="text-gray-500 text-xs">Outstanding</div>
+            <div className="text-gray-500 text-xs">{t('financing:ledger.outstanding')}</div>
             <div className="font-bold text-red-600">M {agreement.outstanding_balance?.toFixed(2)}</div>
           </div>
           <div className="bg-gray-50 rounded-lg p-3">
-            <div className="text-gray-500 text-xs">Paid</div>
+            <div className="text-gray-500 text-xs">{t('financing:ledger.paid')}</div>
             <div className="font-bold text-green-600">M {(agreement.total_owed - agreement.outstanding_balance)?.toFixed(2)}</div>
           </div>
         </div>
@@ -138,18 +141,18 @@ function LedgerModal({ agreement, onClose }: { agreement: FinancingAgreement; on
           />
         </div>
 
-        <h4 className="font-semibold text-sm mb-2">Ledger</h4>
+        <h4 className="font-semibold text-sm mb-2">{t('financing:ledger.ledger')}</h4>
         {loading ? (
-          <p className="text-sm text-gray-400">Loading...</p>
+          <p className="text-sm text-gray-400">{t('financing:ledger.loading')}</p>
         ) : (
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-gray-500 text-xs border-b">
-                <th className="pb-2">Date</th>
-                <th className="pb-2">Type</th>
-                <th className="pb-2 text-right">Amount</th>
-                <th className="pb-2 text-right">Balance After</th>
-                <th className="pb-2">Note</th>
+                <th className="pb-2">{t('financing:ledger.date')}</th>
+                <th className="pb-2">{t('financing:ledger.type')}</th>
+                <th className="pb-2 text-right">{t('financing:ledger.amount')}</th>
+                <th className="pb-2 text-right">{t('financing:ledger.balanceAfter')}</th>
+                <th className="pb-2">{t('financing:ledger.note')}</th>
               </tr>
             </thead>
             <tbody>
@@ -181,6 +184,7 @@ function LedgerModal({ agreement, onClose }: { agreement: FinancingAgreement; on
 // ---------------------------------------------------------------------------
 
 export default function FinancingPage() {
+  const { t } = useTranslation(['financing', 'common']);
   const [tab, setTab] = useState<'products' | 'agreements'>('agreements');
 
   const [products, setProducts] = useState<FinancingProduct[]>([]);
@@ -214,20 +218,20 @@ export default function FinancingPage() {
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-800">Financing Management</h1>
+        <h1 className="text-2xl font-bold text-gray-800">{t('financing:title')}</h1>
       </div>
 
       {/* Tabs */}
       <div className="flex gap-1 mb-4 border-b">
-        {(['agreements', 'products'] as const).map(t => (
+        {(['agreements', 'products'] as const).map(tabKey => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
+            key={tabKey}
+            onClick={() => setTab(tabKey)}
             className={`px-4 py-2 text-sm font-medium border-b-2 transition ${
-              tab === t ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-500 hover:text-gray-700'
+              tab === tabKey ? 'border-blue-600 text-blue-700' : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
-            {t === 'agreements' ? 'Agreements' : 'Product Templates'}
+            {tabKey === 'agreements' ? t('financing:tabs.agreements') : t('financing:tabs.products')}
           </button>
         ))}
       </div>
@@ -240,20 +244,20 @@ export default function FinancingPage() {
         <div>
           <div className="flex justify-end mb-3">
             <button onClick={() => setEditProduct(null)} className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">
-              + New Product
+              {t('financing:products.newProduct')}
             </button>
           </div>
           <div className="bg-white rounded-xl border overflow-hidden">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 text-left text-gray-500 text-xs">
-                  <th className="px-4 py-3">Name</th>
-                  <th className="px-4 py-3">Principal</th>
-                  <th className="px-4 py-3">Interest</th>
-                  <th className="px-4 py-3">Fee</th>
-                  <th className="px-4 py-3">Repayment %</th>
-                  <th className="px-4 py-3">Penalty</th>
-                  <th className="px-4 py-3">Active</th>
+                  <th className="px-4 py-3">{t('financing:products.name')}</th>
+                  <th className="px-4 py-3">{t('financing:products.principal')}</th>
+                  <th className="px-4 py-3">{t('financing:products.interest')}</th>
+                  <th className="px-4 py-3">{t('financing:products.fee')}</th>
+                  <th className="px-4 py-3">{t('financing:products.repaymentPct')}</th>
+                  <th className="px-4 py-3">{t('financing:products.penalty')}</th>
+                  <th className="px-4 py-3">{t('financing:products.active')}</th>
                   <th className="px-4 py-3"></th>
                 </tr>
               </thead>
@@ -268,16 +272,16 @@ export default function FinancingPage() {
                     <td className="px-4 py-3">{(p.default_penalty_rate * 100).toFixed(1)}%</td>
                     <td className="px-4 py-3">
                       <span className={`px-2 py-0.5 rounded-full text-xs ${p.is_active ? 'bg-green-50 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
-                        {p.is_active ? 'Yes' : 'No'}
+                        {p.is_active ? t('financing:products.yes') : t('financing:products.no')}
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <button onClick={() => setEditProduct(p)} className="text-blue-600 hover:underline text-xs">Edit</button>
+                      <button onClick={() => setEditProduct(p)} className="text-blue-600 hover:underline text-xs">{t('financing:products.edit')}</button>
                     </td>
                   </tr>
                 ))}
                 {products.length === 0 && (
-                  <tr><td colSpan={8} className="text-center py-8 text-gray-400">No product templates yet</td></tr>
+                  <tr><td colSpan={8} className="text-center py-8 text-gray-400">{t('financing:products.noProducts')}</td></tr>
                 )}
               </tbody>
             </table>
@@ -291,25 +295,25 @@ export default function FinancingPage() {
               onChange={e => setStatusFilter(e.target.value)}
               className="text-sm border rounded-lg px-3 py-2"
             >
-              <option value="">All Statuses</option>
-              <option value="active">Active</option>
-              <option value="paid_off">Paid Off</option>
-              <option value="defaulted">Defaulted</option>
-              <option value="cancelled">Cancelled</option>
+              <option value="">{t('financing:agreements.allStatuses')}</option>
+              <option value="active">{t('financing:agreements.active')}</option>
+              <option value="paid_off">{t('financing:agreements.paidOff')}</option>
+              <option value="defaulted">{t('financing:agreements.defaulted')}</option>
+              <option value="cancelled">{t('financing:agreements.cancelled')}</option>
             </select>
           </div>
           <div className="bg-white rounded-xl border overflow-hidden">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-gray-50 text-left text-gray-500 text-xs">
-                  <th className="px-4 py-3">ID</th>
-                  <th className="px-4 py-3">Account</th>
-                  <th className="px-4 py-3">Product</th>
-                  <th className="px-4 py-3">Description</th>
-                  <th className="px-4 py-3 text-right">Total Owed</th>
-                  <th className="px-4 py-3 text-right">Outstanding</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Created</th>
+                  <th className="px-4 py-3">{t('financing:agreements.id')}</th>
+                  <th className="px-4 py-3">{t('financing:agreements.account')}</th>
+                  <th className="px-4 py-3">{t('financing:agreements.product')}</th>
+                  <th className="px-4 py-3">{t('financing:agreements.description')}</th>
+                  <th className="px-4 py-3 text-right">{t('financing:agreements.totalOwed')}</th>
+                  <th className="px-4 py-3 text-right">{t('financing:agreements.outstanding')}</th>
+                  <th className="px-4 py-3">{t('financing:agreements.status')}</th>
+                  <th className="px-4 py-3">{t('financing:agreements.created')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -334,7 +338,7 @@ export default function FinancingPage() {
                   </tr>
                 ))}
                 {agreements.length === 0 && (
-                  <tr><td colSpan={8} className="text-center py-8 text-gray-400">No agreements found</td></tr>
+                  <tr><td colSpan={8} className="text-center py-8 text-gray-400">{t('financing:agreements.noAgreements')}</td></tr>
                 )}
               </tbody>
             </table>

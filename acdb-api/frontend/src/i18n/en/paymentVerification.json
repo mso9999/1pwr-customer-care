@@ -1,0 +1,36 @@
+{
+  "title": "Payment Verification",
+  "filters": {
+    "pending": "Pending",
+    "verified": "Verified",
+    "rejected": "Rejected",
+    "all": "All",
+    "allTypes": "All Types",
+    "connectionFee": "Connection Fee",
+    "readyboardFee": "Readyboard Fee",
+    "electricity": "Electricity",
+    "uncategorized": "Uncategorized"
+  },
+  "recordCount": "{{count}} records",
+  "exportXlsx": "Export XLSX",
+  "bulk": {
+    "selected_one": "{{count}} selected",
+    "selected_other": "{{count}} selected",
+    "note": "Note (optional)",
+    "verify": "Verify",
+    "reject": "Reject"
+  },
+  "colDate": "Date",
+  "colAccount": "Account",
+  "colCustomer": "Customer",
+  "colType": "Type",
+  "colAmount": "Amount",
+  "colStatus": "Status",
+  "colNote": "Note",
+  "empty": {
+    "pending": "No pending verifications found",
+    "verified": "No verified verifications found",
+    "rejected": "No rejected verifications found",
+    "all": "No verifications found"
+  }
+}

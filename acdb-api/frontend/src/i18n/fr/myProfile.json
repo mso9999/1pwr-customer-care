@@ -1,0 +1,24 @@
+{
+  "title": "Mon compte",
+  "loading": "Chargement de votre profil…",
+  "noProfile": "Aucune donnée de profil trouvée",
+  "fallbackName": "Client",
+  "fields": {
+    "account": "Compte",
+    "firstName": "Prénom",
+    "middleName": "Deuxième prénom",
+    "lastName": "Nom de famille",
+    "phone": "Téléphone",
+    "cellPhone1": "Téléphone portable 1",
+    "cellPhone2": "Téléphone portable 2",
+    "email": "E-mail",
+    "plotNumber": "Numéro de parcelle",
+    "streetAddress": "Adresse",
+    "city": "Ville",
+    "district": "District",
+    "site": "Site",
+    "dateConnected": "Date de raccordement",
+    "dateTerminated": "Date de résiliation"
+  },
+  "accountNumbers": "Numéros de compte"
+}

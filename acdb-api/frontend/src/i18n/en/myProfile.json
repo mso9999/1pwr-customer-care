@@ -1,0 +1,24 @@
+{
+  "title": "My Account",
+  "loading": "Loading your profile…",
+  "noProfile": "No profile data found",
+  "fallbackName": "Customer",
+  "fields": {
+    "account": "Account",
+    "firstName": "First Name",
+    "middleName": "Middle Name",
+    "lastName": "Last Name",
+    "phone": "Phone",
+    "cellPhone1": "Cell Phone 1",
+    "cellPhone2": "Cell Phone 2",
+    "email": "Email",
+    "plotNumber": "Plot Number",
+    "streetAddress": "Street Address",
+    "city": "City",
+    "district": "District",
+    "site": "Site",
+    "dateConnected": "Date Connected",
+    "dateTerminated": "Date Terminated"
+  },
+  "accountNumbers": "Account Numbers"
+}

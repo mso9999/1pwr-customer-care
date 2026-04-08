@@ -1,0 +1,39 @@
+{
+  "title": "Assigner un compteur",
+  "subtitle": "Lier un compteur et un compte à un client",
+  "goBack": "Retour",
+  "success": {
+    "commissionNow": "Mettre en service maintenant",
+    "done": "Terminé"
+  },
+  "fields": {
+    "customerId": "ID client",
+    "customerIdPlaceholder": "ex. 0045MAK ou 5846",
+    "lookingUp": "Recherche du client…",
+    "meterSerial": "Numéro de série du compteur",
+    "site": "Site (Communauté)",
+    "selectSite": "Sélectionner un site…",
+    "customerType": "Type de client",
+    "selectType": "Sélectionner un type…",
+    "accountNumber": "Numéro de compte",
+    "accountPlaceholder": "Généré automatiquement…",
+    "accountHint": "Laisser vide pour la génération automatique, ou saisir pour remplacer.",
+    "villageName": "Nom du village",
+    "connectionDate": "Date de raccordement",
+    "gpsCoordinates": "Coordonnées GPS",
+    "latitude": "Latitude",
+    "longitude": "Longitude",
+    "acquiringGps": "Acquisition du GPS…",
+    "captureLocation": "Capturer la position actuelle",
+    "gpsNotSupported": "Géolocalisation non prise en charge"
+  },
+  "assigning": "Affectation en cours…",
+  "assignMeter": "Assigner le compteur",
+  "validation": {
+    "customerIdRequired": "L'ID client est requis",
+    "meterRequired": "Le numéro de série du compteur est requis",
+    "siteRequired": "Le site est requis",
+    "typeRequired": "Le type de client est requis"
+  },
+  "assignFailed": "Échec de l'affectation"
+}

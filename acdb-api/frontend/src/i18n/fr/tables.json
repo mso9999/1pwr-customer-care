@@ -1,0 +1,8 @@
+{
+  "title": "Tables de la base de données",
+  "subtitle": "Toutes les tables de la base de données service client. Appuyez pour parcourir.",
+  "loading": "Chargement des tables…",
+  "rowsCols": "{{rows}} lignes · {{cols}} colonnes",
+  "searchPlaceholder": "Rechercher des tables…",
+  "noTables": "Aucune table trouvée"
+}

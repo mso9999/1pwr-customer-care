@@ -1,0 +1,19 @@
+{
+  "title": "Employee Role Management",
+  "assignRole": "Assign Role",
+  "employeeId": "Employee ID",
+  "ccRole": "CC Role",
+  "adding": "Adding…",
+  "assign": "Assign",
+  "colEmployeeId": "Employee ID",
+  "colName": "Name",
+  "colEmail": "Email",
+  "colRole": "CC Role",
+  "colAssignedBy": "Assigned By",
+  "colActions": "Actions",
+  "remove": "Remove",
+  "loading": "Loading…",
+  "empty": "No role assignments yet.",
+  "removeConfirm": "Remove role for {{name}}? They will lose access to this CC role.",
+  "removeFailed": "Failed to remove role"
+}

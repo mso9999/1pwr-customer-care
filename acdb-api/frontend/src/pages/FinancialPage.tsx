@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Line, BarChart, Bar, ComposedChart,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -192,6 +193,7 @@ function formatLSL(value: number): string {
 // ---------------------------------------------------------------------------
 
 export default function FinancialPage() {
+  const { t } = useTranslation(['financial', 'common']);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [exporting, setExporting] = useState(false);
@@ -260,7 +262,7 @@ export default function FinancialPage() {
       <div className="flex items-center justify-center py-20">
         <div className="text-center">
           <div className="animate-spin w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full mx-auto mb-4" />
-          <p className="text-gray-500">Loading financial data...</p>
+          <p className="text-gray-500">{t('financial:loadingData')}</p>
         </div>
       </div>
     );
@@ -273,7 +275,7 @@ export default function FinancialPage() {
   if (!data || !data.arpu || data.arpu.length === 0) {
     return (
       <div className="bg-amber-50 text-amber-800 px-6 py-4 rounded-xl">
-        No ARPU data available. Ensure account history data exists in the CC database.
+        {t('financial:noData')}
       </div>
     );
   }
@@ -318,10 +320,10 @@ export default function FinancialPage() {
       <div className="bg-gradient-to-r from-emerald-700 to-emerald-900 rounded-xl shadow-lg p-6 sm:p-8 mb-6 text-white">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-bold">Financial Analytics</h1>
-            <p className="text-emerald-200 mt-1">Sotho Minigrid Portfolio (SMP)</p>
+            <h1 className="text-2xl sm:text-3xl font-bold">{t('financial:title')}</h1>
+            <p className="text-emerald-200 mt-1">{t('financial:subtitle')}</p>
             <p className="text-emerald-300 text-sm mt-1">
-              ARPU, revenue trends & per-site financial breakdown
+              {t('financial:description')}
             </p>
           </div>
           <button
@@ -345,28 +347,28 @@ export default function FinancialPage() {
       {/* Headline Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-6">
         <div className="bg-white rounded-xl shadow p-4 border-l-4 border-emerald-500">
-          <p className="text-xs text-gray-500 uppercase font-medium">Latest ARPU</p>
+          <p className="text-xs text-gray-500 uppercase font-medium">{t('financial:latestArpu')}</p>
           <p className="text-2xl sm:text-3xl font-bold text-gray-800 mt-1">
             LSL {latest.arpu.toLocaleString()}
           </p>
           <p className="text-xs text-gray-400 mt-1">{latest.quarter}</p>
         </div>
         <div className="bg-white rounded-xl shadow p-4 border-l-4 border-blue-500">
-          <p className="text-xs text-gray-500 uppercase font-medium">Total Revenue</p>
+          <p className="text-xs text-gray-500 uppercase font-medium">{t('financial:totalRevenue')}</p>
           <p className="text-2xl sm:text-3xl font-bold text-gray-800 mt-1">
             LSL {formatLSL(totalRevenue)}
           </p>
-          <p className="text-xs text-gray-400 mt-1">all quarters</p>
+          <p className="text-xs text-gray-400 mt-1">{t('financial:allQuarters')}</p>
         </div>
         <div className="bg-white rounded-xl shadow p-4 border-l-4 border-purple-500">
-          <p className="text-xs text-gray-500 uppercase font-medium">Active Customers</p>
+          <p className="text-xs text-gray-500 uppercase font-medium">{t('financial:activeCustomers')}</p>
           <p className="text-2xl sm:text-3xl font-bold text-gray-800 mt-1">
             {latest.active_customers.toLocaleString()}
           </p>
           <p className="text-xs text-gray-400 mt-1">{latest.quarter}</p>
         </div>
         <div className="bg-white rounded-xl shadow p-4 border-l-4 border-amber-500">
-          <p className="text-xs text-gray-500 uppercase font-medium">Revenue Growth</p>
+          <p className="text-xs text-gray-500 uppercase font-medium">{t('financial:revenueGrowth')}</p>
           <p
             className={`text-2xl sm:text-3xl font-bold mt-1 ${
               revenueGrowth >= 0 ? 'text-green-600' : 'text-red-600'
@@ -375,15 +377,15 @@ export default function FinancialPage() {
             {revenueGrowth >= 0 ? '+' : ''}
             {revenueGrowth.toFixed(1)}%
           </p>
-          <p className="text-xs text-gray-400 mt-1">QoQ</p>
+          <p className="text-xs text-gray-400 mt-1">{t('financial:qoq')}</p>
         </div>
       </div>
 
       {/* ── Figure 1: ARPU Trend ── */}
       <Figure
         id="fig-arpu-trend"
-        title="Figure 1: ARPU Trend"
-        subtitle="Average Revenue Per User (LSL) per quarter, with total revenue on secondary axis"
+        title={t('financial:arpuTrend')}
+        subtitle={t('financial:arpuTrendSub')}
         figureRef={setFigRef('arpu-trend')}
         onExport={handleExportFigure('arpu-trend', 'ARPU_Trend')}
       >
@@ -461,8 +463,8 @@ export default function FinancialPage() {
         return (
           <Figure
             id="fig-monthly-arpu"
-            title="Figure 2: Monthly ARPU"
-            subtitle="Average Revenue Per User (LSL) per month, colored by quarter"
+            title={t('financial:monthlyArpu')}
+            subtitle={t('financial:monthlyArpuSub')}
             figureRef={setFigRef('monthly-arpu')}
             onExport={handleExportFigure('monthly-arpu', 'Monthly_ARPU')}
           >
@@ -545,11 +547,11 @@ export default function FinancialPage() {
               <table className="min-w-full text-sm">
                 <thead className="bg-gray-50 border-b">
                   <tr>
-                    <th className="px-3 py-2 text-left font-medium text-gray-600">Month</th>
-                    <th className="px-3 py-2 text-left font-medium text-gray-600">Quarter</th>
-                    <th className="px-3 py-2 text-right font-medium text-gray-600">Revenue (LSL)</th>
-                    <th className="px-3 py-2 text-right font-medium text-gray-600">Customers</th>
-                    <th className="px-3 py-2 text-right font-medium text-gray-600">ARPU (LSL)</th>
+                    <th className="px-3 py-2 text-left font-medium text-gray-600">{t('financial:month')}</th>
+                    <th className="px-3 py-2 text-left font-medium text-gray-600">{t('financial:quarter')}</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">{t('financial:revenue')} (LSL)</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">{t('financial:customers')}</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">{t('financial:arpu')} (LSL)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
@@ -578,8 +580,8 @@ export default function FinancialPage() {
       {/* ── Figure 3: Revenue by Site (stacked) ── */}
       <Figure
         id="fig-revenue-by-site"
-        title="Figure 3: Quarterly Revenue by Site"
-        subtitle="Stacked breakdown of LSL revenue per quarter by concession"
+        title={t('financial:revenueBySite')}
+        subtitle={t('financial:revenueBySiteSub')}
         figureRef={setFigRef('revenue-by-site')}
         onExport={handleExportFigure('revenue-by-site', 'Revenue_By_Site')}
       >
@@ -627,8 +629,8 @@ export default function FinancialPage() {
       {latestSiteArpu.length > 0 && (
         <Figure
           id="fig-arpu-by-site"
-          title={`Figure 4: ARPU by Site (${latest.quarter})`}
-          subtitle="Average Revenue Per User by concession for the latest quarter"
+          title={t('financial:arpuBySite', { quarter: latest.quarter })}
+          subtitle={t('financial:arpuBySiteSub')}
           figureRef={setFigRef('arpu-by-site')}
           onExport={handleExportFigure('arpu-by-site', 'ARPU_By_Site')}
         >
@@ -665,10 +667,10 @@ export default function FinancialPage() {
             <table className="min-w-full text-sm">
               <thead className="bg-gray-50 border-b">
                 <tr>
-                  <th className="px-3 py-2 text-left font-medium text-gray-600">Site</th>
-                  <th className="px-3 py-2 text-right font-medium text-gray-600">Customers</th>
-                  <th className="px-3 py-2 text-right font-medium text-gray-600">Revenue (LSL)</th>
-                  <th className="px-3 py-2 text-right font-medium text-gray-600">ARPU (LSL)</th>
+                  <th className="px-3 py-2 text-left font-medium text-gray-600">{t('common:site')}</th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-600">{t('financial:customers')}</th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-600">{t('financial:revenue')} (LSL)</th>
+                  <th className="px-3 py-2 text-right font-medium text-gray-600">{t('financial:arpu')} (LSL)</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -696,7 +698,7 @@ export default function FinancialPage() {
               </tbody>
               <tfoot className="bg-gray-50 border-t font-semibold">
                 <tr>
-                  <td className="px-3 py-2">Total / Average</td>
+                  <td className="px-3 py-2">{t('financial:totalAverage')}</td>
                   <td className="px-3 py-2 text-right">
                     {latest.active_customers.toLocaleString()}
                   </td>
@@ -716,8 +718,8 @@ export default function FinancialPage() {
       {/* ── Figure 5: Full Revenue Breakdown Table ── */}
       <Figure
         id="fig-revenue-table"
-        title="Figure 5: Revenue Breakdown by Site and Quarter"
-        subtitle="Detailed per-site, per-quarter revenue (LSL)"
+        title={t('financial:revenueBreakdown')}
+        subtitle={t('financial:revenueBreakdownSub')}
         figureRef={setFigRef('revenue-table')}
         onExport={handleExportFigure('revenue-table', 'Revenue_Breakdown')}
       >
@@ -726,7 +728,7 @@ export default function FinancialPage() {
             <thead className="bg-gray-50 border-b">
               <tr>
                 <th className="px-3 py-2 text-left font-medium text-gray-600 sticky left-0 bg-gray-50">
-                  Quarter
+                  {t('financial:quarter')}
                 </th>
                 {siteCodes.map((code) => (
                   <th
@@ -736,8 +738,8 @@ export default function FinancialPage() {
                     {siteNames[code] || code}
                   </th>
                 ))}
-                <th className="px-3 py-2 text-right font-medium text-gray-800">Total</th>
-                <th className="px-3 py-2 text-right font-medium text-emerald-700">ARPU</th>
+                <th className="px-3 py-2 text-right font-medium text-gray-800">{t('common:total')}</th>
+                <th className="px-3 py-2 text-right font-medium text-emerald-700">{t('financial:arpu')}</th>
               </tr>
             </thead>
             <tbody className="divide-y">
@@ -764,7 +766,7 @@ export default function FinancialPage() {
             </tbody>
             <tfoot className="bg-gray-50 border-t font-semibold">
               <tr>
-                <td className="px-3 py-2 sticky left-0 bg-gray-50">All Quarters</td>
+                <td className="px-3 py-2 sticky left-0 bg-gray-50">{t('financial:allQuarters')}</td>
                 {siteCodes.map((code) => {
                   const siteTotal = arpu.reduce(
                     (sum, row) => sum + (row.per_site[code]?.revenue ?? 0),
@@ -792,7 +794,7 @@ export default function FinancialPage() {
       {tenureData && tenureData.chart_data && tenureData.chart_data.length > 0 && tenureData.customer_types.length > 0 && selectedTenureType && (
         <Figure
           id="fig-consumption-tenure"
-          title="Figure 6: Average Monthly kWh by Tenure"
+          title={t('financial:consumptionByTenure')}
           subtitle={`Average kWh per customer per month as a function of tenure (months since first ${
             tenureData.data_source?.includes('consumption') ? 'reading' : 'transaction'
           }). Dashed lines show ±1 standard deviation. Source: ${tenureData.data_source ?? 'vended'}.`}
@@ -801,7 +803,7 @@ export default function FinancialPage() {
         >
           {/* Customer type selector */}
           <div className="flex items-center gap-3 mb-4">
-            <label className="text-sm font-medium text-gray-600">Customer Type:</label>
+            <label className="text-sm font-medium text-gray-600">{t('financial:customerType')}:</label>
             <select
               value={selectedTenureType}
               onChange={(e) => setSelectedTenureType(e.target.value)}
@@ -948,16 +950,16 @@ export default function FinancialPage() {
             return (
               <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
                 <div className="bg-gray-50 rounded-lg p-3 text-center">
-                  <p className="text-xs font-medium text-gray-500 uppercase">Customers</p>
+                  <p className="text-xs font-medium text-gray-500 uppercase">{t('financial:customers')}</p>
                   <p className="text-lg font-bold text-gray-800 tabular-nums">{stat.customer_count.toLocaleString()}</p>
                 </div>
                 <div className="bg-gray-50 rounded-lg p-3 text-center">
-                  <p className="text-xs font-medium text-gray-500 uppercase">Total kWh</p>
+                  <p className="text-xs font-medium text-gray-500 uppercase">{t('common:total')} kWh</p>
                   <p className="text-lg font-bold text-gray-800 tabular-nums">{Math.round(stat.total_kwh).toLocaleString()}</p>
                 </div>
                 <div className="bg-gray-50 rounded-lg p-3 text-center">
-                  <p className="text-xs font-medium text-gray-500 uppercase">Max Tenure</p>
-                  <p className="text-lg font-bold text-gray-800 tabular-nums">{stat.max_tenure_months} months</p>
+                  <p className="text-xs font-medium text-gray-500 uppercase">{t('financial:maxTenure')}</p>
+                  <p className="text-lg font-bold text-gray-800 tabular-nums">{stat.max_tenure_months} {t('financial:months')}</p>
                 </div>
               </div>
             );
@@ -967,9 +969,9 @@ export default function FinancialPage() {
 
       {/* Footer */}
       <div className="text-center text-xs text-gray-400 py-6 border-t mt-6">
-        <p>Data source: 1PWR Customer Care Portal (1PDB-backed)</p>
+        <p>{t('financial:dataSourceFooter')}</p>
         <p className="mt-1">
-          ARPU = Total Quarterly Revenue / Active Customers in Quarter
+          {t('financial:arpuDefinition')}
         </p>
       </div>
     </div>

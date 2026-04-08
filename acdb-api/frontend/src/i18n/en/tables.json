@@ -1,0 +1,8 @@
+{
+  "title": "Database Tables",
+  "subtitle": "All tables in the customer care database. Tap to browse.",
+  "loading": "Loading tables…",
+  "rowsCols": "{{rows}} rows · {{cols}} columns",
+  "searchPlaceholder": "Search tables…",
+  "noTables": "No tables found"
+}

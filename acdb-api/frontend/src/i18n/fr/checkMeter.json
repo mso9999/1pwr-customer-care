@@ -1,0 +1,17 @@
+{
+  "title": "Compteurs de contrôle",
+  "subtitle": "Comparer les relevés 1Meter et SparkMeter pour les compteurs de contrôle installés",
+  "loading": "Chargement…",
+  "noData": "Aucune donnée de compteur de contrôle disponible",
+  "meterSerial": "N° de série du compteur",
+  "sparkMeter": "SparkMeter",
+  "oneMeter": "1Meter",
+  "delta": "Écart",
+  "lastReading": "Dernier relevé",
+  "status": "Statut",
+  "online": "En ligne",
+  "offline": "Hors ligne",
+  "stale": "Obsolète",
+  "lastSeen": "Vu pour la dernière fois",
+  "readings": "Relevés"
+}

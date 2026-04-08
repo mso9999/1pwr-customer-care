@@ -1,0 +1,23 @@
+{
+  "title": "Service client",
+  "subtitle": "Portail minigrille du Lesotho",
+  "employee": "Employé",
+  "customer": "Client",
+  "employeeId": "ID employé",
+  "accountNumber": "Numéro de compte",
+  "enterEmployeeId": "Saisir l'ID employé",
+  "accountNumberExample": "ex. 0045MAK",
+  "password": "Mot de passe",
+  "enterOtp": "Saisir le code OTP",
+  "choosePassword": "Choisissez un mot de passe (min. 6 caractères)",
+  "yourPassword": "Votre mot de passe",
+  "pleaseWait": "Veuillez patienter...",
+  "createAccount": "Créer un compte",
+  "signIn": "Se connecter",
+  "registrationSuccess": "Inscription réussie ! Vous pouvez maintenant vous connecter.",
+  "loginFailed": "Échec de la connexion",
+  "firstTime": "Première visite ?",
+  "registerHere": "S'inscrire ici",
+  "alreadyRegistered": "Déjà inscrit ?",
+  "signInLink": "Se connecter"
+}
