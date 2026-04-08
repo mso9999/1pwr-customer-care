@@ -43,11 +43,17 @@ def get_balance_kwh(conn, account_number: str) -> tuple[float, datetime | None]:
     """, (account_number,))
     total_payment_kwh, total_legacy_consumption = (float(v) for v in cur.fetchone())
 
-    # Live consumption from hourly_consumption (Koios/ThunderCloud imports)
+    # Live consumption from hourly_consumption (Koios/ThunderCloud imports).
+    # GROUP BY reading_hour with MAX prevents double-counting when multiple
+    # sources (koios, thundercloud) have rows for the same hour.
     cur.execute("""
-        SELECT COALESCE(SUM(kwh), 0)
-        FROM hourly_consumption
-        WHERE account_number = %s
+        SELECT COALESCE(SUM(hour_kwh), 0)
+        FROM (
+            SELECT reading_hour, MAX(kwh) AS hour_kwh
+            FROM hourly_consumption
+            WHERE account_number = %s
+            GROUP BY reading_hour
+        ) deduped
     """, (account_number,))
     total_live_consumption = float(cur.fetchone()[0])
 

@@ -184,30 +184,52 @@ def main():
     conn = psycopg2.connect(DATABASE_URL)
     cur = conn.cursor()
 
+    # Fetch tariff rate for kWh conversion
+    cur.execute("SELECT value FROM system_config WHERE key = 'tariff_rate'")
+    rate_row = cur.fetchone()
+    tariff_rate = float(rate_row[0]) if rate_row and rate_row[0] else 5.0
+    log.info("Tariff rate for kWh conversion: %.2f", tariff_rate)
+
     import hashlib
-    batch = []
+    inserted = 0
+    skipped_dup = 0
     for r in records:
+        # Skip if CC already recorded a payment for this account+amount within 10 min
+        cur.execute("""
+            SELECT 1 FROM transactions
+            WHERE account_number = %s
+              AND is_payment = true
+              AND transaction_amount = %s
+              AND ABS(EXTRACT(EPOCH FROM (transaction_date - %s))) < 600
+            LIMIT 1
+        """, (r["account_number"], r["transaction_amount"], r["transaction_date"]))
+        if cur.fetchone():
+            skipped_dup += 1
+            continue
+
+        kwh_value = round(r["transaction_amount"] / tariff_rate, 4) if tariff_rate > 0 else 0.0
         ext = r["external_id"] or ""
         dedup = ext[:50] if ext else hashlib.md5(
-            f"{r['account_number']}|{r['transaction_date'].isoformat()}|{r['transaction_amount']}"
-            .encode()
+            "{}|{}|{}".format(
+                r["account_number"], r["transaction_date"].isoformat(), r["transaction_amount"]
+            ).encode()
         ).hexdigest()[:16]
-        batch.append((
+
+        cur.execute("""
+            INSERT INTO transactions
+                (account_number, meter_id, transaction_date, transaction_amount,
+                 kwh_value, rate_used, is_payment, source, source_table)
+            VALUES (%s, %s, %s, %s, %s, %s, true, %s::transaction_source, %s)
+            ON CONFLICT DO NOTHING
+        """, (
             r["account_number"], r["meter_id"], r["transaction_date"],
-            r["transaction_amount"], True, r["source"], dedup,
+            r["transaction_amount"], kwh_value, tariff_rate, r["source"], dedup,
         ))
+        if cur.rowcount > 0:
+            inserted += 1
 
-    psycopg2.extras.execute_batch(cur, """
-        INSERT INTO transactions
-            (account_number, meter_id, transaction_date, transaction_amount,
-             is_payment, source, source_table)
-        VALUES (%s, %s, %s, %s, %s, %s::transaction_source, %s)
-        ON CONFLICT DO NOTHING
-    """, batch, page_size=200)
-
-    inserted = cur.rowcount
     conn.commit()
-    log.info("Inserted %d / %d transactions (rest were duplicates)", inserted, len(batch))
+    log.info("Inserted %d, skipped %d duplicates (of %d total)", inserted, skipped_dup, len(records))
 
     conn.close()
     log.info("DONE.")
