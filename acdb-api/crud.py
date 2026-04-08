@@ -510,6 +510,16 @@ def get_record(
         except Exception:
             conn.rollback()
 
+        if not row and table_name == "customers":
+            try:
+                cursor.execute(
+                    "SELECT * FROM customers WHERE customer_id_legacy = %s LIMIT 1",
+                    (record_id,),
+                )
+                row = cursor.fetchone()
+            except Exception:
+                conn.rollback()
+
         # Fallback: for customers, try account_number resolution via join
         if not row and table_name == "customers":
             import re as _re_fallback
@@ -835,6 +845,21 @@ def update_record(
             conn.rollback()
 
         if not old_row and table_name == "customers":
+            try:
+                cursor.execute(
+                    "SELECT * FROM customers WHERE customer_id_legacy = %s LIMIT 1",
+                    (record_id,),
+                )
+                old_row = cursor.fetchone()
+                if old_row:
+                    real_id = _row_to_dict(cursor, old_row).get(pk)
+                    if real_id is not None:
+                        record_id = str(real_id)
+                        lookup_col = pk
+            except Exception:
+                conn.rollback()
+
+        if not old_row and table_name == "customers":
             import re as _re_upd
             if _re_upd.match(r"^\d{3,4}[A-Za-z]{2,4}$", record_id):
                 cursor.execute(
@@ -918,6 +943,21 @@ def delete_record(
             old_row = cursor.fetchone()
         except Exception:
             conn.rollback()
+
+        if not old_row and table_name == "customers":
+            try:
+                cursor.execute(
+                    "SELECT * FROM customers WHERE customer_id_legacy = %s LIMIT 1",
+                    (record_id,),
+                )
+                old_row = cursor.fetchone()
+                if old_row:
+                    real_id = _row_to_dict(cursor, old_row).get(pk)
+                    if real_id is not None:
+                        record_id = str(real_id)
+                        lookup_col = pk
+            except Exception:
+                conn.rollback()
 
         if not old_row and table_name == "customers":
             import re as _re_del
