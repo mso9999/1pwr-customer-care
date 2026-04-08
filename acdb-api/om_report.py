@@ -330,6 +330,61 @@ def customer_growth(user: CurrentUser = Depends(require_employee)):
         return {"growth": result, "total": cumulative}
 
 
+@router.get("/customer-growth-by-site")
+def customer_growth_by_site(
+    site: Optional[str] = Query(None, description="Filter by site code (e.g. KET)"),
+    user: CurrentUser = Depends(require_employee),
+):
+    """
+    Per-site quarterly customer growth based on first transaction date.
+
+    Uses MIN(transaction_date) per account as the "active since" date rather
+    than date_service_connected (which can be bulk-set retroactively).
+    Returns one entry per site per quarter where new customers first transacted.
+    """
+    with _get_connection() as conn:
+        cursor = conn.cursor()
+
+        sql = (
+            "SELECT community, account_number, MIN(transaction_date) AS first_txn "
+            "FROM transactions "
+            "WHERE transaction_date IS NOT NULL AND community IS NOT NULL "
+        )
+        params: list = []
+        if site:
+            sql += "AND UPPER(community) = %s "
+            params.append(site.upper())
+        sql += "GROUP BY community, account_number"
+        cursor.execute(sql, params)
+        rows = cursor.fetchall()
+
+        site_quarterly: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
+        for community, _acct, first_txn in rows:
+            s = (community or "").strip().upper()
+            if not s or s not in KNOWN_SITES:
+                continue
+            q = _date_to_quarter(first_txn)
+            if q:
+                site_quarterly[s][q] += 1
+
+        result = {}
+        for s in sorted(site_quarterly):
+            sorted_q = sorted(site_quarterly[s].keys())
+            cum = 0
+            quarters = []
+            for q in sorted_q:
+                new = site_quarterly[s][q]
+                cum += new
+                quarters.append({"quarter": q, "new": new, "cumulative": cum})
+            result[s] = {
+                "name": SITE_ABBREV.get(s, s),
+                "total": cum,
+                "quarters": quarters,
+            }
+
+        return {"sites": result, "source": "MIN(transaction_date)"}
+
+
 # ---------------------------------------------------------------------------
 # 4. Consumption by Site per Quarter (Figures 5, 12)
 # ---------------------------------------------------------------------------
