@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { listRows, deleteRecord, listColdStorage, restoreRecord, type PaginatedResponse } from '../lib/api';
+import { listRows, deleteRecord, listColdStorage, restoreRecord, downloadCustomersExport, type PaginatedResponse } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
 type Tab = 'active' | 'cold';
@@ -25,6 +25,7 @@ export default function CustomersPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [confirmAction, setConfirmAction] = useState<'delete' | 'restore' | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   // Load sites once
   useEffect(() => {
@@ -297,24 +298,42 @@ export default function CustomersPage() {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h1 className="text-xl sm:text-2xl font-bold text-gray-800">Customers</h1>
-        {canWriteCustomers && tab === 'active' && (
-          <div className="flex gap-2">
-            <Link to="/assign-meter" className="px-4 py-2.5 bg-emerald-600 text-white rounded-xl text-sm font-medium hover:bg-emerald-700 active:bg-emerald-800 transition flex items-center gap-1.5">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-              Assign Meter
-            </Link>
-            <Link to="/commission" className="px-4 py-2.5 bg-amber-600 text-white rounded-xl text-sm font-medium hover:bg-amber-700 active:bg-amber-800 transition flex items-center gap-1.5">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              Commission
-            </Link>
-            <Link to="/customers/new" className="px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 active:bg-blue-800 transition flex items-center gap-1.5">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-              Add Customer
-            </Link>
-          </div>
-        )}
+        <div className="flex flex-wrap gap-2">
+          {tab === 'active' && (
+            <button
+              onClick={async () => {
+                setExporting(true);
+                try {
+                  await downloadCustomersExport({ format: 'xlsx', site: filterSite || undefined, search: search || undefined });
+                } catch { /* ignore */ }
+                setExporting(false);
+              }}
+              disabled={exporting}
+              className="px-4 py-2.5 bg-green-600 text-white rounded-xl text-sm font-medium hover:bg-green-700 active:bg-green-800 disabled:opacity-50 transition flex items-center gap-1.5"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              {exporting ? 'Exporting...' : 'Download'}
+            </button>
+          )}
+          {canWriteCustomers && tab === 'active' && (
+            <>
+              <Link to="/assign-meter" className="px-4 py-2.5 bg-emerald-600 text-white rounded-xl text-sm font-medium hover:bg-emerald-700 active:bg-emerald-800 transition flex items-center gap-1.5">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                Assign Meter
+              </Link>
+              <Link to="/commission" className="px-4 py-2.5 bg-amber-600 text-white rounded-xl text-sm font-medium hover:bg-amber-700 active:bg-amber-800 transition flex items-center gap-1.5">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                Commission
+              </Link>
+              <Link to="/customers/new" className="px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 active:bg-blue-800 transition flex items-center gap-1.5">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                Add Customer
+              </Link>
+            </>
+          )}
+        </div>
       </div>
 
       {/* Tab bar */}

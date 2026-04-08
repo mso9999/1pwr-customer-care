@@ -358,6 +358,17 @@ export function exportUrl(table: string, format: 'csv' | 'xlsx', search?: string
   return `${getApiBase()}/export/${encodeURIComponent(table)}?${qs}`;
 }
 
+export async function downloadCustomersExport(params: {
+  format?: 'csv' | 'xlsx'; site?: string; search?: string;
+} = {}): Promise<void> {
+  const qs = new URLSearchParams();
+  qs.set('format', params.format || 'csv');
+  if (params.site) qs.set('site', params.site);
+  if (params.search) qs.set('search', params.search);
+  const name = params.site ? `customers_${params.site}` : 'customers';
+  return downloadFile(`/export/customers-with-accounts?${qs}`, `${name}.${params.format || 'csv'}`);
+}
+
 // ---------------------------------------------------------------------------
 // Admin
 // ---------------------------------------------------------------------------

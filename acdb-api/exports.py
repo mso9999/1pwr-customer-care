@@ -96,6 +96,66 @@ def export_table(
         return _export_xlsx(table_name, columns, rows)
 
 
+@router.get("/customers-with-accounts")
+def export_customers_with_accounts(
+    format: str = Query("csv", regex="^(csv|xlsx)$"),
+    site: Optional[str] = Query(None, description="Filter by site/community"),
+    search: Optional[str] = Query(None),
+    user: CurrentUser = Depends(require_employee),
+):
+    """Export customers with their account numbers for field distribution."""
+    with _get_connection() as conn:
+        cursor = conn.cursor()
+        clauses = []
+        params: list = []
+
+        if site:
+            clauses.append("c.community = %s")
+            params.append(site.upper())
+        if search:
+            clauses.append(
+                "(c.first_name ILIKE %s OR c.last_name ILIKE %s "
+                "OR CAST(c.customer_id_legacy AS TEXT) ILIKE %s "
+                "OR a.account_number ILIKE %s OR c.plot_number ILIKE %s)"
+            )
+            s = f"%{search}%"
+            params.extend([s, s, s, s, s])
+
+        clauses.append(
+            "NOT EXISTS (SELECT 1 FROM soft_deletes sd "
+            "WHERE sd.table_name = 'customers' AND sd.record_id = CAST(c.id AS TEXT))"
+        )
+
+        where = " WHERE " + " AND ".join(clauses)
+
+        cursor.execute(
+            "SELECT a.account_number, c.customer_id_legacy, "
+            "c.first_name, c.last_name, c.cell_phone_1, "
+            "c.community, c.district, c.customer_type, c.plot_number, "
+            "c.national_id "
+            "FROM customers c "
+            "LEFT JOIN accounts a ON a.customer_id = c.id"
+            + where +
+            " ORDER BY c.community, a.account_number",
+            params,
+        )
+
+        columns = [
+            "account_number", "customer_id", "first_name", "last_name",
+            "phone", "site", "district", "customer_type", "plot_number",
+            "national_id",
+        ]
+        rows = cursor.fetchall()
+
+    name = "customers"
+    if site:
+        name = f"customers_{site}"
+    if format == "csv":
+        return _export_csv(name, columns, rows)
+    else:
+        return _export_xlsx(name, columns, rows)
+
+
 def _export_csv(table_name: str, columns: list, rows: list) -> StreamingResponse:
     """Generate CSV streaming response."""
     output = io.StringIO()
