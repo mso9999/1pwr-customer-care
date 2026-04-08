@@ -336,27 +336,31 @@ def customer_growth_by_site(
     user: CurrentUser = Depends(require_employee),
 ):
     """
-    Per-site quarterly customer growth based on first transaction date.
+    Per-site quarterly customer growth based on first transaction date,
+    cross-referenced with the customers table to exclude orphaned/test accounts.
 
-    Uses MIN(transaction_date) per account as the "active since" date rather
-    than date_service_connected (which can be bulk-set retroactively).
-    Site is derived from the account number suffix (same as _extract_site).
+    Uses MIN(transaction_date) per account as the "active since" date.
+    Only counts accounts that exist in the customers table (via accounts join).
+    Site comes from customers.community (authoritative), not account suffix.
     """
     with _get_connection() as conn:
         cursor = conn.cursor()
 
         cursor.execute(
-            "SELECT account_number, MIN(transaction_date) AS first_txn "
-            "FROM transactions "
-            "WHERE transaction_date IS NOT NULL "
-            "GROUP BY account_number"
+            "SELECT c.community, a.account_number, MIN(t.transaction_date) AS first_txn "
+            "FROM transactions t "
+            "JOIN accounts a ON t.account_number = a.account_number "
+            "JOIN customers c ON a.customer_id = c.id "
+            "WHERE t.transaction_date IS NOT NULL "
+            "  AND c.community IS NOT NULL "
+            "GROUP BY c.community, a.account_number"
         )
         rows = cursor.fetchall()
 
         site_quarterly: Dict[str, Dict[str, int]] = defaultdict(lambda: defaultdict(int))
-        for acct, first_txn in rows:
-            s = _extract_site(acct)
-            if not s:
+        for community, _acct, first_txn in rows:
+            s = (community or "").strip().upper()
+            if not s or s not in KNOWN_SITES:
                 continue
             if site and s != site.upper():
                 continue
@@ -379,7 +383,7 @@ def customer_growth_by_site(
                 "quarters": quarters,
             }
 
-        return {"sites": result, "source": "MIN(transaction_date)"}
+        return {"sites": result, "source": "MIN(transaction_date) JOIN customers"}
 
 
 # ---------------------------------------------------------------------------
