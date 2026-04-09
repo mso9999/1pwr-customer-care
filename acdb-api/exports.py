@@ -66,19 +66,21 @@ def export_customers_with_accounts(
         where = " WHERE " + " AND ".join(clauses)
 
         cursor.execute(
-            "SELECT a.account_number, c.customer_id_legacy, "
+            "SELECT a.account_number, m.meter_id AS meter_serial, "
             "c.first_name, c.last_name, c.cell_phone_1, "
             "c.community, c.district, c.customer_type, c.plot_number, "
             "c.national_id "
             "FROM customers c "
-            "LEFT JOIN accounts a ON a.customer_id = c.id"
+            "LEFT JOIN accounts a ON a.customer_id = c.id "
+            "LEFT JOIN meters m ON m.account_number = a.account_number "
+            "AND m.role = 'primary'"
             + where +
             " ORDER BY c.community, a.account_number",
             params,
         )
 
         columns = [
-            "account_number", "customer_id", "first_name", "last_name",
+            "account_number", "meter_serial", "first_name", "last_name",
             "phone", "site", "district", "customer_type", "plot_number",
             "national_id",
         ]
