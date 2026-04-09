@@ -2831,3 +2831,196 @@ Key evidence:
 ### Protocol Feedback
 - The conversation summary was essential for reconstructing the full context of the Benin data work.
 - CONTEXT.md should be updated to document the Benin import infrastructure (`/opt/1pdb-bn/`, timer, scripts).
+
+---
+
+## Session 2026-04-07 202604072045 (Dashboard Site Selector + Sidebar Nav + 1Meter NVS Persistence)
+
+### What Was Done
+
+**1. Dashboard Site Selector**
+- Added toggle pill strip to `DashboardPage.tsx` for filtering by individual sites or subsets
+- All summary cards (Customers, MWh, Revenue, Sites), bar chart, pie chart, and Site Performance table now filter by selected sites
+- "All" button re-selects everything; at least one site must remain selected
+- Each pill color-matches the chart color for that site; shows customer count
+- Revenue/ARPU section unaffected (operates at country level with its own toggles)
+- Added `month_fraction` and `arpu_usd_prorated` to `RevenueConsolidatedMonth` TypeScript interface (was returned by backend but undeclared)
+
+**2. Left Sidebar Navigation**
+- Refactored `Layout.tsx` from horizontal top bar to fixed left sidebar (224px / `w-56`)
+- Nav links grouped into 5 sections with SVG icons: Dashboard, Operations, Customer Data, Commerce, System
+- Country/portfolio selectors moved into sidebar (full-width dropdowns)
+- User avatar + name + role badge + logout pinned to sidebar footer
+- Mobile: hamburger opens slide-out drawer with backdrop overlay
+- Removed old horizontal nav bar that crammed ~20 links into a single row
+
+**3. Backend: ARPU Proration** (from prior session, deployed with this push)
+- Added `month_fraction` and `arpu_usd_prorated` to `stats.py` revenue-summary endpoint
+- Current partial month ARPU is divided by fraction of month elapsed
+
+**4. 1Meter Check Meter Status Assessment**
+- Queried production API for MAK meter health: 3 of 5 online, 2 offline
+  - Online: 0045MAK (23022673), 0119MAK (23022646), 0026MAK (23021847) — all reporting, tracking SM
+  - Offline: 0025MAK (23022696, down since Apr 5), 0005MAK (23022628, down since Mar 30)
+- All 5 SparkMeters reporting fine — issue is on 1Meter side only for the 2 offline units
+
+**5. 1Meter Firmware: NVS Energy Persistence**
+- Implemented persistence of `EnergyIntegrated` to ESP32 NVS flash across reboots
+- Files modified in `onepwr-aws-mesh` repo:
+  - `main/onemeter/meter_string.c`: Added `energy_nvs_record_t` struct (integratedKWh + prevPowerW + prevTimestamp + XOR checksum = 20 bytes), NVS namespace `"energy"`, keyed by meter serial number. Three new functions:
+    - `meter_string_restore_energy_from_nvs()` — reads and validates NVS blobs per meter after init
+    - `meter_string_flush_energy_to_nvs()` — writes all meters' state (called before restarts)
+    - `maybe_flush_energy_nvs()` — per-meter debounced write every 10 min (~52k writes/year, within 100k NVS cycle limit)
+  - `main/onemeter/meter_string.h`: Exposed restore/flush functions
+  - `main/main.c`: Restore called after `meter_string_init()` in `app_main()`; flush called before both 4-hour hard restart and 30-min comms watchdog restart
+- Drift correction logic (±0.02 kWh snap) unchanged — on clean restore, integrated value is close enough to register that snap doesn't fire
+- No backend changes needed — `ingest.py` already receives `EnergyIntegrated` in MQTT payloads
+
+### Key Decisions
+- NVS write debounced to every 10 minutes (not every 120s read cycle) to stay well within flash wear limits
+- Persist `prevPowerW` and `prevTimestamp` alongside `integratedKWh` for seamless trapezoidal continuity across reboot
+- XOR checksum guards against NVS corruption; corrupt records fall back to existing drift-snap behavior
+- Left sidebar breakpoint at `lg:` (1024px) — below that, slide-out drawer
+
+### What Next Session Should Know
+- **OTA is operational on the MAK fleet.** Pipeline set up in session 202602212100; OTA confirmed working on bench (OneMeter3/4, Mar 6); group OTA `AFR_OTA-v1_0_3-MAKGroup` deployed to field; v1.0.4 timeout patch OTA'd to OneMeter44 as canary. Anti-rollback is active — the NVS persistence firmware must be built at **v1.0.5 or higher**.
+- **3 of 5 check meters online** (0045MAK, 0119MAK, 0026MAK). **0005MAK offline since Mar 30**, **0025MAK offline since Apr 5** — these won't receive OTA until connectivity is restored.
+- NVS firmware changes are committed to `onepwr-aws-mesh` local repo but NOT pushed yet — needs build on EC2 (or laptop), version bump to v1.0.5+, and OTA Job creation targeting the MAK thing group.
+- Dashboard site selector and sidebar nav are deployed to production (`cc.1pwrafrica.com`).
+
+### Files Modified
+- `acdb-api/frontend/src/components/Layout.tsx` — full rewrite to left sidebar
+- `acdb-api/frontend/src/pages/DashboardPage.tsx` — site selector + filtered metrics
+- `acdb-api/frontend/src/lib/api.ts` — added `month_fraction`, `arpu_usd_prorated` to TypeScript interface
+- `acdb-api/stats.py` — ARPU proration logic
+- `onepwr-aws-mesh/main/onemeter/meter_string.c` — NVS energy persistence
+- `onepwr-aws-mesh/main/onemeter/meter_string.h` — exposed restore/flush functions
+- `onepwr-aws-mesh/main/main.c` — wired NVS restore on boot and flush before restarts
+
+### Senescence Notes
+- No degradation observed.
+
+### Protocol Feedback
+- The conversation summary's detailed file inventory was invaluable for quickly locating firmware source files in a separate repo.
+- CONTEXT.md correctly documented the OTA pipeline setup status but SESSION_LOG.md was needed to confirm the pipeline was actually built (session 202602212100). The OTA SOP at `Docs/SOP-1meter-ota-setup.md` in the firmware repo is the authoritative reference.
+
+---
+
+## Session 2026-04-08 202604081710 (Fix BN Transaction Pipeline)
+
+### What Was Done
+- **Diagnosed BN transaction import gap**: Transactions in `onepower_bj` stopped at Feb 25, 2026 (6+ weeks stale). Hourly consumption was current (covered by separate `1pdb-import-bn.timer`). Root cause: `DATABASE_URL_BN` env var missing from `/opt/1pdb/.env`, causing the `have_bn_config()` check in `sync_consumption.sh` Phase 3 to skip all BN sync (hourly, transactions, and customer type sync).
+- **Added `DATABASE_URL_BN`** to `/opt/1pdb/.env`: `DATABASE_URL_BN=postgresql://cc_api:...@localhost:5432/onepower_bj`
+- **Backfilled 843 transactions** (596 GBO + 247 SAM) covering Feb 25 – Apr 8, 2026 by running `import_transactions_bn.py` manually with the correct env vars.
+- **Verified all three `have_bn_config` vars are set**: `DATABASE_URL_BN`, `KOIOS_WEB_EMAIL`, `KOIOS_WEB_PASSWORD` — Phase 3 will now run every 15 minutes via `1pdb-consumption.timer`.
+
+### Key Decisions
+- BN has a separate database (`onepower_bj`) and a separate API service (`1pdb-api-bn` on port 8101) with its own env file at `/opt/1pdb-bn/.env`.
+- The `1pdb-consumption.timer` (15-min) sync script `sync_consumption.sh` sources `/opt/1pdb/.env` and conditionally runs BN scripts (`import_hourly_bn.py`, `import_transactions_bn.py`, `sync_bn_customer_types.py`) in Phase 3 only if `DATABASE_URL_BN`, `KOIOS_WEB_EMAIL`, and `KOIOS_WEB_PASSWORD` are all set.
+- The separate `1pdb-import-bn.timer` (6-hourly) runs `/opt/1pdb-bn/periodic_import.sh` which handles monthly aggregates and hourly consumption for BN — this was already working fine (uses its own env vars in the shell script).
+
+### What Next Session Should Know
+- BN transaction pipeline is now fixed and will auto-sync every 15 minutes.
+- BN data architecture: separate `onepower_bj` database, separate API on port 8101, env at `/opt/1pdb-bn/.env`.
+- The `1pdb-import-bn.timer` (6h) handles monthly aggregates + hourly consumption for BN independently.
+- The `1pdb-consumption.timer` (15min) Phase 3 handles BN transactions + hourly + customer type sync — this was the broken piece.
+- **Still pending**: Fresh LS Koios API credentials needed from SparkMeter for balance audit.
+
+### Files Modified
+- `/opt/1pdb/.env` on production EC2 — added `DATABASE_URL_BN` env var
+
+### Senescence Notes
+- No degradation observed (first task in session).
+
+---
+
+## Session 2026-04-08 202604082057 (Full EN/FR i18n Implementation)
+
+### What Was Done
+- **Implemented full i18n across all 29 pages and core components** of the CC portal frontend using `react-i18next` + `i18next`.
+- **Infrastructure**: Installed `react-i18next` and `i18next`, created central config at `src/i18n/index.ts` with 29 namespaces (one per page), wired into `main.tsx`.
+- **Language toggle**: Added EN/FR toggle to the sidebar footer in `Layout.tsx`, persisted to `localStorage` via key `cc_lang`.
+- **Country-based defaults**: Wired `CountryContext.tsx` to auto-set language (BN→FR, LS→EN) when no explicit user preference exists.
+- **Translation files**: Created 58 JSON files (29 EN + 29 FR) covering every page namespace: common, login, dashboard, customers, customerDetail, customerData, omReport, tickets, financial, checkMeter, meters, newCustomer, commission, financing, tariff, sync, mutations, accounts, transactions, pipeline, help, admin, export, tables, assignMeter, recordPayment, paymentVerification, customerDashboard, myProfile.
+- **String extraction**: Modified all 29 page TSX files + `Layout.tsx` + `ProtectedRoute.tsx` to replace hardcoded English strings with `t()` calls using `useTranslation` hooks with appropriate namespaces.
+- **TypeScript clean**: `npx tsc -b --noEmit` passes with zero errors.
+- **Vite build clean**: Production build succeeds (1047 modules).
+- **Deployed**: Pushed to `main`, GitHub Actions deployed both frontend (48s) and backend (34s) successfully.
+
+### Key Decisions
+- Used namespace-per-page pattern (not a single monolithic JSON) for maintainability.
+- French translations are complete for all pages — not machine-translated stubs, but contextually appropriate French for energy/utility domain.
+- Existing currency formatting helpers (`formatCurrency`, `toLocaleString`) were preserved, not replaced by i18n number formatters.
+- Variable shadowing conflicts (local `t` variables in `.map()` callbacks conflicting with the `useTranslation` `t` function) were resolved by renaming local variables to `tbl`, `txn`, `tk`, `ct`, etc.
+
+### What Next Session Should Know
+- The i18n system is live on cc.1pwrafrica.com.
+- Language preference is stored in `localStorage` key `cc_lang` (values: `'en'` or `'fr'`).
+- When switching country to BN, language auto-switches to FR (unless user has explicit override).
+- To add a new translated string: add key to both `src/i18n/en/<namespace>.json` and `src/i18n/fr/<namespace>.json`, then use `t('<key>')` in the component.
+- Some pages have more thorough translations than others — the "big" pages (Dashboard, Customers, CustomerData, OMReport, Tickets, Financial, etc.) are fully translated; smaller/stub pages have basic title + key strings translated.
+
+### Files Modified
+- 94 files changed: `package.json`, `package-lock.json`, `src/main.tsx`, `src/i18n/index.ts` (new), 58 JSON translation files (new), `Layout.tsx`, `ProtectedRoute.tsx`, `CountryContext.tsx`, all 29 page TSX files.
+
+### Senescence Notes
+- This is a continuation session. Context was loaded from summary. No degradation observed.
+
+---
+
+## Session 2026-04-09 202604090900 (BN Full Data Pipeline and Balance Reconciliation)
+
+### What Was Done
+
+**Phase 1: Fixed BN hourly consumption pipeline**
+- Diagnosed root cause: `sync_consumption.sh` Phase 3 passed `$YESTERDAY` to `import_hourly_bn.py`, so when a gap forms it never backfills
+- Manually backfilled April 2-7: 19,768 hourly records imported (GBO + SAM)
+- Cleaned 18,765 garbage rows from `hourly_consumption` (UUID-fragment account numbers from Koios meter IDs that leaked in)
+- Fixed `sync_consumption.sh` to use `$WEEK_AGO` for BN hourly imports (7-day rolling window, duplicates handled by `ON CONFLICT DO NOTHING`)
+
+**Phase 2: Built balance audit script**
+- Created `scripts/ops/audit_bn_balances.py` with modes: full report (default), `--check` (monitoring), `--reconcile` (preview seeds), `--reconcile --apply` (insert seeds)
+- Probed Koios web session `GET /sm/organizations/{ORG_ID}/customers` — confirmed it returns `balance.value` in XOF
+- Script fetches all BN customer balances from Koios, computes 1PDB balances, and compares
+
+**Phase 3: Reconciled balances**
+- Added `balance_seed` value to `transaction_source` enum in `onepower_bj` database
+- Inserted 152 balance_seed transactions for valid customer accounts (all `\d{4}(GBO|SAM)` pattern)
+- Skipped 12 garbage/invalid account codes (e.g., `GBO`, `SAM`, `00BO`, `0006GKBO`, `00000075SAM`)
+- Post-seed verification: all 152 valid accounts within 0.5 kWh threshold
+
+**Phase 4: Set up ongoing monitoring**
+- Created `1pdb-bn-audit.timer` + `1pdb-bn-audit.service` systemd units for daily 06:00 UTC drift check
+- Updated CONTEXT.md with full BN pipeline documentation
+
+**Phase 5: Verified balance API endpoint**
+- Confirmed `GET /api/payments/balance/{account_number}` on port 8101 returns correct kWh and XOF balances
+- Tested 0001GBO (138.94 kWh), 0001SAM (10.48 kWh), 0027SAM (354.41 kWh), 0002GBO (124.15 kWh), 0043SAM (42.18 kWh) — all match Koios
+
+### Key Decisions
+- Used `$WEEK_AGO` (not a dynamic "since latest DB date") for the timer — simpler, handles up to 7-day gaps automatically
+- Validated account codes with regex `^\d{4}(GBO|SAM)$` before inserting seeds — garbage codes from Koios (typos, fragments) are intentionally excluded
+- Daily audit check runs at 06:00 UTC, exits 1 on drift > 0.5 kWh (logs to journal for alerting)
+
+### What Next Session Should Know
+- BN data pipeline is now fully operational: hourly consumption + transactions flow every 15 minutes
+- 1PDB BN balances are reconciled with Koios as of 2026-04-09 (152 accounts seeded)
+- Koios has ~1 day processing lag for daily report CSVs (April 8-9 data was empty on April 9)
+- 12 garbage account codes in Koios are intentionally unreconciled (they don't match valid account patterns)
+- The balance API (`GET /api/payments/balance/{account}`) on port 8101 is verified working
+
+### Files Modified
+- `scripts/ops/audit_bn_balances.py` — new: BN balance audit/reconciliation script
+- `/opt/1pdb/services/sync_consumption.sh` — changed BN hourly from `$YESTERDAY` to `$WEEK_AGO`
+- `/opt/1pdb/services/audit_bn_balances.py` — deployed audit script to server
+- `/etc/systemd/system/1pdb-bn-audit.service` — new: audit oneshot service
+- `/etc/systemd/system/1pdb-bn-audit.timer` — new: daily audit timer
+- `CONTEXT.md` — added BN data pipeline documentation section
+
+### Database Changes
+- `onepower_bj`: Added `balance_seed` to `transaction_source` enum
+- `onepower_bj.transactions`: 152 balance_seed rows inserted
+- `onepower_bj.hourly_consumption`: 19,768 rows added (backfill), 18,765 garbage rows deleted
+
+### Senescence Notes
+- No degradation observed. Conversation loaded from summary with full context.

@@ -33,69 +33,6 @@ def _row_to_dict(cursor, row) -> dict:
     return d
 
 
-@router.get("/{table_name}")
-def export_table(
-    table_name: str,
-    format: str = Query("csv", regex="^(csv|xlsx)$"),
-    filter_col: Optional[str] = Query(None),
-    filter_val: Optional[str] = Query(None),
-    search: Optional[str] = Query(None),
-    user: CurrentUser = Depends(require_employee),
-):
-    """
-    Export a table as CSV or XLSX.
-    Optionally filter by column value or search text.
-    """
-    with _get_connection() as conn:
-        cursor = conn.cursor()
-
-        # Verify table exists via information_schema
-        cursor.execute(
-            "SELECT EXISTS (SELECT 1 FROM information_schema.tables "
-            "WHERE table_schema = 'public' AND table_name = %s)",
-            (table_name,),
-        )
-        found = cursor.fetchone()[0]
-        if not found:
-            raise HTTPException(status_code=404, detail=f"Table '{table_name}' not found")
-
-        # Build query
-        where_clauses = []
-        params = []
-
-        if filter_col and filter_val:
-            where_clauses.append(f"{filter_col} = %s")
-            params.append(filter_val)
-
-        if search:
-            # Find text columns via information_schema
-            cursor.execute(
-                "SELECT column_name FROM information_schema.columns "
-                "WHERE table_schema = 'public' AND table_name = %s "
-                "AND data_type IN ('character varying', 'text')",
-                (table_name,),
-            )
-            text_cols = [row[0] for row in cursor.fetchall()]
-            if text_cols:
-                search_parts = [f"{c} LIKE %s" for c in text_cols[:10]]
-                where_clauses.append(f"({' OR '.join(search_parts)})")
-                params.extend([f"%{search}%"] * len(search_parts))
-
-        where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
-        sql = f"SELECT * FROM {table_name}{where_sql}"
-
-        cursor.execute(sql, params)
-
-        # Get column names
-        columns = [desc[0] for desc in cursor.description]
-        rows = cursor.fetchall()
-
-    if format == "csv":
-        return _export_csv(table_name, columns, rows)
-    else:
-        return _export_xlsx(table_name, columns, rows)
-
-
 @router.get("/customers-with-accounts")
 def export_customers_with_accounts(
     format: str = Query("csv", regex="^(csv|xlsx)$"),
@@ -154,6 +91,65 @@ def export_customers_with_accounts(
         return _export_csv(name, columns, rows)
     else:
         return _export_xlsx(name, columns, rows)
+
+
+@router.get("/{table_name}")
+def export_table(
+    table_name: str,
+    format: str = Query("csv", regex="^(csv|xlsx)$"),
+    filter_col: Optional[str] = Query(None),
+    filter_val: Optional[str] = Query(None),
+    search: Optional[str] = Query(None),
+    user: CurrentUser = Depends(require_employee),
+):
+    """
+    Export a table as CSV or XLSX.
+    Optionally filter by column value or search text.
+    """
+    with _get_connection() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.tables "
+            "WHERE table_schema = 'public' AND table_name = %s)",
+            (table_name,),
+        )
+        found = cursor.fetchone()[0]
+        if not found:
+            raise HTTPException(status_code=404, detail=f"Table '{table_name}' not found")
+
+        where_clauses = []
+        params = []
+
+        if filter_col and filter_val:
+            where_clauses.append(f"{filter_col} = %s")
+            params.append(filter_val)
+
+        if search:
+            cursor.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_schema = 'public' AND table_name = %s "
+                "AND data_type IN ('character varying', 'text')",
+                (table_name,),
+            )
+            text_cols = [row[0] for row in cursor.fetchall()]
+            if text_cols:
+                search_parts = [f"{c} LIKE %s" for c in text_cols[:10]]
+                where_clauses.append(f"({' OR '.join(search_parts)})")
+                params.extend([f"%{search}%"] * len(search_parts))
+
+        where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+        sql = f"SELECT * FROM {table_name}{where_sql}"
+
+        cursor.execute(sql, params)
+
+        columns = [desc[0] for desc in cursor.description]
+        rows = cursor.fetchall()
+
+    if format == "csv":
+        return _export_csv(table_name, columns, rows)
+    else:
+        return _export_xlsx(table_name, columns, rows)
 
 
 def _export_csv(table_name: str, columns: list, rows: list) -> StreamingResponse:

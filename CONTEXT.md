@@ -240,6 +240,35 @@ in `onepowerLS/onepwr-aws-mesh`. Do not expect MQTT / TLS / OTA code to live in 
 | SMS Gateway (LS) | M-PESA payments | All LS sites | sms.1pwrafrica.com mirrors to POST /api/sms/incoming |
 | SMS Gateway (BN) | MTN MoMo payments | All BN sites | smsbn.1pwrafrica.com mirrors to POST /api/bn/sms/incoming |
 
+### BN (Benin) Data Pipeline
+
+Benin runs two sites: **GBO** (Gbowélé) and **SAM** (Samondji), both using SparkMeter Nova meters via **Koios**.
+
+**Data flow** (all run via `sync_consumption.sh` Phase 3, every 15 minutes):
+
+| Component | Script | Method | Timer Arg |
+|-----------|--------|--------|-----------|
+| Hourly consumption | `import_hourly_bn.py` | Koios web UI daily report CSV download | `$WEEK_AGO` (7-day rolling window for gap recovery) |
+| Transactions (payments) | `import_transactions_bn.py` | Koios web UI payment CSV download | `$YESTERDAY` |
+| Customer types | `sync_bn_customer_types.py` | Koios web session + census spreadsheet | (no date arg) |
+
+**Key differences from LS pipeline**:
+- BN uses **web session scraping** (not Koios v1/v2 API) because the BN org is not API-enabled for reads
+- The hourly script downloads daily reading CSVs, bins 15-min intervals into hourly buckets, inserts with `ON CONFLICT DO NOTHING`
+- BN `accounts` table has no `status` column (unlike LS)
+
+**Balance computation**: `balance_engine.get_balance_kwh()` works the same for BN:
+`balance = SUM(payment kWh from transactions) - SUM(hourly consumption) - SUM(legacy debits)`
+
+**Balance audit** (`audit_bn_balances.py`):
+- Fetches Koios credit balances via web session (`GET /sm/organizations/{ORG_ID}/customers` with JSON accept)
+- Converts XOF balances to kWh using tariff rate (160 XOF/kWh)
+- Compares against 1PDB computed balances
+- `--check` mode: daily monitoring via `1pdb-bn-audit.timer` (06:00 UTC), exits 1 on drift
+- `--reconcile --apply`: inserts `balance_seed` transactions to zero out deltas
+
+**Initial reconciliation**: Performed 2026-04-09. 152 valid accounts seeded, 12 garbage account codes skipped.
+
 ### SparkMeter API Landscape (as of 2026-02-19)
 
 **Koios v1 (management)**: `https://www.sparkmeter.cloud/api/v1/`

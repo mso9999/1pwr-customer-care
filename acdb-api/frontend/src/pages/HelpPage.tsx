@@ -50,6 +50,93 @@ function Warning({ children }: { children: React.ReactNode }) {
   );
 }
 
+function BalanceAdjustmentsContent() {
+  const { i18n } = useTranslation();
+  const fr = i18n.language === 'fr';
+
+  if (fr) {
+    return (
+      <>
+        <Warning>
+          Tous les ajustements de solde (crédits, corrections) pour les clients GBO et SAM doivent être effectués
+          <Bold> uniquement via le portail CC</Bold>. Ne créditez jamais un client directement dans Koios / SparkMeter.
+        </Warning>
+        <P>
+          Le portail CC est synchronisé avec Koios. Quand vous enregistrez un paiement dans CC, le crédit est
+          automatiquement envoyé au compteur SparkMeter. Si vous créditez directement dans Koios, notre base de données
+          ne le verra pas et les soldes se désynchroniseront.
+        </P>
+
+        <SubHead>Comment enregistrer un ajustement</SubHead>
+        <Ol>
+          <li>Ouvrir <Bold>cc.1pwrafrica.com</Bold> et se connecter (pays : Bénin).</li>
+          <li>Aller sur <PageLink to="/record-payment">Enregistrer un paiement</PageLink>.</li>
+          <li>Entrer le <Bold>numéro de compte</Bold> du client (ex : <Code>0001GBO</Code>).</li>
+          <li>Entrer le <Bold>montant en XOF</Bold>.</li>
+          <li>Cliquer sur <Bold>Enregistrer</Bold>. Le système convertit automatiquement en kWh au tarif en vigueur et crédite le compteur.</li>
+        </Ol>
+
+        <SubHead>Vérifier le solde d'un client</SubHead>
+        <Ol>
+          <li>Aller sur <PageLink to="/customer-data">Données client</PageLink>.</li>
+          <li>Entrer le numéro de compte.</li>
+          <li>Le <Bold>solde kWh</Bold> et l'<Bold>équivalent XOF</Bold> sont affichés en haut de la page.</li>
+        </Ol>
+
+        <SubHead>Ce qu'il ne faut pas faire</SubHead>
+        <Ul>
+          <li>Créditer un client directement sur sparkmeter.cloud / Koios.</li>
+          <li>Modifier un solde manuellement dans l'interface web Koios.</li>
+          <li>Contourner CC pour des corrections — même les petits montants doivent passer par le portail.</li>
+        </Ul>
+        <Tip>
+          En cas d'erreur de solde, contactez l'équipe technique. Ne tentez pas de corriger directement dans Koios.
+        </Tip>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <Warning>
+        All balance adjustments (credits, corrections) for BN customers must be made
+        <Bold> exclusively through the CC portal</Bold>. Never credit a customer directly in Koios / SparkMeter.
+      </Warning>
+      <P>
+        The CC portal is synchronized with Koios. When you record a payment in CC, the credit is
+        automatically pushed to the SparkMeter. If you credit directly in Koios, our database
+        won't see it and balances will drift out of sync.
+      </P>
+
+      <SubHead>How to Record an Adjustment</SubHead>
+      <Ol>
+        <li>Open <Bold>cc.1pwrafrica.com</Bold> and log in (country: Benin).</li>
+        <li>Go to <PageLink to="/record-payment">Record Payment</PageLink>.</li>
+        <li>Enter the customer's <Bold>account number</Bold> (e.g., <Code>0001GBO</Code>).</li>
+        <li>Enter the <Bold>amount in XOF</Bold>.</li>
+        <li>Click <Bold>Record</Bold>. The system automatically converts to kWh at the current tariff and credits the meter.</li>
+      </Ol>
+
+      <SubHead>Checking a Customer's Balance</SubHead>
+      <Ol>
+        <li>Go to <PageLink to="/customer-data">Customer Data</PageLink>.</li>
+        <li>Enter the account number.</li>
+        <li>The <Bold>kWh balance</Bold> and <Bold>XOF equivalent</Bold> are displayed at the top of the page.</li>
+      </Ol>
+
+      <SubHead>What NOT to Do</SubHead>
+      <Ul>
+        <li>Credit a customer directly on sparkmeter.cloud / Koios.</li>
+        <li>Manually modify a balance in the Koios web interface.</li>
+        <li>Bypass CC for corrections — even small amounts must go through the portal.</li>
+      </Ul>
+      <Tip>
+        If you spot a balance error, contact the technical team. Do not attempt to fix it directly in Koios.
+      </Tip>
+    </>
+  );
+}
+
 const SECTIONS: Section[] = [
   {
     id: 'overview',
@@ -232,6 +319,11 @@ const SECTIONS: Section[] = [
         <P>Use the <Bold>Export XLSX</Bold> button to download the current view for the finance team's records.</P>
       </>
     ),
+  },
+  {
+    id: 'balance-adjustments',
+    title: 'Balance Adjustments & SparkMeter Policy',
+    content: <BalanceAdjustmentsContent />,
   },
   {
     id: 'financing',
@@ -432,6 +524,7 @@ const SECTION_TITLE_KEYS: Record<string, string> = {
   customers: 'help:sections.customerManagement',
   commission: 'help:sections.commissioning',
   payments: 'help:sections.payments',
+  'balance-adjustments': 'help:sections.balanceAdjustments',
   financing: 'help:sections.financing',
   meters: 'help:sections.metering',
   reports: 'help:sections.reporting',
@@ -568,7 +661,7 @@ export default function HelpPage() {
         </div>
 
         <div className="mt-8 text-center text-xs text-gray-400 pb-8">
-          1PWR Customer Care Portal — Revision February 2026 — Administered by OnePower Lesotho
+          1PWR Customer Care Portal — Revision April 2026 — Administered by OnePower Lesotho
         </div>
       </div>
     </div>
