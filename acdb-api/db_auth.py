@@ -4,6 +4,7 @@ SQLite connection manager for the CC portal auth database.
 Manages:
   - cc_customer_passwords: customer self-service passwords (bcrypt)
   - cc_employee_roles: superadmin-assigned CC roles for employees
+  - cc_department_role_mappings: PR department → CC role auto-mapping
 """
 
 import os
@@ -115,6 +116,14 @@ def init_auth_db():
                 set_by_name     TEXT NOT NULL DEFAULT '',
                 notes           TEXT DEFAULT ''
             );
+
+            CREATE TABLE IF NOT EXISTS cc_department_role_mappings (
+                department_key TEXT PRIMARY KEY,
+                cc_role        TEXT NOT NULL,
+                label          TEXT NOT NULL DEFAULT '',
+                added_by       TEXT NOT NULL DEFAULT 'system',
+                added_at       TEXT NOT NULL DEFAULT (datetime('now'))
+            );
         """)
 
         # Seed default superadmin if not already present
@@ -128,7 +137,39 @@ def init_auth_db():
             )
             logger.info("Seeded superadmin role for employee 00 (Matt Orosz)")
 
+        _seed_department_mappings(conn)
+
     logger.info("Auth database initialized at %s", AUTH_DB_PATH)
+
+
+_DEFAULT_DEPT_MAPPINGS: list[tuple[str, str, str]] = [
+    # key, cc_role, label — LS English
+    ("o&m",                            "onm_team",      "O&M"),
+    ("o_m",                            "onm_team",      "O&M (alt)"),
+    ("finance",                        "finance_team",  "Finance"),
+    ("cfo",                            "finance_team",  "CFO"),
+    # BN / MGB French
+    ("exploitation et maintenance",    "onm_team",      "Exploitation et Maintenance"),
+    ("em",                             "onm_team",      "EM (code)"),
+    ("fin",                            "finance_team",  "FIN (code)"),
+    ("service client",                 "onm_team",      "Service client"),
+    ("sc",                             "onm_team",      "SC (code)"),
+]
+
+
+def _seed_department_mappings(conn: sqlite3.Connection):
+    """Insert default department→role mappings if the table is empty."""
+    count = conn.execute("SELECT COUNT(*) FROM cc_department_role_mappings").fetchone()[0]
+    if count > 0:
+        return
+    for key, role, label in _DEFAULT_DEPT_MAPPINGS:
+        conn.execute(
+            """INSERT OR IGNORE INTO cc_department_role_mappings
+               (department_key, cc_role, label, added_by)
+               VALUES (?, ?, ?, 'system')""",
+            (key.lower(), role, label),
+        )
+    logger.info("Seeded %d default department→role mappings", len(_DEFAULT_DEPT_MAPPINGS))
 
 
 # ---------------------------------------------------------------------------
@@ -206,3 +247,58 @@ def list_employee_roles() -> list[dict]:
             "SELECT employee_id, cc_role, assigned_by, assigned_at FROM cc_employee_roles ORDER BY employee_id"
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Department → role mapping operations
+# ---------------------------------------------------------------------------
+
+def list_department_mappings() -> list[dict]:
+    with get_auth_db() as conn:
+        rows = conn.execute(
+            "SELECT department_key, cc_role, label, added_by, added_at "
+            "FROM cc_department_role_mappings ORDER BY cc_role, department_key"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_department_mapping(department_key: str) -> str | None:
+    """Return the CC role for a department key, or None."""
+    with get_auth_db() as conn:
+        row = conn.execute(
+            "SELECT cc_role FROM cc_department_role_mappings WHERE department_key = ?",
+            (department_key.lower().strip(),),
+        ).fetchone()
+        return row["cc_role"] if row else None
+
+
+def get_all_department_mappings_dict() -> dict[str, str]:
+    """Return {department_key: cc_role} for all mappings (for in-memory cache)."""
+    with get_auth_db() as conn:
+        rows = conn.execute(
+            "SELECT department_key, cc_role FROM cc_department_role_mappings"
+        ).fetchall()
+        return {r["department_key"]: r["cc_role"] for r in rows}
+
+
+def set_department_mapping(department_key: str, cc_role: str, label: str, added_by: str):
+    now = datetime.utcnow().isoformat()
+    with get_auth_db() as conn:
+        conn.execute(
+            """INSERT INTO cc_department_role_mappings
+               (department_key, cc_role, label, added_by, added_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(department_key) DO UPDATE SET
+               cc_role = ?, label = ?, added_by = ?, added_at = ?""",
+            (department_key.lower().strip(), cc_role, label, added_by, now,
+             cc_role, label, added_by, now),
+        )
+
+
+def delete_department_mapping(department_key: str) -> bool:
+    with get_auth_db() as conn:
+        cursor = conn.execute(
+            "DELETE FROM cc_department_role_mappings WHERE department_key = ?",
+            (department_key.lower().strip(),),
+        )
+        return cursor.rowcount > 0

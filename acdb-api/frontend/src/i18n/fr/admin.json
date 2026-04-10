@@ -15,5 +15,22 @@
   "loading": "Chargement…",
   "empty": "Aucune attribution de rôle.",
   "removeConfirm": "Retirer le rôle de {{name}} ? Il/elle perdra l'accès à ce rôle CC.",
-  "removeFailed": "Échec du retrait du rôle"
+  "removeFailed": "Échec du retrait du rôle",
+
+  "deptMappingTitle": "Mapping automatique par département",
+  "deptMappingDesc": "Les employés se voient attribuer automatiquement un rôle CC basé sur leur département PR. Gérez les correspondances département-rôle ci-dessous.",
+  "deptAddMapping": "Ajouter une correspondance",
+  "deptKey": "Clé département",
+  "deptKeyPlaceholder": "ex : finance, o&m, em",
+  "deptLabel": "Libellé",
+  "deptLabelPlaceholder": "ex : Finance (BN)",
+  "deptMapsTo": "Correspond à",
+  "deptAdd": "Ajouter",
+  "deptRemoveConfirm": "Supprimer le mapping pour '{{key}}' ? Les employés de ce département seront « generic » par défaut.",
+  "deptEmpty": "Aucune correspondance département configurée.",
+  "deptColKey": "Clé département",
+  "deptColLabel": "Libellé",
+  "deptColRole": "Rôle CC",
+  "deptUnmappedTitle": "Départements PR non mappés",
+  "deptUnmappedDesc": "Ces départements existent dans le système PR mais n'ont pas de rôle CC associé. Cliquez pour pré-remplir le formulaire."
 }

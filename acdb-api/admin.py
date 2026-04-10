@@ -7,12 +7,18 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from models import CCRole, CurrentUser, RoleAssignment, RoleAssignmentResponse
+from models import (
+    CCRole, CurrentUser, RoleAssignment, RoleAssignmentResponse,
+    DepartmentMapping, DepartmentMappingResponse,
+)
 from middleware import require_role
 from db_auth import (
+    delete_department_mapping,
     delete_employee_role,
     get_employee_role,
+    list_department_mappings,
     list_employee_roles,
+    set_department_mapping,
     set_employee_role,
 )
 from auth import lookup_employee
@@ -197,3 +203,75 @@ def bulk_set_employee_emails(
         results.append({"employee_id": m.employee_id, "email": m.email.lower().strip()})
     logger.info("Bulk email mapping: %d entries set by %s", len(results), user.user_id)
     return {"count": len(results), "mappings": results}
+
+
+# ---------------------------------------------------------------------------
+# Department → role mappings (auto-role from PR department)
+# ---------------------------------------------------------------------------
+
+@router.get("/department-mappings", response_model=List[DepartmentMappingResponse])
+def get_department_mappings(
+    user: CurrentUser = Depends(require_role(CCRole.superadmin)),
+):
+    """List all department→role auto-mappings."""
+    return [DepartmentMappingResponse(**r) for r in list_department_mappings()]
+
+
+@router.post("/department-mappings", response_model=DepartmentMappingResponse, status_code=201)
+def add_department_mapping(
+    req: DepartmentMapping,
+    user: CurrentUser = Depends(require_role(CCRole.superadmin)),
+):
+    """Create or update a department→role mapping."""
+    set_department_mapping(
+        req.department_key, req.cc_role.value, req.label, user.user_id,
+    )
+    from pr_lookup import reload_department_mappings
+    reload_department_mappings()
+
+    try_log_mutation(
+        user, "create", "cc_department_role_mappings", req.department_key,
+        new_values={"department_key": req.department_key, "cc_role": req.cc_role.value, "label": req.label},
+        metadata={"origin": "admin_department_mapping"},
+    )
+    logger.info(
+        "Department mapping set: %s → %s by %s", req.department_key, req.cc_role.value, user.user_id,
+    )
+    return DepartmentMappingResponse(
+        department_key=req.department_key.lower().strip(),
+        cc_role=req.cc_role.value,
+        label=req.label,
+        added_by=user.user_id,
+        added_at="",
+    )
+
+
+@router.delete("/department-mappings/{department_key}")
+def remove_department_mapping(
+    department_key: str,
+    user: CurrentUser = Depends(require_role(CCRole.superadmin)),
+):
+    """Delete a department→role mapping."""
+    deleted = delete_department_mapping(department_key)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"No mapping for '{department_key}'")
+
+    from pr_lookup import reload_department_mappings
+    reload_department_mappings()
+
+    try_log_mutation(
+        user, "delete", "cc_department_role_mappings", department_key,
+        old_values={"department_key": department_key},
+        metadata={"origin": "admin_department_mapping"},
+    )
+    logger.info("Department mapping deleted: %s by %s", department_key, user.user_id)
+    return {"message": f"Mapping removed for '{department_key}'."}
+
+
+@router.get("/pr-departments")
+def list_pr_departments(
+    user: CurrentUser = Depends(require_role(CCRole.superadmin)),
+):
+    """Return all departments from the PR Firestore for the admin UI."""
+    from pr_lookup import get_all_pr_departments
+    return get_all_pr_departments()

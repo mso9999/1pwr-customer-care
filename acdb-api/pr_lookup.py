@@ -65,33 +65,118 @@ def _ensure_firebase():
 
 
 # ---------------------------------------------------------------------------
-# Department → CC Role mapping
+# Department → CC Role mapping (DB-backed via cc_department_role_mappings)
 # ---------------------------------------------------------------------------
 
-_DEPT_TO_ROLE: dict[str, str] = {}
+_dept_role_map: dict[str, str] = {}  # populated from SQLite
 
-_ONM_DEPARTMENTS = [
-    "o&m",
-    "o_m",
-]
 
-_FINANCE_DEPARTMENTS = [
-    "finance",
-    "cfo",
-]
+def _reload_dept_role_map():
+    """Refresh the in-memory department→role dict from SQLite."""
+    global _dept_role_map
+    try:
+        from db_auth import get_all_department_mappings_dict
+        _dept_role_map = get_all_department_mappings_dict()
+        logger.debug("Loaded %d department→role mappings from DB", len(_dept_role_map))
+    except Exception as e:
+        logger.error("Failed to load department mappings from DB: %s", e)
 
-for _d in _ONM_DEPARTMENTS:
-    _DEPT_TO_ROLE[_d.lower()] = "onm_team"
 
-for _d in _FINANCE_DEPARTMENTS:
-    _DEPT_TO_ROLE[_d.lower()] = "finance_team"
+def reload_department_mappings():
+    """Public helper — call after admin writes a mapping change."""
+    _reload_dept_role_map()
+    _invalidate_user_cache()
 
 
 def _map_department_to_role(department: str) -> Optional[str]:
     """Map a PR department string to a CCRole value, or None if no mapping."""
     if not department:
         return None
-    return _DEPT_TO_ROLE.get(department.lower().strip())
+    if not _dept_role_map:
+        _reload_dept_role_map()
+    return _dept_role_map.get(department.lower().strip())
+
+
+# ---------------------------------------------------------------------------
+# Firestore referenceData_departments resolution cache
+# ---------------------------------------------------------------------------
+
+_ref_departments: dict[str, dict] = {}  # doc_id → {name, code, org}
+_ref_depts_loaded = False
+
+
+def _load_reference_departments():
+    """Bulk-load referenceData_departments for ID→name resolution."""
+    global _ref_depts_loaded, _ref_departments
+
+    if _ref_depts_loaded:
+        return
+
+    _ref_depts_loaded = True
+
+    if not _ensure_firebase() or _firestore_db is None:
+        return
+
+    try:
+        count = 0
+        for doc in _firestore_db.collection("referenceData_departments").stream():
+            d = doc.to_dict()
+            org_data = d.get("organization")
+            org_id = ""
+            if isinstance(org_data, dict):
+                org_id = org_data.get("id", "")
+            _ref_departments[doc.id] = {
+                "name": d.get("name", ""),
+                "code": d.get("code", ""),
+                "org": org_id,
+                "org_name": org_data.get("name", "") if isinstance(org_data, dict) else "",
+                "active": d.get("active", True),
+            }
+            count += 1
+        logger.info("Loaded %d referenceData_departments from Firestore", count)
+    except Exception as e:
+        logger.error("Failed to load referenceData_departments: %s", e)
+
+
+def _resolve_department(raw_department: str) -> list[str]:
+    """Return candidate strings to try against the mapping table.
+
+    For readable departments (e.g. "O&M"), returns [raw].
+    For Firestore doc IDs, resolves via referenceData_departments and
+    returns [name, code] (lowercased) so any of them can match.
+    """
+    if not raw_department:
+        return []
+
+    _load_reference_departments()
+
+    ref = _ref_departments.get(raw_department)
+    if ref:
+        candidates = [raw_department.lower()]
+        if ref["name"]:
+            candidates.append(ref["name"].lower().strip())
+        if ref["code"]:
+            candidates.append(ref["code"].lower().strip())
+        return candidates
+
+    return [raw_department.lower().strip()]
+
+
+def get_all_pr_departments() -> list[dict]:
+    """Return every referenceData_department for the admin UI."""
+    _load_reference_departments()
+    result = []
+    for doc_id, info in _ref_departments.items():
+        result.append({
+            "id": doc_id,
+            "name": info["name"],
+            "code": info["code"],
+            "org": info["org"],
+            "org_name": info["org_name"],
+            "active": info["active"],
+        })
+    result.sort(key=lambda d: (d["org"], d["name"]))
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -102,6 +187,13 @@ _email_role_cache: dict[str, Optional[str]] = {}  # lowered email → role
 _cache_loaded = False
 
 
+def _invalidate_user_cache():
+    """Force re-evaluation of user roles on next lookup."""
+    global _cache_loaded
+    _cache_loaded = False
+    _email_role_cache.clear()
+
+
 def _load_all_firestore_users():
     """Bulk-load all PR Firestore users into _email_role_cache."""
     global _cache_loaded
@@ -109,19 +201,26 @@ def _load_all_firestore_users():
     if _cache_loaded:
         return
 
-    _cache_loaded = True  # mark even on failure so we don't retry every call
+    _cache_loaded = True
 
     if not _ensure_firebase() or _firestore_db is None:
         return
+
+    if not _dept_role_map:
+        _reload_dept_role_map()
 
     try:
         count = 0
         for doc in _firestore_db.collection("users").stream():
             data = doc.to_dict()
             email = (data.get("email") or "").strip().lower()
-            department = str(data.get("department", "")).strip()
+            raw_dept = str(data.get("department", "")).strip()
             if email:
-                role = _map_department_to_role(department)
+                role = None
+                for candidate in _resolve_department(raw_dept):
+                    role = _map_department_to_role(candidate)
+                    if role:
+                        break
                 _email_role_cache[email] = role
                 count += 1
 

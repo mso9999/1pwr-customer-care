@@ -406,6 +406,44 @@ export async function removeRole(employee_id: string) {
   });
 }
 
+export interface DepartmentMapping {
+  department_key: string;
+  cc_role: string;
+  label: string;
+  added_by: string;
+  added_at: string;
+}
+
+export interface PRDepartment {
+  id: string;
+  name: string;
+  code: string;
+  org: string;
+  org_name: string;
+  active: boolean;
+}
+
+export async function listDepartmentMappings(): Promise<DepartmentMapping[]> {
+  return request('/admin/department-mappings');
+}
+
+export async function addDepartmentMapping(department_key: string, cc_role: string, label: string) {
+  return request('/admin/department-mappings', {
+    method: 'POST',
+    body: JSON.stringify({ department_key, cc_role, label }),
+  });
+}
+
+export async function removeDepartmentMapping(department_key: string) {
+  return request(`/admin/department-mappings/${encodeURIComponent(department_key)}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function listPRDepartments(): Promise<PRDepartment[]> {
+  return request('/admin/pr-departments');
+}
+
 // ---------------------------------------------------------------------------
 // Sites & health
 // ---------------------------------------------------------------------------

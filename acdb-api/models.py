@@ -93,6 +93,20 @@ class RoleAssignmentResponse(BaseModel):
     email: Optional[str] = None
 
 
+class DepartmentMapping(BaseModel):
+    department_key: str = Field(..., min_length=1)
+    cc_role: CCRole
+    label: str = ""
+
+
+class DepartmentMappingResponse(BaseModel):
+    department_key: str
+    cc_role: str
+    label: str
+    added_by: str
+    added_at: str
+
+
 # ---------------------------------------------------------------------------
 # CRUD / Schema models
 # ---------------------------------------------------------------------------

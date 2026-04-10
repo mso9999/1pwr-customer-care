@@ -15,5 +15,22 @@
   "loading": "Loading…",
   "empty": "No role assignments yet.",
   "removeConfirm": "Remove role for {{name}}? They will lose access to this CC role.",
-  "removeFailed": "Failed to remove role"
+  "removeFailed": "Failed to remove role",
+
+  "deptMappingTitle": "Department Auto-Mapping",
+  "deptMappingDesc": "Employees are automatically assigned a CC role based on their PR department. Manage the department-to-role mappings below.",
+  "deptAddMapping": "Add Mapping",
+  "deptKey": "Department Key",
+  "deptKeyPlaceholder": "e.g. finance, o&m, em",
+  "deptLabel": "Display Label",
+  "deptLabelPlaceholder": "e.g. Finance (BN)",
+  "deptMapsTo": "Maps To",
+  "deptAdd": "Add",
+  "deptRemoveConfirm": "Remove auto-mapping for '{{key}}'? Employees in this department will default to 'generic'.",
+  "deptEmpty": "No department mappings configured.",
+  "deptColKey": "Department Key",
+  "deptColLabel": "Label",
+  "deptColRole": "CC Role",
+  "deptUnmappedTitle": "Unmapped PR Departments",
+  "deptUnmappedDesc": "These departments exist in the PR system but have no CC role mapping. Click one to pre-fill the form."
 }
