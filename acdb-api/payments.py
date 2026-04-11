@@ -16,8 +16,9 @@ import os
 from datetime import datetime, timezone
 from typing import Optional
 
+import psycopg2
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from customer_api import get_connection
 from sparkmeter_credit import credit_sparkmeter, CreditResult
@@ -47,6 +48,11 @@ class ManualPayment(BaseModel):
     meter_id: Optional[str] = None
     kwh: Optional[float] = None
     note: Optional[str] = None
+    payment_reference: str = Field(
+        ...,
+        min_length=1,
+        description="M-Pesa receipt number (or other provider ref); must not duplicate a prior transaction.",
+    )
 
 
 def _verify_gateway_key(x_gateway_key: str = Header(None)):
@@ -65,6 +71,25 @@ def _resolve_meter(conn, account_number: str, meter_id: Optional[str] = None) ->
     )
     row = cur.fetchone()
     return row[0] if row else ""
+
+
+def _payment_ref_taken(conn, ref: str) -> Optional[tuple[int, str]]:
+    """If ref already stored, return (transaction_id, account_number) else None."""
+    r = ref.strip()
+    if not r:
+        return None
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, account_number FROM transactions
+        WHERE lower(trim(payment_reference)) = lower(trim(%s))
+          AND payment_reference IS NOT NULL AND trim(payment_reference) <> ''
+        LIMIT 1
+        """,
+        (r,),
+    )
+    row = cur.fetchone()
+    return (int(row[0]), str(row[1])) if row else None
 
 
 def _get_tariff_rate(conn, account_number: str) -> float:
@@ -120,6 +145,17 @@ def payment_webhook(
 
     try:
         with get_connection() as conn:
+            ext_ref = (payload.reference or "").strip() or None
+            if ext_ref:
+                dup = _payment_ref_taken(conn, ext_ref)
+                if dup:
+                    return {
+                        "status": "duplicate",
+                        "message": "Payment reference already processed",
+                        "transaction_id": dup[0],
+                        "account_number": dup[1],
+                    }
+
             meter_id = _resolve_meter(conn, payload.account_number, payload.meter_id)
             rate = _get_tariff_rate(conn, payload.account_number)
 
@@ -130,6 +166,7 @@ def payment_webhook(
                 conn, payload.account_number, meter_id,
                 amount_currency=elec_amount, rate=rate,
                 source="sms_gateway", timestamp=ts,
+                payment_reference=ext_ref,
             )
 
             if split["has_financing"] and split["debt_portion"] > 0:
@@ -147,9 +184,14 @@ def payment_webhook(
 
             sm_credit_amount = elec_amount if elec_amount > 0 else 0
             if sm_credit_amount > 0:
+                memo = (
+                    f"ref {ext_ref} sms_gateway txn {txn_id}"
+                    if ext_ref
+                    else f"sms_gateway txn {txn_id}"
+                )
                 background_tasks.add_task(
                     _credit_sm_and_log, payload.account_number,
-                    sm_credit_amount, f"sms_gateway txn {txn_id}",
+                    sm_credit_amount, memo,
                     str(txn_id),
                 )
 
@@ -184,12 +226,29 @@ def record_manual_payment(payload: ManualPayment):
 
     Saves to 1PDB with kWh balance tracking and synchronously credits
     SparkMeter so the operator sees the result immediately.
+
+    ``payment_reference`` (e.g. M-Pesa receipt) is required and must be unique
+    across all transactions to prevent double crediting.
     """
     if payload.amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be positive")
 
+    pref = payload.payment_reference.strip()
+    if not pref:
+        raise HTTPException(status_code=400, detail="payment_reference is required")
+
     try:
         with get_connection() as conn:
+            dup = _payment_ref_taken(conn, pref)
+            if dup:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"This payment reference was already recorded "
+                        f"(transaction #{dup[0]}, account {dup[1]})."
+                    ),
+                )
+
             meter_id = _resolve_meter(conn, payload.account_number, payload.meter_id)
             rate = _get_tariff_rate(conn, payload.account_number)
 
@@ -201,6 +260,7 @@ def record_manual_payment(payload: ManualPayment):
                 amount_currency=elec_amount, rate=rate,
                 kwh_override=payload.kwh if not split["has_financing"] else None,
                 source="portal",
+                payment_reference=pref,
             )
 
             if split["has_financing"] and split["debt_portion"] > 0:
@@ -219,9 +279,15 @@ def record_manual_payment(payload: ManualPayment):
             sm_credit_amount = elec_amount if elec_amount > 0 else 0
             sm_result = None
             if sm_credit_amount > 0:
+                note_part = (payload.note or "").strip()
+                memo = (
+                    f"ref {pref} {note_part}"
+                    if note_part
+                    else f"ref {pref} portal txn {txn_id}"
+                )
                 sm_result = _credit_sm_sync(
                     payload.account_number, sm_credit_amount,
-                    payload.note or f"portal txn {txn_id}", str(txn_id),
+                    memo, str(txn_id),
                 )
 
             result = {
@@ -239,6 +305,16 @@ def record_manual_payment(payload: ManualPayment):
                     "is_dedicated_payment": split["is_dedicated_payment"],
                 }
             return result
+    except HTTPException:
+        raise
+    except psycopg2.IntegrityError as e:
+        if "payment_reference" in str(e) or "idx_transactions_payment_reference" in str(e):
+            raise HTTPException(
+                status_code=409,
+                detail="This payment reference was already recorded.",
+            ) from e
+        logger.error("Manual payment failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
     except Exception as e:
         logger.error("Manual payment failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))

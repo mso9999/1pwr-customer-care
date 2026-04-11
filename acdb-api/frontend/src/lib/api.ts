@@ -892,6 +892,8 @@ export interface Transaction {
   kwh: number;
   is_payment: boolean;
   balance?: number | null;
+  /** M-Pesa / provider receipt when recorded via portal or gateway */
+  payment_reference?: string | null;
 }
 
 export interface TariffInfo {
@@ -1508,6 +1510,7 @@ export async function recordManualPayment(data: {
   amount: number;
   meter_id?: string;
   note?: string;
+  payment_reference: string;
 }): Promise<RecordPaymentResult> {
   return request('/payments/record', { method: 'POST', body: JSON.stringify(data) });
 }

@@ -70,6 +70,7 @@ def record_payment_kwh(
     kwh_override: float | None = None,
     source: str = "portal",
     timestamp: datetime | None = None,
+    payment_reference: str | None = None,
 ) -> tuple[int, float, float]:
     """Record a payment and return (txn_id, kwh_vended, new_balance_kwh).
 
@@ -90,13 +91,13 @@ def record_payment_kwh(
         INSERT INTO transactions
             (account_number, meter_id, transaction_date,
              transaction_amount, rate_used, kwh_value,
-             is_payment, current_balance, source)
-        VALUES (%s, %s, %s, %s, %s, %s, true, %s, %s)
+             is_payment, current_balance, source, payment_reference)
+        VALUES (%s, %s, %s, %s, %s, %s, true, %s, %s, %s)
         RETURNING id
     """, (
         account_number, meter_id, ts,
         amount_currency, rate, kwh_vended,
-        new_balance, source,
+        new_balance, source, payment_reference,
     ))
     txn_id = cur.fetchone()[0]
 

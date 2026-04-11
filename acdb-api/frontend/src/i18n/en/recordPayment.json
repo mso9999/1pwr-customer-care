@@ -2,6 +2,9 @@
   "title": "Record Payment",
   "fields": {
     "accountNumber": "Account Number",
+    "paymentReference": "M-Pesa receipt / transaction ID",
+    "paymentReferencePlaceholder": "e.g. 08D4LT8BWS57",
+    "paymentReferenceHint": "Required. Same receipt cannot be used twice — prevents double crediting.",
     "amount": "Amount (M)",
     "debtHint": "Ones digit 1 or 9 indicates dedicated debt payment.",
     "meterId": "Meter ID (optional)",
@@ -22,6 +25,7 @@
   },
   "validation": {
     "accountRequired": "Account number is required",
+    "paymentRefRequired": "M-Pesa receipt / transaction ID is required",
     "amountRequired": "Amount is required",
     "amountPositive": "Amount must be positive"
   },

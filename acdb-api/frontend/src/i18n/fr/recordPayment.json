@@ -2,6 +2,9 @@
   "title": "Enregistrer un paiement",
   "fields": {
     "accountNumber": "Numéro de compte",
+    "paymentReference": "Reçu M-Pesa / ID de transaction",
+    "paymentReferencePlaceholder": "ex. 08D4LT8BWS57",
+    "paymentReferenceHint": "Obligatoire. Un même reçu ne peut pas être utilisé deux fois — évite les doubles crédits.",
     "amount": "Montant (M)",
     "debtHint": "Le chiffre des unités 1 ou 9 indique un paiement dédié à la dette.",
     "meterId": "ID compteur (facultatif)",
@@ -22,6 +25,7 @@
   },
   "validation": {
     "accountRequired": "Le numéro de compte est requis",
+    "paymentRefRequired": "Le reçu M-Pesa / ID de transaction est requis",
     "amountRequired": "Le montant est requis",
     "amountPositive": "Le montant doit être positif"
   },

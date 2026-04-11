@@ -34,6 +34,7 @@
   "rate": "Tarif",
   "balanceCol": "Solde",
   "meter": "Compteur",
+  "paymentRef": "Reçu",
   "actions": "Actions",
   "payment": "Paiement",
   "consumption": "Consommation",

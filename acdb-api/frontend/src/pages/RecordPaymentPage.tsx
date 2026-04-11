@@ -4,14 +4,31 @@ import { recordManualPayment, type RecordPaymentResult } from '../lib/api';
 
 export default function RecordPaymentPage() {
   const { t } = useTranslation(['recordPayment', 'common']);
-  const [form, setForm] = useState({ account_number: '', amount: '', meter_id: '', note: '' });
+  const [form, setForm] = useState({
+    account_number: '',
+    amount: '',
+    meter_id: '',
+    payment_reference: '',
+    note: '',
+  });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<RecordPaymentResult | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.account_number || !form.amount) { setError('Account number and amount are required'); return; }
+    if (!form.account_number.trim()) {
+      setError(t('recordPayment:validation.accountRequired'));
+      return;
+    }
+    if (!form.amount) {
+      setError(t('recordPayment:validation.amountRequired'));
+      return;
+    }
+    if (!form.payment_reference.trim()) {
+      setError(t('recordPayment:validation.paymentRefRequired'));
+      return;
+    }
     setSubmitting(true);
     setError('');
     setResult(null);
@@ -20,6 +37,7 @@ export default function RecordPaymentPage() {
         account_number: form.account_number.trim(),
         amount: Number(form.amount),
         meter_id: form.meter_id.trim() || undefined,
+        payment_reference: form.payment_reference.trim(),
         note: form.note.trim() || undefined,
       });
       setResult(res);
@@ -49,6 +67,20 @@ export default function RecordPaymentPage() {
             placeholder="e.g. 0045MAK"
             className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none"
           />
+        </label>
+
+        <label className="block">
+          <span className="text-sm font-medium text-gray-700">{t('recordPayment:fields.paymentReference')}</span>
+          <input
+            type="text"
+            value={form.payment_reference}
+            onChange={e => setForm({ ...form, payment_reference: e.target.value })}
+            placeholder={t('recordPayment:fields.paymentReferencePlaceholder')}
+            className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none font-mono"
+            required
+            autoComplete="off"
+          />
+          <p className="text-xs text-gray-500 mt-1">{t('recordPayment:fields.paymentReferenceHint')}</p>
         </label>
 
         <label className="block">

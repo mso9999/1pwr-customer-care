@@ -610,6 +610,7 @@ export default function CustomerDataPage() {
                         {t('customerData:balanceCol')} {sortIcon('balance')}
                       </th>
                       <th className="px-4 py-3 font-medium text-gray-500">{t('customerData:meter')}</th>
+                      <th className="px-4 py-3 font-medium text-gray-500">{t('customerData:paymentRef')}</th>
                       {canEditTxns && <th className="px-4 py-3 font-medium text-gray-500 text-right w-24">{t('customerData:actions')}</th>}
                     </tr>
                   </thead>
@@ -631,6 +632,9 @@ export default function CustomerDataPage() {
                         <td className="px-4 py-2.5 text-right font-mono text-gray-400">{txn.rate.toFixed(2)}</td>
                         <td className="px-4 py-2.5 text-right font-mono text-gray-700">{txn.balance != null ? txn.balance.toFixed(1) : '--'}</td>
                         <td className="px-4 py-2.5 text-gray-400 text-xs font-mono truncate max-w-[120px]">{txn.meter || '--'}</td>
+                        <td className="px-4 py-2.5 text-gray-500 text-xs font-mono truncate max-w-[100px]" title={txn.payment_reference || undefined}>
+                          {txn.payment_reference || '--'}
+                        </td>
                         {canEditTxns && (
                           <td className="px-4 py-2.5 text-right">
                             <div className="opacity-0 group-hover:opacity-100 transition flex items-center justify-end gap-1">
@@ -658,7 +662,7 @@ export default function CustomerDataPage() {
                       </tr>
                     ))}
                     {paged.length === 0 && (
-                      <tr><td colSpan={canEditTxns ? 8 : 7} className="px-4 py-8 text-center text-gray-400">{t('customerData:noTransactions')}</td></tr>
+                      <tr><td colSpan={canEditTxns ? 9 : 8} className="px-4 py-8 text-center text-gray-400">{t('customerData:noTransactions')}</td></tr>
                     )}
                   </tbody>
                 </table>

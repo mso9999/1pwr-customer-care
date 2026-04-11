@@ -1546,7 +1546,8 @@ def employee_customer_data(
         try:
             cursor.execute(
                 "SELECT id, account_number, meter_id, transaction_date, "
-                "transaction_amount, rate_used, kwh_value, is_payment, current_balance "
+                "transaction_amount, rate_used, kwh_value, is_payment, current_balance, "
+                "payment_reference "
                 "FROM transactions WHERE account_number = %s "
                 "ORDER BY transaction_date DESC",
                 (acct,),
@@ -1586,6 +1587,8 @@ def employee_customer_data(
                     txn["balance"] = round(float(r[8] or 0), 2)
                 except (ValueError, TypeError):
                     txn["balance"] = None
+                pr = r[9]
+                txn["payment_reference"] = str(pr).strip() if pr else None
                 transactions.append(txn)
         except Exception as e:
             logger.warning("customer-data: failed to read transactions: %s", e)
