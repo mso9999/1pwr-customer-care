@@ -3252,3 +3252,8 @@ Root cause: **Dual registration without synchronization**
 - Commit order: 1PDB commits **before** SM push (no rollback).
 - Distinction between **write** keys for `/payments` vs read/manage keys for other APIs.
 - Failure modes: credentials, code mismatch, timeout, no retry queue; operational grep/journal hints.
+
+### Server log evidence (0252SHG M20, 2026-04-10)
+- `journalctl` showed `SMS payment: txn=2461798 acct=0252SHG … mpesa=08D4LT8BWS57` at 17:58:06 with **no** following `SM credit` line — **ingest.py SMS handler never called SparkMeter**.
+- **Fix:** `POST /api/sms/incoming` now schedules `credit_sparkmeter` after 1PDB commit (`SMS_INGEST_PUSH_SPARKMETER`, default on).
+- Separate line on 2026-04-11 09:38: `SM credit failed … Expecting value` — Koios returned non-JSON (empty body); mitigated by stricter `_koios_credit` parsing.

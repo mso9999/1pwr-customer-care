@@ -238,7 +238,7 @@ in `onepowerLS/onepwr-aws-mesh`. Do not expect MQTT / TLS / OTA code to live in 
 | ThunderCloud v0 live | SparkMeter on-prem | MAK | `import_tc_live.py` (cumulative register diffs, non-lossy, 15-min intervals) |
 | ThunderCloud web API | SparkMeter on-prem | MAK | `import_tc_transactions.py` (live transactions) |
 | IoT / ingestion_gate | 1Meter prototype | MAK (3 meters) | Real-time Lambda → POST /api/meters/reading |
-| SMS Gateway (LS) | M-PESA payments | All LS sites | sms.1pwrafrica.com mirrors to POST /api/sms/incoming |
+| SMS Gateway (LS) | M-PESA payments | All LS sites | sms.1pwrafrica.com mirrors to `POST /api/sms/incoming` (`ingest.py`) — writes **1PDB** and **pushes credit to Koios/ThunderCloud** via `credit_sparkmeter` unless `SMS_INGEST_PUSH_SPARKMETER=0` |
 | SMS Gateway (BN) | MTN MoMo payments | All BN sites | smsbn.1pwrafrica.com mirrors to POST /api/bn/sms/incoming |
 
 ### BN (Benin) Data Pipeline
@@ -343,6 +343,8 @@ Routes credits by site code:
 6. **No retry** — A single transient failure leaves **1PDB credited, Koios not** until someone **re-posts** (manual Koios) or a future **retry job** exists.
 
 **Operational checks after a suspected failure:** On the Record Payment success panel, read `sm_credit.success` and `sm_credit.error`. On the server: `journalctl -u 1pdb-api --lines 200 | grep -i koios`. Confirm `KOIOS_WRITE_API_KEY` / `KOIOS_WRITE_API_SECRET` for **LS** on the host that runs the Lesotho API.
+
+**SMS mirror path (`/api/sms/incoming`):** Before 2026-04, this handler inserted into `transactions` **without** calling SparkMeter — so M-PESA rows could appear in CC/1PDB while Koios showed nothing. It now schedules `credit_sparkmeter` after commit (see `ingest.py`). Logs: `SMS path SM credit OK` / `SMS path SM credit failed`.
 
 ## ARPU Methodology
 

@@ -33,8 +33,16 @@ from pydantic import BaseModel
 
 from country_config import UTC_OFFSET_HOURS
 from customer_api import get_connection
+from sparkmeter_credit import credit_sparkmeter
 
 logger = logging.getLogger("cc-api.ingest")
+
+# If true (default), push M-PESA payments recorded via /api/sms/incoming to SparkMeter/Koios
+# after 1PDB commit. Set false only if another system (e.g. legacy PHP) already credits SM
+# for every SMS and you observe double credits.
+SMS_INGEST_PUSH_SPARKMETER = os.environ.get("SMS_INGEST_PUSH_SPARKMETER", "1").lower() in (
+    "1", "true", "yes",
+)
 
 _METER_TZ = timezone(timedelta(hours=UTC_OFFSET_HOURS))
 
@@ -423,12 +431,10 @@ def update_meter_role(meter_id: str, body: MeterRoleUpdate):
 # ---------------------------------------------------------------------------
 # SMS payment ingestion (mirrored from sms.1pwrafrica.com/receive.php)
 # ---------------------------------------------------------------------------
-# The existing payment pipeline:
-#   Merchant phone (SMS Gateway app) → sms.1pwrafrica.com/receive.php
-#   → file drop to ./incoming/mpesa/ → new_file_watcher.php → SparkMeter API
-#
-# receive.php mirrors the raw JSON payload to this endpoint after its own
-# processing.  Format: {"messages": [{"id","from","content","sms_sent",...}]}
+# Flow: SMS gateway → sms.1pwrafrica.com may mirror JSON to this endpoint.
+# We persist to 1PDB and (by default) call credit_sparkmeter() so Koios matches CC.
+# Set SMS_INGEST_PUSH_SPARKMETER=0 if another process already credits SM for every SMS.
+# Format: {"messages": [{"id","from","content","sms_sent",...}]}
 #
 # M-PESA Lesotho confirmation format:
 #   "5L956Z39DJ Confirmed. on 9/12/18 at 8:59 AM M1.00 received from
@@ -496,14 +502,40 @@ def _phone_to_account(conn, phone_digits: str) -> Optional[str]:
     return row[0] if row else None
 
 
+def _sms_ingest_credit_sm(
+    account_number: str,
+    amount: float,
+    txn_id: int,
+    mpesa_receipt: str,
+) -> None:
+    """Background: credit Koios/ThunderCloud after SMS payment is in 1PDB."""
+    memo = f"sms_incoming mpesa={mpesa_receipt or '?'} txn={txn_id}"
+    result = credit_sparkmeter(
+        account_number=account_number,
+        amount=amount,
+        memo=memo,
+        external_id=str(txn_id),
+    )
+    if result.success:
+        logger.info(
+            "SMS path SM credit OK for %s M%.2f → %s",
+            account_number, amount, result.platform,
+        )
+    else:
+        logger.warning(
+            "SMS path SM credit failed for %s: %s",
+            account_number, result.error,
+        )
+
+
 @router.post("/api/sms/incoming")
 async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
     """Receive mirrored SMS payload from the PHP at sms.1pwrafrica.com.
 
-    The PHP (SMSComms/receive.php) does its own processing first (file drop,
-    SparkMeter crediting) and then mirrors the raw Medic Mobile Gateway JSON
-    here as a fire-and-forget POST.  We parse M-PESA payments and record them,
-    then trigger a background Koios consumption sync for the customer's site.
+    The PHP (SMSComms/receive.php) may also process the SMS; we parse M-PESA
+    payments, record them in 1PDB, then (unless ``SMS_INGEST_PUSH_SPARKMETER=0``)
+    push the credit to SparkMeter/Koios in the background so portal and SM stay
+    aligned. We also trigger a Koios consumption sync for the site.
     """
     raw_body = await request.body()
 
@@ -586,6 +618,15 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
                     "SMS payment: txn=%d acct=%s M%.2f from %s ref=%s mpesa=%s",
                     txn_db_id, account, amount, phone, reference, mpesa_txn_id,
                 )
+
+                if SMS_INGEST_PUSH_SPARKMETER and amount > 0:
+                    background_tasks.add_task(
+                        _sms_ingest_credit_sm,
+                        account,
+                        amount,
+                        txn_db_id,
+                        mpesa_txn_id or "",
+                    )
 
                 cur.execute(
                     "SELECT community FROM meters "
