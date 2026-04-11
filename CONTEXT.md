@@ -85,6 +85,7 @@ Windows EC2 / ACCDB assumptions as current production architecture.
 | `commission.py` | Commission workflow + bulk status update |
 | `registration.py` | Customer registration + Excel bulk import |
 | `contract_gen.py` | Contract PDF generation |
+| `sparkmeter_customer.py` | CC → SparkMeter customer sync (auto-push on registration) |
 | `sync_ugridplan.py` | Sync data to uGridPlan |
 | `schema.py` | PostgreSQL schema introspection endpoints |
 | `requirements.txt` | Python dependencies (psycopg2-binary, no pyodbc) |
@@ -301,11 +302,47 @@ Benin runs two sites: **GBO** (Gbowélé) and **SAM** (Samondji), both using Spa
 - **No separate historical readings endpoint** — historical data only available via daily parquet files
 - No rate limiting observed on TC v0 API
 
+### CC → SparkMeter Customer Sync (`sparkmeter_customer.py`)
+
+1PDB is the authority for customer creation. When a customer is registered in CC
+(single or bulk import), `sparkmeter_customer.py` pushes the customer to SparkMeter:
+
+| Platform | Sites | Endpoint | Required | Notes |
+|----------|-------|----------|----------|-------|
+| Koios v1 | All LS except MAK; all BN | `POST /api/v1/customers` | `name`, `code`, `service_area_id` | Works without meter |
+| ThunderCloud v0 | MAK | `POST /api/v0/customer/` | `serial`, `code`, `name`, `meter_tariff_name` | Requires meter serial |
+
+- **Multi-country credentials**: Resolved per-country: `KOIOS_MANAGE_API_KEY_{CC}` → `KOIOS_API_KEY_{CC}` → `KOIOS_API_KEY`.
+  - **LS**: Uses the read key (`KOIOS_API_KEY` / `KOIOS_API_SECRET`), which has customer creation access.
+  - **BN**: Uses dedicated manage key (`KOIOS_MANAGE_API_KEY_BN` / `KOIOS_MANAGE_API_SECRET_BN`).
+- **ThunderCloud**: If no meter serial at registration time, sync is deferred until meter assignment.
+- **Name updates**: Neither platform supports customer name updates via API. Name drift must be corrected manually or via the audit/fix scripts in `scripts/ops/`.
+- **Service area IDs**:
+  - LS: Most sites share `e3015e87-...`; MAS uses `e6efc982-...`.
+  - BN: GBO = `de00dfbf-...`; SAM = `43a81ea8-...`.
+
+Integration points:
+- `registration.py` → calls `create_sparkmeter_customer()` after 1PDB commit (single + bulk)
+- `meter_lifecycle.py` → calls `create_sparkmeter_customer()` on meter assignment if customer doesn't exist in SM yet
+
 ### CC → SparkMeter Credit Pipe (`sparkmeter_credit.py`)
 Routes credits by site code:
 - **MAK/LAB** → ThunderCloud v0 `POST /transaction/` (requires customer UUID lookup first)
 - **All other sites** → Koios v1 `POST /payments` with `customer_code` (single call)
 - Integrated into `payments.py` (webhook + manual) and `crud.py` (generic create)
+
+**Credentials (Koios payments):** Uses `KOIOS_WRITE_API_KEY_{CC}` / `KOIOS_WRITE_API_SECRET_{CC}` with fallback to global `KOIOS_WRITE_API_KEY` / `KOIOS_WRITE_API_SECRET`, then to `KOIOS_API_KEY` / `KOIOS_API_SECRET`. **Customer creation** may use the read/manage keys (`KOIOS_MANAGE_*` / `KOIOS_API_*`); **posting payments** requires write-capable keys. If the write pair is missing, wrong, or read-only, Koios returns 401/403 — **1PDB still records the payment first** (see ordering below).
+
+**RCA — “CC updated but Koios didn’t credit” (recurring risk):**
+
+1. **Commit order** — `payments.record` and `record_payment_kwh` **commit 1PDB before** calling SparkMeter. If Koios or ThunderCloud fails, **1PDB is already the source of truth for the portal balance**; SparkMeter is a **best-effort push**. There is **no automatic rollback** or retry queue today.
+2. **Misclassified success (fixed 2026-04)** — `_koios_credit` previously treated any JSON body without `errors[]` as success, **without checking HTTP status**. Responses like **401/403** with `{"detail": "..."}` (FastAPI style) could be marked **success** while Koios never credited. The client now **requires HTTP 2xx** and treats non-JSON / error bodies as failure.
+3. **Wrong or read-only API key** — Write key must match the country/org. Session log history: a **read-only** key was used for imports; write must be set for `/api/v1/payments`.
+4. **customer_code mismatch** — Koios matches `customer_code` to the account string (e.g. `0252SHG`). If 1PDB account ≠ SparkMeter code (typo, drift), Koios returns an error (now surfaced).
+5. **Network / timeout** — `API_TIMEOUT` (90s) or connection errors → `CreditResult(success=False)`; check server logs (`cc-api.sm-credit`).
+6. **No retry** — A single transient failure leaves **1PDB credited, Koios not** until someone **re-posts** (manual Koios) or a future **retry job** exists.
+
+**Operational checks after a suspected failure:** On the Record Payment success panel, read `sm_credit.success` and `sm_credit.error`. On the server: `journalctl -u 1pdb-api --lines 200 | grep -i koios`. Confirm `KOIOS_WRITE_API_KEY` / `KOIOS_WRITE_API_SECRET` for **LS** on the host that runs the Lesotho API.
 
 ## ARPU Methodology
 

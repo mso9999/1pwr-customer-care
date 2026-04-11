@@ -248,29 +248,73 @@ def _koios_credit(
     if external_id:
         payload["external_id"] = external_id
 
-    r = requests.post(
-        f"{KOIOS_BASE}/api/v1/payments",
-        json=payload,
-        headers=_koios_headers(country_code),
-        timeout=API_TIMEOUT,
-    )
-    if not r.content:
-        logger.warning("Koios returned empty body (HTTP %d) for %s — payment may have succeeded",
-                        r.status_code, account_code)
-        return CreditResult(
-            success=r.status_code < 300, platform="koios",
-            error=None if r.status_code < 300 else f"HTTP {r.status_code} (empty body)",
+    try:
+        r = requests.post(
+            f"{KOIOS_BASE}/api/v1/payments",
+            json=payload,
+            headers=_koios_headers(country_code),
+            timeout=API_TIMEOUT,
         )
-    body = r.json()
+    except requests.RequestException as e:
+        logger.error("Koios payment request failed for %s: %s", account_code, e)
+        return CreditResult(success=False, platform="koios", error=str(e))
+
+    if not r.content:
+        ok = 200 <= r.status_code < 300
+        logger.warning(
+            "Koios empty body HTTP %d for %s — treating as %s",
+            r.status_code, account_code, "success" if ok else "failure",
+        )
+        return CreditResult(
+            success=ok,
+            platform="koios",
+            error=None if ok else f"HTTP {r.status_code} (empty body)",
+        )
+
+    try:
+        body = r.json()
+    except ValueError:
+        snippet = (r.text or "")[:400]
+        logger.warning(
+            "Koios non-JSON HTTP %d for %s: %s",
+            r.status_code, account_code, snippet,
+        )
+        return CreditResult(
+            success=False,
+            platform="koios",
+            error=f"HTTP {r.status_code} (invalid JSON body)",
+        )
+
     errors = body.get("errors")
     if errors:
-        return CreditResult(
-            success=False, platform="koios",
-            error=errors[0].get("title", str(errors)),
+        err = errors[0].get("title", str(errors)) if isinstance(errors, list) else str(errors)
+        logger.warning(
+            "Koios rejected payment for %s: %s (HTTP %d)",
+            account_code, err, r.status_code,
         )
-    data = body.get("data", {})
+        return CreditResult(success=False, platform="koios", error=err)
+
+    http_ok = 200 <= r.status_code < 300
+    if not http_ok:
+        # e.g. 401/403 with {"detail": "..."} — do not treat as success (RCA 2026-04)
+        detail = body.get("detail")
+        if isinstance(detail, list):
+            detail = detail[0] if detail else None
+        msg = (
+            str(detail)
+            if detail
+            else (str(body.get("message")) if body.get("message") else f"HTTP {r.status_code}")
+        )
+        logger.warning(
+            "Koios HTTP %d for %s (no errors[] in body): %s",
+            r.status_code, account_code, msg[:300],
+        )
+        return CreditResult(success=False, platform="koios", error=msg)
+
+    data = body.get("data") or {}
     return CreditResult(
-        success=True, platform="koios",
+        success=True,
+        platform="koios",
         sm_transaction_id=str(data.get("id", "")),
         customer_id=str(data.get("recipient_id", "")),
     )

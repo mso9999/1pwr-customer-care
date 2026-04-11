@@ -3024,3 +3024,231 @@ Key evidence:
 
 ### Senescence Notes
 - No degradation observed. Conversation loaded from summary with full context.
+
+---
+
+## Session 2026-04-09 202604091400 (MAK Meter Serial Migration + Account Drift RCA & Fix)
+
+### What Was Done
+
+**Meter Serial Migration (numeric → full ThunderCloud serial)**
+- Updated `meters` table: 237 SparkMeter IDs from old numeric format (e.g., "7408") to full TC serial (e.g., "SMRSD-03-0001B57D")
+- Migrated `hourly_consumption`: ~8.1M rows (deduped conflicts from meter reassignments, cleaned orphan data)
+- Migrated `monthly_consumption`, `meter_assignments`, `meter_readings_2026`
+- Deleted 1 orphan meter record (SMRSD-04-0002E24D with empty account in MAT)
+- 5 check meters (1Meter prototypes, 2302* serials) and 33 ACCT-* meters intentionally left as-is
+- Had to stop `1pdb-consumption.timer` during migration to avoid deadlocks with concurrent imports; restarted after
+
+**Account-Customer Drift RCA**
+Root cause: **Dual registration without synchronization**
+- ACDB (now 1PDB) and ThunderCloud maintain separate customer registries with no automated sync
+- Customers 0001-0217MAK were registered in a single coordinated batch — match perfectly
+- Customers 0218+ were added later (legacy IDs jump from 5870 to 6583) in separate uncoordinated batches
+- `import_tc_live.py` syncs meter READINGS but never syncs customer RECORDS
+- Result: 5 accounts (0218-0221, 0297) had different people assigned in each system
+
+**Account Drift Fix**
+- Updated 5 customer names in 1PDB to match ThunderCloud (the metering authority):
+  - 0218MAK: Malitaba Mara → Mantahli Moqasa
+  - 0219MAK: Macobone Mocase → Mammei Maeeane
+  - 0220MAK: Mafumane Liphoto → Tiisetso Semethe
+  - 0221MAK: Kenalemang Mokhothu → Jubile Makebe
+  - 0297MAK: Teboho Lehlokoanyane → Mafumane Liphoto
+- Verified: Liphoto now correctly on 0297MAK in both systems, Maitin on 0244/0245MAK in both
+- 19 accounts in 1PDB but not TC (1Meter/pending connections) — correct, left as-is
+- 1 account in TC but not 1PDB (0500MAK MAK Power House) — informational
+
+### Key Decisions
+- ThunderCloud is the authority for metered customer-account mappings (it controls physical meters)
+- Updated customer names rather than reassigning accounts — safe because transactions key on account_number, not customer name
+- Did NOT build an ongoing TC↔1PDB customer sync mechanism (should be a future task)
+- Stopped the import timer during migration to prevent deadlocks
+
+### What Next Session Should Know
+- MAK meter serials are now full TC format across all tables
+- The 5 account-customer mismatches are fixed
+- **MISSING**: There is no customer registration sync between 1PDB and TC — new customers must be registered in both systems manually, or a sync mechanism should be built
+- 19 1Meter/pending accounts exist only in 1PDB (0236-0298 range with ACCT-* meters)
+- The `1pdb-consumption.timer` was restarted and is running normally
+
+### Files Modified
+- `scripts/ops/fix_mak_drift.py` — new: MAK drift report and fix script
+- `scripts/ops/rca_mak_drift.py` — new: RCA analysis script
+- `scripts/ops/migrate_meter_serials.py` — new: meter serial migration script
+- `scripts/ops/check_mak_drift.py` — new: quick drift check utility
+
+### Database Changes
+- `meters`: 237 rows updated (numeric → SMRS serial), 1 orphan deleted
+- `hourly_consumption`: ~8.1M rows migrated to SMRS serial format
+- `monthly_consumption`: ~31K rows migrated
+- `meter_assignments`: 5 duplicate rows deleted
+- `meter_readings_2026`: ~12K rows migrated
+- `customers`: 5 rows updated (names corrected to match TC)
+
+## Session 2026-02-16 202602161400 (Portfolio-Wide Customer Drift Fix)
+
+### What Was Done
+- Ran a portfolio-wide audit comparing 1PDB customer names against SparkMeter (ThunderCloud for MAK, Koios for all other LS sites)
+- Identified 48 mismatches across 6 sites: LSB (19), SHG (12), MAT (7), KET (6), MAS (3), SEH (1)
+- Created `scripts/ops/fix_all_sites_drift.py` to fix all mismatches in a single pass
+- Applied all 48 fixes — verified zero mismatches remain across entire portfolio
+
+### Nature of Discrepancies
+- **LSB (19)**: Severe structural drift — nearly every account mapped to wrong person (same offset pattern as MAK)
+- **SHG (12)**: 9 generic "Thaba Tseka DAO" accounts → distinct "DAO staff house N" labels, plus 2 spelling corrections, 1 real name swap
+- **MAT (7)**: Mix of institutional changes (schools, churches) and name corrections
+- **KET (6)**: Offset numbering drift (same root cause as MAK — uncoordinated registration)
+- **MAS (3)**: Spelling corrections (Seboletso→Sebolelo, Nomdela→Nomdeloa) + 1 institutional
+- **SEH (1)**: Minor spelling fix (Malepheana→Malepheane)
+
+### Key Decisions
+- SparkMeter remains the authority for all metered customer-account mappings
+- Applied all fixes in one batch — SparkMeter names take precedence over 1PDB names
+- Junk SparkMeter entries (BB, FAIL, GGG) were excluded automatically (they have no matching 1PDB account)
+
+### What Next Session Should Know
+- **All customer-account name discrepancies between 1PDB and SparkMeter are now resolved** (0 mismatches)
+- The root cause (no automated customer sync between systems) has NOT been addressed — drift will recur whenever new customers are registered
+- Building a periodic customer sync mechanism should be a priority to prevent future drift
+- The audit/fix scripts are in `scripts/ops/` and can be re-run at any time
+
+### Files Modified
+- `scripts/ops/fix_all_sites_drift.py` — new: portfolio-wide drift fix script (dry-run + apply modes)
+- `scripts/ops/audit_all_sites_drift.py` — new: portfolio-wide audit script (created in prior session)
+
+### Database Changes
+- `customers`: 48 rows updated across 6 sites (names corrected to match SparkMeter)
+
+## Session 2026-04-09 202604091600 (CC → SparkMeter Customer Sync)
+
+### What Was Done
+- Probed SparkMeter APIs (Koios v1 + ThunderCloud v0) to discover customer creation endpoints
+- Built `sparkmeter_customer.py` — CC → SparkMeter customer sync module
+- Integrated into `registration.py` (single + bulk import) and `meter_lifecycle.py` (meter assignment)
+- Deployed and tested end-to-end: Koios creation, TC deferral, unmapped site handling all pass
+
+### API Discovery Results
+- **Koios v1**: `POST /api/v1/customers` requires `{name, code, service_area_id}`, uses read API key (not write)
+- **ThunderCloud v0**: `POST /api/v0/customer/` requires `{serial, code, name, meter_tariff_name}` — needs meter serial
+- Neither platform supports customer name updates or deletion via API (405 on DELETE/PATCH)
+- BN API keys lack customer management access; BN sync not yet supported
+- All LS sites share service_area_id `e3015e87-...` except MAS which has `e6efc982-...`
+
+### Key Decisions
+- 1PDB (via CC) is now the authority for customer creation going forward
+- SparkMeter sync is fire-and-forget: SM failure doesn't roll back the 1PDB record
+- For ThunderCloud (MAK), customer creation is deferred if no meter serial is available at registration
+- Deferred MAK customers get synced when a meter is assigned via `meter_lifecycle.py`
+- Name update sync was cancelled — API doesn't support it; drift must be fixed with audit scripts
+
+### What Next Session Should Know
+- `sparkmeter_customer.py` is deployed and live — new customer registrations auto-push to SparkMeter
+- Two orphan test customers exist in Koios: `9999ZZZ` (MAS service area) and `8888KET` (KET service area) — both named ZZZTEST, no meters, harmless
+- One orphan test customer exists in ThunderCloud: `9999ZZZ` with nonexistent meter SMRSD-04-00000000 — harmless
+- Name drift prevention is still manual — run `scripts/ops/audit_all_sites_drift.py` periodically
+
+### Files Modified
+- `acdb-api/sparkmeter_customer.py` — new: SM customer sync module
+- `acdb-api/registration.py` — added SM sync on single + bulk registration
+- `acdb-api/meter_lifecycle.py` — added SM sync on meter assignment
+- `CONTEXT.md` — added customer sync documentation
+
+---
+
+## Session 2026-02-16 202602161415 (BN Customer Sync)
+
+### What Was Done
+- Added BN manage API credentials to both `/opt/1pdb/.env` and `/opt/1pdb-bn/.env`
+  - Key: `KOIOS_MANAGE_API_KEY_BN` / `KOIOS_MANAGE_API_SECRET_BN` (with single-quote protection for special chars)
+- Probed BN Koios API with new key — confirmed read + create access
+- Discovered BN service area IDs:
+  - GBO: `de00dfbf-64e7-4d0d-ae80-8a4a309fe8ed`
+  - SAM: `43a81ea8-f5fd-4df3-ae6b-0b7f54a58fe2`
+- Updated `sparkmeter_customer.py` with multi-country support:
+  - Per-country credential resolution via `country_config._REGISTRY`: `KOIOS_MANAGE_API_KEY_{CC}` → `KOIOS_API_KEY_{CC}` → `KOIOS_API_KEY`
+  - Added GBO + SAM to `KOIOS_SERVICE_AREAS` dict
+  - `_koios_headers()` now takes `site_code` and resolves country → credentials
+  - `is_configured()` returns per-country status
+- Tested end-to-end: created test customers in both GBO and SAM via the new BN manage key
+  - `8888GBO` → `sm_id=b19e6970-cbe3-4971-ba4c-f8d3e764d13f`
+  - `9999SAM` → `sm_id=c0ce594d-f86f-49fd-9da2-803eb77dd183`
+- Deployed updated module, restarted both `1pdb-api` and `1pdb-api-bn` services
+
+### Key Decisions
+- Used dedicated `KOIOS_MANAGE_API_KEY_BN` env var (separate from payment key) because the original BN key lacked customer management permissions
+- Credential resolution cascades: manage key → country-specific key → global key
+- BN service uses `/opt/1pdb-bn/.env`; LS service uses `/opt/1pdb/.env` — both need the BN manage key
+
+### What Next Session Should Know
+- BN customer sync is now fully live — new GBO and SAM registrations auto-push to SparkMeter
+- Orphan test customers in BN Koios: `8888GBO` ("ZZZTEST BN SYNC") and `9999SAM` ("ZZZTEST SAM SYNC") — harmless, cannot be deleted via API
+- BN Koios data quality is messy: typos in codes (`0200GBOT`, `0131GLBO`, `00190GBO`), null codes with "new"/"?" names. Pre-existing SM issues, not 1PDB's fault.
+
+### Files Modified
+- `acdb-api/sparkmeter_customer.py` — added multi-country credential resolution + BN service areas
+- `CONTEXT.md` — updated customer sync section with BN details
+- `/opt/1pdb/.env` + `/opt/1pdb-bn/.env` — added `KOIOS_MANAGE_API_KEY_BN` / `KOIOS_MANAGE_API_SECRET_BN`
+
+---
+
+## Session 2026-02-16 202602161104 (Configurable Department-to-Role Mapping)
+
+### What Was Done
+- Replaced hardcoded department→CC role mapping in `pr_lookup.py` with a database-backed table (`cc_department_role_mappings`) in SQLite
+- Added Firestore `referenceData_departments` resolution: BN/ZM employees whose department is stored as a Firestore doc ID (e.g., `Rb73GDJbgs7u1lgqQN7N`) now get resolved to readable names (e.g., "Finance") and codes (e.g., "FIN") before role matching
+- Seeded 9 default mappings covering LS English labels and BN French labels
+- Added admin CRUD endpoints: `GET/POST/DELETE /api/admin/department-mappings` + `GET /api/admin/pr-departments`
+- Added "Department Auto-Mapping" section to `AdminRolesPage.tsx` with:
+  - Current mappings table (key, label, role, delete)
+  - Add mapping form (key input, label, role selector)
+  - Unmapped PR departments quick-select (amber callout showing unmatched departments from Firestore)
+- Full EN/FR i18n for all new UI labels
+- Deployed backend to both LS (8100) and BN (8101) services
+- Verified end-to-end: BN employees like `jphilippe@1pwrbenin.com` (Finance) → `finance_team`, `ramou@1pwrbenin.com` (Service client) → `onm_team`
+- LS regression verified: `moletsane@1pwrafrica.com` (o_m) → `onm_team`, `palama@1pwrafrica.com` (Finance) → `finance_team`
+- Pushed to `main` for frontend auto-deploy
+
+### Key Decisions
+- Match strategy tries in order: raw string → resolved name → resolved code (all lowercased)
+- `_invalidate_user_cache()` called after admin mapping changes to force Firestore re-evaluation
+- Service client and SC mapped to `onm_team` (operational role per customer-facing nature)
+- Only `onm_team` and `finance_team` are selectable in the department mapping add form (superadmin/generic don't make sense as auto-mapped roles)
+
+### Files Modified
+- `acdb-api/db_auth.py` — new `cc_department_role_mappings` table + CRUD + seeding
+- `acdb-api/pr_lookup.py` — Firestore dept ID resolution, DB-backed mapping, `get_all_pr_departments()`
+- `acdb-api/admin.py` — department mapping CRUD endpoints + PR departments listing
+- `acdb-api/models.py` — `DepartmentMapping` / `DepartmentMappingResponse` Pydantic models
+- `acdb-api/frontend/src/lib/api.ts` — API calls for department mappings
+- `acdb-api/frontend/src/pages/AdminRolesPage.tsx` — department mappings UI section
+- `acdb-api/frontend/src/i18n/en/admin.json` + `fr/admin.json` — EN/FR labels
+
+---
+
+## Session 2026-04-11 (M-Pesa receipt on manual payment)
+
+### What Was Done
+- Added `transactions.payment_reference` (migration `008_transactions_payment_reference.sql`) with unique index on `lower(trim(payment_reference))` for deduplication
+- `POST /api/payments/record` now **requires** `payment_reference`; returns **409** if that receipt was already used (with existing txn id + account in message)
+- SMS gateway webhook stores `reference` when sent; returns idempotent `status: duplicate` if the same reference is posted again
+- Customer Data API and UI show a **Receipt** column for traceability; SparkMeter credit memo prefixed with `ref {receipt}`
+- Deploy: run migration on 1PDB before/restart API after deploy
+
+### Files
+- `acdb-api/balance_engine.py`, `payments.py`, `crud.py`, `migrations/008_*.sql`
+- `RecordPaymentPage.tsx`, `CustomerDataPage.tsx`, `api.ts`, `recordPayment` + `customerData` i18n
+
+---
+
+## Session 2026-04-11 (RCA: Koios credit vs 1PDB)
+
+### Root cause (historical bug)
+- `_koios_credit` in `sparkmeter_credit.py` did **not** check HTTP status before returning `success=True`. API error bodies such as `401` + `{"detail":"..."}` (no `errors[]`) could be treated as a successful credit while Koios never posted the payment.
+
+### Fix
+- Require **HTTP 2xx** for Koios success; parse `detail` / `message` on failure; handle `RequestException` and non-JSON bodies with logging.
+
+### Documented (CONTEXT.md)
+- Commit order: 1PDB commits **before** SM push (no rollback).
+- Distinction between **write** keys for `/payments` vs read/manage keys for other APIs.
+- Failure modes: credentials, code mismatch, timeout, no retry queue; operational grep/journal hints.
