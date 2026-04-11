@@ -1543,55 +1543,73 @@ def employee_customer_data(
 
         # --- Transaction history (most recent first) ---
         transactions = []
-        try:
-            cursor.execute(
-                "SELECT id, account_number, meter_id, transaction_date, "
-                "transaction_amount, rate_used, kwh_value, is_payment, current_balance, "
-                "payment_reference "
-                "FROM transactions WHERE account_number = %s "
-                "ORDER BY transaction_date DESC",
-                (acct,),
-            )
-            from country_config import UTC_OFFSET_HOURS as _TXN_UTC_OFF
-            _txn_offset = timedelta(hours=_TXN_UTC_OFF)
-            for r in cursor.fetchall():
-                dt_raw = r[3]
-                dt_str = None
-                if dt_raw is not None:
-                    if isinstance(dt_raw, str):
-                        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y"):
-                            try:
-                                dt_parsed = datetime.strptime(dt_raw.strip(), fmt)
-                                dt_str = (dt_parsed + _txn_offset).strftime("%Y-%m-%d %H:%M:%S")
-                                break
-                            except ValueError:
-                                continue
-                    else:
-                        if hasattr(dt_raw, "strftime"):
-                            local_dt = dt_raw.replace(tzinfo=None) + _txn_offset if hasattr(dt_raw, 'tzinfo') and dt_raw.tzinfo else dt_raw
-                            dt_str = local_dt.strftime("%Y-%m-%d %H:%M:%S")
-                        else:
-                            dt_str = str(dt_raw)
+        _txn_sel = (
+            "SELECT id, account_number, meter_id, transaction_date, "
+            "transaction_amount, rate_used, kwh_value, is_payment, current_balance"
+        )
+        _txn_from = " FROM transactions WHERE account_number = %s ORDER BY transaction_date DESC"
+        from country_config import UTC_OFFSET_HOURS as _TXN_UTC_OFF
+        _txn_offset = timedelta(hours=_TXN_UTC_OFF)
 
-                txn = {
-                    "id": r[0],
-                    "account": r[1],
-                    "meter": r[2],
-                    "date": dt_str,
-                    "amount_lsl": round(float(r[4] or 0), 2),
-                    "rate": round(float(r[5] or 0), 2),
-                    "kwh": round(float(r[6] or 0), 2),
-                    "is_payment": bool(r[7]),
-                }
+        txn_rows: list = []
+        include_payment_ref = False
+        try:
+            cursor.execute(_txn_sel + ", payment_reference" + _txn_from, (acct,))
+            include_payment_ref = True
+            txn_rows = list(cursor.fetchall())
+        except Exception as e:
+            err = str(e).lower()
+            if "payment_reference" in err and "does not exist" in err:
+                conn.rollback()
                 try:
-                    txn["balance"] = round(float(r[8] or 0), 2)
-                except (ValueError, TypeError):
-                    txn["balance"] = None
+                    cursor.execute(_txn_sel + _txn_from, (acct,))
+                    txn_rows = list(cursor.fetchall())
+                except Exception as e2:
+                    logger.warning("customer-data: failed to read transactions (fallback): %s", e2)
+                    conn.rollback()
+            else:
+                logger.warning("customer-data: failed to read transactions: %s", e)
+                conn.rollback()
+
+        for r in txn_rows:
+            dt_raw = r[3]
+            dt_str = None
+            if dt_raw is not None:
+                if isinstance(dt_raw, str):
+                    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y"):
+                        try:
+                            dt_parsed = datetime.strptime(dt_raw.strip(), fmt)
+                            dt_str = (dt_parsed + _txn_offset).strftime("%Y-%m-%d %H:%M:%S")
+                            break
+                        except ValueError:
+                            continue
+                else:
+                    if hasattr(dt_raw, "strftime"):
+                        local_dt = dt_raw.replace(tzinfo=None) + _txn_offset if hasattr(dt_raw, 'tzinfo') and dt_raw.tzinfo else dt_raw
+                        dt_str = local_dt.strftime("%Y-%m-%d %H:%M:%S")
+                    else:
+                        dt_str = str(dt_raw)
+
+            txn = {
+                "id": r[0],
+                "account": r[1],
+                "meter": r[2],
+                "date": dt_str,
+                "amount_lsl": round(float(r[4] or 0), 2),
+                "rate": round(float(r[5] or 0), 2),
+                "kwh": round(float(r[6] or 0), 2),
+                "is_payment": bool(r[7]),
+            }
+            try:
+                txn["balance"] = round(float(r[8] or 0), 2)
+            except (ValueError, TypeError):
+                txn["balance"] = None
+            if include_payment_ref:
                 pr = r[9]
                 txn["payment_reference"] = str(pr).strip() if pr else None
-                transactions.append(txn)
-        except Exception as e:
-            logger.warning("customer-data: failed to read transactions: %s", e)
+            else:
+                txn["payment_reference"] = None
+            transactions.append(txn)
 
         # --- Supplement with monthly_transactions for months beyond history ---
         latest_hist_date: Optional[datetime] = None
