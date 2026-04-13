@@ -127,6 +127,11 @@ React + TypeScript + Vite SPA. Key pages include:
 **Deployment**: Built on GitHub-hosted runners and deployed to
 `/opt/cc-portal/frontend/`.
 
+### User documentation
+
+- **In-app:** employees can open **Help** (`/help`) for the interactive manual (search, links to pages).
+- **Repository:** `1PWR Customer Care Portal Operating Manual.md` is the printable companion; keep it aligned with major UI changes.
+
 ### `whatsapp-bridge/`
 
 Node.js service using Baileys to connect to WhatsApp. Handles:

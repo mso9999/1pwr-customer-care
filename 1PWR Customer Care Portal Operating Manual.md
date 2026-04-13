@@ -1,385 +1,362 @@
 # 1PWR Customer Care Portal — Operating Manual
 
-**Revision Date:** February 2026
-**Portal URL:** https://cc.1pwrafrica.com
-**Administered by:** OnePower Lesotho
+**Revision Date:** April 2026  
+**Portal URL (production):** https://cc.1pwrafrica.com  
+**Administered by:** OnePower Lesotho (with multi-country backends)
 
 ---
 
-## Introduction
+## How to use this manual
 
-The 1PWR Customer Care (CC) Portal is a web-based application that replaces the former ACCDB-based database system. All operations are performed through a web browser — no RDP, VBA forms, or Dropbox paths are required.
+| Resource | Purpose |
+|----------|---------|
+| **This document** | Full printable / shareable reference; keep in sync with product releases. |
+| **In-app Help** (`/help`, also **Help** in the navigation bar) | Same topics in an interactive layout with search and quick links to portal pages. |
 
-This manual details the step-by-step guidelines for using the portal to perform the following actions. Access to specific functions depends on the user's assigned role.
+**Roles:** Most procedures assume an **employee** login. **Customer self-service** is documented separately; paths begin with `/my/`.
 
-### List of Actions
-
-| Category | Feature | Portal Page |
-|----------|---------|-------------|
-| Authentication | Employee login | `/login` |
-| Authentication | Customer self-service login | `/login` |
-| Customer Management | View/search customers | `/customers` |
-| Customer Management | Register new customer | `/customers/new` |
-| Customer Management | Customer detail & profile | `/customers/:id` |
-| Customer Management | Customer data & transactions | `/customer-data` |
-| Customer Management | Commission customer | `/commission` |
-| Metering | View/search meters | `/meters` |
-| Metering | Assign meter to customer | `/assign-meter` |
-| Metering | Check meter comparison | `/check-meters` |
-| Payments | Record missed payment | `/record-payment` |
-| Payments | Payment verification | `/payment-verification` |
-| Financing | Product templates & agreements | `/financing` |
-| Reports | O&M quarterly report | `/om-report` |
-| Reports | Financial analytics | `/financial` |
-| Reports | Onboarding pipeline | `/pipeline` |
-| Data | View accounts | `/accounts` |
-| Data | View transactions | `/transactions` |
-| Data | Browse raw tables | `/tables` |
-| Data | Export to CSV/XLSX | `/export` |
-| Administration | Tariff management | `/tariffs` |
-| Administration | Role management | `/admin/roles` |
-| Administration | Mutation audit log | `/mutations` |
-| Administration | UGridPlan sync | `/sync` |
+**Environments:** Production is `cc.1pwrafrica.com`. If your organization provides a **sandbox** or **staging** URL for training, use it for the [Sandbox tutorial](#22-sandbox-tutorial-safe-practice-environment) below. Never use production accounts for destructive experiments.
 
 ---
 
-## 1. Login
+## 1. Introduction
 
-Navigate to https://cc.1pwrafrica.com. The login screen presents two options:
+The 1PWR Customer Care (CC) Portal is a web application for minigrid customer operations: registration, metering, payments, financing, reporting, and audit. It replaces the former ACCDB-based system. All employee workflows run in a browser (desktop, tablet, or phone); no RDP or Access is required.
 
-### Employee Login
-- Enter your **Employee ID** and **password**.
-- Click **Sign In**.
-- You will be redirected to the Dashboard.
+### 1.1 Feature index (by page)
 
-### Customer Self-Service Login
-- Customers can register and log in with their customer ID.
-- The customer view provides a personal dashboard with balance, consumption history, and profile.
-
-### Roles
-The portal uses role-based access control:
-- **superadmin** — Full access including role management.
-- **onm_team** — Operations & maintenance features.
-- **finance_team** — Financial reporting and payment verification.
-- **generic** — Basic read access.
-
----
-
-## 2. Dashboard
-
-The main dashboard (`/dashboard`) provides an overview of the system with key metrics. From here, the top navigation bar provides access to all portal features.
-
-### Navigation Bar
-The horizontal navigation bar at the top of every page includes:
-- **Dashboard** — Home overview
-- **O&M Report** — Quarterly operational metrics
-- **Financial** — Revenue and ARPU analytics
-- **Check Meters** — SparkMeter vs 1Meter comparison
-- **Customers** — Customer registry
-- **Meters** — Meter registry
-- **Accounts** — Account registry
-- **Transactions** — Transaction browser
-- **Customer Data** — Per-customer lookup
-- **Tables** — Raw table browser
-- **Export** — Data export (CSV/XLSX)
-- **Tariffs** — Tariff rate management
-- **Financing** — Asset financing management
-- **Record Payment** — Manual payment entry
-- **Verify Payments** — Payment verification queue
-- **Pipeline** — Onboarding funnel
-- **Mutations** — Audit trail
-- **Sync** — UGridPlan sync status
+| Category | Feature | Path | Typical roles |
+|----------|---------|------|----------------|
+| Help | User guide (this content in-app) | `/help` | All employees |
+| Dashboard | KPIs, sites, table counts | `/dashboard` | All employees |
+| Reports | O&M quarterly report | `/om-report` | All employees |
+| Reports | Financial analytics (ARPU, revenue) | `/financial` | All employees |
+| Reports | Check meters (SM vs 1M) | `/check-meters` | All employees |
+| Customers | Search and list | `/customers` | All employees |
+| Customers | Register new customer | `/customers/new` | superadmin, onm_team |
+| Customers | Customer profile | `/customers/:id` | All employees |
+| Commission | Commissioning wizard | `/commission` | superadmin, onm_team |
+| Metering | Meter registry | `/meters` | All employees |
+| Metering | Assign meter | `/assign-meter` | superadmin, onm_team |
+| Data | Customer data (balance, charts) | `/customer-data` | All employees |
+| Data | Accounts browser | `/accounts` | All employees |
+| Data | Transactions browser | `/transactions` | All employees |
+| Data | Raw tables | `/tables`, `/tables/:name` | All employees |
+| Data | CSV/XLSX export | `/export` | All employees |
+| Payments | Record missed payment | `/record-payment` | All employees |
+| Payments | Payment verification | `/payment-verification` | All employees (finance primary) |
+| Financing | Products, agreements, ledger | `/financing` | All employees (finance primary) |
+| Reports | Onboarding pipeline funnel | `/pipeline` | All employees |
+| Admin | Tariff management | `/tariffs` | All employees |
+| Admin | Mutation audit log | `/mutations` | All employees |
+| Admin | uGridPlan sync | `/sync` | All employees |
+| Admin | Role management | `/admin/roles` | superadmin only |
+| Customer | Self-service dashboard | `/my/dashboard` | Customer login |
+| Customer | My profile | `/my/profile` | Customer login |
 
 ---
 
-## 3. Customer Registration
+## 2. Login and authentication
 
-### Individual Registration
-1. Navigate to `/customers/new`.
-2. Fill in required fields: first name, last name, national ID, phone number, site/concession, customer type.
-3. Click **Save**. The customer is created and assigned an account number automatically.
+### 2.1 Employee login
 
-### Bulk Registration
-Bulk registration is handled through the data import features or the UGridPlan integration at `/sync`.
+1. Open https://cc.1pwrafrica.com (or your sandbox URL).
+2. Enter **Employee ID** and **password**.
+3. Click **Sign In**. You land on the **Dashboard** (or home redirect).
 
----
+### 2.2 Customer self-service login
 
-## 4. Commission Customer
+Customers use **customer ID** (and credentials as configured). After login they see **My Dashboard** and **My Account** — not the full staff navigation.
 
-The commission page (`/commission`) provides a multi-step wizard to finalize a customer's service connection:
+### 2.3 Roles (RBAC)
 
-1. **Look up** the customer by account number or customer ID.
-2. **Verify/update** customer details: name, national ID, phone, GPS coordinates, customer type, service phase, ampacity.
-3. **Capture signature** — the customer signs on a tablet canvas.
-4. **Generate contracts** — bilingual (English/Sesotho) PDF contracts are generated automatically and stored.
-5. **Send SMS** — the contract download link is sent to the customer via SMS.
+| Role | Scope |
+|------|--------|
+| **superadmin** | Full access, including `/admin/roles` and all write workflows. |
+| **onm_team** | Operations: registration, commissioning, meter assignment, field-oriented workflows. |
+| **finance_team** | Finance-heavy pages (verification, financing, reports). |
+| **generic** | Read-focused access; may be restricted from some write actions. |
 
-### Commissioning Steps
-The system tracks seven commissioning steps per customer:
-1. Connection fee paid
-2. Readyboard fee paid
-3. Readyboard tested
-4. Readyboard installed
-5. Airdac connected
-6. Meter installed
-7. Customer commissioned
-
-These can be updated individually or in bulk from the commission page.
+Exact permissions for a given deployment are enforced server-side. If an action fails with “forbidden,” ask a **superadmin** to adjust your role.
 
 ---
 
-## 5. Record Missed Payment
+## 3. Multi-country and portfolio selection
 
-Page: `/record-payment`
-
-When a payment is missed by the SMS gateway (e.g., the gateway phone was offline), record it manually:
-
-1. Enter the **account number** (e.g., `0045MAK`).
-2. Enter the **amount** in Maloti.
-3. Optionally specify a meter ID and note.
-4. Click **Record Payment**.
-
-The system will:
-- Convert the currency amount to kWh at the current tariff rate.
-- Credit the customer's electricity balance.
-- Credit SparkMeter (if configured).
-- If the customer has active financing, automatically split the payment per the financing terms (see Section 9).
-
-**Financing Split Indicator:** If the payment amount ends in digit **1** or **9** (e.g., M51, M101, M79), the entire amount is treated as a dedicated debt payment rather than being split.
+The header may show a **country** selector (e.g. Lesotho, Benin) and, where configured, a **portfolio** filter. The selected country determines which backend database and currency apply. **Always confirm the country** before creating customers or recording payments.
 
 ---
 
-## 6. Payment Verification
+## 4. Dashboard (`/dashboard`)
 
-Page: `/payment-verification`
+- Summary of **sites/concessions** with customer counts (from live data).
+- **Energy and revenue** summaries where APIs provide them.
+- **Database table** inventory and **record completeness** indicators (when enabled).
 
-Connection fees and readyboard fees require verification by the finance team.
-
-1. Open the **Payment Verification** page.
-2. The default view shows **Pending** verifications.
-3. Use filters to narrow by payment type or status.
-4. Select one or more payments using checkboxes.
-5. Optionally add a note.
-6. Click **Verify** or **Reject**.
-
-### Filtering
-- **Status:** Pending, Verified, Rejected, All
-- **Type:** Connection Fee, Readyboard Fee, Electricity, Uncategorized
+Use the Dashboard as the daily entry point; deep work happens on feature pages.
 
 ---
 
-## 7. Reports
+## 5. End-to-end customer lifecycle (typical flow)
 
-### O&M Quarterly Report (`/om-report`)
-Generates operational metrics matching the SMP O&M quarterly report format:
-- Customer statistics per site (total, active, new)
-- Customer connection growth (quarterly)
-- Consumption per site per quarter (kWh)
-- Revenue per site per quarter (LSL)
-- Generation vs consumption
-- Average consumption per customer trends
-- Consumption by customer tenure
+This is the “happy path” many teams follow; adapt to local SOPs.
 
-### Financial Analytics (`/financial`)
-Revenue and ARPU analytics:
-- Monthly revenue by site
-- ARPU (Average Revenue Per User) trends
-- Payment type breakdown
-- Revenue growth comparisons
+1. **Register** the customer (`/customers/new`) — capture identity, phone, **site/concession**, customer type.
+2. **Fees and steps** — connection / readyboard fees often flow through M-PESA and the **payment verification** queue (`/payment-verification`).
+3. **Commission** (`/commission`) — verify details, signature, contracts, SMS links.
+4. **Meter** — assign or confirm meter (`/assign-meter`, `/meters`).
+5. **Ongoing** — **Customer Data** (`/customer-data`) for balance and history; **Record Payment** if the SMS gateway missed a payment.
+6. **Financing** (optional) — extend credit from customer detail or `/financing`.
 
-### Onboarding Pipeline (`/pipeline`)
-A funnel visualization showing how many customers are at each stage of the commissioning process:
-- **Registered** → Connection Fee Paid → Readyboard Fee Paid → Readyboard Tested → Readyboard Installed → Airdac Connected → Meter Installed → **Commissioned**
-
-Features:
-- Filter by site/community.
-- Drop-off percentages between each stage.
-- Summary cards: total registered, fully commissioned, conversion rate, in-progress count.
-- Tabular breakdown with percentages.
-
-### Check Meter Comparison (`/check-meters`)
-Compares SparkMeter (SM) production meter readings against 1Meter (1M) check meter readings:
-- Hourly kWh time series (configurable time range).
-- Per-meter deviation statistics (%, mean, std dev).
-- Fleet-wide total deviation summary.
-- Meter health indicators (online/stale/offline).
+Track funnel position on **Pipeline** (`/pipeline`).
 
 ---
 
-## 8. Customer Data Lookup
+## 6. Customers
 
-Page: `/customer-data`
+### 6.1 Search and list (`/customers`)
 
-Enter an account number to view comprehensive customer data:
+- Text search across names, IDs, account numbers, and related fields.
+- Click a row to open **Customer detail**.
 
-- **Balance** — Current kWh balance and currency equivalent.
-- **Average Consumption** — kWh/day.
-- **Estimated Recharge Time** — Based on current balance and consumption rate.
-- **Last Payment** — Most recent payment amount and date.
-- **Total Consumption & Purchases** — All-time totals.
-- **Active Financing** — If the customer has financing agreements, a summary card shows total outstanding debt with progress bars per agreement.
-- **Transaction History** — Sortable table of all transactions (payments and consumption).
-- **Consumption Charts** — 24h, 7-day, 30-day, and 12-month consumption visualizations.
+### 6.2 Register new customer (`/customers/new`)
 
----
+**Roles:** superadmin, onm_team.
 
-## 9. Customer Financing
+1. Open **Customers → New Customer** or go to `/customers/new`.
+2. Complete required fields (names, national ID, phone, **site/concession**, customer type, etc.).
+3. Save. An **account number** is generated automatically when applicable.
 
-Page: `/financing`
+**Site/concession list:** Dropdowns that list “sites” are often built from **communities that already have at least one customer** in the database. If a valid site code does not appear yet, coordinate with your **data/engineering** team — the canonical site list is configured per country in the backend; the first customer at a new site may require a one-time data entry path agreed with admins.
 
-The financing system allows extending credit to customers for assets like readyboards, refrigerators, or solar lanterns.
+### 6.3 Customer detail (`/customers/:id`)
 
-### Product Templates (Financing > Product Templates tab)
-Define reusable financing product templates with default terms:
-- **Name** — e.g., "Readyboard", "Refrigerator"
-- **Default Principal** — Standard financed amount
-- **Interest Rate** — e.g., 10%
-- **Setup Fee** — Administration fee
-- **Repayment Fraction** — % of each electricity payment diverted to debt (e.g., 20%)
-- **Penalty Rate** — Applied when payments are overdue
-- **Grace Days** — Days before penalty applies
-- **Penalty Interval** — How often penalty recurs
+- View and edit profile fields.
+- Common actions (depending on role and state): **Edit**, **View Data**, **Commission**, **Extend Credit**, **Assign Meter**, **Decommission**.
 
-### Creating a Financing Agreement
-From the customer detail page or the financing management page:
-1. Select a product template (pre-fills terms) or set custom terms.
-2. Set the principal, interest, fees, repayment fraction, and penalty parameters.
-3. The **total owed** is computed: principal + interest + fees.
-4. Capture the customer's signature.
-5. A signed financing agreement PDF is generated and attached to the account.
+### 6.4 Sites and concessions (operational notes)
 
-### Payment Splitting
-When a customer with active financing makes a payment:
-- **Regular payments:** Split between electricity and debt per the repayment fraction.
-  - Example: M100 payment with 20% fraction → M20 to debt, M80 to electricity.
-- **Dedicated debt payments:** If the amount's ones digit is **1** or **9** (e.g., M51, M101, M79), the **entire** amount is applied to debt.
-- **FIFO ordering:** If multiple agreements exist, payments are applied to the oldest first.
-- The electricity portion is credited to SparkMeter normally.
-- The debt portion is recorded in the financing ledger.
-
-### Agreements Table (Financing > Agreements tab)
-View all financing agreements across customers:
-- Filter by status: Active, Paid Off, Defaulted, Cancelled.
-- Click any agreement to view its full ledger (payments, penalties, adjustments).
-
-### Automatic Penalties
-The system automatically applies penalties to overdue agreements:
-- If no payment is received within the **grace days**, a penalty equal to **penalty rate × outstanding balance** is added.
-- Penalties recur at the configured interval until a payment is made.
-- Penalty entries appear in the agreement's ledger.
-
-### Financing on Customer Data Page
-When viewing a customer in `/customer-data`, if they have active financing:
-- An amber-highlighted **Active Financing** section appears.
-- Shows total outstanding debt and per-agreement progress bars.
-- Debt repayment progress is visible at a glance.
+- **Account numbers** encode site as the last segment (e.g. `0045MAK` → site **MAK**).
+- **Community / concession** on the customer record should match the operational site.
+- **Adding a new site code** to a country is an **engineering/configuration** change (backend country config, Koios IDs where applicable), not something end users toggle in the UI. Operations should request adds through your standard change process; after deployment, new sites appear in config-driven UIs.
 
 ---
 
-## 10. Meters
+## 7. Commissioning (`/commission`)
 
-### Meter Registry (`/meters`)
-Browse and search all meters in the system. Each meter record includes:
-- Meter ID, account number, community/site, status, type.
+**Roles:** superadmin, onm_team.
 
-### Assign Meter (`/assign-meter`)
-Assign a meter to a customer account or reassign between accounts.
+1. Look up the customer by **account number** or **customer ID**.
+2. Verify or update: name, national ID, phone, GPS, customer type, service phase, ampacity.
+3. **Capture signature** on the canvas.
+4. **Generate contracts** (e.g. English / Sesotho PDFs) and store them.
+5. **Send SMS** with contract download link when supported.
 
-### Meter Lifecycle
-Meters follow a lifecycle: active → inactive → decommissioned → maintenance. Status changes are logged in the mutation audit trail.
-
----
-
-## 11. Data Export
-
-Page: `/export`
-
-Export data tables to CSV or XLSX format:
-1. Select the table to export.
-2. Apply filters (site, date range, etc.).
-3. Click **Export**.
-4. The file downloads to your browser.
-
-Available tables include: customers, accounts, meters, transactions, hourly_consumption, and more.
+**Seven tracked steps:** connection fee paid → readyboard fee paid → readyboard tested → readyboard installed → airdac connected → meter installed → **customer commissioned**. Update steps individually or in bulk from this flow. Use **Pipeline** to see cohort progress.
 
 ---
 
-## 12. Tariff Management
+## 8. Meters
 
-Page: `/tariffs`
+### 8.1 Meter registry (`/meters`)
 
-Manage electricity tariff rates per site/concession:
-- View current tariff rates.
-- Update rates (changes take effect for future payments).
-- Country-specific tariff configuration.
+Browse and search meters: ID, account, community/site, status, type.
 
----
+### 8.2 Assign meter (`/assign-meter`)
 
-## 13. User Management
+**Roles:** superadmin, onm_team.
 
-### Role Assignment (`/admin/roles`)
-Available to superadmin users only:
-- View all users and their current roles.
-- Assign or change roles (superadmin, onm_team, finance_team, generic).
-- Activate or deactivate user accounts.
+Assign or reassign a meter to an account. Meter history is auditable.
 
-### Password Management
-Users manage their own passwords. Superadmins can reset passwords for other users.
+### 8.3 Check meters (`/check-meters`)
+
+Compare **SparkMeter** production data to **1Meter** check meters: time series, deviation stats, fleet summary, health (online/stale/offline).
+
+### 8.4 Meter lifecycle
+
+Statuses such as active → inactive → decommissioned → maintenance are logged in the **mutation audit** trail.
 
 ---
 
-## 14. Mutation Audit Trail
+## 9. Accounts and transactions
 
-Page: `/mutations`
+- **`/accounts`** — Account registry and filters.
+- **`/transactions`** — Transaction browser (payments, vend, etc., per schema).
 
-All data modifications (creates, updates, deletes) are logged with:
-- Timestamp
-- User who made the change
-- Table and record affected
-- Old and new values
-
-This provides a complete audit trail and supports reverting changes if needed.
+Use together with **Customer Data** when reconciling a specific account.
 
 ---
 
-## 15. UGridPlan Integration
+## 10. Customer data (`/customer-data`)
 
-Page: `/sync`
+Enter an **account number** to view:
 
-The CC portal integrates with UGridPlan (https://ugp.1pwrafrica.com) via API:
-- Customer data synchronization.
-- O&M ticket creation.
-- Survey/connection binding.
-
-The sync page shows the status of recent synchronization operations.
+- **Balance** (kWh and currency equivalent).
+- **Average consumption** (kWh/day).
+- **Estimated recharge time** (illustrative).
+- **Last payment**.
+- **Totals** (consumption / purchases — per implementation).
+- **Active financing** summary when applicable.
+- **Transaction history** (sortable; some inline editing may be available).
+- **Consumption charts** (24h, 7d, 30d, 12m).
 
 ---
 
-## Key Differences from ACCDB System
+## 11. Payments
+
+### 11.1 Record missed payment (`/record-payment`)
+
+When M-PESA (or other gateway) did not record a payment:
+
+1. Enter **account number** (e.g. `0045MAK`).
+2. Enter **amount** in local currency.
+3. Optional: meter ID, note.
+4. **Record Payment**.
+
+The system converts to kWh at the tariff, credits balance, and integrates with SparkMeter where configured. **Financing:** payments may split between electricity and debt; amounts ending in **1** or **9** in the ones digit can be treated as dedicated debt payments per product rules.
+
+### 11.2 Payment verification (`/payment-verification`)
+
+For fees that require finance approval:
+
+1. Open the queue (defaults to **Pending**).
+2. Filter by type/status.
+3. Select rows, add notes, **Verify** or **Reject**.
+4. Use **Export XLSX** for records if available.
+
+---
+
+## 12. Financing (`/financing`)
+
+Asset financing (readyboards, appliances, etc.):
+
+- **Product templates** — Default principal, interest, fees, repayment fraction, penalties, grace.
+- **Agreements** — Create from **customer detail** (**Extend Credit**) or manage here; signed PDFs; ledger per agreement.
+- **Splits** — Repayment fraction applies to ordinary payments; **1/9** ones-digit rule for dedicated debt; FIFO across multiple agreements.
+- **Penalties** — Automated after grace period per configuration.
+
+---
+
+## 13. Reports
+
+### 13.1 O&M quarterly report (`/om-report`)
+
+Operational metrics: customer stats by site, growth, consumption and revenue by site/quarter, generation vs consumption, average consumption trends, consumption by tenure, etc.
+
+### 13.2 Financial analytics (`/financial`)
+
+Revenue, ARPU, monthly revenue by site, payment mix, comparisons.
+
+### 13.3 Onboarding pipeline (`/pipeline`)
+
+Funnel from registered through commissioned; filters, drop-off rates, summary cards.
+
+---
+
+## 14. Data tools
+
+### 14.1 Raw tables (`/tables`)
+
+Browse database tables with sort/filter; advanced users only — changes affect production data.
+
+### 14.2 Export (`/export`)
+
+Export authorized tables to **CSV** or **XLSX** with filters.
+
+### 14.3 Mutations (`/mutations`)
+
+Audit log of creates/updates/deletes: who, when, what changed; supports accountability and optional revert flows.
+
+---
+
+## 15. Tariffs (`/tariffs`)
+
+View and update **per-site** tariff rates. Changes affect **future** kWh conversion; historical rows are not recalculated automatically.
+
+---
+
+## 16. uGridPlan sync (`/sync`)
+
+Integration with **uGridPlan** (https://ugp.1pwrafrica.com): customer sync, O&M tickets, survey/connection linkage. The page shows sync status and site/project mappings. Bulk registration may also reference UGridPlan workflows.
+
+---
+
+## 17. Administration
+
+### 17.1 Roles (`/admin/roles`)
+
+**superadmin only:** assign roles, activate/deactivate users.
+
+### 17.2 Passwords
+
+Employees change passwords per policy; superadmins may reset others where implemented.
+
+---
+
+## 18. Customer self-service (`/my/dashboard`, `/my/profile`)
+
+Customers see balance-oriented dashboards and profile — not staff menus. Content depends on backend features enabled for customer tokens.
+
+---
+
+## 19. Help (`/help`)
+
+The **Help** page mirrors this manual in a navigable format with section search. When documentation and the app disagree, treat the **deployed application behavior** as authoritative and file a bug or doc fix.
+
+---
+
+## 20. Sandbox tutorial (safe practice environment)
+
+**Purpose:** Train new users without impacting real customers or finance.
+
+### 20.1 When a sandbox exists
+
+If your organization provides a **non-production** URL (staging/sandbox):
+
+1. **Request credentials** from your admin (separate from production).
+2. **Use only sandbox URLs** during training; bookmark them clearly.
+3. **Run through Section 5** (lifecycle) with synthetic names and test phones.
+4. **Record payment** — use small, obviously test amounts and accounts created in sandbox.
+5. **Never** copy production passwords or API keys into sandbox notes.
+
+### 20.2 When no dedicated sandbox is available
+
+- Use **production in read-only mode**: Dashboard, reports, Customer Data **lookup**, export where allowed — **no** fake registrations or test payments on real accounts.
+- Ask leadership to provision a **staging** environment; training on production creates compliance and data-quality risk.
+
+### 20.3 Suggested first-hour checklist (sandbox)
+
+| Step | Action | Success criterion |
+|------|--------|-------------------|
+| 1 | Log in as trainee | Dashboard loads |
+| 2 | Open `/help` | Sections render; search works |
+| 3 | Find a test customer or create one | Customer detail opens |
+| 4 | Open Customer Data for a test account | Balance panel loads |
+| 5 | Open O&M report | Charts load without error |
+| 6 | (Optional) Pipeline | See funnel stages |
+
+---
+
+## Appendix A: Key differences from the ACCDB era
 
 | Old (ACCDB) | New (CC Portal) |
 |-------------|-----------------|
-| Windows RDP connection required | Web browser from any device |
-| VBA forms in Access database | React web application |
-| Dropbox file paths for imports/exports | In-browser data entry and download |
-| Spreadsheet-based bulk registration | Web forms + UGridPlan sync |
-| Spreadsheet-based payment verification | In-portal verification queue |
-| Reports exported to Dropbox directory | In-portal interactive charts + CSV/XLSX export |
-| No financing capability | Full asset financing system |
-| Manual kWh balance tracking | Automated balance engine |
-| No meter comparison | Check meter deviation analysis |
-| No real-time data | Live SparkMeter + 1Meter data |
-| Single-user at a time | Multi-user concurrent access |
-| No audit trail | Full mutation logging |
-| No customer self-service | Customer login with personal dashboard |
+| Windows RDP | Web browser |
+| Access/VBA forms | React application |
+| Dropbox paths for files | Portal export/download |
+| Single user | Multi-user concurrent |
+| Limited audit | Mutation audit trail |
+| No self-service | Customer login |
 
 ---
 
-## Appendix: System Architecture
+## Appendix B: System architecture (reference)
 
-- **Frontend:** React + TypeScript + Vite (deployed to Linux EC2)
-- **Backend:** FastAPI + Python (deployed to Linux EC2 via GitHub Actions)
-- **Database:** PostgreSQL (`onepower_cc` on EC2)
-- **SparkMeter Integration:** Koios API + ThunderCloud API
-- **1Meter Integration:** AWS IoT Core → DynamoDB → prototype_sync → PostgreSQL
-- **Deployment:** Push to `main` branch → automatic deploy to cc.1pwrafrica.com
+- **Frontend:** React + TypeScript + Vite (static deploy).
+- **Backend:** FastAPI + PostgreSQL (`1PDB`).
+- **Integrations:** SparkMeter (Koios / ThunderCloud as applicable), SMS gateways, uGridPlan, optional IoT paths for 1Meter.
+- **Deploy:** Push to `main` triggers CI/CD to the CC Linux host (see engineering README).
+
+---
+
+*For technical setup, database ownership, and deployment, see `README.md` and `CONTEXT.md` in the repository.*

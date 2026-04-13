@@ -57,6 +57,8 @@ export function Warning({ children }: { children: ReactNode }) {
 export interface HelpSection {
   id: string;
   content: ReactNode;
+  /** Lowercase phrases (EN/FR) matched by Help search, not shown in TOC */
+  searchKeywords?: string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -64,6 +66,8 @@ export interface HelpSection {
 /* ------------------------------------------------------------------ */
 
 const FEATURE_ROWS: [string, string, string, string, string][] = [
+  ['Help',           'Aide',                  'User guide (this page)',              'Guide utilisateur (cette page)',           '/help'],
+  ['Dashboard',      'Tableau de bord',       'KPIs & site summary',                 'Indicateurs et sites',                     '/dashboard'],
   ['Customer Mgmt',  'Gestion clients',       'Search & browse customers',         'Rechercher et parcourir les clients',      '/customers'],
   ['Customer Mgmt',  'Gestion clients',       'Register new customer',             'Créer un nouveau client',                  '/customers/new'],
   ['Customer Mgmt',  'Gestion clients',       'Customer profile & detail',         'Profil et détail du client',               '/customers/:id'],
@@ -80,8 +84,12 @@ const FEATURE_ROWS: [string, string, string, string, string][] = [
   ['Reports',        'Rapports',              'Financial analytics (ARPU)',        'Analyses financières (ARPU)',              '/financial'],
   ['Reports',        'Rapports',              'Onboarding pipeline',               'Pipeline d\'intégration',                  '/pipeline'],
   ['Reports',        'Rapports',              'Maintenance / ticket log',          'Journal maintenance / tickets',            '/tickets'],
-  ['Data',           'Données',               'Accounts / Transactions / Tables',  'Comptes / Transactions / Tables',          '/accounts'],
+  ['Data',           'Données',               'Accounts browser',                  'Explorateur des comptes',                  '/accounts'],
+  ['Data',           'Données',               'Transactions browser',               'Explorateur des transactions',             '/transactions'],
+  ['Data',           'Données',               'Raw table browser',                  'Explorateur des tables SQL',               '/tables'],
   ['Data',           'Données',               'Export to CSV / XLSX',              'Exporter en CSV / XLSX',                   '/export'],
+  ['Customer',       'Client',                'Self-service dashboard',             'Tableau de bord client',                   '/my/dashboard'],
+  ['Customer',       'Client',                'My profile',                         'Mon profil',                               '/my/profile'],
   ['Admin',          'Administration',        'Tariff management',                 'Gestion des tarifs',                       '/tariffs'],
   ['Admin',          'Administration',        'Role management',                   'Gestion des rôles',                        '/admin/roles'],
   ['Admin',          'Administration',        'Audit trail',                       'Journal d\'audit',                         '/mutations'],
@@ -144,6 +152,11 @@ function OverviewContent() {
           ? <>Accédez au portail à l'adresse <Bold>cc.1pwrafrica.com</Bold>. Il fonctionne sur ordinateurs, tablettes et téléphones.</>
           : <>Access the portal at <Bold>cc.1pwrafrica.com</Bold>. It works on desktops, tablets, and phones.</>}
       </P>
+      <P>
+        {fr
+          ? <>Un manuel imprimable complémentaire se trouve dans le dépôt : <Code>1PWR Customer Care Portal Operating Manual.md</Code>. En cas de divergence, faites confiance au portail déployé.</>
+          : <>A printable companion lives in the repo as <Code>1PWR Customer Care Portal Operating Manual.md</Code>. If the app and this guide disagree, trust the deployed application.</>}
+      </P>
       <SubHead>{fr ? 'Paiements mobiles et pipeline de données' : 'Mobile payments & data pipeline'}</SubHead>
       <P>
         {fr
@@ -204,6 +217,11 @@ function LoginContent() {
           <li><Bold>finance_team</Bold> — Rapports financiers, vérification des paiements, gestion du financement.</li>
           <li><Bold>generic</Bold> — Accès en lecture aux données clients et aux rapports.</li>
         </Ul>
+        <SubHead>Pays et portefeuille</SubHead>
+        <P>
+          La barre supérieure peut afficher un sélecteur de <Bold>pays</Bold> et, le cas échéant, de <Bold>portefeuille</Bold>.
+          Vérifiez toujours le pays actif avant de créer un client ou d&apos;enregistrer un paiement — la base de données et la devise changent.
+        </P>
       </>
     );
   }
@@ -227,6 +245,65 @@ function LoginContent() {
         <li><Bold>finance_team</Bold> — Financial reporting, payment verification, financing management.</li>
         <li><Bold>generic</Bold> — Basic read access to customer data and reports.</li>
       </Ul>
+      <SubHead>Country & portfolio</SubHead>
+      <P>
+        The header may show a <Bold>country</Bold> selector and, where configured, a <Bold>portfolio</Bold> filter.
+        Always confirm the active country before creating customers or recording payments — the database and currency depend on it.
+      </P>
+    </>
+  );
+}
+
+function DashboardContent() {
+  const fr = useHelpLangIsFr();
+  if (fr) {
+    return (
+      <>
+        <P>
+          Le <PageLink to="/dashboard">tableau de bord</PageLink> résume les sites/concessions, les effectifs clients,
+          l&apos;énergie et les revenus lorsque les données sont disponibles, l&apos;inventaire des tables et l&apos;état de complétude des dossiers.
+        </P>
+        <Tip>Point d&apos;entrée quotidien ; le détail se fait sur les pages métier.</Tip>
+      </>
+    );
+  }
+  return (
+    <>
+      <P>
+        The <PageLink to="/dashboard">Dashboard</PageLink> summarizes sites/concessions, customer counts, energy and revenue
+        where available, table inventory, and record completeness when enabled.
+      </P>
+      <Tip>Use it for daily orientation; detailed work happens on feature pages.</Tip>
+    </>
+  );
+}
+
+function SitesContent() {
+  const fr = useHelpLangIsFr();
+  if (fr) {
+    return (
+      <>
+        <P>
+          Les <Bold>numéros de compte</Bold> codent le site sur les derniers caractères (ex. <Code>0045MAK</Code> → <Code>MAK</Code>).
+          Le champ <Bold>communauté / concession</Bold> doit correspondre au site d&apos;exploitation.
+        </P>
+        <Warning>
+          Les listes déroulantes de sites sont souvent construites à partir des communautés qui ont <Bold>déjà au moins un client</Bold>.
+          Pour un nouveau site sans client, contactez l&apos;administration — l&apos;ajout d&apos;un code site est une configuration backend, pas un simple interrupteur dans le portail.
+        </Warning>
+      </>
+    );
+  }
+  return (
+    <>
+      <P>
+        <Bold>Account numbers</Bold> encode the site in the last segment (e.g. <Code>0045MAK</Code> → site <Code>MAK</Code>).
+        The customer&apos;s <Bold>community / concession</Bold> should match the operational site.
+      </P>
+      <Warning>
+        Site dropdowns are often built from communities that <Bold>already have at least one customer</Bold>.
+        For a greenfield site that does not appear, contact your admin — adding a site code is a backend configuration change, not a portal toggle.
+      </Warning>
     </>
   );
 }
@@ -241,11 +318,13 @@ function CustomerMgmtContent() {
         <P>La liste des clients permet une recherche textuelle par nom, numéro de compte et ID. Cliquez sur une ligne pour ouvrir la fiche détaillée du client.</P>
 
         <SubHead>Créer un nouveau client (<PageLink to="/customers/new">/customers/new</PageLink>)</SubHead>
+        <P>Rôles : <Bold>superadmin</Bold> ou <Bold>onm_team</Bold>.</P>
         <Ol>
           <li>Cliquer sur <Bold>+ Nouveau client</Bold> ou naviguer vers <Code>/customers/new</Code>.</li>
           <li>Remplir : prénom, nom, ID national, téléphone, site/concession, type de client.</li>
           <li>Cliquer sur <Bold>Enregistrer</Bold>. Un numéro de compte est attribué automatiquement.</li>
         </Ol>
+        <P>Si un site valide n&apos;apparaît pas dans la liste, voir la section <Bold>Sites et concessions</Bold> dans ce guide.</P>
         <Tip>
           Lors de la création d'un client, le compte est <Bold>automatiquement synchronisé avec SparkMeter</Bold> (Koios). Il n'est plus nécessaire de créer le client manuellement dans Koios.
         </Tip>
@@ -282,11 +361,13 @@ function CustomerMgmtContent() {
       <P>The customer list supports text search across names, account numbers, and IDs. Click any customer row to open their detail page.</P>
 
       <SubHead>Register New Customer (<PageLink to="/customers/new">/customers/new</PageLink>)</SubHead>
+      <P>Requires role: <Bold>superadmin</Bold> or <Bold>onm_team</Bold>.</P>
       <Ol>
         <li>Click <Bold>+ New Customer</Bold> or navigate to <Code>/customers/new</Code>.</li>
         <li>Fill in: first name, last name, national ID, phone number, site/concession, customer type.</li>
         <li>Click <Bold>Save</Bold>. An account number is assigned automatically.</li>
       </Ol>
+      <P>If a valid site does not appear in the dropdown, see <Bold>Sites & concessions</Bold> in this guide.</P>
       <Tip>
         When a customer is created, the account is <Bold>automatically synced to SparkMeter</Bold> (Koios). There is no need to manually create the customer in Koios.
       </Tip>
@@ -715,6 +796,120 @@ function ReportsContent() {
   );
 }
 
+function DataBrowsersContent() {
+  const fr = useHelpLangIsFr();
+  if (fr) {
+    return (
+      <>
+        <SubHead>Comptes (<PageLink to="/accounts">/accounts</PageLink>)</SubHead>
+        <P>Explorateur du registre des comptes ; à utiliser avec les données client pour le rapprochement.</P>
+        <SubHead>Transactions (<PageLink to="/transactions">/transactions</PageLink>)</SubHead>
+        <P>Historique des paiements et opérations (selon le schéma). Compléter avec <PageLink to="/customer-data">Données client</PageLink> pour le support.</P>
+        <SubHead>Tables brutes (<PageLink to="/tables">/tables</PageLink>)</SubHead>
+        <Warning>
+          Avancé : accès direct aux tables avec tri, filtres et parfois édition en ligne. Les changements affectent la production.
+        </Warning>
+      </>
+    );
+  }
+  return (
+    <>
+      <SubHead>Accounts (<PageLink to="/accounts">/accounts</PageLink>)</SubHead>
+      <P>Browse the account registry; use with Customer Data when reconciling a specific account.</P>
+      <SubHead>Transactions (<PageLink to="/transactions">/transactions</PageLink>)</SubHead>
+      <P>Browse payment and billing history (schema-dependent). Pair with <PageLink to="/customer-data">Customer Data</PageLink> for narrative support.</P>
+      <SubHead>Raw tables (<PageLink to="/tables">/tables</PageLink>)</SubHead>
+      <Warning>
+        Advanced: direct database table access with sort/filter and possible inline edits. Changes affect production data.
+      </Warning>
+    </>
+  );
+}
+
+function SelfServiceContent() {
+  const fr = useHelpLangIsFr();
+  if (fr) {
+    return (
+      <P>
+        Les clients qui se connectent avec un compte <Bold>client</Bold> (pas un ID employé) voient une navigation réduite :
+        <PageLink to="/my/dashboard">Mon tableau de bord</PageLink> et <PageLink to="/my/profile">Mon compte</PageLink>.
+        Les pages employés (Clients, Compteurs, Rapports, etc.) ne sont pas affichées.
+      </P>
+    );
+  }
+  return (
+    <P>
+      Customers who log in with a <Bold>customer</Bold> account (not an employee ID) see a reduced navigation:
+      <PageLink to="/my/dashboard">My Dashboard</PageLink> and <PageLink to="/my/profile">My Account</PageLink>.
+      Staff pages such as Customers, Meters, or Reports are not shown.
+    </P>
+  );
+}
+
+function SandboxContent() {
+  const fr = useHelpLangIsFr();
+  if (fr) {
+    return (
+      <>
+        <P>
+          <Bold>Objectif :</Bold> s&apos;entraîner sans impacter de vrais clients ni la comptabilité. Préférez une URL
+          <Bold> hors production</Bold> lorsque votre organisation en fournit une.
+        </P>
+        <SubHead>Si vous avez un bac à sable ou un environnement de staging</SubHead>
+        <Ol>
+          <li>Obtenir des identifiants auprès de l&apos;admin (distincts de la production).</li>
+          <li>Marquer clairement le favori ; ne jamais mélanger les mots de passe.</li>
+          <li>Enchaîner inscription → données client → rapports avec des noms et téléphones de test.</li>
+          <li>Utiliser des montants de paiement minuscules et évidents sur des comptes de test uniquement.</li>
+        </Ol>
+        <SubHead>Sans bac à sable</SubHead>
+        <P>
+          Utiliser la production en mode <Bold>lecture seule</Bold> (tableau de bord, rapports, consultation Données client) —
+          ne pas créer de faux clients ni de paiements de test sur des comptes réels. Demander un environnement de staging pour la formation en écriture.
+        </P>
+        <SubHead>Première heure (bac à sable)</SubHead>
+        <Ul>
+          <li>Connexion → le tableau de bord s&apos;affiche</li>
+          <li>Cette page Aide → la recherche fonctionne</li>
+          <li>Ouvrir ou créer un client test → la fiche se charge</li>
+          <li>Données client pour un compte test → le solde s&apos;affiche</li>
+          <li>Rapport O&amp;M → les graphiques se chargent</li>
+          <li>Pipeline → l&apos;entonnoir est visible</li>
+        </Ul>
+      </>
+    );
+  }
+  return (
+    <>
+      <P>
+        <Bold>Purpose:</Bold> train on workflows without harming real customers or finance. Prefer a dedicated
+        <Bold> non-production</Bold> URL when your organization provides one.
+      </P>
+      <SubHead>If you have a sandbox or staging URL</SubHead>
+      <Ol>
+        <li>Get credentials from your admin (separate from production).</li>
+        <li>Bookmark the sandbox clearly; never mix passwords with production.</li>
+        <li>Walk through registration → customer data → reports using synthetic names and test phones.</li>
+        <li>Use tiny, obviously fake payment amounts on test accounts only.</li>
+      </Ol>
+      <SubHead>If no sandbox exists</SubHead>
+      <P>
+        Use production in <Bold>read-only</Bold> mode (Dashboard, reports, Customer Data lookup) — do not create fake customers
+        or test payments on real accounts. Ask leadership for a staging environment for hands-on write training.
+      </P>
+      <SubHead>First-hour checklist (sandbox)</SubHead>
+      <Ul>
+        <li>Log in → Dashboard loads</li>
+        <li>This Help page → search works</li>
+        <li>Open or create a test customer → detail page loads</li>
+        <li>Customer Data for a test account → balance panel loads</li>
+        <li>O&amp;M report → charts load</li>
+        <li>Pipeline → funnel visible</li>
+      </Ul>
+    </>
+  );
+}
+
 function ExportContent() {
   const fr = useHelpLangIsFr();
 
@@ -797,9 +992,6 @@ function AdminContent() {
         <SubHead>Synchronisation uGridPlan (<PageLink to="/sync">/sync</PageLink>)</SubHead>
         <P>Le portail s'intègre avec uGridPlan (<Bold>ugp.1pwrafrica.com</Bold>) via API pour la synchronisation des données clients, la création de tickets O&M et le rattachement enquêtes/raccordements. La page de synchronisation affiche l'état des opérations récentes.</P>
 
-        <SubHead>Explorateur de tables brutes (<PageLink to="/tables">/tables</PageLink>)</SubHead>
-        <P>Pour les utilisateurs avancés : parcourez n'importe quelle table de la base de données directement avec des fonctionnalités de tri, filtrage et modification en ligne.</P>
-
         <SubHead>Mises à jour du portail (équipe technique)</SubHead>
         <P>Les changements fusionnés dans la branche <Code>main</Code> du dépôt déclenchent <Bold>GitHub Actions</Bold> : compilation du frontend (Vite), synchronisation du code vers le serveur Linux, installation des dépendances Python si besoin, redémarrage des services <Code>1pdb-api</Code>. L’URL publique <Bold>cc.1pwrafrica.com</Bold> reste la même ; aucune action n’est requise sur le terrain.</P>
       </>
@@ -821,9 +1013,6 @@ function AdminContent() {
 
       <SubHead>UGridPlan Sync (<PageLink to="/sync">/sync</PageLink>)</SubHead>
       <P>The portal integrates with UGridPlan (<Bold>ugp.1pwrafrica.com</Bold>) via API for customer data synchronization, O&M ticket creation, and survey/connection binding. The sync page shows recent operation status.</P>
-
-      <SubHead>Raw Table Browser (<PageLink to="/tables">/tables</PageLink>)</SubHead>
-      <P>For advanced users: browse any database table directly with sorting, filtering, and inline editing capabilities.</P>
 
       <SubHead>Portal software updates (technical)</SubHead>
       <P>Changes merged to the <Code>main</Code> branch trigger <Bold>GitHub Actions</Bold>: the frontend is built (Vite), backend and static files are rsync’d to the Linux host, Python dependencies refresh if needed, and <Code>1pdb-api</Code> services restart. The public URL <Bold>cc.1pwrafrica.com</Bold> is unchanged — no action required from field staff.</P>
@@ -863,18 +1052,23 @@ function AccdbDiffContent() {
 
 export function useHelpSections(): HelpSection[] {
   return [
-    { id: 'overview',             content: <OverviewContent /> },
-    { id: 'login',                content: <LoginContent /> },
-    { id: 'customers',            content: <CustomerMgmtContent /> },
+    { id: 'overview',             content: <OverviewContent />, searchKeywords: 'manual markdown repository printable' },
+    { id: 'login',                content: <LoginContent />, searchKeywords: 'country portfolio multi-country currency benin lesotho' },
+    { id: 'dashboard',            content: <DashboardContent />, searchKeywords: 'home kpi metrics summary' },
+    { id: 'sites',                content: <SitesContent />, searchKeywords: 'community concession tosing site code dropdown new site' },
+    { id: 'customers',            content: <CustomerMgmtContent />, searchKeywords: 'register superadmin onm_team' },
     { id: 'commission',           content: <CommissionContent /> },
     { id: 'payments',             content: <PaymentsContent /> },
     { id: 'balance-adjustments',  content: <BalanceAdjustmentsContent /> },
     { id: 'financing',            content: <FinancingContent /> },
     { id: 'meters',               content: <MetersContent /> },
     { id: 'reports',              content: <ReportsContent /> },
+    { id: 'data-browsers',        content: <DataBrowsersContent />, searchKeywords: 'accounts transactions tables sql browse' },
     { id: 'export',               content: <ExportContent /> },
     { id: 'tariffs',              content: <TariffsContent /> },
     { id: 'admin',                content: <AdminContent /> },
+    { id: 'self-service',         content: <SelfServiceContent />, searchKeywords: 'customer login my dashboard profile' },
+    { id: 'sandbox',              content: <SandboxContent />, searchKeywords: 'training staging practice test environment tutorial safe' },
     { id: 'accdb-diff',           content: <AccdbDiffContent /> },
   ];
 }

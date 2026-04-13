@@ -5,6 +5,8 @@ import { useHelpSections } from './helpSections';
 const SECTION_TITLE_KEYS: Record<string, string> = {
   overview: 'help:sections.overview',
   login: 'help:sections.loginRoles',
+  dashboard: 'help:sections.dashboard',
+  sites: 'help:sections.sites',
   customers: 'help:sections.customerManagement',
   commission: 'help:sections.commissioning',
   payments: 'help:sections.payments',
@@ -12,9 +14,12 @@ const SECTION_TITLE_KEYS: Record<string, string> = {
   financing: 'help:sections.financing',
   meters: 'help:sections.metering',
   reports: 'help:sections.reporting',
+  'data-browsers': 'help:sections.dataBrowsers',
   export: 'help:sections.dataExport',
   tariffs: 'help:sections.tariffs',
   admin: 'help:sections.systemAdmin',
+  'self-service': 'help:sections.selfService',
+  sandbox: 'help:sections.sandbox',
   'accdb-diff': 'help:sections.accdbDiff',
 };
 
@@ -57,10 +62,13 @@ export default function HelpPage() {
   const sectionTitle = (id: string) =>
     SECTION_TITLE_KEYS[id] ? t(SECTION_TITLE_KEYS[id]) : id;
 
-  const filteredSections = searchQuery
-    ? sections.filter(s =>
-        sectionTitle(s.id).toLowerCase().includes(searchQuery.toLowerCase())
-      )
+  const q = searchQuery.trim().toLowerCase();
+  const filteredSections = q
+    ? sections.filter(s => {
+        const title = sectionTitle(s.id).toLowerCase();
+        const kw = (s.searchKeywords ?? '').toLowerCase();
+        return title.includes(q) || kw.includes(q) || s.id.toLowerCase().includes(q);
+      })
     : sections;
 
   return (
