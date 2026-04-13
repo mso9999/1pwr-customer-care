@@ -521,7 +521,11 @@ def customer_search(
 @app.get("/sites")
 @app.get("/api/sites")
 def list_sites():
-    """List all distinct concession names (sites) in the customer database."""
+    """List all configured sites for this country, with live customer counts.
+
+    Includes every code in ``country_config.KNOWN_SITES`` (e.g. TOS) even when
+    the count is zero, so filters and registration dropdowns match ``/api/config``.
+    """
     from country_config import KNOWN_SITES
 
     sql = """
@@ -529,7 +533,6 @@ def list_sites():
         FROM customers
         WHERE community IS NOT NULL AND community <> ''
         GROUP BY community
-        ORDER BY community
     """
 
     try:
@@ -538,9 +541,17 @@ def list_sites():
             cursor.execute(sql)
             rows = cursor.fetchall()
 
+            counts: dict = {}
+            for row in rows:
+                if not row[0]:
+                    continue
+                code = row[0].strip().upper()
+                if code in KNOWN_SITES:
+                    counts[code] = row[1]
+
             sites = [
-                {"concession": row[0].strip().upper(), "customer_count": row[1]}
-                for row in rows if row[0] and row[0].strip().upper() in KNOWN_SITES
+                {"concession": code, "customer_count": counts.get(code, 0)}
+                for code in sorted(KNOWN_SITES)
             ]
 
             return {"sites": sites, "total_sites": len(sites)}
