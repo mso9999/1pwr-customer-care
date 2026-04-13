@@ -17,7 +17,9 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+import re
+
+from pydantic import BaseModel, Field, model_validator
 
 from contract_gen import (
     CONTRACTS_DIR,
@@ -49,8 +51,11 @@ def _get_connection():
 
 class CommissionRequest(BaseModel):
     customer_id: Optional[int] = None
-    account_number: str
-    site_code: str                          # concession code (MAK, LEB, ...)
+    account_number: str = Field(..., min_length=1)
+    site_code: str = Field(
+        default="",
+        description="Concession code (MAK, LEB, …). If empty, derived from account_number suffix.",
+    )
     customer_type: str                      # HH, SME, CHU, SCP, etc.
     connection_date: str                    # YYYY-MM-DD
     service_phase: str                      # "Single" or "Three"
@@ -62,8 +67,29 @@ class CommissionRequest(BaseModel):
     gps_lat: Optional[str] = None
     gps_lng: Optional[str] = None
     survey_id: Optional[str] = None         # UGP connection binding (from picker)
-    customer_signature: str                 # base64 JPEG from tablet canvas
+    customer_signature: str = Field(
+        ...,
+        min_length=32,
+        description="Base64 JPEG from canvas or upload; must be non-trivial.",
+    )
     commissioned_by: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _derive_site_code(self) -> "CommissionRequest":
+        """If community was blank in DB, derive site from account number (e.g. 0297MAK → MAK)."""
+        sc = (self.site_code or "").strip().upper()
+        acct = (self.account_number or "").strip().upper()
+        if not sc and acct:
+            m = re.search(r"([A-Za-z]{2,4})$", acct)
+            if m:
+                sc = m.group(1).upper()
+        if not sc:
+            raise ValueError(
+                "site_code is required: set the customer's community/concession in CC, "
+                "or use an account number ending with the site code (e.g. 0297MAK)."
+            )
+        self.site_code = sc
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -73,7 +99,6 @@ class CommissionRequest(BaseModel):
 
 def _resolve_customer_for_commission(cursor, identifier: str):
     """Resolve a customer by account_number or legacy ID. Returns (customer_dict, meter_dict, account_number)."""
-    import re
     customer = None
     meter = None
     account_number = ""

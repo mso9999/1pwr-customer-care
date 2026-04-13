@@ -17,6 +17,40 @@ function getToken(): string | null {
   return localStorage.getItem('cc_token');
 }
 
+/** FastAPI often returns `detail` as a string, or an array of { loc, msg, type } validation errors. */
+function formatApiErrorDetail(detail: unknown): string {
+  if (detail == null) return '';
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (item && typeof item === 'object' && 'msg' in item) {
+          const loc = Array.isArray((item as { loc?: unknown }).loc)
+            ? (item as { loc: string[] }).loc.filter((x) => x !== 'body').join('.')
+            : '';
+          const msg = String((item as { msg: string }).msg);
+          return loc ? `${loc}: ${msg}` : msg;
+        }
+        try {
+          return JSON.stringify(item);
+        } catch {
+          return String(item);
+        }
+      })
+      .filter(Boolean)
+      .join('; ');
+  }
+  if (typeof detail === 'object') {
+    try {
+      return JSON.stringify(detail);
+    } catch {
+      return String(detail);
+    }
+  }
+  return String(detail);
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -38,7 +72,8 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(body.detail || `HTTP ${res.status}`);
+    const msg = formatApiErrorDetail(body.detail) || res.statusText || `HTTP ${res.status}`;
+    throw new Error(msg);
   }
 
   // Handle empty responses (204, etc.)
@@ -69,7 +104,8 @@ async function downloadFile(path: string, fallbackFilename: string, options: Req
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
-    throw new Error(body.detail || `HTTP ${res.status}`);
+    const msg = formatApiErrorDetail(body.detail) || res.statusText || `HTTP ${res.status}`;
+    throw new Error(msg);
   }
 
   const blob = await res.blob();

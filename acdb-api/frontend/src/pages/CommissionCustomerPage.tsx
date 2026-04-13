@@ -393,10 +393,15 @@ export default function CommissionCustomerPage() {
     setSaving(true);
     setError('');
     try {
+      const acct = accountNumber.trim().toUpperCase();
+      const fromAcct = acct.match(/[A-Za-z]{2,4}$/)?.[0] ?? '';
+      const site =
+        (customerData?.customer.concession || '').trim().toUpperCase() || fromAcct;
+
       const res = await executeCommission({
         customer_id: customerData?.customer.customer_id_legacy ? parseInt(String(customerData.customer.customer_id_legacy), 10) : undefined,
-        account_number: accountNumber.trim(),
-        site_code: customerData?.customer.concession || '',
+        account_number: acct,
+        site_code: site,
         customer_type: customerType,
         connection_date: connectionDate,
         service_phase: servicePhase,
