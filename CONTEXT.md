@@ -223,6 +223,13 @@ Three 1Meter prototypes are installed at MAK in series with SparkMeters for vali
 - 23022667 — repeater/gateway node at powerhouse (NOT a customer meter, not in meters table)
 - 23022613 — real meter, customer TBD (pending team confirmation)
 
+**Field operations log (MAK):** Dated team reports (Wi‑Fi, PCB swaps, firmware) live in
+[`docs/1meter-field-notes.md`](docs/1meter-field-notes.md). **2026-04-13 (summary):** IT
+resolved site Wi‑Fi; PCB swaps reported as **44→17** and **55→11**; speeds improved vs
+prior Wi‑Fi; all meters picked up the new network **except `23022628`** (same creds as
+others); only **`onemeter17`** (PCB 17) and **`onemeter11`** (PCB 11) on latest firmware
+at time of report.
+
 New meters are registered with one `INSERT INTO meters` row — the ingest API resolves
 meters dynamically from the DB (no hardcoded dicts).
 
@@ -450,6 +457,7 @@ single source of truth behind the CC API.
 | `docs/inter-repo-credentials.md` | **Inter-repo credential map** (same doc copied in 1PDB, SMSComms, uGridPlan, om-portal, ingestion_gate, onepwr-aws-mesh, etc.) |
 | In-app **Help** (`/help`) | User guide: bilingual EN/FR body copy in `frontend/src/pages/helpSections.tsx`; UI chrome in `i18n/*/help.json`. Use **FR** toggle for full translation. |
 | `SESSION_LOG.md` | AI session handoffs (read recent entries) |
+| `docs/1meter-field-notes.md` | MAK 1Meter prototype: dated field-team reports (Wi‑Fi, PCB, FW) |
 
 ---
 
