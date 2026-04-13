@@ -3,6 +3,19 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-13 202604020100 (Comprehensive user guide + sandbox tutorial)
+
+### What Was Done
+- Rewrote `1PWR Customer Care Portal Operating Manual.md` as a full manual: feature index (all major routes), multi-country, end-to-end lifecycle, sites/concessions operational notes, accounts/transactions/tables, customer self-service, Help page reference, and **Sandbox tutorial** (staging vs read-only production).
+- Expanded in-app `HelpPage.tsx`: new sections (Dashboard, Sites & concessions, Accounts/transactions, Customer self-service, Sandbox tutorial); expanded feature map; improved search to match section keywords; cross-reference to Markdown manual.
+- Added README pointer to Help + Markdown manual.
+
+### What Next Session Should Know
+- Sandbox tutorial is procedural (no separate sandbox URL in repo); if org adds `VITE_*` staging URL later, wire it in docs/env.
+- Keep `HelpPage.tsx` SECTIONS and the Markdown manual roughly aligned on new features.
+
+---
+
 ## Session 2026-02-18 202602161800 (1Meter IoT Backfill & Customer Dashboard)
 
 ### What Was Done

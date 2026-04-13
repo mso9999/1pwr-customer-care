@@ -8,6 +8,8 @@ import { Link } from 'react-router-dom';
 interface Section {
   id: string;
   title: string;
+  /** Extra phrases matched by the section search (not shown in TOC). */
+  searchText?: string;
   content: React.ReactNode;
 }
 
@@ -59,6 +61,10 @@ const SECTIONS: Section[] = [
           RDP, desktop software, or file shares are required.
         </P>
         <P>Access the portal at <Bold>cc.1pwrafrica.com</Bold>. It works on desktops, tablets, and phones.</P>
+        <P>
+          A printable companion document lives in the repo as <Code>1PWR Customer Care Portal Operating Manual.md</Code>.
+          When the app and the PDF disagree, trust the deployed app and report a documentation bug.
+        </P>
         <SubHead>Feature Map</SubHead>
         <div className="overflow-x-auto mb-3">
           <table className="w-full text-xs border-collapse">
@@ -71,6 +77,8 @@ const SECTIONS: Section[] = [
             </thead>
             <tbody className="divide-y divide-gray-100">
               {[
+                ['Help', 'This user guide (you are here)', '/help'],
+                ['Dashboard', 'KPIs, sites, completeness', '/dashboard'],
                 ['Customer Mgmt', 'Search & browse customers', '/customers'],
                 ['Customer Mgmt', 'Register new customer', '/customers/new'],
                 ['Customer Mgmt', 'Customer profile & detail', '/customers/:id'],
@@ -86,12 +94,16 @@ const SECTIONS: Section[] = [
                 ['Reports', 'O&M quarterly report', '/om-report'],
                 ['Reports', 'Financial analytics (ARPU)', '/financial'],
                 ['Reports', 'Onboarding pipeline', '/pipeline'],
-                ['Data', 'Accounts / Transactions / Tables', '/accounts'],
+                ['Data', 'Accounts browser', '/accounts'],
+                ['Data', 'Transactions browser', '/transactions'],
+                ['Data', 'Raw table browser', '/tables'],
                 ['Data', 'Export to CSV / XLSX', '/export'],
                 ['Admin', 'Tariff management', '/tariffs'],
                 ['Admin', 'Role management', '/admin/roles'],
                 ['Admin', 'Audit trail', '/mutations'],
                 ['Admin', 'UGridPlan sync', '/sync'],
+                ['Customer', 'Self-service dashboard', '/my/dashboard'],
+                ['Customer', 'My profile', '/my/profile'],
               ].map(([cat, feat, page], i) => (
                 <tr key={i} className="hover:bg-gray-50">
                   <td className="px-3 py-1.5 text-gray-500">{cat}</td>
@@ -127,6 +139,43 @@ const SECTIONS: Section[] = [
           <li><Bold>finance_team</Bold> — Financial reporting, payment verification, financing management.</li>
           <li><Bold>generic</Bold> — Basic read access to customer data and reports.</li>
         </Ul>
+        <SubHead>Multi-country</SubHead>
+        <P>
+          The header may show a <Bold>country</Bold> selector (e.g. Lesotho, Benin). The active country determines which
+          backend database and currency apply — always confirm the country before creating customers or recording payments.
+        </P>
+      </>
+    ),
+  },
+  {
+    id: 'dashboard',
+    title: 'Dashboard',
+    searchText: 'overview kpi metrics',
+    content: (
+      <>
+        <P>
+          The <PageLink to="/dashboard">Dashboard</PageLink> is the default home after login. It summarizes sites/concessions,
+          customer counts, energy and revenue where available, database table inventory, and record completeness indicators.
+        </P>
+        <Tip>Use it for daily orientation; use feature pages for detailed work.</Tip>
+      </>
+    ),
+  },
+  {
+    id: 'sites',
+    title: 'Sites & concessions',
+    searchText: 'community site code new site tosing account number',
+    content: (
+      <>
+        <P>
+          <Bold>Account numbers</Bold> encode the site in the last segment (e.g. <Code>0045MAK</Code> → site <Code>MAK</Code>).
+          The <Bold>community / concession</Bold> field on a customer should match the operational site.
+        </P>
+        <Warning>
+          Dropdowns that list &quot;sites&quot; are often built from communities that <Bold>already have at least one customer</Bold>.
+          If a valid site does not appear for a brand-new grid, contact your admin — adding a site code is a backend configuration
+          change, not a portal toggle.
+        </Warning>
       </>
     ),
   },
@@ -139,6 +188,7 @@ const SECTIONS: Section[] = [
         <P>The customer list supports text search across names, account numbers, and IDs. Click any customer row to open their detail page.</P>
 
         <SubHead>Register New Customer (<PageLink to="/customers/new">/customers/new</PageLink>)</SubHead>
+        <P>Requires role: <Bold>superadmin</Bold> or <Bold>onm_team</Bold>.</P>
         <Ol>
           <li>Click <Bold>+ New Customer</Bold> or navigate to <Code>/customers/new</Code>.</li>
           <li>Fill in: first name, last name, national ID, phone number, site/concession, customer type.</li>
@@ -327,11 +377,28 @@ const SECTIONS: Section[] = [
     ),
   },
   {
+    id: 'data-browsers',
+    title: 'Accounts, transactions & tables',
+    searchText: 'accounts transactions tables sql browse',
+    content: (
+      <>
+        <SubHead>Accounts (<PageLink to="/accounts">/accounts</PageLink>)</SubHead>
+        <P>Browse and filter the account registry; use with Customer Data when reconciling a specific account.</P>
+        <SubHead>Transactions (<PageLink to="/transactions">/transactions</PageLink>)</SubHead>
+        <P>Browse payment and billing history (schema-dependent). Pair with <PageLink to="/customer-data">Customer Data</PageLink> for narrative support.</P>
+        <SubHead>Raw tables (<PageLink to="/tables">/tables</PageLink>)</SubHead>
+        <Warning>
+          Advanced: direct database table access with sort/filter and possible inline edits. Changes affect production data — use only with training and approval.
+        </Warning>
+      </>
+    ),
+  },
+  {
     id: 'export',
     title: 'Data Export',
     content: (
       <>
-        <P>The <PageLink to="/export">Export page</PageLink> lets you download any database table as CSV or XLSX.</P>
+        <P>The <PageLink to="/export">Export page</PageLink> lets you download authorized database tables as CSV or XLSX.</P>
         <Ol>
           <li>Select the table to export (customers, accounts, meters, transactions, etc.).</li>
           <li>Optionally search/filter the data.</li>
@@ -375,9 +442,54 @@ const SECTIONS: Section[] = [
 
         <SubHead>UGridPlan Sync (<PageLink to="/sync">/sync</PageLink>)</SubHead>
         <P>The portal integrates with UGridPlan (<Bold>ugp.1pwrafrica.com</Bold>) via API for customer data synchronization, O&M ticket creation, and survey/connection binding. The sync page shows recent operation status.</P>
-
-        <SubHead>Raw Table Browser (<PageLink to="/tables">/tables</PageLink>)</SubHead>
-        <P>For advanced users: browse any database table directly with sorting, filtering, and inline editing capabilities.</P>
+      </>
+    ),
+  },
+  {
+    id: 'self-service',
+    title: 'Customer self-service',
+    searchText: 'my dashboard profile customer login',
+    content: (
+      <>
+        <P>
+          Customers who log in with a <Bold>customer</Bold> account (not an employee ID) see a reduced navigation:
+          <PageLink to="/my/dashboard">My Dashboard</PageLink> and <PageLink to="/my/profile">My Account</PageLink>.
+          They do not see staff pages such as Customers, Meters, or Reports.
+        </P>
+      </>
+    ),
+  },
+  {
+    id: 'sandbox',
+    title: 'Sandbox tutorial',
+    searchText: 'training staging practice test environment safe tutorial',
+    content: (
+      <>
+        <P>
+          <Bold>Purpose:</Bold> train on workflows without harming real customers or finance. Prefer a dedicated
+          <Bold> non-production</Bold> URL when your organization provides one.
+        </P>
+        <SubHead>If you have a sandbox or staging URL</SubHead>
+        <Ol>
+          <li>Get credentials from your admin (separate from production).</li>
+          <li>Bookmark the sandbox clearly; never mix passwords with production.</li>
+          <li>Walk through registration → customer data → reports using synthetic names and test phones.</li>
+          <li>Use tiny, obviously fake payment amounts on test accounts only.</li>
+        </Ol>
+        <SubHead>If no sandbox exists</SubHead>
+        <P>
+          Use production in <Bold>read-only</Bold> mode (Dashboard, reports, Customer Data lookup) — do not create fake customers
+          or test payments on real accounts. Ask leadership for a staging environment for hands-on write training.
+        </P>
+        <SubHead>First-hour checklist (sandbox)</SubHead>
+        <Ul>
+          <li>Log in → Dashboard loads</li>
+          <li>Open this Help page → search works</li>
+          <li>Open a test customer or create one → detail page loads</li>
+          <li>Customer Data for a test account → balance panel loads</li>
+          <li>O&amp;M report → charts load</li>
+          <li>Pipeline → funnel visible</li>
+        </Ul>
       </>
     ),
   },
@@ -461,10 +573,12 @@ export default function HelpPage() {
     }
   };
 
-  const filteredSections = searchQuery
-    ? SECTIONS.filter(s =>
-        s.title.toLowerCase().includes(searchQuery.toLowerCase())
-      )
+  const q = searchQuery.trim().toLowerCase();
+  const filteredSections = q
+    ? SECTIONS.filter(s => {
+        const hay = `${s.title} ${s.searchText ?? ''} ${s.id}`.toLowerCase();
+        return hay.includes(q);
+      })
     : SECTIONS;
 
   return (
@@ -550,7 +664,7 @@ export default function HelpPage() {
         </div>
 
         <div className="mt-8 text-center text-xs text-gray-400 pb-8">
-          1PWR Customer Care Portal — Revision February 2026 — Administered by OnePower Lesotho
+          1PWR Customer Care Portal — Revision April 2026 — See also the repository operating manual (Markdown)
         </div>
       </div>
     </div>
