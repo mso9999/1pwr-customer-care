@@ -28,6 +28,7 @@ The 1PWR Customer Care (CC) Portal is a web application for minigrid customer op
 | Category | Feature | Path | Typical roles |
 |----------|---------|------|----------------|
 | Help | User guide (this content in-app) | `/help` | All employees |
+| Tutorial | UX orientation & workflow walkthroughs | `/tutorial` | All employees |
 | Dashboard | KPIs, sites, table counts | `/dashboard` | All employees |
 | Reports | O&M quarterly report | `/om-report` | All employees |
 | Reports | Financial analytics (ARPU, revenue) | `/financial` | All employees |

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useHelpSections } from './helpSections';
 
@@ -24,6 +25,7 @@ const SECTION_TITLE_KEYS: Record<string, string> = {
 };
 
 export default function HelpPage() {
+  const location = useLocation();
   const { t, i18n } = useTranslation(['help', 'common']);
   const sections = useHelpSections();
   const [activeSection, setActiveSection] = useState(sections[0].id);
@@ -50,6 +52,22 @@ export default function HelpPage() {
 
     return () => observer.disconnect();
   }, [sections]);
+
+  useEffect(() => {
+    const raw = location.hash.replace(/^#/, '');
+    if (!raw) return;
+    const id = decodeURIComponent(raw);
+    if (!sections.some(s => s.id === id)) return;
+    setSearchQuery('');
+    const frame = requestAnimationFrame(() => {
+      const el = sectionRefs.current[id];
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        setActiveSection(id);
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [location.hash, sections]);
 
   const scrollTo = (id: string) => {
     const el = sectionRefs.current[id];

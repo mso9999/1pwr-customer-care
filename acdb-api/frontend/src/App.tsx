@@ -31,6 +31,7 @@ import RecordPaymentPage from './pages/RecordPaymentPage';
 import PaymentVerificationPage from './pages/PaymentVerificationPage';
 import PipelinePage from './pages/PipelinePage';
 import HelpPage from './pages/HelpPage';
+import TutorialPage from './pages/TutorialPage';
 import TicketsPage from './pages/TicketsPage';
 
 function HomeRedirect() {
@@ -76,6 +77,7 @@ export default function App() {
             <Route path="pipeline" element={<ProtectedRoute requireEmployee><PipelinePage /></ProtectedRoute>} />
             <Route path="tickets" element={<ProtectedRoute requireEmployee><TicketsPage /></ProtectedRoute>} />
             <Route path="help" element={<ProtectedRoute requireEmployee><HelpPage /></ProtectedRoute>} />
+            <Route path="tutorial" element={<ProtectedRoute requireEmployee><TutorialPage /></ProtectedRoute>} />
             {/* Customer routes */}
             <Route path="my/dashboard" element={<CustomerDashboardPage />} />
             <Route path="my/profile" element={<MyProfilePage />} />
