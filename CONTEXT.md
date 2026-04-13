@@ -253,7 +253,7 @@ in `onepowerLS/onepwr-aws-mesh`. Do not expect MQTT / TLS / OTA code to live in 
 | SMS Gateway (LS) | M-PESA payments | All LS sites | sms.1pwrafrica.com mirrors to `POST /api/sms/incoming` (`ingest.py`) — **Remark-first** account resolution (`mpesa_sms.resolve_sms_account`), **phone lookup fallback**; WhatsApp alert on phone fallback via `CC_BRIDGE_NOTIFY_URL` / `CC_BRIDGE_SECRET` (Benin: `CC_BRIDGE_*_BN` when `COUNTRY_CODE=BN`). Writes **1PDB** (incl. `sms_payer_phone`, `sms_remark_raw`, `sms_allocation`, `payment_reference`) and **pushes credit** via `credit_sparkmeter` unless `SMS_INGEST_PUSH_SPARKMETER=0`. Historical log reconciliation: `scripts/ops/reconcile_sms_misroutes_from_logs.py` (partial if SMS text in logs is truncated). |
 | SMS Gateway (BN) | MTN MoMo payments | All BN sites | smsbn.1pwrafrica.com mirrors JSON to **`POST /api/bn/sms/incoming`** (same payload as LS). **Benin API** (`COUNTRY_CODE=BN`, port 8101): `momo_bj.parse_momo_bn_sms` + `resolve_bn_momo_account` (Motif/account text first, then phone **229** lookup). 1PDB + SparkMeter + WhatsApp fallback as in `ingest.py`. Koios consumption sync uses **`country_config`** sites/keys for BN. |
 
-**Lesotho duplicate-credit guard (SMSComms repo):** `receive.php` mirrors JSON to CC **and** legacy PHP wrote payment files consumed by `sparkmeter/new_file_watcher.php`, which posted to **ThunderCloud** — a second SparkMeter credit alongside CC. As of SMSComms `main`, `$LEGACY_FILE_WATCHER_CREDIT_ENABLED = false` in `sparkmeter/env.php` disables that payment-file crediting path; CC mirror remains the sole automatic creditor. `deploy.php` includes `new_file_watcher.php` in the sparkmeter copy list so cPanel auto-deploy picks up changes.
+**Lesotho duplicate-credit guard (SMSComms repo):** `receive.php` mirrors JSON to CC **and** legacy PHP wrote payment files consumed by `sparkmeter/new_file_watcher.php`, which posted to **ThunderCloud** — a second SparkMeter credit alongside CC. `$LEGACY_FILE_WATCHER_CREDIT_ENABLED = false` in `sparkmeter/env.php` disables that payment-file crediting path; CC mirror remains the sole automatic creditor. **Deploy:** LS and BN are **two separate** cPanel targets; production is often **manual** (archive old PHP first). See `docs/ops/sms-gateway-cpanel-deploy.md`.
 
 ### BN (Benin) Data Pipeline
 
@@ -445,6 +445,7 @@ single source of truth behind the CC API.
 | `docs/sop-add-new-country.md` | SOP: adding a new country (DB, API, frontend, bridge, deploy) |
 | `docs/ops/manual-adjustment-sms-discrepancies.md` | Team instructions: manual Koios + 1PDB corrections after SMS misallocations |
 | `docs/ops/bn-sms-1pdb-gap.md` | Benin: CC API is ready; SMSComms-BN PHP must mirror to `/api/bn/sms/incoming` (not in this repo) |
+| `docs/ops/sms-gateway-cpanel-deploy.md` | **LS vs BN** manual cPanel deploy, archive-before-overwrite, two hosts |
 | `docs/credentials-and-secrets.md` | **Where credentials live** (GitHub secrets, server `.env`, AWS, related repos)—nothing secret in git |
 | `docs/inter-repo-credentials.md` | **Inter-repo credential map** (same doc copied in 1PDB, SMSComms, uGridPlan, om-portal, ingestion_gate, onepwr-aws-mesh, etc.) |
 | In-app **Help** (`/help`) | User guide: bilingual EN/FR body copy in `frontend/src/pages/helpSections.tsx`; UI chrome in `i18n/*/help.json`. Use **FR** toggle for full translation. |
