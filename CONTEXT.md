@@ -65,6 +65,18 @@ Windows EC2 / ACCDB assumptions as current production architecture.
 - **onepowerLS/ingestion_gate** — Prototype meter IoT Lambda (DynamoDB)
 - **onepowerLS/onepwr-aws-mesh** — 1Meter ESP32-C3 firmware (AWS IoT + Mesh-Lite + OTA)
 
+### SMS payment gateways — where they are defined (two production stacks)
+
+There are **two live gateway deployments** — **Lesotho** (M-Pesa) and **Benin** (MTN MoMo) — each with its **own** hosted PHP endpoint and DB-backed routing. They are **not** implemented inside this CC repo; CC only exposes **`POST /api/sms/incoming`** (LS) and **`POST /api/bn/sms/incoming`** (BN).
+
+| Piece | Repo | Role |
+|-------|------|------|
+| **Server gateway (LS)** | [SMSComms](https://github.com/onepowerLS/SMSComms) | PHP on **sms.1pwrafrica.com** — `receive.php` ingests JSON from the Android app, writes typed files / DB, then **`mirror_to_1pdb()`** POSTs the same JSON to `https://cc.1pwrafrica.com/api/sms/incoming`. |
+| **Server gateway (BN)** | [SMSComms-BN](https://github.com/onepowerLS/SMSComms-BN) (or **`smsbn/`** beside Lesotho in some checkouts of SMSComms) | PHP on **smsbn.1pwrafrica.com** — same pattern; mirror URL is **`/api/bn/sms/incoming`**. |
+| **Phone app** | [SMS-Gateway-APP](https://github.com/onepowerLS/SMS-Gateway-APP) | Android (Medic fork): forwards SMS to the configured **webapp URL** (`receive.php`). One build; **each country** points the app at its own gateway host. |
+
+**CC ingest** (`acdb-api/ingest.py`) is the **consumer** of those mirrors: parse payment text → 1PDB row → optional `credit_sparkmeter` to Koios/ThunderCloud. Any **second** path that credits SparkMeter for the same SMS (legacy PHP, Iometer, native Koios payment gateway, etc.) causes **double credits** — see deployment notes in `ingest.py` (`SMS_INGEST_PUSH_SPARKMETER`).
+
 ## Key Files
 
 ### Backend (`acdb-api/`)

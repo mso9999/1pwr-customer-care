@@ -18,6 +18,8 @@
 | H | **uGridPlan** (O&M backend, planning) | [onepowerLS/uGridPlan](https://github.com/onepowerLS/uGridPlan) |
 | I | **om-portal** (O&M SPA on CC host) | [onepowerLS/om-portal](https://github.com/onepowerLS/om-portal) |
 
+**SMS stack:** Production uses **two** gateway server deployments — **Lesotho** (`sms.1pwrafrica.com`, repo **SMSComms**) and **Benin** (`smsbn.1pwrafrica.com`, **SMSComms-BN** or `smsbn/` tree). The **SMS-Gateway-APP** Android build is one codebase; each site configures its own gateway URL. CC (`/api/sms/incoming` vs `/api/bn/sms/incoming`) is the mirror target — see `CONTEXT.md` → *SMS payment gateways*.
+
 ---
 
 ## Cross-cutting
