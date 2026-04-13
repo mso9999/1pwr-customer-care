@@ -238,8 +238,8 @@ in `onepowerLS/onepwr-aws-mesh`. Do not expect MQTT / TLS / OTA code to live in 
 | ThunderCloud v0 live | SparkMeter on-prem | MAK | `import_tc_live.py` (cumulative register diffs, non-lossy, 15-min intervals) |
 | ThunderCloud web API | SparkMeter on-prem | MAK | `import_tc_transactions.py` (live transactions) |
 | IoT / ingestion_gate | 1Meter prototype | MAK (3 meters) | Real-time Lambda → POST /api/meters/reading |
-| SMS Gateway (LS) | M-PESA payments | All LS sites | sms.1pwrafrica.com mirrors to `POST /api/sms/incoming` (`ingest.py`) — writes **1PDB** and **pushes credit to Koios/ThunderCloud** via `credit_sparkmeter` unless `SMS_INGEST_PUSH_SPARKMETER=0` |
-| SMS Gateway (BN) | MTN MoMo payments | All BN sites | smsbn.1pwrafrica.com mirrors to POST /api/bn/sms/incoming |
+| SMS Gateway (LS) | M-PESA payments | All LS sites | sms.1pwrafrica.com mirrors to `POST /api/sms/incoming` (`ingest.py`) — **Remark-first** account resolution (`mpesa_sms.resolve_sms_account`), **phone lookup fallback**; WhatsApp alert on phone fallback via `CC_BRIDGE_NOTIFY_URL` / `CC_BRIDGE_SECRET` (Benin: `CC_BRIDGE_*_BN` when `COUNTRY_CODE=BN`). Writes **1PDB** (incl. `sms_payer_phone`, `sms_remark_raw`, `sms_allocation`, `payment_reference`) and **pushes credit** via `credit_sparkmeter` unless `SMS_INGEST_PUSH_SPARKMETER=0`. Historical log reconciliation: `scripts/ops/reconcile_sms_misroutes_from_logs.py` (partial if SMS text in logs is truncated). |
+| SMS Gateway (BN) | MTN MoMo payments | All BN sites | smsbn.1pwrafrica.com mirrors JSON to **`POST /api/bn/sms/incoming`** (same payload as LS). **Benin API** (`COUNTRY_CODE=BN`, port 8101): `momo_bj.parse_momo_bn_sms` + `resolve_bn_momo_account` (Motif/account text first, then phone **229** lookup). 1PDB + SparkMeter + WhatsApp fallback as in `ingest.py`. Koios consumption sync uses **`country_config`** sites/keys for BN. |
 
 ### BN (Benin) Data Pipeline
 
@@ -344,7 +344,7 @@ Routes credits by site code:
 
 **Operational checks after a suspected failure:** On the Record Payment success panel, read `sm_credit.success` and `sm_credit.error`. On the server: `journalctl -u 1pdb-api --lines 200 | grep -i koios`. Confirm `KOIOS_WRITE_API_KEY` / `KOIOS_WRITE_API_SECRET` for **LS** on the host that runs the Lesotho API.
 
-**SMS mirror path (`/api/sms/incoming`):** Before 2026-04, this handler inserted into `transactions` **without** calling SparkMeter — so M-PESA rows could appear in CC/1PDB while Koios showed nothing. It now schedules `credit_sparkmeter` after commit (see `ingest.py`). Logs: `SMS path SM credit OK` / `SMS path SM credit failed`.
+**SMS mirror path (`/api/sms/incoming`):** Before 2026-04, this handler inserted into `transactions` **without** calling SparkMeter — so M-PESA rows could appear in CC/1PDB while Koios showed nothing. It now schedules `credit_sparkmeter` after commit (see `ingest.py`). Logs: `SMS path SM credit OK` / `SMS path SM credit failed`. Account selection uses the M-Pesa **Remark** (customer account pattern) when it matches `accounts`; otherwise the payer **phone** → customer lookup; phone-only matches notify Customer Care via the WhatsApp bridge. **Retroactive checks** against old misroutes require log lines with full SMS body or a gateway archive — see `scripts/ops/reconcile_sms_misroutes_from_logs.py`.
 
 ## ARPU Methodology
 
@@ -380,6 +380,8 @@ multi-country access), the codebase itself (deployed per-country with config).
 
 **What's separate**: Database, API instance, payment pipeline, SparkMeter/meter platform
 integration, SMS gateway.
+
+**Onboarding a new country** (e.g. Zambia): follow `docs/sop-add-new-country.md` — `country_config.py`, dedicated DB + systemd service + Caddy route, frontend `COUNTRY_ROUTES`, Koios/org keys, SMS/payment parsers, and per-country WhatsApp bridge env (`CC_BRIDGE_NOTIFY_URL_<CC>`).
 
 ## Common Pitfalls
 
@@ -426,6 +428,12 @@ single source of truth behind the CC API.
 |----------|---------|
 | `README.md` | Architecture overview, auto-deploy, quick start |
 | `docs/whatsapp-customer-care.md` | Full WhatsApp bridge documentation, infrastructure, troubleshooting |
+| `docs/sop-add-new-country.md` | SOP: adding a new country (DB, API, frontend, bridge, deploy) |
+| `docs/ops/manual-adjustment-sms-discrepancies.md` | Team instructions: manual Koios + 1PDB corrections after SMS misallocations |
+| `docs/ops/bn-sms-1pdb-gap.md` | Benin: CC API is ready; SMSComms-BN PHP must mirror to `/api/bn/sms/incoming` (not in this repo) |
+| `docs/credentials-and-secrets.md` | **Where credentials live** (GitHub secrets, server `.env`, AWS, related repos)—nothing secret in git |
+| `docs/inter-repo-credentials.md` | **Inter-repo credential map** (same doc copied in 1PDB, SMSComms, uGridPlan, om-portal, ingestion_gate, onepwr-aws-mesh, etc.) |
+| In-app **Help** (`/help`) | User guide: bilingual EN/FR body copy in `frontend/src/pages/helpSections.tsx`; UI chrome in `i18n/*/help.json`. Use **FR** toggle for full translation. |
 | `SESSION_LOG.md` | AI session handoffs (read recent entries) |
 
 ---

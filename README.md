@@ -63,6 +63,8 @@ CC API, and creates O&M tickets in uGridPlan over HTTP.
 - `acdb-api/frontend/` — React + TypeScript + Vite portal UI.
 - `whatsapp-bridge/` — WhatsApp / Baileys automation.
 - `docs/` — architecture, ops, and troubleshooting documentation.
+- `docs/credentials-and-secrets.md` — **where to fetch credentials** (GitHub Actions secrets, EC2 `.env` paths; CC-focused).
+- `docs/inter-repo-credentials.md` — **same org-wide map** committed in 1PDB, SMSComms, uGridPlan, om-portal, ingestion_gate, onepwr-aws-mesh (cross-repo pointers only).
 
 ## Responsibilities
 
@@ -148,14 +150,22 @@ separate applications that integrate at the API level:
 | **O&M Analytics** | Shared | Both systems display O&M metrics sourced through CC / `1PDB` data |
 | **Notifications** | uGridPlan -> Email | Ticket creation triggers uGridPlan notification flows |
 
+## User guide (in-app)
+
+End-user documentation lives in the portal at **https://cc.1pwrafrica.com/help** (sidebar → Help). It is maintained in `acdb-api/frontend/src/pages/helpSections.tsx` with English and French copy, and mirrored UI strings in `acdb-api/frontend/src/i18n/en/help.json` and `fr/help.json`. Switch **EN / FR** in the sidebar to translate the full manual (not only section titles).
+
 ## Auto-Deploy (CI/CD)
 
 Pushing to `main` triggers `.github/workflows/deploy.yml` with two parallel jobs:
 
 | Job | Runner | What it does |
 |-----|--------|--------------|
-| `deploy-frontend` | GitHub-hosted `ubuntu-latest` | Builds the Vite app and rsyncs it to `/opt/cc-portal/frontend/` |
-| `deploy-backend` | GitHub-hosted `ubuntu-latest` | Syncs `acdb-api/` to `/opt/cc-portal/backend/`, installs requirements, restarts `1pdb-api` and `1pdb-api-bn` |
+| `deploy-frontend` | GitHub-hosted `ubuntu-latest` | `npm ci` + `npm run build`; rsync `dist/` to `/opt/cc-portal/frontend/` |
+| `deploy-backend` | GitHub-hosted `ubuntu-latest` | rsync `acdb-api/` to `/opt/cc-portal/backend/` (excludes `frontend/`, `.env`, caches); `pip install -r requirements.txt` as `cc_api`; restarts `1pdb-api` and `1pdb-api-bn` |
+
+**GitHub Actions secrets** (repo → Settings → Secrets and variables → Actions): `EC2_SSH_KEY` (private key for `ubuntu@` host), `EC2_LINUX_HOST` (hostname or IP). See `docs/credentials-and-secrets.md`.
+
+**Pre-push check (frontend):** `cd acdb-api/frontend && npx tsc -b --noEmit` — the deploy fails if TypeScript does not compile.
 
 The workflow then verifies:
 
@@ -178,7 +188,7 @@ pip install -r requirements.txt
 uvicorn customer_api:app --host 0.0.0.0 --port 8100
 ```
 
-Typical local setup requires `DATABASE_URL` and any relevant service credentials.
+Typical local setup requires `DATABASE_URL` and any relevant service credentials. **Where those live in production and CI** is documented in `docs/credentials-and-secrets.md` and the shared `docs/inter-repo-credentials.md` (values are never committed).
 
 ### Frontend
 

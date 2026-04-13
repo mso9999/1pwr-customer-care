@@ -1003,6 +1003,75 @@ function sleep(ms) {
 }
 
 // ============================================================
+// INBOUND HTTP (CC API -> WhatsApp ticket tracker group)
+// POST http://127.0.0.1:<BRIDGE_INBOUND_PORT>/notify
+// Header: X-Bridge-Secret: <same as CC_BRIDGE_SECRET on API host>
+// Body: JSON { id, account_number, text, category, source }
+// ============================================================
+function buildCareInboundText(body) {
+    var parts = [];
+    parts.push("[App / meter relay]");
+    if (body.country_code) parts.push("Country: " + body.country_code);
+    if (body.account_number) parts.push("Account: " + body.account_number);
+    if (body.id != null) parts.push("MsgID: " + body.id);
+    if (body.source) parts.push("Source: " + body.source);
+    parts.push("");
+    parts.push(body.text || "(empty)");
+    return parts.join("\n");
+}
+
+function startInboundHttpServer() {
+    var port = parseInt(process.env.BRIDGE_INBOUND_PORT || "3847", 10);
+    var secret = process.env.CC_BRIDGE_SECRET || "";
+    if (!secret) {
+        console.log("[INBOUND] CC_BRIDGE_SECRET not set; inbound HTTP disabled.");
+        return;
+    }
+    var server = http.createServer(function(req, res) {
+        if (req.method !== "POST" || (req.url !== "/notify" && req.url !== "/notify/")) {
+            res.writeHead(404);
+            res.end();
+            return;
+        }
+        var chunks = [];
+        req.on("data", function(c) { chunks.push(c); });
+        req.on("end", function() {
+            var hdr = req.headers["x-bridge-secret"] || req.headers["X-Bridge-Secret"] || "";
+            if (hdr !== secret) {
+                res.writeHead(401);
+                res.end("unauthorized");
+                return;
+            }
+            var body = {};
+            try {
+                body = JSON.parse(Buffer.concat(chunks).toString() || "{}");
+            } catch (e) {
+                res.writeHead(400);
+                res.end("bad json");
+                return;
+            }
+            if (!TICKET_TRACKER_JID || !sock) {
+                res.writeHead(503);
+                res.end(JSON.stringify({ ok: false, reason: "wa_not_ready" }));
+                return;
+            }
+            var text = buildCareInboundText(body);
+            sock.sendMessage(TICKET_TRACKER_JID, { text: text }).then(function() {
+                res.writeHead(200);
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({ ok: true }));
+            }).catch(function(e) {
+                res.writeHead(500);
+                res.end(e.message || "send failed");
+            });
+        });
+    });
+    server.listen(port, "127.0.0.1", function() {
+        console.log("[INBOUND] Listening on http://127.0.0.1:" + port + "/notify (set CC_BRIDGE_NOTIFY_URL on API)");
+    });
+}
+
+// ============================================================
 // SOCKET CONNECTION
 // ============================================================
 async function startSocket() {
@@ -1163,6 +1232,7 @@ console.log("Active conversations loaded: " + Object.keys(conversations).length)
 console.log("");
 
 startSocket();
+startInboundHttpServer();
 
 function shutdownState(status, extra) {
     var state = {

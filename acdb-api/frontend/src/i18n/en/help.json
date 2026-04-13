@@ -15,7 +15,8 @@
     "financing": "Financing",
     "tariffs": "Tariffs",
     "dataExport": "Data Export",
-    "systemAdmin": "System Administration"
+    "systemAdmin": "System Administration",
+    "accdbDiff": "Differences from Old ACCDB System"
   },
   "tip": "Tip:",
   "important": "Important:",
@@ -23,5 +24,6 @@
     "category": "Category",
     "feature": "Feature",
     "page": "Page"
-  }
+  },
+  "footer": "1PWR Customer Care Portal — Revision April 2026 — Administered by OnePower Lesotho"
 }

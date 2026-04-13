@@ -24,6 +24,7 @@ from country_config import COUNTRY
 from middleware import require_employee, require_role
 from models import CurrentUser
 from mutations import log_mutation, try_log_mutation
+from sparkmeter_customer import create_sparkmeter_customer
 
 logger = logging.getLogger("cc-api.registration")
 
@@ -265,7 +266,26 @@ def register_customer(
             req.first_name, req.last_name, account_number, user.user_id,
         )
 
-        return {
+        sm_result = None
+        try:
+            full_name = f"{req.first_name} {req.last_name}".strip()
+            phone = _normalize_phone_for_storage(req.phone) or _normalize_phone_for_storage(req.cell_phone_1)
+            sm_result = create_sparkmeter_customer(
+                account_number=account_number,
+                name=full_name,
+                meter_serial=req.meter_id,
+                phone=phone,
+            )
+            if sm_result.success and not sm_result.skipped:
+                logger.info("SM customer synced: %s -> %s", account_number, sm_result.platform)
+            elif sm_result.skipped:
+                logger.info("SM customer sync deferred for %s: %s", account_number, sm_result.error)
+            else:
+                logger.warning("SM customer sync failed for %s: %s", account_number, sm_result.error)
+        except Exception as e:
+            logger.error("SM customer sync exception for %s: %s", account_number, e)
+
+        response: dict = {
             "account_number": account_number,
             "customer_id": customer_pg_id,
             "customer_id_legacy": customer_legacy_id,
@@ -273,6 +293,18 @@ def register_customer(
             "last_name": req.last_name,
             "community": community,
         }
+        if sm_result:
+            response["sm_sync"] = {
+                "success": sm_result.success,
+                "platform": sm_result.platform,
+                "skipped": sm_result.skipped,
+            }
+            if sm_result.sm_customer_id:
+                response["sm_sync"]["sm_customer_id"] = sm_result.sm_customer_id
+            if sm_result.error and not sm_result.success:
+                response["sm_sync"]["error"] = sm_result.error
+
+        return response
 
 
 @router.get("/next-account")
@@ -430,6 +462,18 @@ async def bulk_import_customers(
                 cursor.execute("RELEASE SAVEPOINT bulk_import_row")
                 imported += 1
                 imported_accounts.append(account_number)
+
+                try:
+                    phone_raw = str(row_dict.get("phone", "") or "").strip() or None
+                    sm_r = create_sparkmeter_customer(
+                        account_number=account_number,
+                        name=f"{first_name} {last_name}".strip(),
+                        phone=_normalize_phone_for_storage(phone_raw),
+                    )
+                    if not sm_r.success and not sm_r.skipped:
+                        logger.warning("Bulk SM sync failed for %s: %s", account_number, sm_r.error)
+                except Exception as e:
+                    logger.error("Bulk SM sync exception for %s: %s", account_number, e)
             except Exception as e:
                 cursor.execute("ROLLBACK TO SAVEPOINT bulk_import_row")
                 cursor.execute("RELEASE SAVEPOINT bulk_import_row")

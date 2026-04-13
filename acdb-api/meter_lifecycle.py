@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from models import CCRole, CurrentUser
 from middleware import require_employee
 from mutations import log_mutation
+from sparkmeter_customer import create_sparkmeter_customer, lookup_sparkmeter_customer
 
 logger = logging.getLogger("acdb-api.meter-lifecycle")
 
@@ -390,12 +391,40 @@ def assign_meter(
             conn.rollback()
             raise HTTPException(status_code=400, detail=f"Assign failed: {e}")
 
-        return {
+        sm_sync = None
+        try:
+            existing = lookup_sparkmeter_customer(account_number)
+            if not existing:
+                full_name = " ".join(
+                    filter(None, [customer.get("first_name"), customer.get("last_name")])
+                )
+                sm_r = create_sparkmeter_customer(
+                    account_number=account_number,
+                    name=full_name,
+                    meter_serial=meter_id,
+                )
+                sm_sync = {"success": sm_r.success, "platform": sm_r.platform}
+                if sm_r.sm_customer_id:
+                    sm_sync["sm_customer_id"] = sm_r.sm_customer_id
+                if sm_r.error and not sm_r.success:
+                    sm_sync["error"] = sm_r.error
+                if sm_r.skipped:
+                    sm_sync["skipped"] = True
+            else:
+                sm_sync = {"success": True, "platform": "existing", "already_exists": True}
+        except Exception as e:
+            logger.warning("SM customer sync on assign failed for %s: %s", account_number, e)
+            sm_sync = {"success": False, "error": str(e)}
+
+        result = {
             "message": f"Meter {meter_id} assigned to account {account_number}",
             "meter_id": meter_id,
             "account_number": account_number,
             "customer_id_legacy": customer.get("customer_id_legacy"),
         }
+        if sm_sync:
+            result["sm_sync"] = sm_sync
+        return result
 
 
 @router.post("/{meter_id}/decommission")

@@ -114,6 +114,8 @@ MSG_DEDUP_MAX           = 500
 If the code still uses a legacy variable name such as `ACDB_API`, it should
 still point at the current CC API, not a deprecated Windows host.
 
+**CC API → bridge (`POST /notify`)**: Per-country env vars `CC_BRIDGE_NOTIFY_URL_<CC>` and `CC_BRIDGE_SECRET_<CC>` (e.g. `_BN`, `_ZM`) override the shared `CC_BRIDGE_NOTIFY_URL` / `CC_BRIDGE_SECRET`. Default port `BRIDGE_INBOUND_PORT` is often 3847. Deploy a separate bridge process (and tracker group JID) per country so each country’s Customer Care WhatsApp receives only its own alerts. See `docs/sop-add-new-country.md`.
+
 ### Anti-Spam / Message Filtering
 
 The bridge should skip:

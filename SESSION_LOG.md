@@ -3,6 +3,20 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-11 202604111200 (Inter-repo credential map)
+
+### What Was Done
+- Added **`docs/inter-repo-credentials.md`**: canonical org-wide map (GitHub secret names, server paths, env keys, cross-repo references; no values).
+- Copied the same file into local clones: **1PDB**, **SMSComms**, **om-portal**, **uGridPlan**, **ingestion_gate** (+ new `README.md` there), **onepwr-aws-mesh**; linked from each repo’s `README.md` where applicable.
+- **1PWR CC**: Linked from `README.md`, `CONTEXT.md`, and `docs/credentials-and-secrets.md`.
+- **Not cloned locally:** **SMSComms-BN**, **SMS-Gateway-APP** — index table in the shared doc lists them; add `docs/inter-repo-credentials.md` when those repos are checked out.
+
+### What Next Session Should Know
+- **Sync rule:** When editing the map, update every repo’s copy or drift will confuse readers.
+- **SMSComms-BN / SMS-Gateway-APP:** Commit the file after copying into those repos.
+
+---
+
 ## Session 2026-02-18 202602161800 (1Meter IoT Backfill & Customer Dashboard)
 
 ### What Was Done
@@ -3257,3 +3271,32 @@ Root cause: **Dual registration without synchronization**
 - `journalctl` showed `SMS payment: txn=2461798 acct=0252SHG … mpesa=08D4LT8BWS57` at 17:58:06 with **no** following `SM credit` line — **ingest.py SMS handler never called SparkMeter**.
 - **Fix:** `POST /api/sms/incoming` now schedules `credit_sparkmeter` after 1PDB commit (`SMS_INGEST_PUSH_SPARKMETER`, default on).
 - Separate line on 2026-04-11 09:38: `SM credit failed … Expecting value` — Koios returned non-JSON (empty body); mitigated by stricter `_koios_credit` parsing.
+
+---
+
+## Session 2026-04-11 202604111430 (SMS Remark-first allocation + WA fallback + reconciliation)
+
+### What Was Done
+- **Remark-first M-Pesa account resolution** in `mpesa_sms.py` (`parse_mpesa_sms`, `resolve_sms_account`): Lesotho account tokens from Remark / body, validate against `accounts`, then phone lookup fallback (same as prior ingest behavior for fallback path).
+- **Shared bridge notifier** `cc_bridge_notify.py`; `customer_messages.py` and `ingest.py` use `notify_cc_bridge`. On `phone_fallback`, `POST /api/sms/incoming` schedules `_notify_sms_phone_fallback` (background) with `source: sms_allocation`, `category: sms_phone_fallback`.
+- **Migration `009_transactions_sms_meta.sql`**: `sms_payer_phone`, `sms_remark_raw`, `sms_allocation` on `transactions`; SMS insert sets these + `payment_reference` (M-Pesa receipt id); graceful degrade if columns missing; `psycopg2.IntegrityError` for duplicate receipt.
+- **Ops script** `scripts/ops/reconcile_sms_misroutes_from_logs.py`: pairs journalctl `SMS from=… content=` with `SMS payment: txn=…` lines; optional `--database-url`; documents 60-char truncation limits.
+- **Tests** `acdb-api/tests/test_mpesa_sms.py` (unittest): parse/remark/candidates + mocked `resolve_sms_account`.
+- **CONTEXT.md**: Data Sources SMS row + SMS mirror path paragraph updated.
+
+### What Next Session Should Know
+- Apply migration `009` on `onepower_cc` (and BN if shared schema path) before relying on new columns.
+- Set `CC_BRIDGE_NOTIFY_URL` + `CC_BRIDGE_SECRET` on API host for WA alerts on phone fallback.
+
+### Files Touched
+- `acdb-api/mpesa_sms.py`, `cc_bridge_notify.py`, `customer_messages.py`, `ingest.py`, `migrations/009_transactions_sms_meta.sql`, `tests/test_mpesa_sms.py`, `scripts/ops/reconcile_sms_misroutes_from_logs.py`, `CONTEXT.md`
+
+---
+
+## Session 2026-04-11 (SOP: add new country + generic bridge env)
+
+### What Was Done
+- Added **`docs/sop-add-new-country.md`**: end-to-end checklist for a new operating country (1PDB DB, `country_config.py`, SMS/payments, SparkMeter, frontend `COUNTRY_ROUTES` + Caddy, systemd/deploy, bridge `CC_BRIDGE_*_<CC>`, verification).
+- **`cc_bridge_notify.bridge_credentials`**: generic `CC_BRIDGE_NOTIFY_URL_<CC>` / `CC_BRIDGE_SECRET_<CC>` with fallback to unsuffixed vars (same behaviour for LS/BN; Zambia can use `_ZM` without new Python branches).
+- **`CONTEXT.md`**: Multi-Country section links to SOP; Related Documentation table updated.
+- **`docs/whatsapp-customer-care.md`**: bridge env wording aligned with generic suffix pattern.

@@ -5,7 +5,8 @@ Provides:
   - POST  /api/meters/reading                — prototype meter readings (from ingestion_gate Lambda)
   - GET   /api/meters/account/{account}      — list meters + roles for an account
   - PATCH /api/meters/{meter_id}/role        — change meter role (primary/check/backup)
-  - POST  /api/sms/incoming                  — mirrored SMS from sms.1pwrafrica.com
+  - POST  /api/sms/incoming                  — mirrored SMS (LS: M-Pesa; BN: MoMo when COUNTRY_CODE=BN)
+  - POST  /api/bn/sms/incoming               — same handler (public URL for Benin gateway behind /api/bn)
 
 Meter roles:
   - primary: billing/production meter, used in consumption aggregation
@@ -21,6 +22,8 @@ import json
 import logging
 import os
 import re
+
+import psycopg2
 import threading
 import time
 from collections import defaultdict
@@ -31,8 +34,11 @@ import requests as http_requests
 from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
 from pydantic import BaseModel
 
-from country_config import UTC_OFFSET_HOURS
+from country_config import COUNTRY, KOIOS_SITES, UTC_OFFSET_HOURS
+from cc_bridge_notify import notify_cc_bridge
 from customer_api import get_connection
+from momo_bj import parse_momo_bn_sms, resolve_bn_momo_account
+from mpesa_sms import mpesa_receipt_in_use, parse_mpesa_sms, resolve_sms_account
 from sparkmeter_credit import credit_sparkmeter
 
 logger = logging.getLogger("cc-api.ingest")
@@ -61,22 +67,15 @@ def _watts_to_kw(value: float) -> float:
 # ---------------------------------------------------------------------------
 
 KOIOS_BASE = "https://www.sparkmeter.cloud"
-KOIOS_ORG = "1cddcb07-6647-40aa-aaaa-70d762922029"
-KOIOS_KEY = os.environ.get(
+# Per-country org + read keys (consumption sync after SMS payment)
+_CC = COUNTRY.code
+KOIOS_ORG = COUNTRY.koios_org_id
+KOIOS_KEY = os.environ.get(f"KOIOS_API_KEY_{_CC}") or os.environ.get(
     "KOIOS_API_KEY", "SGWcnZpgCj-R0fGoVRtjbwMcElV7BvZGz00EEmJDv54"
 )
-KOIOS_SECRET = os.environ.get(
+KOIOS_SECRET = os.environ.get(f"KOIOS_API_SECRET_{_CC}") or os.environ.get(
     "KOIOS_API_SECRET", "gJ5gHPsw21W8Jwl&!aId9O5uoywpg#2G"
 )
-
-KOIOS_SITES = {
-    "MAT": "2f7c38b8-4a70-44fd-bf9c-ebf2b2aa78c0",
-    "TLH": "db5bf699-31ea-44b6-91c5-1b41e4a2d130",
-    "MAS": "101c443e-6500-4a4d-8cdc-6bd15f4388c8",
-    "SHG": "bd7c477d-0742-4056-b75c-38b14ac7cf97",
-    "KET": "a075cbc1-e920-455e-9d5a-8595061dfec0",
-    "LSB": "ed0766c4-9270-4254-a107-eb4464a96ed9",
-}
 
 _sync_lock = threading.Lock()
 
@@ -432,74 +431,53 @@ def update_meter_role(meter_id: str, body: MeterRoleUpdate):
 # SMS payment ingestion (mirrored from sms.1pwrafrica.com/receive.php)
 # ---------------------------------------------------------------------------
 # Flow: SMS gateway → sms.1pwrafrica.com may mirror JSON to this endpoint.
-# We persist to 1PDB and (by default) call credit_sparkmeter() so Koios matches CC.
-# Set SMS_INGEST_PUSH_SPARKMETER=0 if another process already credits SM for every SMS.
+# Account: Remark field (customer account) first; phone lookup as fallback.
+# See mpesa_sms.parse_mpesa_sms / resolve_sms_account.
 # Format: {"messages": [{"id","from","content","sms_sent",...}]}
-#
-# M-PESA Lesotho confirmation format:
-#   "5L956Z39DJ Confirmed. on 9/12/18 at 8:59 AM M1.00 received from
-#    26657755403 - Tamer Teker 26657755403.New M-Pesa balance is M387.80
-#    Reference: 315103084."
-
-MPESA_PATTERN = re.compile(
-    r"(?P<txn_id>\w+)\s+Confirmed\.\s+on\s+.+?"
-    r"M(?P<amount>\d+(?:\.\d{1,2})?)\s+received\s+from\s+"
-    r"(?P<phone>\d{8,15})"
-    r".*?Reference:\s*(?P<ref>\d+)",
-    re.IGNORECASE | re.DOTALL,
-)
-
-MPESA_FALLBACK = re.compile(
-    r"M(?P<amount>\d+(?:\.\d{1,2})?)\s+received\s+from\s+(?P<phone>\d{8,15})",
-    re.IGNORECASE,
-)
-
-REF_PATTERN = re.compile(r"Reference:\s*(\d+)", re.IGNORECASE)
 
 
-def _parse_mpesa_sms(content: str) -> Optional[dict]:
-    """Parse an M-PESA confirmation SMS. Returns dict or None."""
-    m = MPESA_PATTERN.search(content)
-    if m:
-        return {
-            "txn_id": m.group("txn_id"),
-            "amount": float(m.group("amount")),
-            "phone": m.group("phone"),
-            "reference": m.group("ref"),
-            "provider": "mpesa",
-        }
-
-    m = MPESA_FALLBACK.search(content)
-    if m:
-        ref_match = REF_PATTERN.search(content)
-        return {
-            "txn_id": "",
-            "amount": float(m.group("amount")),
-            "phone": m.group("phone"),
-            "reference": ref_match.group(1) if ref_match else "",
-            "provider": "mpesa",
-        }
-
-    return None
-
-
-def _phone_to_account(conn, phone_digits: str) -> Optional[str]:
-    """Look up account number from phone number."""
-    normalized = phone_digits.lstrip("0")
-    if normalized.startswith("266"):
-        normalized = normalized[3:]
-
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT a.account_number
-        FROM customers c
-        JOIN accounts a ON a.customer_id = c.id
-        WHERE replace(replace(replace(COALESCE(c.phone,''), '+', ''), ' ', ''), '-', '') LIKE %s
-           OR replace(replace(replace(COALESCE(c.cell_phone_1,''), '+', ''), ' ', ''), '-', '') LIKE %s
-        LIMIT 1
-    """, (f"%{normalized}", f"%{normalized}"))
-    row = cur.fetchone()
-    return row[0] if row else None
+def _notify_sms_phone_fallback(
+    account: str,
+    amount: float,
+    phone: str,
+    remark: str,
+    mpesa_receipt: str,
+    reason: str,
+) -> None:
+    """WhatsApp Customer Care — only when phone lookup was used (country-specific bridge)."""
+    sym = COUNTRY.currency_symbol
+    if COUNTRY.code == "BN":
+        header = (
+            "MTN MoMo SMS: account was resolved by PHONE "
+            "(no matching account token in 1PDB from SMS text).\n"
+        )
+        pay_line = f"Amount: {amount:,.0f} {sym} ({COUNTRY.currency})\n"
+        ref_line = f"MoMo / payment ref: {mpesa_receipt or '?'}\n"
+    else:
+        header = (
+            "M-Pesa SMS: account was resolved by PHONE "
+            "(not a valid Remark account in 1PDB).\n"
+        )
+        pay_line = f"Amount: {sym}{amount:.2f}\n"
+        ref_line = f"M-Pesa receipt: {mpesa_receipt or '?'}\n"
+    text = (
+        header
+        + f"Credited account: {account}\n"
+        + pay_line
+        + f"Payer phone (from SMS): {phone}\n"
+        + f"Remark / reference text: {remark or '(empty)'}\n"
+        + ref_line
+        + f"Reason: {reason}"
+    )
+    notify_cc_bridge(
+        {
+            "source": "sms_allocation",
+            "account_number": account,
+            "category": "sms_phone_fallback",
+            "text": text,
+        },
+        country_code=COUNTRY.code,
+    )
 
 
 def _sms_ingest_credit_sm(
@@ -509,7 +487,7 @@ def _sms_ingest_credit_sm(
     mpesa_receipt: str,
 ) -> None:
     """Background: credit Koios/ThunderCloud after SMS payment is in 1PDB."""
-    memo = f"sms_incoming mpesa={mpesa_receipt or '?'} txn={txn_id}"
+    memo = f"sms_incoming ref={mpesa_receipt or '?'} txn={txn_id}"
     result = credit_sparkmeter(
         account_number=account_number,
         amount=amount,
@@ -517,9 +495,10 @@ def _sms_ingest_credit_sm(
         external_id=str(txn_id),
     )
     if result.success:
+        sym = COUNTRY.currency_symbol
         logger.info(
-            "SMS path SM credit OK for %s M%.2f → %s",
-            account_number, amount, result.platform,
+            "SMS path SM credit OK for %s %s%.2f → %s",
+            account_number, sym, amount, result.platform,
         )
     else:
         logger.warning(
@@ -528,14 +507,34 @@ def _sms_ingest_credit_sm(
         )
 
 
-@router.post("/api/sms/incoming")
-async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
-    """Receive mirrored SMS payload from the PHP at sms.1pwrafrica.com.
+def _parse_gateway_payment(content: str):
+    """M-Pesa (LS) or MTN MoMo (BN) depending on COUNTRY_CODE."""
+    if COUNTRY.code == "BN":
+        return parse_momo_bn_sms(content)
+    return parse_mpesa_sms(content)
 
-    The PHP (SMSComms/receive.php) may also process the SMS; we parse M-PESA
-    payments, record them in 1PDB, then (unless ``SMS_INGEST_PUSH_SPARKMETER=0``)
-    push the credit to SparkMeter/Koios in the background so portal and SM stay
-    aligned. We also trigger a Koios consumption sync for the site.
+
+def _resolve_gateway_account(conn, content: str, parsed: dict) -> tuple:
+    if COUNTRY.code == "BN":
+        return resolve_bn_momo_account(conn, content, parsed)
+    return resolve_sms_account(conn, content, parsed)
+
+
+def _default_tariff_fallback() -> float:
+    return COUNTRY.default_tariff_rate
+
+
+@router.post("/api/sms/incoming")
+@router.post("/api/bn/sms/incoming")
+async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
+    """Receive mirrored SMS JSON from the national SMS gateway (PHP mirror).
+
+    **Lesotho** (``COUNTRY_CODE=LS``): M-Pesa templates via ``mpesa_sms``.
+    **Benin** (``COUNTRY_CODE=BN``): MTN MoMo templates via ``momo_bj`` (same JSON shape).
+
+    Records payments in 1PDB, then (unless ``SMS_INGEST_PUSH_SPARKMETER=0``) credits
+    SparkMeter/Koios. ``/api/bn/sms/incoming`` is an alias for operators routing
+    ``smsbn.1pwrafrica.com`` behind ``/api/bn``.
     """
     raw_body = await request.body()
 
@@ -557,31 +556,46 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
 
         logger.info("SMS from=%s id=%s content=%.60s…", sender, msg_id, content)
 
-        parsed = _parse_mpesa_sms(content)
+        parsed = _parse_gateway_payment(content)
         if not parsed:
             continue
 
         amount = parsed["amount"]
         phone = parsed["phone"]
-        reference = parsed["reference"]
-        mpesa_txn_id = parsed["txn_id"]
+        reference = parsed.get("reference") or ""
+        receipt_key = (parsed.get("txn_id") or "").strip() or (reference or "").strip()
 
         try:
             with get_connection() as conn:
-                account = _phone_to_account(conn, phone)
+                if receipt_key and mpesa_receipt_in_use(conn, receipt_key):
+                    logger.info(
+                        "SMS duplicate payment ref %s — skipping",
+                        receipt_key,
+                    )
+                    continue
+
+                account, allocation, remark_stored, fb_reason = _resolve_gateway_account(
+                    conn, content, parsed,
+                )
 
                 if not account:
-                    logger.warning(
-                        "SMS payment M%.2f from %s (ref %s) — no matching account",
-                        amount, phone, reference,
-                    )
+                    if COUNTRY.code == "BN":
+                        logger.warning(
+                            "SMS payment %.0f %s from %s (ref %s) — no account (text/phone)",
+                            amount, COUNTRY.currency, phone, reference,
+                        )
+                    else:
+                        logger.warning(
+                            "SMS payment M%.2f from %s (ref %s) — no account (remark/phone)",
+                            amount, phone, reference,
+                        )
                     continue
 
                 cur = conn.cursor()
 
                 cur.execute("SELECT value FROM system_config WHERE key = 'tariff_rate'")
                 rate_row = cur.fetchone()
-                rate = float(rate_row[0]) if rate_row else 5.0
+                rate = float(rate_row[0]) if rate_row else _default_tariff_fallback()
                 kwh = round(amount / rate, 4) if rate > 0 else 0.0
 
                 cur.execute("""
@@ -603,21 +617,86 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
                 except (ValueError, TypeError, OSError):
                     ts = datetime.now(timezone.utc)
 
-                cur.execute("""
-                    INSERT INTO transactions
-                        (account_number, meter_id, transaction_date,
-                         transaction_amount, rate_used, kwh_value,
-                         is_payment, current_balance, source)
-                    VALUES (%s, '', %s, %s, %s, %s, true, %s, 'sms_gateway')
-                    RETURNING id
-                """, (account, ts, amount, rate, kwh, new_balance))
+                payer_phone = "".join(c for c in str(phone) if c.isdigit()) or str(phone)
+
+                try:
+                    cur.execute("""
+                        INSERT INTO transactions
+                            (account_number, meter_id, transaction_date,
+                             transaction_amount, rate_used, kwh_value,
+                             is_payment, current_balance, source,
+                             payment_reference, sms_payer_phone, sms_remark_raw, sms_allocation)
+                        VALUES (%s, '', %s, %s, %s, %s, true, %s, 'sms_gateway',
+                                %s, %s, %s, %s)
+                        RETURNING id
+                    """, (
+                        account, ts, amount, rate, kwh, new_balance,
+                        receipt_key or None,
+                        payer_phone,
+                        remark_stored or None,
+                        allocation,
+                    ))
+                except psycopg2.IntegrityError:
+                    conn.rollback()
+                    logger.info("SMS skipped duplicate payment ref %s", receipt_key)
+                    continue
+                except Exception as e:
+                    err = str(e).lower()
+                    conn.rollback()
+                    if (
+                        "sms_payer_phone" in err
+                        or "sms_remark_raw" in err
+                        or "sms_allocation" in err
+                    ) and "does not exist" in err:
+                        cur.execute("""
+                            INSERT INTO transactions
+                                (account_number, meter_id, transaction_date,
+                                 transaction_amount, rate_used, kwh_value,
+                                 is_payment, current_balance, source,
+                                 payment_reference)
+                            VALUES (%s, '', %s, %s, %s, %s, true, %s, 'sms_gateway', %s)
+                            RETURNING id
+                        """, (
+                            account, ts, amount, rate, kwh, new_balance,
+                            receipt_key or None,
+                        ))
+                    elif "payment_reference" in err and "does not exist" in err:
+                        cur.execute("""
+                            INSERT INTO transactions
+                                (account_number, meter_id, transaction_date,
+                                 transaction_amount, rate_used, kwh_value,
+                                 is_payment, current_balance, source)
+                            VALUES (%s, '', %s, %s, %s, %s, true, %s, 'sms_gateway')
+                            RETURNING id
+                        """, (account, ts, amount, rate, kwh, new_balance))
+                    else:
+                        raise
                 txn_db_id = cur.fetchone()[0]
                 conn.commit()
 
-                logger.info(
-                    "SMS payment: txn=%d acct=%s M%.2f from %s ref=%s mpesa=%s",
-                    txn_db_id, account, amount, phone, reference, mpesa_txn_id,
-                )
+                if COUNTRY.code == "BN":
+                    logger.info(
+                        "SMS payment (MoMo): txn=%d acct=%s alloc=%s %.0f %s from %s ref=%s receipt=%s",
+                        txn_db_id, account, allocation, amount, COUNTRY.currency,
+                        phone, reference, receipt_key,
+                    )
+                else:
+                    logger.info(
+                        "SMS payment: txn=%d acct=%s alloc=%s M%.2f from %s ref=%s mpesa=%s",
+                        txn_db_id, account, allocation, amount, phone, reference,
+                        receipt_key,
+                    )
+
+                if allocation == "phone_fallback":
+                    background_tasks.add_task(
+                        _notify_sms_phone_fallback,
+                        account,
+                        amount,
+                        phone,
+                        remark_stored or "",
+                        receipt_key,
+                        fb_reason,
+                    )
 
                 if SMS_INGEST_PUSH_SPARKMETER and amount > 0:
                     background_tasks.add_task(
@@ -625,7 +704,7 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
                         account,
                         amount,
                         txn_db_id,
-                        mpesa_txn_id or "",
+                        receipt_key or "",
                     )
 
                 cur.execute(

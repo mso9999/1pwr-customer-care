@@ -15,7 +15,8 @@
     "financing": "Financement",
     "tariffs": "Tarifs",
     "dataExport": "Export de données",
-    "systemAdmin": "Administration système"
+    "systemAdmin": "Administration système",
+    "accdbDiff": "Différences avec l'ancien système ACCDB"
   },
   "tip": "Conseil :",
   "important": "Important :",
@@ -23,5 +24,6 @@
     "category": "Catégorie",
     "feature": "Fonctionnalité",
     "page": "Page"
-  }
+  },
+  "footer": "Portail Service Client 1PWR — Révision avril 2026 — Administré par OnePower Lesotho"
 }
