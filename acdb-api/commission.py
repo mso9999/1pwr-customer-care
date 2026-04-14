@@ -35,106 +35,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["commission"])
 
 
-def _is_undefined_column_error(exc: BaseException) -> bool:
-    """Detect missing-column errors from PostgreSQL / psycopg2."""
+def _commissioning_done_date(connection_date_str: str) -> str:
+    """Return YYYY-MM-DD for commissioning / contract-signed dates."""
     try:
-        from psycopg2 import errors as pg_errors  # type: ignore
-
-        if isinstance(exc, pg_errors.UndefinedColumn):
-            return True
-    except Exception:
-        pass
-    msg = str(exc).lower()
-    return "does not exist" in msg and "column" in msg
-
-
-def _set_commissioning_completed(
-    cursor,
-    conn,
-    *,
-    legacy_id: int,
-    user_id: str,
-    connection_date_str: str,
-) -> None:
-    """After successful contract generation, persist commissioning completion flags.
-
-    Production 1PDB includes customer_commissioned, contract_signed, and *_date
-    columns. Older schemas may omit some columns — we fall back gracefully.
-    """
-    try:
-        done_day = date.fromisoformat(connection_date_str[:10])
+        return date.fromisoformat(connection_date_str[:10]).isoformat()
     except ValueError:
-        done_day = datetime.utcnow().date()
-    done_iso = done_day.isoformat()
-
-    try:
-        cursor.execute(
-            """
-            UPDATE customers SET
-                customer_commissioned = true,
-                customer_commissioned_date = %s,
-                contract_signed = true,
-                contract_signed_date = %s,
-                updated_at = NOW(),
-                updated_by = %s
-            WHERE customer_id_legacy = %s
-            """,
-            (done_iso, done_iso, user_id, legacy_id),
-        )
-        if cursor.rowcount and cursor.rowcount > 0:
-            return
-        raise RuntimeError("customer row not found for legacy_id")
-    except Exception as exc:
-        if not _is_undefined_column_error(exc):
-            raise
-        logger.info(
-            "Commissioning completion: retrying without optional columns (%s)",
-            exc,
-        )
-
-    try:
-        cursor.execute(
-            """
-            UPDATE customers SET
-                customer_commissioned = true,
-                customer_commissioned_date = %s,
-                updated_at = NOW(),
-                updated_by = %s
-            WHERE customer_id_legacy = %s
-            """,
-            (done_iso, user_id, legacy_id),
-        )
-        if cursor.rowcount and cursor.rowcount > 0:
-            return
-        raise RuntimeError("customer row not found for legacy_id")
-    except Exception as exc2:
-        if not _is_undefined_column_error(exc2):
-            raise
-        logger.info(
-            "Commissioning completion: retrying customer_commissioned only (%s)",
-            exc2,
-        )
-
-    try:
-        cursor.execute(
-            """
-            UPDATE customers SET
-                customer_commissioned = true,
-                customer_commissioned_date = %s,
-                updated_at = NOW()
-            WHERE customer_id_legacy = %s
-            """,
-            (done_iso, legacy_id),
-        )
-        if not cursor.rowcount:
-            raise RuntimeError("customer row not found for legacy_id")
-    except Exception as exc3:
-        if not _is_undefined_column_error(exc3):
-            raise
-        logger.warning(
-            "Could not set customer_commissioned (schema may lack column): %s",
-            exc3,
-        )
+        return datetime.utcnow().date().isoformat()
 
 
 # ---------------------------------------------------------------------------
@@ -310,17 +216,21 @@ async def get_commission_data(identifier: str, user: CurrentUser = Depends(requi
 @router.post("/api/commission/execute")
 async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends(require_employee)):
     """Execute customer commissioning:
-    1. Update customers table with commissioning fields (connection date, type, ID, GPS)
-    2. Generate bilingual contract PDFs
-    3. Set customer_commissioned / contract_signed (and dates) after successful PDFs
+    1. Resolve customer (read-only)
+    2. Generate bilingual contract PDFs (if this fails, no DB changes — avoids orphan state)
+    3. Single PostgreSQL transaction: profile fields + customer_commissioned + contract_signed
     4. SMS download links to customer
+
+    RCA note: Previously we committed profile updates before PDFs, then ran a second
+    UPDATE that could fail on schema drift; PostgreSQL then aborted the transaction
+    and retries without ROLLBACK caused "current transaction is aborted". The fix is
+    canonical columns (migration 010) + one atomic UPDATE after successful PDF generation.
     """
 
-    # ----- Phase 1: Update PostgreSQL ----- #
+    # ----- Phase 1: Resolve customer (no writes — keeps DB unchanged if PDF fails) ----- #
     with _get_connection() as conn:
         cursor = conn.cursor()
 
-        # Resolve customer: prefer account_number, fall back to legacy customer_id
         customer, _, resolved_acct = _resolve_customer_for_commission(
             cursor, req.account_number or str(req.customer_id or "")
         )
@@ -330,30 +240,6 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
 
         first_name = req.first_name or str(customer.get("first_name") or "")
         last_name = req.last_name or str(customer.get("last_name") or "")
-
-        updates: Dict[str, Any] = {
-            "date_service_connected": req.connection_date,
-            "customer_position": req.customer_type,
-            "national_id": req.national_id,
-        }
-        if req.gps_lat:
-            updates["gps_lat"] = req.gps_lat
-        if req.gps_lng:
-            updates["gps_lon"] = req.gps_lng
-
-        if updates:
-            set_clause = ", ".join(f"{k} = %s" for k in updates)
-            values = list(updates.values()) + [legacy_id]
-            cursor.execute(
-                f"UPDATE customers SET {set_clause} WHERE customer_id_legacy = %s",
-                values,
-            )
-            conn.commit()
-            logger.info(
-                "Updated customers for %s (legacy %s): %s",
-                resolved_acct or req.account_number, legacy_id,
-                list(updates.keys()),
-            )
 
     # ----- Phase 2: Generate contracts ----- #
     try:
@@ -376,33 +262,59 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
             detail=f"Contract generation failed: {exc}",
         )
 
-    # ----- Phase 2b: Mark commissioning complete in DB (was missing — UI stayed false) ----- #
+    # ----- Phase 3: Persist commissioning in one transaction (migration 010 columns) ----- #
     try:
-        with _get_connection() as conn2:
-            cur2 = conn2.cursor()
-            _set_commissioning_completed(
-                cur2,
-                conn2,
-                legacy_id=legacy_id,
-                user_id=user.user_id,
-                connection_date_str=req.connection_date,
+        done_day = _commissioning_done_date(req.connection_date)
+        try:
+            done_date = date.fromisoformat(done_day)
+        except ValueError:
+            done_date = datetime.utcnow().date()
+
+        row_updates: Dict[str, Any] = {
+            "date_service_connected": req.connection_date,
+            "customer_position": req.customer_type,
+            "national_id": req.national_id,
+            "customer_commissioned": True,
+            "customer_commissioned_date": done_date,
+            "contract_signed": True,
+            "contract_signed_date": done_date,
+        }
+        if req.gps_lat:
+            row_updates["gps_lat"] = req.gps_lat
+        if req.gps_lng:
+            row_updates["gps_lon"] = req.gps_lng
+
+        set_clause = ", ".join(f"{k} = %s" for k in row_updates.keys())
+        values = list(row_updates.values()) + [user.user_id, legacy_id]
+        with _get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                f"UPDATE customers SET {set_clause}, updated_at = NOW(), updated_by = %s "
+                f"WHERE customer_id_legacy = %s",
+                values,
             )
-            conn2.commit()
+            if not cur.rowcount:
+                conn.rollback()
+                raise RuntimeError("customer row not found after contract generation")
+            conn.commit()
             logger.info(
-                "Commissioning flags set for legacy_id=%s after contract generation",
+                "Commissioning complete for %s (legacy %s): profile + flags",
+                resolved_acct or req.account_number,
                 legacy_id,
             )
     except Exception as exc:
         logger.error(
-            "Failed to set customer_commissioned after contract: %s",
+            "Persist commissioning after PDF failed (legacy_id=%s): %s",
+            legacy_id,
             exc,
             exc_info=True,
         )
         raise HTTPException(
             status_code=500,
             detail=(
-                "Contracts were generated but the database could not be updated with "
-                f"commissioning status: {exc}"
+                "Contracts were generated but the customer record could not be updated. "
+                f"Apply migration 010_customers_commissioning_contract_flags.sql if needed. "
+                f"Detail: {exc}"
             ),
         )
 
