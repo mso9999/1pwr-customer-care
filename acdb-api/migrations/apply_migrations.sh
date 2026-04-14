@@ -1,32 +1,37 @@
-#!/usr/bin/env bash
-# Apply all *.sql migrations in lexical order (001, 002, … 010).
+#!/bin/sh
+# Apply all *.sql migrations in version order (001, 002, … 010).
 # Idempotent migrations only (IF NOT EXISTS / safe re-run).
+#
+# POSIX sh — works on dash/bash. Requires psql on PATH.
 #
 # Usage:
 #   DATABASE_URL=postgresql://... ./apply_migrations.sh
-# Or on the CC host (peer auth as postgres):
-#   sudo -u postgres env DATABASE_URL=... ./apply_migrations.sh
 #
-set -euo pipefail
+set -eu
+
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 
-if [[ -z "${DATABASE_URL:-}" ]]; then
+if [ -z "${DATABASE_URL:-}" ]; then
   echo "apply_migrations.sh: DATABASE_URL is required" >&2
   exit 1
 fi
 
-shopt -s nullglob
-files=( "${ROOT}"/*.sql )
-IFS=$'\n' sorted=( $(printf '%s\n' "${files[@]}" | sort -V) )
-
-if [[ ${#sorted[@]} -eq 0 ]]; then
-  echo "No .sql files in ${ROOT}" >&2
+LIST="$(find "$ROOT" -maxdepth 1 -name '*.sql' -type f | sort -V)"
+if [ -z "$LIST" ]; then
+  echo "No .sql files in $ROOT" >&2
   exit 1
 fi
 
-for f in "${sorted[@]}"; do
+COUNT=0
+for f in $LIST; do
+  COUNT=$((COUNT + 1))
   echo "Applying $(basename "$f")..."
   psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"
 done
+
+if [ "$COUNT" -eq 0 ]; then
+  echo "No migration files found" >&2
+  exit 1
+fi
 
 echo "All migrations applied successfully."
