@@ -1,0 +1,78 @@
+{
+  "title": "Tutoriel UX",
+  "subtitle": "Orientation et parcours pas à pas",
+  "intro": "Utilisez cette page pour l’intégration des nouveaux membres ou pour revoir un processus précis. Chaque parcours liste les pages du portail dans un ordre logique ; ouvrez les liens dans l’ordre ou accédez directement à une étape. Pour le texte de référence complet, ouvrez Aide ou le manuel imprimable dans le dépôt.",
+  "openPage": "Ouvrir la page",
+  "readInHelp": "Lire dans Aide",
+  "typicalRoles": "Rôles typiques",
+  "roles": {
+    "allEmployees": "Tous les employés",
+    "onmSuperadmin": "superadmin, onm_team (et autres selon les cas)",
+    "financeAll": "Tous les employés ; la finance pilote la vérification",
+    "financeOps": "Finance et opérations (tarifs, financement, exports)"
+  },
+  "workflows": {
+    "orientation": {
+      "title": "Orientation à l’application (première session)",
+      "description": "Organisation du portail : accueil, pays, navigation et documentation.",
+      "steps": [
+        "Commencez par le Tableau de bord pour un aperçu des sites, des volumes et des indicateurs.",
+        "Vérifiez que le pays (et le portefeuille, s’il est affiché) correspond aux données sur lesquelles vous travaillez — API et devise sont par pays.",
+        "Utilisez la barre latérale pour le quotidien : Opérations (rapports, finances), Données clients, Commerce et Système (tables, export, Aide).",
+        "Ouvrez Aide pour le manuel complet avec recherche par section.",
+        "Revenez ici via Système → Tutoriel pour les parcours guidés."
+      ]
+    },
+    "lifecycle": {
+      "title": "Cycle de vie nouveau client (parcours type)",
+      "description": "De l’inscription au comptage ; adaptez aux procédures locales.",
+      "steps": [
+        "Enregistrer le client (identité, téléphone, site/concession, type).",
+        "Faire passer les frais de raccordement ou de tableau par la file de vérification lorsque les paiements M-Pesa/MoMo doivent être rapprochés.",
+        "Lancer l’assistant de mise en service pour vérifier les informations, signatures et documents.",
+        "Attribuer ou confirmer le compteur et le numéro de série dans le registre.",
+        "Utiliser Données clients pour soldes, graphiques et historique des transactions.",
+        "Suivre l’avancement dans le Pipeline."
+      ]
+    },
+    "payments": {
+      "title": "Paiements et rapprochement",
+      "description": "Lorsque la passerelle SMS est incomplète ou à contrôler, et pour tracer les crédits.",
+      "steps": [
+        "Enregistrer un paiement mobile manquant pour garder 1PDB et SparkMeter alignés.",
+        "Traiter la file de vérification pour les frais et acomptes à rapprocher manuellement.",
+        "Parcourir les Transactions pour les crédits récents et les montants par site.",
+        "Approfondir avec Données clients pour l’historique et le contexte de solde d’un compte."
+      ]
+    },
+    "reporting": {
+      "title": "Exploitation et rapports",
+      "description": "O&M trimestriel, finances, contrôle compteurs et maintenance.",
+      "steps": [
+        "Rapport O&M : analyses trimestrielles clients, consommation et ventes.",
+        "Finances : ARPU, revenus par site, vues portefeuille.",
+        "Compteurs de contrôle : comparer principal et contrôle lorsque déployé.",
+        "Journal de maintenance : contexte des tickets liés au terrain."
+      ]
+    },
+    "commerce": {
+      "title": "Tarifs, financement et exports",
+      "description": "Paramétrage des taux, financement d’actifs et extractions pour analyse.",
+      "steps": [
+        "Tarifs : taux par site/concession pour la conversion kWh des nouveaux paiements.",
+        "Financement : produits, accords et journaux.",
+        "Export : extraits CSV/XLSX pour analyse hors ligne (respecter la politique de données)."
+      ]
+    },
+    "dataAudit": {
+      "title": "Données, audit et intégrations",
+      "description": "Vues brutes, historique des changements et état de synchro uGridPlan.",
+      "steps": [
+        "Comptes : parcourir les lignes et filtres.",
+        "Tables : explorateur SQL pour inspection avancée.",
+        "Mutations : journal d’audit avec annulation lorsque c’est prévu.",
+        "Synchronisation : état d’intégration uGridPlan et opérations récentes."
+      ]
+    }
+  }
+}

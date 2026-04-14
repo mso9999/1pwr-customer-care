@@ -3,6 +3,18 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-13 202604131200 (Web UX tutorial page)
+
+### What Was Done
+- Added **`/tutorial`** (`TutorialPage.tsx`): bilingual orientation plus six workflow walkthroughs (lifecycle, payments, reporting, commerce, data/audit, first-session orientation) with per-step links to portal routes and **Read in Help** deep links (`/help#section-id`). Data: `tutorialWorkflows.ts`; strings: `i18n/en|fr/tutorial.json`; nav: **System → Tutorial**.
+- **`HelpPage`**: scrolls to section when URL hash matches a section id (supports tutorial and bookmarks).
+- **`helpSections` Overview**: link to Tutorial; **`CONTEXT.md`** and operating manual feature index updated for discoverability.
+
+### What Next Session Should Know
+- Add new workflows by extending `TUTORIAL_WORKFLOWS` and adding matching `steps` arrays in both `tutorial.json` files.
+
+---
+
 ## Session 2026-04-11 202604111200 (Inter-repo credential map)
 
 ### What Was Done

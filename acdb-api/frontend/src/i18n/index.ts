@@ -22,6 +22,7 @@ import accountsEn from './en/accounts.json';
 import transactionsEn from './en/transactions.json';
 import pipelineEn from './en/pipeline.json';
 import helpEn from './en/help.json';
+import tutorialEn from './en/tutorial.json';
 import adminEn from './en/admin.json';
 import exportEn from './en/export.json';
 import tablesEn from './en/tables.json';
@@ -52,6 +53,7 @@ import accountsFr from './fr/accounts.json';
 import transactionsFr from './fr/transactions.json';
 import pipelineFr from './fr/pipeline.json';
 import helpFr from './fr/help.json';
+import tutorialFr from './fr/tutorial.json';
 import adminFr from './fr/admin.json';
 import exportFr from './fr/export.json';
 import tablesFr from './fr/tables.json';
@@ -91,6 +93,7 @@ i18n.use(initReactI18next).init({
       transactions: transactionsEn,
       pipeline: pipelineEn,
       help: helpEn,
+      tutorial: tutorialEn,
       admin: adminEn,
       export: exportEn,
       tables: tablesEn,
@@ -122,6 +125,7 @@ i18n.use(initReactI18next).init({
       transactions: transactionsFr,
       pipeline: pipelineFr,
       help: helpFr,
+      tutorial: tutorialFr,
       admin: adminFr,
       export: exportFr,
       tables: tablesFr,

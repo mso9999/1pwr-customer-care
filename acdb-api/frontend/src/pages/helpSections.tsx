@@ -154,8 +154,8 @@ function OverviewContent() {
       </P>
       <P>
         {fr
-          ? <>Un manuel imprimable complémentaire se trouve dans le dépôt : <Code>1PWR Customer Care Portal Operating Manual.md</Code>. En cas de divergence, faites confiance au portail déployé.</>
-          : <>A printable companion lives in the repo as <Code>1PWR Customer Care Portal Operating Manual.md</Code>. If the app and this guide disagree, trust the deployed application.</>}
+          ? <>Un manuel imprimable complémentaire se trouve dans le dépôt : <Code>1PWR Customer Care Portal Operating Manual.md</Code>. En cas de divergence, faites confiance au portail déployé. Pour une orientation guidée et des parcours par métier, ouvrez <PageLink to="/tutorial">Tutoriel</PageLink> (<Code>/tutorial</Code>).</>
+          : <>A printable companion lives in the repo as <Code>1PWR Customer Care Portal Operating Manual.md</Code>. If the app and this guide disagree, trust the deployed application. For guided orientation and role-based walkthroughs, open <PageLink to="/tutorial">Tutorial</PageLink> (<Code>/tutorial</Code>).</>}
       </P>
       <SubHead>{fr ? 'Paiements mobiles et pipeline de données' : 'Mobile payments & data pipeline'}</SubHead>
       <P>

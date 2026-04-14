@@ -1,0 +1,78 @@
+{
+  "title": "UX Tutorial",
+  "subtitle": "Orientation and step-by-step workflow walkthroughs",
+  "intro": "Use this page when onboarding new staff or refreshing a specific process. Each walkthrough lists portal pages in a sensible order; open links in sequence or jump ahead. For full reference text, open Help or the printable manual in the repo.",
+  "openPage": "Open page",
+  "readInHelp": "Read in Help",
+  "typicalRoles": "Typical roles",
+  "roles": {
+    "allEmployees": "All employees",
+    "onmSuperadmin": "superadmin, onm_team (plus others where noted)",
+    "financeAll": "All employees; finance leads verification",
+    "financeOps": "Finance and operations (tariffs, financing, exports)"
+  },
+  "workflows": {
+    "orientation": {
+      "title": "App orientation (first session)",
+      "description": "How the portal is organized: home, country, navigation, and where to find documentation.",
+      "steps": [
+        "Start at the Dashboard for a snapshot of sites, counts, and health indicators.",
+        "Confirm the country (and portfolio, if shown) in the header matches the data you intend to work on — APIs and currency are per country.",
+        "Use the left sidebar for day-to-day work: Operations (reports, financials), Customer Data, Commerce, and System (tables, export, Help).",
+        "Open Help for the full operating manual with searchable sections.",
+        "Return here anytime via System → Tutorial for guided walkthroughs."
+      ]
+    },
+    "lifecycle": {
+      "title": "New customer lifecycle (happy path)",
+      "description": "End-to-end flow from registration through metering; align with your local SOPs.",
+      "steps": [
+        "Register the customer (identity, phone, site/concession, customer type).",
+        "Route connection or readyboard fees through payment verification when M-Pesa/MoMo posts need matching.",
+        "Run the commissioning wizard to verify details, signatures, and paperwork.",
+        "Assign or confirm the meter and serial in the meter registry.",
+        "Use Customer Data for balances, charts, and transaction history.",
+        "Track funnel position on the Pipeline page."
+      ]
+    },
+    "payments": {
+      "title": "Payments & reconciliation",
+      "description": "When SMS gateway data is missing or needs review, and how to trace credits.",
+      "steps": [
+        "Record a missed mobile-money payment so 1PDB and SparkMeter stay aligned.",
+        "Work the verification queue for fees and deposits that need human matching.",
+        "Browse Transactions for recent credits and amounts site-wide.",
+        "Drill into Customer Data for a specific account’s history and balance context."
+      ]
+    },
+    "reporting": {
+      "title": "Operations & reporting",
+      "description": "Quarterly O&M, financial analytics, meter checks, and maintenance context.",
+      "steps": [
+        "O&M Report: quarterly customer, consumption, and sales analytics.",
+        "Financial: ARPU trends, revenue by site, portfolio views.",
+        "Check Meters: compare primary vs check-meter signals where deployed.",
+        "Maintenance Log: ticket context linked to field work."
+      ]
+    },
+    "commerce": {
+      "title": "Tariffs, financing, and exports",
+      "description": "Rate configuration, asset financing, and bulk extracts for analysis.",
+      "steps": [
+        "Tariffs: site/concession rates that drive kWh conversion for new payments.",
+        "Financing: products, agreements, and ledger views.",
+        "Export: CSV/XLSX extracts for offline analysis (respect data-handling policy)."
+      ]
+    },
+    "dataAudit": {
+      "title": "Data browsers, audit, and integrations",
+      "description": "Raw views, change history, and uGridPlan sync status.",
+      "steps": [
+        "Accounts: browse account rows and filters.",
+        "Tables: SQL table browser for advanced inspection.",
+        "Mutations: audit trail with revert where supported.",
+        "Sync: uGridPlan integration status and recent operations."
+      ]
+    }
+  }
+}
