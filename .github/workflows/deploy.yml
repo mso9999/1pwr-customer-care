@@ -85,7 +85,8 @@ jobs:
             ubuntu@${{ secrets.EC2_LINUX_HOST }}:/tmp/cc-backend/
 
           # Move to final location and set permissions
-          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_LINUX_HOST }} << 'DEPLOY_SCRIPT'
+          # Use bash explicitly: default remote shell may be dash, which does not support `local`
+          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_LINUX_HOST }} bash -s << 'DEPLOY_SCRIPT'
             sudo rsync -a /tmp/cc-backend/ /opt/cc-portal/backend/
             sudo chown -R cc_api:cc_api /opt/cc-portal/backend/
             rm -rf /tmp/cc-backend
