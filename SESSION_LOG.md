@@ -3,6 +3,18 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-13 202604131200 (1Meter field report — knowledge base)
+
+### What Was Done
+- Added **`docs/1meter-field-notes.md`**: 2026-04-13 MAK team report (IT Wi‑Fi fix, PCB 44→17 / 55→11, improved speeds, all meters on new Wi‑Fi except **`23022628`**, latest FW only on **`onemeter17`** / **`onemeter11`**).
+- Linked from **`CONTEXT.md`** (Prototype 1Meters section + Related Documentation table).
+
+### What Next Session Should Know
+- Follow-up for **`23022628`** if still offline after credential parity with fleet.
+- PCB numbering in the report is as stated by the team; confirm against hardware labels if anything looks inconsistent with prior SOPs.
+
+---
+
 ## Session 2026-04-11 202604111200 (Inter-repo credential map)
 
 ### What Was Done
