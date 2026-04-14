@@ -98,25 +98,23 @@ jobs:
             fi
 
             # Apply incremental CC migrations only (010_*.sql, 011_*.sql, …).
-            # Do NOT run 001–009 here: legacy ops (e.g. DROP COLUMN) need table owner / DBA;
-            # cc_api would fail with "must be owner of table".
+            # Do NOT run 001–009 here: legacy ops are one-time DBA/ops.
+            # Use postgres OS user + local DB name: cc_api is not table owner (ALTER fails).
             MIG_DIR=/opt/cc-portal/backend/migrations
             apply_incremental() {
-              _env="$1"
-              if [ ! -f "$_env" ]; then
-                echo "Skipping migrations: $_env not found"
-                return 0
-              fi
+              _db="$1"
               INCR=$(find "$MIG_DIR" -maxdepth 1 -name '0[1-9][0-9]_*.sql' -type f | sort -V)
               for f in $INCR; do
                 [ -f "$f" ] || continue
-                echo "Applying $(basename "$f")..."
-                sudo -u cc_api sh -c "set -a; . '$_env'; set +a; export DATABASE_URL; psql \"\$DATABASE_URL\" -v ON_ERROR_STOP=1 -f '$f'" || exit 1
+                echo "Applying $(basename "$f") to database $_db..."
+                sudo -u postgres psql -d "$_db" -v ON_ERROR_STOP=1 -f "$f" || exit 1
               done
             }
-            apply_incremental /opt/1pdb/.env
-            if [ -f /opt/1pdb-bn/.env ]; then
-              apply_incremental /opt/1pdb-bn/.env
+            apply_incremental onepower_cc
+            if sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='onepower_bj'" 2>/dev/null | grep -q 1; then
+              apply_incremental onepower_bj
+            else
+              echo "Skipping onepower_bj (database not present on this host)"
             fi
 
             # Restart both API services (LS on :8100, BN on :8101)

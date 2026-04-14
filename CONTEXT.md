@@ -130,7 +130,7 @@ There are **two live gateway deployments** — **Lesotho** (M-Pesa) and **Benin*
 ### Auto-Deploy (Primary Method)
 Push to `main` triggers GitHub Actions with two parallel jobs:
 - **deploy-frontend**: GitHub-hosted runner → `npm ci && npm run build` → `rsync` to Linux EC2
-- **deploy-backend**: GitHub-hosted runner → `rsync` backend files to Linux EC2 → apply **incremental** SQL (`010_*.sql` and higher) as `cc_api` via `psql` + `/opt/1pdb/.env` (and BN `.env`) → restart `1pdb-api` services (full `apply_migrations.sh` is for DBA/manual — not 001–009 in CI)
+- **deploy-backend**: GitHub-hosted runner → `rsync` backend files to Linux EC2 → apply **incremental** SQL (`010_*.sql` and higher) with **`sudo -u postgres psql -d onepower_cc`** (and **`onepower_bj`** if that database exists) → restart `1pdb-api` services (full `apply_migrations.sh` is for DBA/manual — not 001–009 in CI)
 
 This keeps **1PDB schema** in step with API code (avoids commissioning and other failures when new columns ship in migrations).
 
