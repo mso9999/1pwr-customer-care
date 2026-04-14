@@ -104,7 +104,7 @@ Reference shape used successfully on `2026-04-01`:
 - Ubuntu 24.04 EC2
 - `t3.medium`
 - `120 GiB` gp3 root disk
-- same key pair as the CC host (`EOver`)
+- same key pair as the CC host (`EOver.pem` from **`/Users/mattmso/Dropbox/AI Projects/PEMs`** on the dev Mac)
 - IAM instance profile: `cc-postgres-backup-profile`
 
 Provisioning outline:

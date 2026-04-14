@@ -27,7 +27,7 @@
 | Topic | Where |
 |-------|--------|
 | **AWS account (CC backups, etc.)** | `758201218523` referenced from backup bucket naming in 1PWR CC `CONTEXT.md` — use org IAM / SSO, not long-lived keys in repos. |
-| **SSH (CC / shared EC2)** | Team key often named like `EOver.pem`; hostnames/IPs must come from AWS inventory or GitHub secret `EC2_LINUX_HOST` / `EC2_HOST` — do not rely on old IPs in stray docs. |
+| **SSH (CC / shared EC2)** | Human Mac: canonical PEM folder **`/Users/mattmso/Dropbox/AI Projects/PEMs`** (e.g. `EOver.pem` for CC). CI: `EC2_SSH_KEY` secret. Hostnames/IPs from AWS inventory or `EC2_LINUX_HOST` — do not rely on old IPs in stray docs. |
 | **PostgreSQL (`1PDB`)** | Production `DATABASE_URL` values are on the CC host (`/opt/1pdb/.env`, `/opt/1pdb-bn/.env`) and in 1PDB’s `config/credentials.example.env` template for local/dev. |
 
 ---

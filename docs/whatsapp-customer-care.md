@@ -68,10 +68,10 @@ This host runs the public CC stack and the WhatsApp bridge.
 **Access**:
 
 ```bash
-ssh -i ~/Downloads/EOver.pem ubuntu@<current-cc-linux-host>
+ssh -i "/Users/mattmso/Dropbox/AI Projects/PEMs/EOver.pem" ubuntu@<current-cc-linux-host>
 ```
 
-Resolve `<current-cc-linux-host>` from AWS inventory or the `EC2_LINUX_HOST`
+**PEMs:** Use keys from **`/Users/mattmso/Dropbox/AI Projects/PEMs`** (Dropbox-synced). Resolve `<current-cc-linux-host>` from AWS inventory or the `EC2_LINUX_HOST`
 deploy secret. Do not rely on historical hardcoded public IPs in older docs.
 
 ### uGridPlan Host
@@ -225,7 +225,7 @@ uGridPlan API target, not by reviving old ACCDB infrastructure.
 ### Service Management
 
 ```bash
-ssh -i ~/Downloads/EOver.pem ubuntu@<current-cc-linux-host>
+ssh -i "/Users/mattmso/Dropbox/AI Projects/PEMs/EOver.pem" ubuntu@<current-cc-linux-host>
 ```
 
 **Bridge**
@@ -314,7 +314,7 @@ Prevention:
 **WhatsApp re-pairing**
 
 ```bash
-ssh -i ~/Downloads/EOver.pem ubuntu@<current-cc-linux-host> '
+ssh -i "/Users/mattmso/Dropbox/AI Projects/PEMs/EOver.pem" ubuntu@<current-cc-linux-host> '
   pm2 stop whatsapp-cc
   rm -rf /home/ubuntu/whatsapp-logger/baileys_auth_cc
   mkdir -p /home/ubuntu/whatsapp-logger/baileys_auth_cc

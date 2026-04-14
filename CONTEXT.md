@@ -136,8 +136,10 @@ Push to `main` triggers GitHub Actions with two parallel jobs:
 
 | Target | Command |
 |--------|---------|
-| CC Linux host | `ssh -i ~/Downloads/EOver.pem ubuntu@<current-cc-linux-host>` |
+| CC Linux host | `ssh -i "/Users/mattmso/Dropbox/AI Projects/PEMs/EOver.pem" ubuntu@<current-cc-linux-host>` |
 | uGridPlan EC2 | `ssh -p 2222 -i uGridPLAN.pem ugridplan@15.240.40.213` |
+
+**PEM keys (human machines):** Canonical Dropbox folder for team `.pem` files (CC, etc.): **`/Users/mattmso/Dropbox/AI Projects/PEMs`** — use `EOver.pem` from there for the CC host (not `~/Downloads` unless you copied it). Cloud/CI agents do not have this path; use GitHub secret `EC2_SSH_KEY` or copy into a local `.secrets/` (gitignored) if needed.
 
 Resolve `<current-cc-linux-host>` from AWS inventory or the deploy secret.
 Avoid relying on historical public IPs in old docs.
