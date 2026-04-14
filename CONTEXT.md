@@ -130,7 +130,9 @@ There are **two live gateway deployments** — **Lesotho** (M-Pesa) and **Benin*
 ### Auto-Deploy (Primary Method)
 Push to `main` triggers GitHub Actions with two parallel jobs:
 - **deploy-frontend**: GitHub-hosted runner → `npm ci && npm run build` → `rsync` to Linux EC2
-- **deploy-backend**: GitHub-hosted runner → `rsync` backend files to Linux EC2 → restart `1pdb-api` services
+- **deploy-backend**: GitHub-hosted runner → `rsync` backend files to Linux EC2 → **`acdb-api/migrations/apply_migrations.sh`** against `onepower_cc` / `onepower_bj` (from `/opt/1pdb/.env` and `/opt/1pdb-bn/.env`) → restart `1pdb-api` services
+
+This keeps **1PDB schema** in step with API code (avoids commissioning and other failures when new columns ship in migrations).
 
 ### Manual Access
 

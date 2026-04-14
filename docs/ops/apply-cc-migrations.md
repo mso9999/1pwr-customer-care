@@ -1,6 +1,14 @@
 # Applying Customer Care SQL migrations (1PDB)
 
-Migrations live under `acdb-api/migrations/` in this repo. They are **not** always run automatically on deploy: the GitHub Actions job rsyncs Python files and restarts the API but does **not** execute SQL against production unless you add that step.
+Migrations live under `acdb-api/migrations/` in this repo.
+
+## Automatic apply (production)
+
+On push to **`main`**, the **deploy-backend** job (`.github/workflows/deploy.yml`) runs `migrations/apply_migrations.sh` on the CC host **after** rsync and **before** restarting `1pdb-api` / `1pdb-api-bn`. It sources `/opt/1pdb/.env` (Lesotho → `onepower_cc`) and `/opt/1pdb-bn/.env` (Benin → `onepower_bj`) and applies every `*.sql` file in **sorted order**.
+
+**Root cause this fixes:** API code referenced columns (e.g. commissioning flags) that existed only in repo migrations, not in live 1PDB — causing 500s and aborted transactions. Deploy now keeps schema aligned with code.
+
+If a migration fails, the deploy step fails — fix SQL or DB state, then redeploy.
 
 ## When to apply
 

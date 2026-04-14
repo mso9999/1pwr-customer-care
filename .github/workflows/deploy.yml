@@ -96,6 +96,34 @@ jobs:
               sudo -u cc_api venv/bin/pip install -r requirements.txt --quiet 2>/dev/null
             fi
 
+            # Apply SQL migrations (root cause fix: code shipped before 1PDB columns existed)
+            MIG_DIR=/opt/cc-portal/backend/migrations
+            if [ -f "$MIG_DIR/apply_migrations.sh" ]; then
+              chmod +x "$MIG_DIR/apply_migrations.sh"
+              apply_db() {
+                local envfile="$1"
+                if [ ! -f "$envfile" ]; then
+                  echo "Skipping migrations: $envfile not found"
+                  return 0
+                fi
+                set -a
+                # shellcheck disable=SC1090
+                . "$envfile"
+                set +a
+                if [ -z "${DATABASE_URL:-}" ]; then
+                  echo "ERROR: DATABASE_URL empty after sourcing $envfile — cannot run migrations"
+                  exit 1
+                fi
+                ( cd "$MIG_DIR" && ./apply_migrations.sh )
+              }
+              apply_db /opt/1pdb/.env || exit 1
+              if [ -f /opt/1pdb-bn/.env ]; then
+                apply_db /opt/1pdb-bn/.env || exit 1
+              fi
+            else
+              echo "WARNING: $MIG_DIR/apply_migrations.sh missing — migrations not applied"
+            fi
+
             # Restart both API services (LS on :8100, BN on :8101)
             sudo systemctl restart 1pdb-api
             sudo systemctl restart 1pdb-api-bn
