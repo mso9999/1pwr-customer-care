@@ -138,13 +138,27 @@ This keeps **1PDB schema** in step with API code (avoids commissioning and other
 
 | Target | Command |
 |--------|---------|
-| CC Linux host | `ssh -i "/Users/mattmso/Dropbox/AI Projects/PEMs/EOver.pem" ubuntu@<current-cc-linux-host>` |
+| CC Linux host | `ssh -i "/Users/mattmso/Dropbox/AI Projects/secrets/EOver.pem" ubuntu@<current-cc-linux-host>` |
 | uGridPlan EC2 | `ssh -p 2222 -i uGridPLAN.pem ugridplan@15.240.40.213` |
 
-**PEM keys (human machines):** Canonical Dropbox folder for team `.pem` files (CC, etc.): **`/Users/mattmso/Dropbox/AI Projects/PEMs`** — use `EOver.pem` from there for the CC host (not `~/Downloads` unless you copied it). Cloud/CI agents do not have this path; use GitHub secret `EC2_SSH_KEY` or copy into a local `.secrets/` (gitignored) if needed.
+**SSH keys (human Mac):** Canonical Dropbox folder for team keys (CC, etc.): **`/Users/mattmso/Dropbox/AI Projects/secrets`** — use **`EOver.pem`** there for the CC host. Cloud/CI agents do not have this path; use GitHub secret **`EC2_SSH_KEY`** or copy into repo **`.secrets/`** (gitignored).
 
-Resolve `<current-cc-linux-host>` from AWS inventory or the deploy secret.
-Avoid relying on historical public IPs in old docs.
+**Resolve `<current-cc-linux-host>` with AWS CLI** (preferred over stale IPs in docs):
+
+```bash
+# Replace filters with your org’s tags / instance id (region often af-south-1 for CC)
+aws ec2 describe-instances --region af-south-1 \
+  --instance-ids i-xxxxxxxxxxxxxxxxx \
+  --query 'Reservations[0].Instances[0].PublicDnsName' --output text
+
+# Or search by tag (example: Name contains “cc” — adjust to your naming)
+aws ec2 describe-instances --region af-south-1 \
+  --filters "Name=instance-state-name,Values=running" \
+  --query 'Reservations[*].Instances[*].[InstanceId,Tags[?Key==`Name`].Value|[0],PublicDnsName,PublicIpAddress]' \
+  --output table
+```
+
+You can also use the **`EC2_LINUX_HOST`** value from GitHub Actions secrets (same hostname the deploy job uses). Avoid relying on historical public IPs in old docs.
 
 ### 1Meter Firmware Build Host
 

@@ -17,7 +17,7 @@ If a migration fails, the deploy step fails — fix SQL or DB state, then redepl
 
 ## Apply on the CC host (typical)
 
-**SSH key (human Mac):** Use **`/Users/mattmso/Dropbox/AI Projects/PEMs/EOver.pem`** — see `CONTEXT.md` → Manual Access. Resolve `<current-cc-linux-host>` from AWS or `EC2_LINUX_HOST`.
+**SSH key (human Mac):** **`/Users/mattmso/Dropbox/AI Projects/secrets/EOver.pem`** — see `CONTEXT.md` → Manual Access. Resolve `<current-cc-linux-host>` with **`aws ec2 describe-instances`** or GitHub **`EC2_LINUX_HOST`**.
 
 Use the same `DATABASE_URL` (or role) the `1pdb-api` service uses. Example:
 

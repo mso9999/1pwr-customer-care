@@ -49,7 +49,7 @@ There is **no** GitHub‑documented **Secrets Manager** ARN for CC DB password i
 
 | Item | Where | Notes |
 |------|--------|--------|
-| CC EC2 | **`/Users/mattmso/Dropbox/AI Projects/PEMs/EOver.pem`** (canonical on primary dev Mac) | Dropbox-synced PEMs folder; `chmod 600`. Resolve host via AWS or `EC2_LINUX_HOST`. CI uses GitHub secret `EC2_SSH_KEY`. |
+| CC EC2 | **`/Users/mattmso/Dropbox/AI Projects/secrets/EOver.pem`** (canonical on primary dev Mac) | Dropbox-synced **`secrets`** folder (renamed from `PEMs`); `chmod 600`. Resolve host with **`aws ec2 describe-instances`** (see `CONTEXT.md` → Manual Access) or GitHub secret **`EC2_LINUX_HOST`**. CI uses **`EC2_SSH_KEY`**. |
 
 ---
 

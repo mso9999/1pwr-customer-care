@@ -7,16 +7,17 @@ This directory is gitignored. **Do not commit private keys.**
 The team key for the Customer Care Linux host is often named **`EOver.pem`**. It is **not** in the repository.
 
 **Canonical location (primary dev Mac, Dropbox):**  
-`/Users/mattmso/Dropbox/AI Projects/PEMs/EOver.pem`
+`/Users/mattmso/Dropbox/AI Projects/secrets/EOver.pem`  
+(Folder was renamed from `PEMs` → **`secrets`**.)
 
 1. Copy from there (or another secure copy) into this folder when working in a cloud workspace:
 
    ```bash
-   cp "/Users/mattmso/Dropbox/AI Projects/PEMs/EOver.pem" .secrets/EOver.pem
+   cp "/Users/mattmso/Dropbox/AI Projects/secrets/EOver.pem" .secrets/EOver.pem
    chmod 600 .secrets/EOver.pem
    ```
 
-2. Resolve the current host from AWS inventory or your `EC2_LINUX_HOST` secret (do not rely on stale IPs in old docs).
+2. Resolve the current host with **AWS CLI** (see `CONTEXT.md` → Manual Access) or your **`EC2_LINUX_HOST`** secret — do not rely on stale IPs in old docs.
 
 3. SSH example:
 
