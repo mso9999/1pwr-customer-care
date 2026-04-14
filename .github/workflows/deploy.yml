@@ -85,8 +85,8 @@ jobs:
             ubuntu@${{ secrets.EC2_LINUX_HOST }}:/tmp/cc-backend/
 
           # Move to final location and set permissions
-          # Use bash explicitly: default remote shell may be dash, which does not support `local`
-          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_LINUX_HOST }} bash -s << 'DEPLOY_SCRIPT'
+          # Script is POSIX sh (no `local`) so it works if SSH uses /bin/sh (dash).
+          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_LINUX_HOST }} << 'DEPLOY_SCRIPT'
             sudo rsync -a /tmp/cc-backend/ /opt/cc-portal/backend/
             sudo chown -R cc_api:cc_api /opt/cc-portal/backend/
             rm -rf /tmp/cc-backend
@@ -102,17 +102,17 @@ jobs:
             if [ -f "$MIG_DIR/apply_migrations.sh" ]; then
               chmod +x "$MIG_DIR/apply_migrations.sh"
               apply_db() {
-                local envfile="$1"
-                if [ ! -f "$envfile" ]; then
-                  echo "Skipping migrations: $envfile not found"
+                _env="$1"
+                if [ ! -f "$_env" ]; then
+                  echo "Skipping migrations: $_env not found"
                   return 0
                 fi
                 set -a
                 # shellcheck disable=SC1090
-                . "$envfile"
+                . "$_env"
                 set +a
                 if [ -z "${DATABASE_URL:-}" ]; then
-                  echo "ERROR: DATABASE_URL empty after sourcing $envfile — cannot run migrations"
+                  echo "ERROR: DATABASE_URL empty after sourcing $_env — cannot run migrations"
                   exit 1
                 fi
                 ( cd "$MIG_DIR" && ./apply_migrations.sh )
