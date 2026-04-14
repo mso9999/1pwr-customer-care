@@ -112,8 +112,15 @@ def _normalize_customer(row_dict: Dict[str, Any]) -> Dict[str, Any]:
         v = row_dict.get(key)
         return str(v).strip() if v is not None else ""
 
+    # Primary key in PostgreSQL (customers.id). Exposed so the UI can load the
+    # correct row via CRUD; customer_id_legacy can equal another row's id,
+    # which would mis-resolve lookups keyed only on the legacy integer.
+    _pk = row_dict.get("id")
+    pg_customer_id = int(_pk) if _pk is not None else None
+
     return {
         "customer_id_legacy": _s("customer_id_legacy"),
+        "pg_customer_id": pg_customer_id,
         "first_name": _s("first_name"),
         "middle_name": _s("middle_name"),
         "gender": _s("gender"),
