@@ -11,3 +11,8 @@ auth_info_baileys/
 .DS_Store
 .dropbox_cache/
 firebase-service-account.json
+
+# Local SSH keys (e.g. CC EC2). Copy EOver.pem into .secrets/ yourself — never commit keys.
+.secrets/**
+!.secrets/README.md
+EOver.pem
