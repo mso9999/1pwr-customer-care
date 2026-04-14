@@ -195,6 +195,8 @@ uvicorn customer_api:app --host 0.0.0.0 --port 8100
 
 Typical local setup requires `DATABASE_URL` and any relevant service credentials. **Where those live in production and CI** is documented in `docs/credentials-and-secrets.md` and the shared `docs/inter-repo-credentials.md` (values are never committed).
 
+**SQL migrations** under `acdb-api/migrations/` may need manual application on 1PDB production — see `docs/ops/apply-cc-migrations.md`.
+
 ### Frontend
 
 ```bash

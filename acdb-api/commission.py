@@ -220,6 +220,7 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
     2. Generate bilingual contract PDFs (if this fails, no DB changes — avoids orphan state)
     3. Single PostgreSQL transaction: profile fields + customer_commissioned + contract_signed
     4. SMS download links to customer
+    5. uGridPlan sync (non-blocking)
 
     RCA note: Previously we committed profile updates before PDFs, then ran a second
     UPDATE that could fail on schema drift; PostgreSQL then aborted the transaction
@@ -321,7 +322,7 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
     en_url = build_download_url(result["site_code"], result["en_filename"])
     so_url = build_download_url(result["site_code"], result["so_filename"])
 
-    # ----- Phase 3: SMS to customer ----- #
+    # ----- Phase 4: SMS to customer ----- #
     sms_sent = False
     try:
         sms_sent = send_contract_sms(
@@ -334,7 +335,7 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
     except Exception as exc:
         logger.warning("SMS delivery failed: %s", exc)
 
-    # ----- Phase 4: Sync to uGridPLAN ----- #
+    # ----- Phase 5: Sync to uGridPLAN ----- #
     ugp_sync_result: Optional[Dict[str, Any]] = None
     survey_id: Optional[str] = None
     try:
