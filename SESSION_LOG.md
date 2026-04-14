@@ -3,6 +3,20 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-13 202604131400 (Restore 1Meter OTA tooling)
+
+### What Was Done
+- **Archeology:** Session logs referenced `scripts/1meter/` and `docs/1Meter-Remote-Build-OTA-Runbook.md`; commit `a49d7b7` moved helpers to `scripts/archive/.../legacy_helpers/` without preserving a top-level `scripts/1meter/`.
+- **Restored** `scripts/1meter/` from those legacy helpers: `bootstrap_build_host.sh`, `build_firmware_remote.sh`, `publish_release.sh`, `create_ota_update.sh`, `onepwr-aws-mesh-timeout.patch`, plus `scripts/1meter/README.md`.
+- **Added** `docs/1meter-ota-runbook.md` (active runbook: AWS resource IDs from docs, anti-rollback, flow) and linked it from **`CONTEXT.md`**.
+- **Installed** AWS CLI v2 in this environment; **`aws sts get-caller-identity` fails** — no credentials in the agent sandbox (`NoCredentials`). OTA **create** still requires org IAM/SSO or EC2 role on a real operator machine or the build host with an instance profile.
+
+### What Next Session Should Know
+- To **push OTA**: authenticate AWS (`aws sso login` or instance profile), build with **`OTA_APP_VERSION` strictly above** current fleet line (see `SESSION_LOG` 2026-03-17: need **> 1.0.3** for timeout lineage at that time; confirm today’s max in IoT/S3), publish, then `create_ota_update.sh` with `THING_NAMES` or `THING_GROUP_NAMES=MAK_V1_0_2`.
+- Field note (2026-04-13): only **`onemeter17`** / **`onemeter11`** on latest — target **other** `OneMeter*` things; **`23022628`** may not complete OTA until on Wi‑Fi.
+
+---
+
 ## Session 2026-04-11 202604111200 (Inter-repo credential map)
 
 ### What Was Done
