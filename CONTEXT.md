@@ -450,6 +450,7 @@ single source of truth behind the CC API.
 | `docs/inter-repo-credentials.md` | **Inter-repo credential map** (same doc copied in 1PDB, SMSComms, uGridPlan, om-portal, ingestion_gate, onepwr-aws-mesh, etc.) |
 | In-app **Help** (`/help`) | User guide: bilingual EN/FR body copy in `frontend/src/pages/helpSections.tsx`; UI chrome in `i18n/*/help.json`. Use **FR** toggle for full translation. |
 | `SESSION_LOG.md` | AI session handoffs (read recent entries) |
+| `docs/1meter-ota-runbook.md` | 1Meter: build/publish/OTA scripts (`scripts/1meter/`), AWS resource IDs, anti-rollback |
 
 ---
 

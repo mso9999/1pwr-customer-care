@@ -1,0 +1,105 @@
+diff --git a/main/Kconfig.projbuild b/main/Kconfig.projbuild
+index 08b44f0..d39166f 100644
+--- a/main/Kconfig.projbuild
++++ b/main/Kconfig.projbuild
+@@ -231,6 +231,22 @@ menu "ONEPWR-AWS-MESH Settings"
+                 The maximum time to wait for a CONNACK packet from the broker in a mesh network.
+                 This value needs to be higher in mesh networks due to additional routing overhead.
+ 
++        config GRI_MQTT_AGENT_TLS_CONNECT_TIMEOUT_MS
++            int "TLS connect timeout in milliseconds"
++            default 15000
++            help
++                The maximum time to allow for establishing the TLS connection.
++                Weak WiFi or mesh backhaul can make the initial TLS handshake take
++                longer than the stock ESP defaults.
++
++        config GRI_MQTT_AGENT_TLS_RECV_TIMEOUT_MS
++            int "TLS receive timeout in milliseconds"
++            default 500
++            help
++                Socket receive timeout used by the TLS transport during MQTT
++                operations. A slightly higher value helps tolerate weak links
++                without making the agent unresponsive for too long.
++
+         config GRI_MQTT_AGENT_MESH_RECONNECT_DELAY_MS
+             int "Delay before reconnecting MQTT after mesh connection in milliseconds"
+             default 5000
+diff --git a/main/networking/mqtt/core_mqtt_agent_manager.c b/main/networking/mqtt/core_mqtt_agent_manager.c
+index c211fe3..eff27da 100644
+--- a/main/networking/mqtt/core_mqtt_agent_manager.c
++++ b/main/networking/mqtt/core_mqtt_agent_manager.c
+@@ -587,8 +587,12 @@ static MQTTStatus_t prvCoreMqttAgentInit( NetworkContext_t * pxNetworkContext )
+     xTransport.send = espTlsTransportSend;
+     xTransport.recv = espTlsTransportRecv;
+ 
+-    vTlsSetConnectTimeout( 3000 );
+-    vTlsSetRecvTimeout( 100 );
++    ESP_LOGI( TAG,
++              "TLS transport timeouts: connect=%d ms recv=%d ms",
++              configMQTT_AGENT_TLS_CONNECT_TIMEOUT_MS,
++              configMQTT_AGENT_TLS_RECV_TIMEOUT_MS );
++    vTlsSetConnectTimeout( configMQTT_AGENT_TLS_CONNECT_TIMEOUT_MS );
++    vTlsSetRecvTimeout( configMQTT_AGENT_TLS_RECV_TIMEOUT_MS );
+ 
+     /* Initialize MQTT library. */
+     xReturn = MQTTAgent_Init( &xGlobalMqttAgentContext,
+@@ -719,6 +723,14 @@ static void prvCoreMqttAgentConnectionTask( void * pvParameters )
+                              pdTRUE,
+                              portMAX_DELAY );
+ 
++        if( configMQTT_AGENT_MESH_RECONNECT_DELAY_MS > 0 )
++        {
++            ESP_LOGI( TAG,
++                      "Waiting %d ms for WiFi/mesh stabilization before TLS reconnect.",
++                      configMQTT_AGENT_MESH_RECONNECT_DELAY_MS );
++            vTaskDelay( pdMS_TO_TICKS( configMQTT_AGENT_MESH_RECONNECT_DELAY_MS ) );
++        }
++
+         xBackoffRet = pdFAIL;
+         xTlsRet = TLS_TRANSPORT_CONNECT_FAILURE;
+         eMqttRet = MQTTBadParameter;
+diff --git a/main/networking/mqtt/core_mqtt_agent_manager_config.h b/main/networking/mqtt/core_mqtt_agent_manager_config.h
+index 0c3e0f9..dac3d4b 100644
+--- a/main/networking/mqtt/core_mqtt_agent_manager_config.h
++++ b/main/networking/mqtt/core_mqtt_agent_manager_config.h
+@@ -96,6 +96,24 @@
+  */
+ #define configMQTT_AGENT_CONNACK_RECV_TIMEOUT_MS        ( CONFIG_GRI_MQTT_AGENT_CONNACK_RECV_TIMEOUT_MS )
+ 
++/**
++ * @brief Timeout for establishing the TLS socket connection.
++ * Defined in milliseconds.
++ */
++#define configMQTT_AGENT_TLS_CONNECT_TIMEOUT_MS         ( CONFIG_GRI_MQTT_AGENT_TLS_CONNECT_TIMEOUT_MS )
++
++/**
++ * @brief Timeout for TLS socket receive operations.
++ * Defined in milliseconds.
++ */
++#define configMQTT_AGENT_TLS_RECV_TIMEOUT_MS            ( CONFIG_GRI_MQTT_AGENT_TLS_RECV_TIMEOUT_MS )
++
++/**
++ * @brief Delay after WiFi/mesh connectivity before attempting MQTT/TLS reconnect.
++ * Defined in milliseconds.
++ */
++#define configMQTT_AGENT_MESH_RECONNECT_DELAY_MS        ( CONFIG_GRI_MQTT_AGENT_MESH_RECONNECT_DELAY_MS )
++
+ /**
+  * @brief The task stack size of the coreMQTT-Agent task.
+  */
+diff --git a/sdkconfig.defaults b/sdkconfig.defaults
+index f1efd5e..b20c340 100644
+--- a/sdkconfig.defaults
++++ b/sdkconfig.defaults
+@@ -9,7 +9,9 @@ CONFIG_PARTITION_TABLE_CUSTOM=y
+ CONFIG_PARTITION_TABLE_OFFSET=0xb000
+ CONFIG_ROUTER_SSID="DareMightyThings"
+ CONFIG_ROUTER_PASSWORD="bestcity"
+-CONFIG_GRI_MQTT_AGENT_CONNACK_RECV_TIMEOUT_MS=10000
++CONFIG_GRI_MQTT_AGENT_CONNACK_RECV_TIMEOUT_MS=15000
++CONFIG_GRI_MQTT_AGENT_TLS_CONNECT_TIMEOUT_MS=15000
++CONFIG_GRI_MQTT_AGENT_TLS_RECV_TIMEOUT_MS=500
+ CONFIG_COMPILER_OPTIMIZATION_SIZE=y
+ CONFIG_BT_NIMBLE_ENABLED=y
+ CONFIG_PM_POWER_DOWN_CPU_IN_LIGHT_SLEEP=n
