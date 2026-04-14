@@ -4,9 +4,13 @@ Migrations live under `acdb-api/migrations/` in this repo.
 
 ## Automatic apply (production)
 
-On push to **`main`**, the **deploy-backend** job (`.github/workflows/deploy.yml`) runs `migrations/apply_migrations.sh` on the CC host **after** rsync and **before** restarting `1pdb-api` / `1pdb-api-bn`. It sources `/opt/1pdb/.env` (Lesotho → `onepower_cc`) and `/opt/1pdb-bn/.env` (Benin → `onepower_bj`) and applies every `*.sql` file in **sorted order**.
+On push to **`main`**, the **deploy-backend** job (`.github/workflows/deploy.yml`) applies **incremental** migrations only: files matching **`NNN_*.sql` where NNN ≥ 010** (e.g. `010_customers_commissioning_contract_flags.sql`). It runs as **`cc_api`** with `DATABASE_URL` from `/opt/1pdb/.env` and `/opt/1pdb-bn/.env`, **before** restarting `1pdb-api` / `1pdb-api-bn`.
 
-**Root cause this fixes:** API code referenced columns (e.g. commissioning flags) that existed only in repo migrations, not in live 1PDB — causing 500s and aborted transactions. Deploy now keeps schema aligned with code.
+**Why not 001–009 in CI:** Older scripts (e.g. `DROP COLUMN`) require **table owner** privileges; the app role `cc_api` is not the owner — those were one-time DBA/ops applies.
+
+**Root cause this fixes:** API code referenced columns that existed only in repo migrations, not in live 1PDB. Incremental deploy applies **010+** automatically.
+
+For a **full** re-apply of every file in `migrations/` (e.g. new dev DB), use `apply_migrations.sh` manually as a superuser — see below.
 
 If a migration fails, the deploy step fails — fix SQL or DB state, then redeploy.
 

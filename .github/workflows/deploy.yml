@@ -97,25 +97,26 @@ jobs:
               sudo -u cc_api venv/bin/pip install -r requirements.txt --quiet 2>/dev/null
             fi
 
-            # Apply SQL migrations (root cause fix: code shipped before 1PDB columns existed)
-            # ubuntu cannot chmod/chown cc_api files or read /opt/1pdb/.env — use sudo / cc_api user.
+            # Apply incremental CC migrations only (010_*.sql, 011_*.sql, …).
+            # Do NOT run 001–009 here: legacy ops (e.g. DROP COLUMN) need table owner / DBA;
+            # cc_api would fail with "must be owner of table".
             MIG_DIR=/opt/cc-portal/backend/migrations
-            if [ -f "$MIG_DIR/apply_migrations.sh" ]; then
-              sudo chmod +x "$MIG_DIR/apply_migrations.sh"
-              apply_db() {
-                _env="$1"
-                if [ ! -f "$_env" ]; then
-                  echo "Skipping migrations: $_env not found"
-                  return 0
-                fi
-                sudo -u cc_api sh -c "set -a; . '$_env'; set +a; export DATABASE_URL; cd '$MIG_DIR' && ./apply_migrations.sh" || exit 1
-              }
-              apply_db /opt/1pdb/.env
-              if [ -f /opt/1pdb-bn/.env ]; then
-                apply_db /opt/1pdb-bn/.env
+            apply_incremental() {
+              _env="$1"
+              if [ ! -f "$_env" ]; then
+                echo "Skipping migrations: $_env not found"
+                return 0
               fi
-            else
-              echo "WARNING: $MIG_DIR/apply_migrations.sh missing — migrations not applied"
+              INCR=$(find "$MIG_DIR" -maxdepth 1 -name '0[1-9][0-9]_*.sql' -type f | sort -V)
+              for f in $INCR; do
+                [ -f "$f" ] || continue
+                echo "Applying $(basename "$f")..."
+                sudo -u cc_api sh -c "set -a; . '$_env'; set +a; export DATABASE_URL; psql \"\$DATABASE_URL\" -v ON_ERROR_STOP=1 -f '$f'" || exit 1
+              done
+            }
+            apply_incremental /opt/1pdb/.env
+            if [ -f /opt/1pdb-bn/.env ]; then
+              apply_incremental /opt/1pdb-bn/.env
             fi
 
             # Restart both API services (LS on :8100, BN on :8101)
