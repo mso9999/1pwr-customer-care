@@ -3,6 +3,16 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-14 202604141100 (Deploy: 010+ migrations as postgres)
+
+### What Was Done
+- **CI deploy** (`.github/workflows/deploy.yml`): incremental migrations **`010_*.sql`+** run with **`sudo -u postgres psql -d onepower_cc`** and **`onepower_bj`** (if DB exists), not as `cc_api` (table owner issue).
+- **Docs**: `CONTEXT.md` and `docs/ops/apply-cc-migrations.md` aligned with that behavior.
+- **Verified**: GitHub Actions run [24395177444](https://github.com/mso9999/1pwr-customer-care/actions/runs/24395177444) **success** (deploy-frontend + deploy-backend).
+
+### What Next Session Should Know
+- **True conditions for commissioning columns:** run the verify `information_schema` query in `docs/ops/apply-cc-migrations.md` on production if commissioning still 500s after deploy.
+
 ## Session 2026-04-13 202604131200 (Web UX tutorial page)
 
 ### What Was Done
