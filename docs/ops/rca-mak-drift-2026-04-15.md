@@ -90,34 +90,34 @@ So: **operational truth** = treat the workbook as a **human audit list**; **auto
 
 ### A. Authority (policy)
 
-**Decision (2026-04): ThunderCloud is authoritative** for MAK/LAB customer **display identity** (name on the metering system / field tools). When 1PDB disagrees, **align 1PDB to ThunderCloud** using `fix_mak_drift.py` (after dry run) or a manual `UPDATE` sourced from TC.
+**Canonical source of truth:** **CC / 1PDB** for customer identity.
 
-If legal/CRM name in CC must differ from TC, record it elsewhere (notes, external register) or **change ThunderCloud first** via SparkMeter UI, then sync 1PDB to match — do not leave CC and TC divergent for routine operations.
+**This incident:** ThunderCloud had the **correct** names and CC did not — so the remediation is a **one-time** sync **TC → 1PDB** (`fix_mak_drift.py` or manual `UPDATE` from TC).
 
-Until TC exposes name updates via API, **editing only CC** does not update TC; ops should either edit TC to match policy or pull TC → 1PDB after TC is corrected.
+**After that back-sync:** Ongoing changes are edited **in CC**; the API **pushes names to ThunderCloud** on `PUT /api/tables/customers/{id}` when `first_name` / `last_name` are updated (`sync_thundercloud_customer_name` → re-POST `POST /api/v0/customer/`). Response may include **`thundercloud_sync`** per MAK/LAB account; failures are logged and do not roll back 1PDB.
 
 ### B. Immediate (clean existing drift)
 
-1. Re-run **`scripts/ops/fix_mak_drift.py`** on the CC host (venv as `cc_api`) after any bulk registration or known TC import — **dry run first**, then `--apply` if policy is TC-wins.
+1. **One-time:** **`scripts/ops/fix_mak_drift.py`** on the CC host (venv as `cc_api`) — **dry run**, then **`--apply`** to align 1PDB to verified-good TC names.
 2. For the **58 workbook rows**: for each code, compare **current** 1PDB vs **current** TC API (`GET /api/v0/customers`). Where the script’s heuristic passes but staff still see a problem, **manually** reconcile (spreadsheet as checklist).
 3. Track **accounts in 1PDB not returned in the TC bulk customer list** and **TC-only org meters** — separate onboarding; not fixed by renaming alone.
 
 ### C. Process (prevent new drift)
 
-1. **Name change SOP for MAK/LAB:** when ops edits a customer name in CC, add a step **“Update ThunderCloud / SparkMeter to match”** (or open a ticket) until an API exists.
+1. **Name changes for MAK/LAB:** edit **in CC**; confirm **`thundercloud_sync`** in the update response or logs. If push fails, use SparkMeter UI or vendor — do not leave 1PDB and TC divergent on purpose.
 2. **Meter assignment:** if `sm_sync` returns `already_exists`, have staff **verify** TC name matches CC (API lookup vs 1PDB) before closing the task.
 3. **After ACCDB / bulk imports:** run reconciliation before go-live for ThunderCloud sites.
 
 ### D. Engineering (optional hardening)
 
-1. **Scheduled report:** cron on CC host or CI: compare TC vs 1PDB for MAK/LAB weekly; email or Slack on **any** mismatch (even soft).
-2. **On customer update (MAK/LAB):** after `PUT` on `customers`, **GET** TC customer by code; if names differ, return a **warning** in the API response (non-blocking) so the UI can show “meter system may still show a different name.”
-3. If SparkMeter ever documents a **customer update** endpoint for ThunderCloud, implement a **`push_customer_name_to_tc()`** and call it from the customer update path — until then, document the limitation prominently in ops runbooks.
+1. **Scheduled report:** cron on CC host or CI: compare TC vs 1PDB for MAK/LAB weekly; alert on drift (catches failed re-POSTs or manual TC edits).
+2. **UI:** surface **`thundercloud_sync`** failures from the customer update response so staff retry or use SparkMeter UI.
+3. If SparkMeter documents a dedicated **PATCH** customer endpoint, prefer it over re-POST when available.
 
 ### E. What not to do
 
-- Do not assume **editing CC alone** updates ThunderCloud — **TC does not receive name pushes** after creation. With **TC authoritative**, pull **TC → 1PDB** (or edit TC in SparkMeter UI, then align 1PDB).
-- Do not relax the token matcher in `fix_mak_drift.py` blindly for auto-apply; use **report-only** fuzzy output first if you ever doubt TC data quality for a code.
+- Do not treat **one-time TC→1PDB** as “ThunderCloud is always authoritative” — CC remains canonical; that sync only fixed **this** drift episode.
+- Do not relax the token matcher in `fix_mak_drift.py` blindly for auto-apply; use **report-only** fuzzy output first if TC data quality is uncertain for a code.
 
 ## What we ran (CC production host)
 

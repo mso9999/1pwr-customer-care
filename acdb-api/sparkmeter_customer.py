@@ -11,11 +11,12 @@ Platforms:
 Constraints:
   - Koios can create customers without a meter assignment.
   - ThunderCloud requires a physical meter serial at creation time.
-  - Neither platform supports customer name updates via API.
+  - SparkMeter documents no separate “PATCH customer”; we **re-POST** the same
+    `POST /api/v0/customer/` payload to push name changes from CC to TC (best-effort).
 
-Authority note (MAK/LAB / ThunderCloud): CC creates rows first, then pushes a name
-snapshot to TC. If 1PDB and TC later disagree on name, **ThunderCloud is authoritative**
-for field/meter identity — align 1PDB to TC (see CONTEXT.md, scripts/ops/fix_mak_drift.py).
+**Source of truth:** 1PDB / CC is canonical. After a **one-time** TC→1PDB name
+reconciliation when TC was correct (`scripts/ops/fix_mak_drift.py`), ongoing edits
+in CC call **`sync_thundercloud_customer_name`** so ThunderCloud stays aligned.
 
 Multi-country support:
   Each country uses its own Koios API key pair with customer management permissions.
@@ -120,6 +121,11 @@ def _extract_site(account_number: str) -> str:
     return m.group(1) if m else ""
 
 
+def is_thundercloud_account(account_number: str) -> bool:
+    """True if account code is for a site on ThunderCloud on-prem (MAK/LAB)."""
+    return _extract_site(account_number) in THUNDERCLOUD_SITES
+
+
 def _koios_headers(site_code: str) -> dict:
     cc = _site_to_country.get(site_code, "LS")
     key, secret = _country_creds.get(cc, (_GLOBAL_KEY, _GLOBAL_SECRET))
@@ -216,11 +222,14 @@ def _tc_create_customer(
         logger.error("TC customer create failed for %s: %s", account_number, e)
         return CustomerSyncResult(success=False, platform="thundercloud", error=str(e))
 
-    body = r.json()
-    if r.status_code == 201 and body.get("status") == "success":
+    try:
+        body = r.json() if r.content else {}
+    except ValueError:
+        body = {}
+    if r.status_code in (200, 201) and body.get("status") == "success":
         sm_id = body.get("customer_id", "")
         logger.info(
-            "TC customer created: %s -> %s (sm_id=%s, meter=%s)",
+            "TC customer push OK: %s -> %s (sm_id=%s, meter=%s)",
             account_number, name, sm_id, meter_serial,
         )
         return CustomerSyncResult(
@@ -229,11 +238,36 @@ def _tc_create_customer(
 
     error_msg = body.get("error", f"HTTP {r.status_code}")
     logger.warning(
-        "TC customer create failed for %s: %s", account_number, error_msg,
+        "TC customer push failed for %s: %s", account_number, error_msg,
     )
     return CustomerSyncResult(
         success=False, platform="thundercloud", error=error_msg,
     )
+
+
+def sync_thundercloud_customer_name(
+    account_number: str,
+    first_name: Optional[str],
+    last_name: Optional[str],
+    meter_serial: Optional[str] = None,
+) -> CustomerSyncResult:
+    """Push current CC/1PDB name to ThunderCloud (MAK/LAB) using the same POST as create.
+
+    Call after customer name changes so TC matches the portal. No-op for non-TC sites.
+    Requires an active meter serial; otherwise returns skipped=True.
+    """
+    site = _extract_site(account_number)
+    if site not in THUNDERCLOUD_SITES:
+        return CustomerSyncResult(
+            success=True, platform="none", skipped=True,
+            error="Not a ThunderCloud site",
+        )
+    name = " ".join(filter(None, [first_name or "", last_name or ""])).strip()
+    if not name:
+        return CustomerSyncResult(
+            success=False, platform="thundercloud", error="Empty customer name",
+        )
+    return _tc_create_customer(account_number, name, meter_serial)
 
 
 def create_sparkmeter_customer(

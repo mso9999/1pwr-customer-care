@@ -23,6 +23,7 @@ from models import (
 from middleware import can_write_table, get_current_user, require_employee
 from mutations import log_mutation
 from sparkmeter_credit import credit_sparkmeter
+from sparkmeter_customer import is_thundercloud_account, sync_thundercloud_customer_name
 
 logger = logging.getLogger("acdb-api.crud")
 
@@ -33,6 +34,50 @@ CUSTOMER_READABLE_TABLES = {"customers", "accounts"}
 
 SOFT_DELETE_TABLES = {"customers"}
 COLD_STORAGE_DAYS = 30
+
+
+def _primary_meter_for_account(cursor, account_number: str) -> Optional[str]:
+    cursor.execute(
+        """
+        SELECT meter_id FROM meters
+        WHERE account_number = %s AND (status = 'active' OR status IS NULL)
+        ORDER BY CASE WHEN role = 'primary' THEN 0 ELSE 1 END,
+                 customer_connect_date DESC NULLS LAST
+        LIMIT 1
+        """,
+        (account_number,),
+    )
+    row = cursor.fetchone()
+    return row[0] if row else None
+
+
+def _push_thundercloud_customer_names(cursor, new_values: dict) -> list:
+    """Push 1PDB customer name to ThunderCloud for each MAK/LAB account on this customer."""
+    cid = new_values.get("id")
+    if cid is None:
+        return []
+    fn = new_values.get("first_name")
+    ln = new_values.get("last_name")
+    cursor.execute(
+        "SELECT account_number FROM accounts WHERE customer_id = %s",
+        (cid,),
+    )
+    out = []
+    for (acct,) in cursor.fetchall():
+        if not is_thundercloud_account(acct):
+            continue
+        meter = _primary_meter_for_account(cursor, acct)
+        r = sync_thundercloud_customer_name(acct, fn, ln, meter)
+        out.append(
+            {
+                "account_number": acct,
+                "success": r.success,
+                "skipped": r.skipped,
+                "error": r.error,
+                "platform": r.platform,
+            }
+        )
+    return out
 
 
 def _get_connection():
@@ -881,6 +926,8 @@ def update_record(
         if not coerced:
             raise HTTPException(status_code=400, detail="No valid fields after type coercion")
 
+        name_fields_updated = bool({"first_name", "last_name"} & set(coerced.keys()))
+
         set_parts = [f"{col} = %s" for col in coerced.keys()]
         values = list(coerced.values()) + [record_id]
 
@@ -909,7 +956,18 @@ def update_record(
             conn.rollback()
             raise HTTPException(status_code=400, detail=f"Update failed: {e}")
 
-        return {"message": "Record updated", "table": table_name, "id": record_id}
+        sm_tc = None
+        if table_name == "customers" and name_fields_updated:
+            try:
+                sm_tc = _push_thundercloud_customer_names(cursor, new_values)
+            except Exception as e:
+                logger.warning("ThunderCloud customer name push failed: %s", e)
+                sm_tc = [{"error": str(e)}]
+
+        result: dict = {"message": "Record updated", "table": table_name, "id": record_id}
+        if sm_tc:
+            result["thundercloud_sync"] = sm_tc
+        return result
 
 
 # ---------------------------------------------------------------------------
