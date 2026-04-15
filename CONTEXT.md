@@ -223,6 +223,12 @@ Three 1Meter prototypes are installed at MAK in series with SparkMeters for vali
 - 23022667 — repeater/gateway node at powerhouse (NOT a customer meter, not in meters table)
 - 23022613 — real meter, customer TBD (pending team confirmation)
 
+**Field operations log (MAK):** Dated team reports (Wi‑Fi, PCB, firmware, OTA) are in
+[`docs/1meter-field-notes.md`](docs/1meter-field-notes.md). **Latest (2026-04-14):** all
+meters reported **up**; **firmware updated on all**; OTA completes **263/263** blocks but
+devices **loop** (restart and re-download from block 1 — investigation **deferred**); more
+meters planned **between the next day and end of week** (per team).
+
 New meters are registered with one `INSERT INTO meters` row — the ingest API resolves
 meters dynamically from the DB (no hardcoded dicts).
 
@@ -451,6 +457,7 @@ single source of truth behind the CC API.
 | In-app **Help** (`/help`) | User guide: bilingual EN/FR body copy in `frontend/src/pages/helpSections.tsx`; UI chrome in `i18n/*/help.json`. Use **FR** toggle for full translation. |
 | `SESSION_LOG.md` | AI session handoffs (read recent entries) |
 | `docs/1meter-ota-runbook.md` | 1Meter: build/publish/OTA scripts (`scripts/1meter/`), AWS resource IDs, anti-rollback |
+| `docs/1meter-field-notes.md` | MAK 1Meter prototype: dated field-team reports |
 
 ---
 

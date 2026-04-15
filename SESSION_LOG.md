@@ -3,6 +3,18 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-14 202604141200 (1Meter field update — fleet up, OTA loop deferred)
+
+### What Was Done
+- Added **`docs/1meter-field-notes.md`** on branch (file was missing here; had only existed on unmerged field-notes work): includes **2026-04-14** team update — all meters **up**, **FW on all**, OTA **263/263** then **restart/repeat from block 1** (loop; **deferred** investigation), **more meters tomorrow–Friday**; retained **2026-04-13** Wi‑Fi/PCB notes for continuity.
+- Updated **`CONTEXT.md`** (Prototype 1Meters summary + Related Documentation link).
+
+### What Next Session Should Know
+- OTA **loop** is an **open** firmware/cloud issue when someone picks it up; cross-check AWS IoT job status vs device logs.
+- New meters later in the week: ensure **`INSERT INTO meters`** + ingest mapping as in `CONTEXT.md`.
+
+---
+
 ## Session 2026-04-13 202604131400 (Restore 1Meter OTA tooling)
 
 ### What Was Done
