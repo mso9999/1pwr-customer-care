@@ -5,7 +5,7 @@ Provides:
   - POST  /api/meters/reading                — prototype meter readings (from ingestion_gate Lambda)
   - GET   /api/meters/account/{account}      — list meters + roles for an account
   - PATCH /api/meters/{meter_id}/role        — change meter role (primary/check/backup)
-  - POST  /api/sms/incoming                  — mirrored SMS (LS: M-Pesa; BN: MoMo when COUNTRY_CODE=BN)
+  - POST  /api/sms/incoming                  — mirrored SMS (LS: M-Pesa + EcoCash → 1PDB then Koios; BN: MoMo when COUNTRY_CODE=BN)
   - POST  /api/bn/sms/incoming               — same handler (public URL for Benin gateway behind /api/bn)
 
 Meter roles:
@@ -38,7 +38,7 @@ from country_config import COUNTRY, KOIOS_SITES, UTC_OFFSET_HOURS
 from cc_bridge_notify import notify_cc_bridge
 from customer_api import get_connection
 from momo_bj import parse_momo_bn_sms, resolve_bn_momo_account
-from mpesa_sms import mpesa_receipt_in_use, parse_mpesa_sms, resolve_sms_account
+from mpesa_sms import mpesa_receipt_in_use, parse_ls_sms_payment, resolve_sms_account
 from sparkmeter_credit import credit_sparkmeter
 
 logger = logging.getLogger("cc-api.ingest")
@@ -432,7 +432,7 @@ def update_meter_role(meter_id: str, body: MeterRoleUpdate):
 # ---------------------------------------------------------------------------
 # Flow: SMS gateway → sms.1pwrafrica.com may mirror JSON to this endpoint.
 # Account: Remark field (customer account) first; phone lookup as fallback.
-# See mpesa_sms.parse_mpesa_sms / resolve_sms_account.
+# See mpesa_sms.parse_ls_sms_payment (M-Pesa + EcoCash) / resolve_sms_account.
 # Format: {"messages": [{"id","from","content","sms_sent",...}]}
 
 
@@ -443,6 +443,7 @@ def _notify_sms_phone_fallback(
     remark: str,
     mpesa_receipt: str,
     reason: str,
+    payment_provider: str = "mpesa",
 ) -> None:
     """WhatsApp Customer Care — only when phone lookup was used (country-specific bridge)."""
     sym = COUNTRY.currency_symbol
@@ -453,6 +454,13 @@ def _notify_sms_phone_fallback(
         )
         pay_line = f"Amount: {amount:,.0f} {sym} ({COUNTRY.currency})\n"
         ref_line = f"MoMo / payment ref: {mpesa_receipt or '?'}\n"
+    elif (payment_provider or "").lower() == "ecocash":
+        header = (
+            "EcoCash SMS: account was resolved by PHONE "
+            "(not a valid Remark account in 1PDB).\n"
+        )
+        pay_line = f"Amount: {sym}{amount:.2f}\n"
+        ref_line = f"EcoCash / payment ref: {mpesa_receipt or '?'}\n"
     else:
         header = (
             "M-Pesa SMS: account was resolved by PHONE "
@@ -507,11 +515,11 @@ def _sms_ingest_credit_sm(
         )
 
 
-def _parse_gateway_payment(content: str):
-    """M-Pesa (LS) or MTN MoMo (BN) depending on COUNTRY_CODE."""
+def _parse_gateway_payment(content: str, sender: str = ""):
+    """M-Pesa + EcoCash (LS) or MTN MoMo (BN) depending on COUNTRY_CODE."""
     if COUNTRY.code == "BN":
         return parse_momo_bn_sms(content)
-    return parse_mpesa_sms(content)
+    return parse_ls_sms_payment(content, sender)
 
 
 def _resolve_gateway_account(conn, content: str, parsed: dict) -> tuple:
@@ -529,12 +537,12 @@ def _default_tariff_fallback() -> float:
 async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
     """Receive mirrored SMS JSON from the national SMS gateway (PHP mirror).
 
-    **Lesotho** (``COUNTRY_CODE=LS``): M-Pesa templates via ``mpesa_sms``.
+    **Lesotho** (``COUNTRY_CODE=LS``): ``mpesa_sms.parse_ls_sms_payment`` (M-Pesa and EcoCash / short code 199).
     **Benin** (``COUNTRY_CODE=BN``): MTN MoMo templates via ``momo_bj`` (same JSON shape).
 
-    Records payments in 1PDB, then (unless ``SMS_INGEST_PUSH_SPARKMETER=0``) credits
-    SparkMeter/Koios. ``/api/bn/sms/incoming`` is an alias for operators routing
-    ``smsbn.1pwrafrica.com`` behind ``/api/bn``.
+    **Flow (unchanged for EcoCash):** insert payment into **1PDB** first; only then (unless
+    ``SMS_INGEST_PUSH_SPARKMETER=0``) background ``credit_sparkmeter`` — no direct Koios/PHP-only path.
+    ``/api/bn/sms/incoming`` is an alias for operators routing ``smsbn.1pwrafrica.com`` behind ``/api/bn``.
     """
     raw_body = await request.body()
 
@@ -556,7 +564,7 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
 
         logger.info("SMS from=%s id=%s content=%.60s…", sender, msg_id, content)
 
-        parsed = _parse_gateway_payment(content)
+        parsed = _parse_gateway_payment(content, sender)
         if not parsed:
             continue
 
@@ -681,8 +689,10 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
                         phone, reference, receipt_key,
                     )
                 else:
+                    prov = (parsed.get("provider") or "mpesa").lower()
                     logger.info(
-                        "SMS payment: txn=%d acct=%s alloc=%s M%.2f from %s ref=%s mpesa=%s",
+                        "SMS payment (%s): txn=%d acct=%s alloc=%s M%.2f from %s ref=%s receipt=%s",
+                        prov,
                         txn_db_id, account, allocation, amount, phone, reference,
                         receipt_key,
                     )
@@ -696,6 +706,7 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
                         remark_stored or "",
                         receipt_key,
                         fb_reason,
+                        (parsed.get("provider") or "mpesa"),
                     )
 
                 if SMS_INGEST_PUSH_SPARKMETER and amount > 0:

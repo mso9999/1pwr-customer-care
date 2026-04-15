@@ -16,3 +16,6 @@ firebase-service-account.json
 .secrets/**
 !.secrets/README.md
 EOver.pem
+
+# Pandoc-generated Word exports (open locally; do not commit)
+docs/ops/*.docx

@@ -46,7 +46,7 @@ from mpesa_sms import (  # noqa: E402
     account_exists,
     candidate_accounts_from_text,
     extract_remark_text,
-    parse_mpesa_sms,
+    parse_ls_sms_payment,
 )
 
 # Matches ingest.py: logger.info("SMS from=%s id=%s content=%.60s…", ...)
@@ -55,8 +55,8 @@ SMS_LINE_RE = re.compile(
 )
 
 PAYMENT_LINE_RE = re.compile(
-    r"SMS payment:\s+txn=(?P<txn>\d+)\s+acct=(?P<acct>\S+)\s+alloc=(?P<alloc>\S+)\s+"
-    r"M(?P<amt>[\d.]+)\s+from\s+(?P<phone>\S+)\s+ref=(?P<ref>\S+)\s+mpesa=(?P<mpesa>\S*)\s*$"
+    r"SMS payment(?:\s+\([^)]+\))?:\s+txn=(?P<txn>\d+)\s+acct=(?P<acct>\S+)\s+alloc=(?P<alloc>\S+)\s+"
+    r"M(?P<amt>[\d.]+)\s+from\s+(?P<phone>\S+)\s+ref=(?P<ref>\S+)\s+(?:mpesa|receipt)=(?P<mpesa>\S*)\s*$"
 )
 
 
@@ -88,7 +88,7 @@ def _match_sms_to_payment(
         body = row["body"]
         if mpesa_key in body:
             return row
-        p = parse_mpesa_sms(body)
+        p = parse_ls_sms_payment(body, row.get("from", ""))
         if p and (p.get("txn_id") or "").strip() == mpesa_key:
             return row
     return None
@@ -155,7 +155,7 @@ def process_log_text(
         body = sms["body"]
         truncated = bool(sms.get("truncated"))
 
-        parsed = parse_mpesa_sms(body) or {}
+        parsed = parse_ls_sms_payment(body, sms.get("from", "")) or {}
         if conn:
             intended = _intended_from_remark_db(conn, body, parsed)
         else:

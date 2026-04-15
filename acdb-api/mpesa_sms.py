@@ -1,5 +1,8 @@
 """
-Lesotho M-Pesa SMS parsing and account resolution (Remark-first, phone fallback).
+Lesotho M-Pesa and EcoCash SMS parsing and account resolution (Remark-first, phone fallback).
+
+EcoCash (Econet / short code 199, including MAT and other Koios sites) often does not match
+M-Pesa regexes; ``parse_ls_sms_payment`` tries M-Pesa first, then EcoCash-specific patterns.
 
 Used by ingest.sms_incoming and by ops reconciliation scripts.
 """
@@ -28,6 +31,27 @@ MPESA_LOOSE = re.compile(
 
 MPESA_FALLBACK = re.compile(
     r"M(?P<amount>\d+(?:\.\d{1,2})?)\s+received\s+from\s+(?P<phone>\d{8,15})",
+    re.IGNORECASE,
+)
+
+# --- Lesotho EcoCash (MAT site and others): parallel to PHP read_payment_file.php (sender 199) ---
+# Templates vary; short code 199 is the usual gateway sender. Amounts are often Maloti as M#.#.
+_ECOCASH_BRAND_M = re.compile(
+    r"(?is)EcoCash.*?M(?P<amount>\d+(?:\.\d{1,2})?)\s+received\s+from\s+"
+    r"(?P<phone>\+?266\d{8,10}|\d{10,15})",
+)
+_ECOCASH_BRAND_M2 = re.compile(
+    r"(?is)M(?P<amount>\d+(?:\.\d{1,2})?)\s+received\s+from\s+"
+    r"(?P<phone>\+?266\d{8,10}|\d{10,15}).*?EcoCash",
+)
+# No "Confirmed." line (differs from typical M-Pesa) but still has M-line + phone
+_ECOCASH_MLINE_ONLY = re.compile(
+    r"(?is)^(?P<txn_id>[\w-]{4,36})\s+.*?M(?P<amount>\d+(?:\.\d{1,2})?)\s+received\s+from\s+"
+    r"(?P<phone>\+?266\d{8,10}|\d{10,15})",
+)
+# Reference / transaction id for dedupe (same helpers as M-Pesa)
+_EXT_TXN_ID = re.compile(
+    r"(?:Reference|Transaction\s*ID|Txn\s*ID|Ref\.?)\s*[:#]?\s*([A-Za-z0-9\-]{4,36})",
     re.IGNORECASE,
 )
 
@@ -106,6 +130,102 @@ def parse_mpesa_sms(content: str) -> Optional[dict[str, Any]]:
         }
 
     return None
+
+
+def _ecocash_hint(content: str, sender: str) -> bool:
+    """True if SMS is likely Lesotho EcoCash (body or short code 199)."""
+    if not (content or "").strip():
+        return False
+    if "ecocash" in content.lower():
+        return True
+    s = (sender or "").strip()
+    if not s:
+        return False
+    if s == "199":
+        return True
+    digits = "".join(c for c in s if c.isdigit())
+    return digits.endswith("199") or digits == "199"
+
+
+def _ecocash_build_dict(
+    amount: float,
+    phone: str,
+    content: str,
+    txn_id: str = "",
+) -> dict[str, Any]:
+    ref_match = REF_PATTERN.search(content)
+    ext_match = _EXT_TXN_ID.search(content)
+    remark = extract_remark_text(content)
+    ref = ref_match.group(1) if ref_match else ""
+    tid = (txn_id or "").strip()
+    if not tid and ext_match:
+        tid = ext_match.group(1).strip()
+    if not tid:
+        tid = ref
+    return {
+        "txn_id": tid,
+        "amount": amount,
+        "phone": phone.lstrip("+"),
+        "reference": ref,
+        "remark_raw": remark,
+        "provider": "ecocash",
+    }
+
+
+def parse_ecocash_ls_sms(content: str, sender: str = "") -> Optional[dict[str, Any]]:
+    """Parse Lesotho EcoCash payment SMS (parallel to PHP CSV sender ``199``).
+
+    Called only when :func:`parse_mpesa_sms` returns None — templates differ from M-Pesa.
+    """
+    if not _ecocash_hint(content, sender):
+        return None
+
+    for rx in (_ECOCASH_BRAND_M, _ECOCASH_BRAND_M2):
+        m = rx.search(content)
+        if m:
+            return _ecocash_build_dict(
+                float(m.group("amount")),
+                m.group("phone"),
+                content,
+            )
+
+    m = _ECOCASH_MLINE_ONLY.search(content)
+    if m:
+        return _ecocash_build_dict(
+            float(m.group("amount")),
+            m.group("phone"),
+            content,
+            txn_id=m.group("txn_id"),
+        )
+
+    # Short code 199: same M…received line as M-Pesa fallback but SMS may not match mpesa
+    # (e.g. missing "Confirmed." so MPESA_LOOSE fails).
+    if _ecocash_hint(content, sender):
+        m = MPESA_FALLBACK.search(content)
+        if m:
+            return _ecocash_build_dict(
+                float(m.group("amount")),
+                m.group("phone"),
+                content,
+            )
+
+    return None
+
+
+def parse_ls_sms_payment(content: str, sender: str = "") -> Optional[dict[str, Any]]:
+    """Lesotho gateway: M-Pesa first, then EcoCash.
+
+    EcoCash confirmations often share the same ``Confirmed`` / ``M…received`` shape as M-Pesa;
+    if the body or sender (short code 199) indicates EcoCash, mark ``provider`` accordingly.
+    """
+    p = parse_mpesa_sms(content)
+    if p:
+        if _ecocash_hint(content, sender):
+            out = dict(p)
+            out["provider"] = "ecocash"
+            return out
+        return p
+    return parse_ecocash_ls_sms(content, sender)
 
 
 def account_exists(conn, account_number: str) -> bool:
