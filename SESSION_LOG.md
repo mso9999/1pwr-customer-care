@@ -3,6 +3,17 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-14 202604141200 (MAK/CC name mismatch RCA + UI fix)
+
+### What Was Done
+- **RCA:** `CustomerDetailPage` loaded CRUD via `getRecord('customers', customer_id_legacy)` after by-account lookup; CRUD resolves numeric IDs on **`customers.id`**, so when `customer_id_legacy` equals **another** row’s `id`, the UI showed the **wrong person** (not a Koios vs CC issue for that path).
+- **Fix:** `customer_api` `_normalize_customer` exposes **`pg_customer_id`**; detail page uses it for `getRecord` when opening by account number.
+- **MAK vs external systems:** Repo already documents **1PDB vs ThunderCloud** drift (`scripts/ops/rca_mak_drift.py`, `fix_mak_drift.py`). MAK is **ThunderCloud**, not Koios — compare names to TC for MAK.
+- **PR:** https://github.com/mso9999/1pwr-customer-care/pull/8 — `SWAPPED MAK CUSTOMERS.xlsx` not present in workspace (no `.xlsx` in repo).
+
+### What Next Session Should Know
+- Add the spreadsheet to the repo or paste sample rows if automated reconcile is needed.
+
 ## Session 2026-04-14 202604141100 (Deploy: 010+ migrations as postgres)
 
 ### What Was Done

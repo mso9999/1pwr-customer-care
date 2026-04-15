@@ -2,6 +2,8 @@
 """
 Fix MAK customer-account mapping drift between 1PDB and ThunderCloud.
 
+Team spreadsheet (human Mac): see docs/ops/mak-swapped-customers.md
+
 ThunderCloud (SparkMeter) is the metering authority for MAK.
 This script:
 1. Identifies name mismatches (different person on same account code)

@@ -295,11 +295,16 @@ export default function CustomerDetailPage() {
           setAccountNumbers(accts);
           if (!accts.includes(urlParam.toUpperCase())) accts.push(urlParam.toUpperCase());
 
-          const legacyId = String(cust.customer_id_legacy || '');
-          if (legacyId) {
-            return getRecord('customers', legacyId).then(({ record: r }) => {
+          // CRUD get-by-id uses customers.id when the path param is numeric.
+          // customer_id_legacy can equal another row's id — use canonical pg id.
+          const crudId =
+            cust.pg_customer_id != null && cust.pg_customer_id !== ''
+              ? String(cust.pg_customer_id)
+              : String(cust.customer_id_legacy || '');
+          if (crudId) {
+            return getRecord('customers', crudId).then(({ record: r }) => {
               setRecord(r);
-              setPgId(String(r['id'] ?? legacyId));
+              setPgId(String(r['id'] ?? crudId));
               const fd: Record<string, string> = {};
               for (const [k, v] of Object.entries(r)) fd[k] = v != null ? String(v) : '';
               setFormData(fd);
