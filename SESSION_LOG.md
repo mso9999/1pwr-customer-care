@@ -3,6 +3,17 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-15 202604151600 (OneMeter13 OTA log — RCA in field notes)
+
+### What Was Done
+- **`docs/1meter-field-notes.md`:** Added **2026-04-15** analysis of team-supplied serial log for **`OneMeter13` / `23022673`**: OTA reaches **signature OK** and **activate image**, then **Wi‑Fi disconnect (reason 8)**, **MQTT failure**, **`RTC_SW_CPU_RST`** — hypothesis that **IoT job does not reach SUCCEEDED** so device **re-pulls stream from block 1**; noted post-boot **checksum** warning and **Mesh `ap record is NULL`**. **No Wi‑Fi secrets** stored in repo.
+- **`CONTEXT.md`:** One-line pointer updated under Prototype 1Meters.
+
+### What Next Session Should Know
+- Ops follow-up is **AWS IoT job status** + **firmware/Mesh stability** during activation, not CC portal code.
+
+---
+
 ## Session 2026-04-14 202604141200 (1Meter field update — fleet up, OTA loop deferred)
 
 ### What Was Done

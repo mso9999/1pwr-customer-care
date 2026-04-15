@@ -224,10 +224,11 @@ Three 1Meter prototypes are installed at MAK in series with SparkMeters for vali
 - 23022613 — real meter, customer TBD (pending team confirmation)
 
 **Field operations log (MAK):** Dated team reports (Wi‑Fi, PCB, firmware, OTA) are in
-[`docs/1meter-field-notes.md`](docs/1meter-field-notes.md). **Latest (2026-04-14):** all
-meters reported **up**; **firmware updated on all**; OTA completes **263/263** blocks but
-devices **loop** (restart and re-download from block 1 — investigation **deferred**); more
-meters planned **between the next day and end of week** (per team).
+[`docs/1meter-field-notes.md`](docs/1meter-field-notes.md). **Latest:** **2026-04-15** serial
+log on **`OneMeter13` / 23022673** — OTA **signature OK** then **Wi‑Fi/MQTT loss** and
+**`RTC_SW_CPU_RST`** during activation; likely **cloud job never completes** so **re-download
+from block 1** repeats (see doc for RCA). **2026-04-14:** all meters **up**, FW rollout,
+loop issue deferred, expansion planned.
 
 New meters are registered with one `INSERT INTO meters` row — the ingest API resolves
 meters dynamically from the DB (no hardcoded dicts).
