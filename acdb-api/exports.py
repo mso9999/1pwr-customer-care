@@ -40,7 +40,13 @@ def export_customers_with_accounts(
     search: Optional[str] = Query(None),
     user: CurrentUser = Depends(require_employee),
 ):
-    """Export customers with their account numbers for field distribution."""
+    """Export customers with their account numbers for field distribution.
+
+    Includes commissioning fields. **customer_commissioned** is the DB flag set by
+    the commission wizard; **portal_service_active** matches Customer Detail
+    (connected date set, not terminated). After migration 011, the boolean is
+    backfilled when service was connected but the flag was never set.
+    """
     with _get_connection() as conn:
         cursor = conn.cursor()
         clauses = []
@@ -69,7 +75,11 @@ def export_customers_with_accounts(
             "SELECT a.account_number, m.meter_id AS meter_serial, "
             "c.first_name, c.last_name, c.cell_phone_1, "
             "c.community, c.district, c.customer_type, c.plot_number, "
-            "c.national_id "
+            "c.national_id, "
+            "c.date_service_connected, c.date_service_terminated, "
+            "c.customer_commissioned, "
+            "(c.date_service_connected IS NOT NULL AND c.date_service_terminated IS NULL) "
+            "AS portal_service_active "
             "FROM customers c "
             "LEFT JOIN accounts a ON a.customer_id = c.id "
             "LEFT JOIN meters m ON m.account_number = a.account_number "
@@ -83,6 +93,8 @@ def export_customers_with_accounts(
             "account_number", "meter_serial", "first_name", "last_name",
             "phone", "site", "district", "customer_type", "plot_number",
             "national_id",
+            "date_service_connected", "date_service_terminated",
+            "customer_commissioned", "portal_service_active",
         ]
         rows = cursor.fetchall()
 
