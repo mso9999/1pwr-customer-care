@@ -3,6 +3,18 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-15 202604151200 (MAK drift RCA + TC name fix)
+
+### What Was Done
+- Confirmed `origin` = `mso9999/1pwr-customer-care`; verified `docs/ops/SWAPPED MAK CUSTOMERS.xlsx` exists (58 rows). `docs/ops/agent-handoff-1pwr-cc-repo.md` was not in repo — RCA followed `CONTEXT.md` + ops scripts instead.
+- AWS CLI: CC host `i-04291e12e64de36d7` (`af-south-1`) → public IP used for SSH. Ran `rca_mak_drift.py` and `fix_mak_drift.py` on host as `cc_api` with `/opt/cc-portal/backend/venv/bin/python3` (scripts in `/tmp/`).
+- **RCA:** Data drift (1PDB vs ThunderCloud for MAK), not UI-only or wrong comparison. Applied one `customers` row update: **0298MAK** → Mapopela Nhlapho (TC). Post-fix: **0** token mismatches.
+- Added **`docs/ops/rca-mak-drift-2026-04-15.md`** (workbook already on `main`).
+
+### What Next Session Should Know
+- Re-copy `scripts/ops/rca_mak_drift.py` / `fix_mak_drift.py` to the server or add them under `/opt/cc-portal/backend/` if repeated runs are needed.
+- 18 MAK accounts still in 1PDB only vs TC export; `0500MAK` in TC only — separate from name-alignment.
+
 ## Session 2026-04-14 202604141100 (Deploy: 010+ migrations as postgres)
 
 ### What Was Done
