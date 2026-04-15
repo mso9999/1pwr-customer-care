@@ -88,14 +88,13 @@ So: **operational truth** = treat the workbook as a **human audit list**; **auto
 
 ## How to solve it (recommended program)
 
-### A. Decide authority (policy, not only tech)
+### A. Authority (policy)
 
-| If the business decides… | Then… |
-|--------------------------|--------|
-| **ThunderCloud name is authoritative for field / metering** | Keep **aligning 1PDB → TC** for display and care workflows (`fix_mak_drift.py` direction). CRM edits in CC should trigger a **manual** TC update (or future API if SparkMeter adds one). |
-| **1PDB / CC is authoritative for legal / CRM name** | **Manually update ThunderCloud** to match CC (same API gap — usually **SparkMeter UI** or vendor process). Do **not** only change 1PDB and assume TC will follow. |
+**Decision (2026-04): ThunderCloud is authoritative** for MAK/LAB customer **display identity** (name on the metering system / field tools). When 1PDB disagrees, **align 1PDB to ThunderCloud** using `fix_mak_drift.py` (after dry run) or a manual `UPDATE` sourced from TC.
 
-Until TC exposes name updates via API, **both** sides require **explicit** coordination when names change.
+If legal/CRM name in CC must differ from TC, record it elsewhere (notes, external register) or **change ThunderCloud first** via SparkMeter UI, then sync 1PDB to match — do not leave CC and TC divergent for routine operations.
+
+Until TC exposes name updates via API, **editing only CC** does not update TC; ops should either edit TC to match policy or pull TC → 1PDB after TC is corrected.
 
 ### B. Immediate (clean existing drift)
 
@@ -117,8 +116,8 @@ Until TC exposes name updates via API, **both** sides require **explicit** coord
 
 ### E. What not to do
 
-- Do not assume **only** fixing 1PDB fixes what technicians see on **ThunderCloud**-backed UIs — **TC may stay stale** until manually updated or an API exists.
-- Do not relax the token matcher in `fix_mak_drift.py` blindly for auto-apply; use **report-only** fuzzy output first to avoid overwriting correct CRM names with bad TC data.
+- Do not assume **editing CC alone** updates ThunderCloud — **TC does not receive name pushes** after creation. With **TC authoritative**, pull **TC → 1PDB** (or edit TC in SparkMeter UI, then align 1PDB).
+- Do not relax the token matcher in `fix_mak_drift.py` blindly for auto-apply; use **report-only** fuzzy output first if you ever doubt TC data quality for a code.
 
 ## What we ran (CC production host)
 

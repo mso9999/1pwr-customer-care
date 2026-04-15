@@ -268,7 +268,7 @@ in `onepowerLS/onepwr-aws-mesh`. Do not expect MQTT / TLS / OTA code to live in 
 | ThunderCloud v0 live | SparkMeter on-prem | MAK | `import_tc_live.py` (cumulative register diffs, non-lossy, 15-min intervals) |
 | ThunderCloud web API | SparkMeter on-prem | MAK | `import_tc_transactions.py` (live transactions) |
 | IoT / ingestion_gate | 1Meter prototype | MAK (3 meters) | Real-time Lambda → POST /api/meters/reading |
-| SMS Gateway (LS) | M-PESA payments | All LS sites | sms.1pwrafrica.com mirrors to `POST /api/sms/incoming` (`ingest.py`) — **Remark-first** account resolution (`mpesa_sms.resolve_sms_account`), **phone lookup fallback**; WhatsApp alert on phone fallback via `CC_BRIDGE_NOTIFY_URL` / `CC_BRIDGE_SECRET` (Benin: `CC_BRIDGE_*_BN` when `COUNTRY_CODE=BN`). Writes **1PDB** (incl. `sms_payer_phone`, `sms_remark_raw`, `sms_allocation`, `payment_reference`) and **pushes credit** via `credit_sparkmeter` unless `SMS_INGEST_PUSH_SPARKMETER=0`. Historical log reconciliation: `scripts/ops/reconcile_sms_misroutes_from_logs.py` (partial if SMS text in logs is truncated). |
+| SMS Gateway (LS) | M-PESA + **EcoCash** (e.g. MAT site; short code **199**) | All LS sites | sms.1pwrafrica.com mirrors to `POST /api/sms/incoming` (`ingest.py`) — **`mpesa_sms.parse_ls_sms_payment`** (M-Pesa regexes, then EcoCash patterns / sender hint) + **Remark-first** resolution (`resolve_sms_account`), **phone lookup fallback**; WhatsApp alert on phone fallback via `CC_BRIDGE_NOTIFY_URL` / `CC_BRIDGE_SECRET` (Benin: `CC_BRIDGE_*_BN` when `COUNTRY_CODE=BN`). Writes **1PDB** (incl. `sms_payer_phone`, `sms_remark_raw`, `sms_allocation`, `payment_reference`) and **pushes credit** via `credit_sparkmeter` unless `SMS_INGEST_PUSH_SPARKMETER=0`. PHP `read_payment_file.php` still tags EcoCash files with sender `199` — CC path uses SMS **content** + `from`. Historical log reconciliation: `scripts/ops/reconcile_sms_misroutes_from_logs.py` (partial if SMS text in logs is truncated). |
 | SMS Gateway (BN) | MTN MoMo payments | All BN sites | smsbn.1pwrafrica.com mirrors JSON to **`POST /api/bn/sms/incoming`** (same payload as LS). **Benin API** (`COUNTRY_CODE=BN`, port 8101): `momo_bj.parse_momo_bn_sms` + `resolve_bn_momo_account` (Motif/account text first, then phone **229** lookup). 1PDB + SparkMeter + WhatsApp fallback as in `ingest.py`. Koios consumption sync uses **`country_config`** sites/keys for BN. |
 
 **Lesotho duplicate-credit guard (SMSComms repo):** `receive.php` mirrors JSON to CC **and** legacy PHP wrote payment files consumed by `sparkmeter/new_file_watcher.php`, which posted to **ThunderCloud** — a second SparkMeter credit alongside CC. `$LEGACY_FILE_WATCHER_CREDIT_ENABLED = false` in `sparkmeter/env.php` disables that payment-file crediting path; CC mirror remains the sole automatic creditor. **Deploy:** LS and BN are **two separate** cPanel targets; production is often **manual** (archive old PHP first). See `docs/ops/sms-gateway-cpanel-deploy.md`.
@@ -336,7 +336,11 @@ Benin runs two sites: **GBO** (Gbowélé) and **SAM** (Samondji), both using Spa
 
 ### CC → SparkMeter Customer Sync (`sparkmeter_customer.py`)
 
-1PDB is the authority for customer creation. When a customer is registered in CC
+**Registration flow:** CC creates the customer in **1PDB first**, then `sparkmeter_customer.py` **pushes** that snapshot to SparkMeter (create-only APIs).
+
+**Identity authority when names disagree:** For **MAK** and **LAB** (ThunderCloud on-prem), **ThunderCloud is authoritative** for the customer name shown on meters and in SparkMeter tooling. If 1PDB and ThunderCloud diverge, **align 1PDB to ThunderCloud** (e.g. `scripts/ops/fix_mak_drift.py` on the CC host, or manual `UPDATE` after checking TC). Other Lesotho sites use Koios; resolve drift under the same “metering platform wins for field-facing identity” principle unless ops agrees otherwise.
+
+When a customer is registered in CC
 (single or bulk import), `sparkmeter_customer.py` pushes the customer to SparkMeter:
 
 | Platform | Sites | Endpoint | Required | Notes |
@@ -348,7 +352,7 @@ Benin runs two sites: **GBO** (Gbowélé) and **SAM** (Samondji), both using Spa
   - **LS**: Uses the read key (`KOIOS_API_KEY` / `KOIOS_API_SECRET`), which has customer creation access.
   - **BN**: Uses dedicated manage key (`KOIOS_MANAGE_API_KEY_BN` / `KOIOS_MANAGE_API_SECRET_BN`).
 - **ThunderCloud**: If no meter serial at registration time, sync is deferred until meter assignment.
-- **Name updates**: Neither platform supports customer name updates via API. Name drift must be corrected manually or via the audit/fix scripts in `scripts/ops/`.
+- **Name updates**: Neither platform supports customer name updates via API. For MAK/LAB, **reconcile 1PDB toward ThunderCloud** when drift is found (`fix_mak_drift.py` or ops process). Until a TC name-update API exists, correcting TC alone still requires SparkMeter UI / vendor; if only CC was edited, **pull TC name into 1PDB** to match policy.
 - **Service area IDs**:
   - LS: Most sites share `e3015e87-...`; MAS uses `e6efc982-...`.
   - BN: GBO = `de00dfbf-...`; SAM = `43a81ea8-...`.

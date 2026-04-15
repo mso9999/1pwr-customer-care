@@ -13,6 +13,10 @@ Constraints:
   - ThunderCloud requires a physical meter serial at creation time.
   - Neither platform supports customer name updates via API.
 
+Authority note (MAK/LAB / ThunderCloud): CC creates rows first, then pushes a name
+snapshot to TC. If 1PDB and TC later disagree on name, **ThunderCloud is authoritative**
+for field/meter identity — align 1PDB to TC (see CONTEXT.md, scripts/ops/fix_mak_drift.py).
+
 Multi-country support:
   Each country uses its own Koios API key pair with customer management permissions.
   Credentials resolved: KOIOS_MANAGE_API_KEY_{CC} → KOIOS_API_KEY_{CC} → KOIOS_API_KEY.
