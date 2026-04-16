@@ -60,6 +60,13 @@ class TestCandidateAccounts(unittest.TestCase):
         self.assertEqual(c, ["0252SHG", "0045MAT"])
 
 
+# Econet wallet (MAT / sender 199): not M-Pesa "M…received from 266…" word order
+SAMPLE_ECOCASH_YOU_HAVE_RECEIVED = (
+    "You have received M25 from Tiisetso Lebotho-62205631 for 0118mat. "
+    "Approval Code: MP260416.0953.A96450. New wallet balance: M64525.0."
+)
+
+
 class TestParseEcoCashLs(unittest.TestCase):
     def test_branded_same_shape_as_mpesa(self):
         p = parse_mpesa_sms(SAMPLE_ECOCASH_MPESA_SHAPED)
@@ -103,6 +110,28 @@ class TestParseEcoCashLs(unittest.TestCase):
         assert p is not None
         self.assertEqual(p["phone"], "26650111222")
         self.assertEqual(p["amount"], 10.5)
+
+    def test_you_have_received_m_from_for_mat(self):
+        """Gateway template: 'You have received M25 from Name-62205631 for 0118mat' (EcoCash / 199)."""
+        self.assertIsNone(parse_mpesa_sms(SAMPLE_ECOCASH_YOU_HAVE_RECEIVED))
+        p = parse_ls_sms_payment(SAMPLE_ECOCASH_YOU_HAVE_RECEIVED, "199")
+        self.assertIsNotNone(p)
+        assert p is not None
+        self.assertEqual(p["provider"], "ecocash")
+        self.assertEqual(p["amount"], 25.0)
+        self.assertEqual(p["phone"], "26662205631")
+        self.assertIn("MP260416", p.get("txn_id") or "")
+
+    def test_you_have_received_multiline(self):
+        body = (
+            "You have received M25\nfrom Tiisetso Lebotho-62205631\nfor 0118mat. Approval Code:\n"
+            "MP260416.0953.A96450. New\nwallet balance: M64525.0."
+        )
+        p = parse_ls_sms_payment(body, "199")
+        self.assertIsNotNone(p)
+        assert p is not None
+        self.assertEqual(p["amount"], 25.0)
+        self.assertEqual(p["provider"], "ecocash")
 
     def test_econet_branding_sets_ecocash_provider(self):
         """Body may say Econet instead of EcoCash; still Lesotho wallet (MAT etc.)."""

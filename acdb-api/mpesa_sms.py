@@ -50,6 +50,13 @@ _ECOCASH_MLINE_ONLY = re.compile(
     r"(?is)^(?P<txn_id>[\w-]{4,36})\s+.*?M(?P<amount>\d+(?:\.\d{1,2})?)\s+received\s+from\s+"
     r"(?P<phone>\+?266\d{8,10}|\d{10,15})",
 )
+# Econet EcoCash (common on MAT): amount BEFORE "received", payer blob, "for NNNNXXX" account — not M-Pesa shape.
+# Example: "You have received M25 from Tiisetso Lebotho-62205631 for 0118mat. Approval Code: MP260416...."
+_ECOCASH_YOU_HAVE_RECEIVED_FOR = re.compile(
+    r"(?is)You have received M(?P<amount>\d+(?:\.\d{1,2})?)\s+from\s+(?P<from_blob>.+?)\s+for\s+"
+    r"(?P<acct>\d{3,4})\s*(?P<site>[A-Za-z]{2,4})",
+)
+_APPROVAL_CODE = re.compile(r"Approval\s*Code:\s*([A-Za-z0-9_.]+)", re.IGNORECASE)
 # Reference / transaction id for dedupe (same helpers as M-Pesa)
 _EXT_TXN_ID = re.compile(
     r"(?:Reference|Transaction\s*ID|Txn\s*ID|Ref\.?)\s*[:#]?\s*([A-Za-z0-9\-]{4,36})",
@@ -157,6 +164,40 @@ def _ecocash_hint(content: str, sender: str) -> bool:
     return digits.endswith("199") or digits == "199"
 
 
+def _parse_ecocash_you_have_received_for(content: str) -> Optional[dict[str, Any]]:
+    """Parse 'You have received M… from … for …0118mat…' (sender 199 / Econet wallet)."""
+    m = _ECOCASH_YOU_HAVE_RECEIVED_FOR.search(content)
+    if not m:
+        return None
+    amount = float(m.group("amount"))
+    from_blob = (m.group("from_blob") or "").strip()
+    # Payer phone: digits after hyphen (Name-62205631) or last 8–12 digit run in blob
+    phone_raw = ""
+    hy = re.search(r"-\s*(\d{6,12})\s*$", from_blob)
+    if hy:
+        phone_raw = hy.group(1)
+    if not phone_raw:
+        runs = re.findall(r"\d{8,12}", from_blob)
+        if runs:
+            phone_raw = runs[-1]
+    if phone_raw and len(phone_raw) == 8:
+        phone_raw = "266" + phone_raw
+    elif phone_raw and len(phone_raw) == 9 and phone_raw.startswith("5"):
+        phone_raw = "266" + phone_raw
+    appr = _APPROVAL_CODE.search(content)
+    if appr:
+        txn_id = appr.group(1).strip()
+    else:
+        ext_match = _EXT_TXN_ID.search(content)
+        txn_id = ext_match.group(1).strip() if ext_match else ""
+    return _ecocash_build_dict(
+        amount,
+        phone_raw,
+        content,
+        txn_id=txn_id,
+    )
+
+
 def _ecocash_build_dict(
     amount: float,
     phone: str,
@@ -187,6 +228,11 @@ def parse_ecocash_ls_sms(content: str, sender: str = "") -> Optional[dict[str, A
 
     Called only when :func:`parse_mpesa_sms` returns None — templates differ from M-Pesa.
     """
+    # Distinct template (no M-Pesa "M…received from 266…" line) — try before ecocash hint.
+    y = _parse_ecocash_you_have_received_for(content)
+    if y:
+        return y
+
     if not _ecocash_hint(content, sender):
         return None
 
