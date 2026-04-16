@@ -92,6 +92,31 @@ class TestParseEcoCashLs(unittest.TestCase):
         self.assertEqual(p2["provider"], "ecocash")
         self.assertEqual(p2["amount"], 25.0)
 
+    def test_mpesa_fallback_spaced_phone_normalizes_digits(self):
+        """EcoCash templates sometimes space the MSISDN; strict \\d{8,15} used to fail."""
+        body = (
+            "EcoCash: M10.50 received from 266 50 111 222. "
+            "Remark: 0100MAT electricity"
+        )
+        p = parse_mpesa_sms(body)
+        self.assertIsNotNone(p)
+        assert p is not None
+        self.assertEqual(p["phone"], "26650111222")
+        self.assertEqual(p["amount"], 10.5)
+
+    def test_econet_branding_sets_ecocash_provider(self):
+        """Body may say Econet instead of EcoCash; still Lesotho wallet (MAT etc.)."""
+        body = (
+            "Econet: M15.00 received from 26650998877. "
+            "Remark: 0200MAT"
+        )
+        p = parse_ls_sms_payment(body, "")
+        self.assertIsNotNone(p)
+        assert p is not None
+        self.assertEqual(p["provider"], "ecocash")
+        self.assertEqual(p["amount"], 15.0)
+        self.assertEqual(p["phone"], "26650998877")
+
 
 class TestParseMpesaSms(unittest.TestCase):
     def test_full_template(self):

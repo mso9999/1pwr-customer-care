@@ -1,7 +1,7 @@
 """
 Lesotho M-Pesa and EcoCash SMS parsing and account resolution (Remark-first, phone fallback).
 
-EcoCash (Econet / short code 199, including MAT and other Koios sites) often does not match
+EcoCash (Econet / short code 199, including MAT/ThunderCloud and Koios-backed sites) often does not match
 M-Pesa regexes; ``parse_ls_sms_payment`` tries M-Pesa first, then EcoCash-specific patterns.
 
 Used by ingest.sms_incoming and by ops reconciliation scripts.
@@ -29,8 +29,9 @@ MPESA_LOOSE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+# Phone group allows spaces / + (EcoCash and operator templates sometimes break \d{8,15}).
 MPESA_FALLBACK = re.compile(
-    r"M(?P<amount>\d+(?:\.\d{1,2})?)\s+received\s+from\s+(?P<phone>\d{8,15})",
+    r"M(?P<amount>\d+(?:\.\d{1,2})?)\s+received\s+from\s+(?P<phone>[\d+\s\u00a0\-]{10,36})",
     re.IGNORECASE,
 )
 
@@ -67,6 +68,11 @@ ACCOUNT_TOKEN_RE = re.compile(
 )
 
 
+def _normalize_ls_payment_phone(raw: str) -> str:
+    """Digits-only for SMS payer phone (handles +266, spaces, NBSP in EcoCash templates)."""
+    return "".join(c for c in (raw or "") if c.isdigit())
+
+
 def extract_remark_text(content: str) -> str:
     """Text after 'Remark:' if present."""
     m = REMARK_PATTERN.search(content or "")
@@ -97,7 +103,7 @@ def parse_mpesa_sms(content: str) -> Optional[dict[str, Any]]:
         return {
             "txn_id": m.group("txn_id"),
             "amount": float(m.group("amount")),
-            "phone": m.group("phone"),
+            "phone": _normalize_ls_payment_phone(m.group("phone")),
             "reference": m.group("ref"),
             "remark_raw": remark,
             "provider": "mpesa",
@@ -110,7 +116,7 @@ def parse_mpesa_sms(content: str) -> Optional[dict[str, Any]]:
         return {
             "txn_id": m.group("txn_id"),
             "amount": float(m.group("amount")),
-            "phone": m.group("phone"),
+            "phone": _normalize_ls_payment_phone(m.group("phone")),
             "reference": ref_match.group(1) if ref_match else "",
             "remark_raw": remark,
             "provider": "mpesa",
@@ -123,7 +129,7 @@ def parse_mpesa_sms(content: str) -> Optional[dict[str, Any]]:
         return {
             "txn_id": "",
             "amount": float(m.group("amount")),
-            "phone": m.group("phone"),
+            "phone": _normalize_ls_payment_phone(m.group("phone")),
             "reference": ref_match.group(1) if ref_match else "",
             "remark_raw": remark,
             "provider": "mpesa",
@@ -136,7 +142,11 @@ def _ecocash_hint(content: str, sender: str) -> bool:
     """True if SMS is likely Lesotho EcoCash (body or short code 199)."""
     if not (content or "").strip():
         return False
-    if "ecocash" in content.lower():
+    low = content.lower()
+    if "ecocash" in low:
+        return True
+    # Operator templates often say "Econet" / wallet without the word "EcoCash".
+    if "econet" in low and re.search(r"266\s*\d{6,12}", content):
         return True
     s = (sender or "").strip()
     if not s:
@@ -165,7 +175,7 @@ def _ecocash_build_dict(
     return {
         "txn_id": tid,
         "amount": amount,
-        "phone": phone.lstrip("+"),
+        "phone": _normalize_ls_payment_phone(phone),
         "reference": ref,
         "remark_raw": remark,
         "provider": "ecocash",

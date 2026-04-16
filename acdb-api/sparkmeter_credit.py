@@ -342,6 +342,9 @@ def credit_sparkmeter(
             error="Amount must be positive",
         )
 
+    # ThunderCloud customer lookup is case-sensitive for some codes; 1PDB may store mixed case.
+    account_number = (account_number or "").strip().upper()
+
     site = _extract_site(account_number)
     if not site:
         return CreditResult(

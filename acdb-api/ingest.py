@@ -496,12 +496,19 @@ def _sms_ingest_credit_sm(
 ) -> None:
     """Background: credit Koios/ThunderCloud after SMS payment is in 1PDB."""
     memo = f"sms_incoming ref={mpesa_receipt or '?'} txn={txn_id}"
-    result = credit_sparkmeter(
-        account_number=account_number,
-        amount=amount,
-        memo=memo,
-        external_id=str(txn_id),
-    )
+    try:
+        result = credit_sparkmeter(
+            account_number=account_number,
+            amount=amount,
+            memo=memo,
+            external_id=str(txn_id),
+        )
+    except Exception as e:
+        logger.error(
+            "SMS path SM credit raised for %s txn=%s: %s",
+            account_number, txn_id, e,
+        )
+        return
     if result.success:
         sym = COUNTRY.currency_symbol
         logger.info(
@@ -510,8 +517,8 @@ def _sms_ingest_credit_sm(
         )
     else:
         logger.warning(
-            "SMS path SM credit failed for %s: %s",
-            account_number, result.error,
+            "SMS path SM credit failed for %s (txn=%s): %s",
+            account_number, txn_id, result.error,
         )
 
 
@@ -566,6 +573,14 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
 
         parsed = _parse_gateway_payment(content, sender)
         if not parsed:
+            if COUNTRY.code == "LS":
+                logger.warning(
+                    "SMS ingest: unparsed Lesotho message (no M-Pesa/EcoCash match) "
+                    "from=%s id=%s snippet=%.220s",
+                    sender,
+                    msg_id,
+                    content,
+                )
             continue
 
         amount = parsed["amount"]
