@@ -15,7 +15,7 @@ Constraints:
     `POST /api/v0/customer/` payload to push name changes from CC to TC (best-effort).
 
 **Source of truth:** 1PDB / CC is canonical. After a **one-time** TC→1PDB name
-reconciliation when TC was correct (`scripts/ops/fix_mak_drift.py`), ongoing edits
+reconciliation when TC was correct (`acdb-api/scripts/ops/fix_mak_drift.py`), ongoing edits
 in CC call **`sync_thundercloud_customer_name`** so ThunderCloud stays aligned.
 
 Multi-country support:

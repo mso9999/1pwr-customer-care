@@ -12,6 +12,7 @@
 
 ### What Next Session Should Know
 - **47** MAK accounts still **1PDB-only** vs TC bulk export; **0500MAK** TC-only — not resolved by name sync. Workbook rows for codes not yet in TC cannot align until those accounts exist in ThunderCloud.
+- **`fix_mak_drift.py`** now lives at **`acdb-api/scripts/ops/fix_mak_drift.py`** and deploys to **`/opt/cc-portal/backend/scripts/ops/`** with the backend (replaces ad-hoc `/tmp/` copy).
 
 ## Session 2026-04-15 202604151200 (MAK drift RCA + TC name fix)
 

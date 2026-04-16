@@ -338,7 +338,7 @@ Benin runs two sites: **GBO** (Gbowélé) and **SAM** (Samondji), both using Spa
 
 **Registration flow:** CC creates the customer in **1PDB first**, then `sparkmeter_customer.py` **pushes** that snapshot to SparkMeter (create-only APIs).
 
-**Source of truth:** **1PDB / CC** is the canonical customer record. **ThunderCloud** receives **pushes** from CC (initial create + **re-POST** on name change for MAK/LAB via `sync_thundercloud_customer_name` from `crud.py`). If historical drift left **TC correct and CC wrong** (e.g. after migration), run a **one-time** TC→1PDB alignment (`scripts/ops/fix_mak_drift.py`), then rely on CC edits to keep TC in sync.
+**Source of truth:** **1PDB / CC** is the canonical customer record. **ThunderCloud** receives **pushes** from CC (initial create + **re-POST** on name change for MAK/LAB via `sync_thundercloud_customer_name` from `crud.py`). If historical drift left **TC correct and CC wrong** (e.g. after migration), run a **one-time** TC→1PDB alignment (`acdb-api/scripts/ops/fix_mak_drift.py` on the CC host: `/opt/cc-portal/backend/scripts/ops/fix_mak_drift.py`), then rely on CC edits to keep TC in sync.
 
 When a customer is registered in CC
 (single or bulk import), `sparkmeter_customer.py` pushes the customer to SparkMeter:
@@ -352,7 +352,7 @@ When a customer is registered in CC
   - **LS**: Uses the read key (`KOIOS_API_KEY` / `KOIOS_API_SECRET`), which has customer creation access.
   - **BN**: Uses dedicated manage key (`KOIOS_MANAGE_API_KEY_BN` / `KOIOS_MANAGE_API_SECRET_BN`).
 - **ThunderCloud**: If no meter serial at registration time, sync is deferred until meter assignment.
-- **Name updates**: Documented SparkMeter APIs do not expose a separate PATCH; CC **re-POSTs** `POST /api/v0/customer/` to push name changes to TC after 1PDB updates. **One-time** TC→1PDB back-sync when TC was verified correct: `fix_mak_drift.py`. If re-POST fails (e.g. duplicate semantics), use SparkMeter UI or vendor support.
+- **Name updates**: Documented SparkMeter APIs do not expose a separate PATCH; CC **re-POSTs** `POST /api/v0/customer/` to push name changes to TC after 1PDB updates. **One-time** TC→1PDB back-sync when TC was verified correct: `acdb-api/scripts/ops/fix_mak_drift.py` (on host: `/opt/cc-portal/backend/scripts/ops/fix_mak_drift.py`). If re-POST fails (e.g. duplicate semantics), use SparkMeter UI or vendor support.
 - **Service area IDs**:
   - LS: Most sites share `e3015e87-...`; MAS uses `e6efc982-...`.
   - BN: GBO = `de00dfbf-...`; SAM = `43a81ea8-...`.

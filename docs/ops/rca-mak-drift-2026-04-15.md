@@ -98,7 +98,7 @@ So: **operational truth** = treat the workbook as a **human audit list**; **auto
 
 ### B. Immediate (clean existing drift)
 
-1. **One-time:** **`scripts/ops/fix_mak_drift.py`** on the CC host (venv as `cc_api`) — **dry run**, then **`--apply`** to align 1PDB to verified-good TC names.
+1. **One-time:** **`acdb-api/scripts/ops/fix_mak_drift.py`** on the CC host (`/opt/cc-portal/backend/scripts/ops/fix_mak_drift.py`, venv as `cc_api`) — **dry run**, then **`--apply`** to align 1PDB to verified-good TC names.
 2. For the **58 workbook rows**: for each code, compare **current** 1PDB vs **current** TC API (`GET /api/v0/customers`). Where the script’s heuristic passes but staff still see a problem, **manually** reconcile (spreadsheet as checklist).
 3. Track **accounts in 1PDB not returned in the TC bulk customer list** and **TC-only org meters** — separate onboarding; not fixed by renaming alone.
 
@@ -125,7 +125,7 @@ So: **operational truth** = treat the workbook as a **human audit list**; **auto
 - **SSH:** `ssh -i ~/Downloads/EOver.pem ubuntu@<host>` per `CONTEXT.md`.
 - Scripts copied to `/tmp/` and executed as `cc_api` with API venv:  
   `/opt/cc-portal/backend/venv/bin/python3 /tmp/rca_mak_drift.py`  
-  `/opt/cc-portal/backend/venv/bin/python3 /tmp/fix_mak_drift.py` (dry run, then `--apply`).
+  `sudo -u cc_api /opt/cc-portal/backend/venv/bin/python3 /opt/cc-portal/backend/scripts/ops/fix_mak_drift.py` (dry run, then `--apply`).
 
 ### `rca_mak_drift.py` highlights
 
@@ -156,7 +156,7 @@ Re-run `fix_mak_drift.py` after any bulk MAK registration or TC imports.
 ## Follow-up: full-string TC → 1PDB sync (2026-04-15)
 
 - **Policy:** ThunderCloud was treated as **authoritative for this one-off**; ongoing name edits should be made **in CC**, which **re-POSTs** to ThunderCloud for MAK/LAB via `sync_thundercloud_customer_name` on customer update (`acdb-api/crud.py`).
-- **Script:** `scripts/ops/fix_mak_drift.py --sync-all-from-tc --apply` on the CC host (venv as `cc_api`, env from `/opt/1pdb/.env`).
+- **Script:** `/opt/cc-portal/backend/scripts/ops/fix_mak_drift.py --sync-all-from-tc --apply` on the CC host (venv as `cc_api`, env from `/opt/1pdb/.env`). Source in repo: `acdb-api/scripts/ops/fix_mak_drift.py` (deployed with backend).
 - **TC name cleanup:** Leading quotes and trailing ` faulty` are stripped from TC display names before compare/apply (SparkMeter glitches).
 - **Result:** **9** `customers` rows updated so full name matches sanitized TC for accounts present **in both** TC export and 1PDB. Post-run `--sync-all-from-tc` dry run: **0** mismatches on that intersection.
 - **Not fixed by renaming:** **`0500MAK`** — in TC only (MAK Power House). **47** accounts in **1PDB only** vs TC bulk list (new registrations / not yet in ThunderCloud export). **Workbook rows** in SWAPPED MAK CUSTOMERS.xlsx that fall in that bucket are **not** a CC↔TC name mismatch until TC lists the same account code.

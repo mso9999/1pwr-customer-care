@@ -29,7 +29,7 @@ Verify on GitHub: **Repository → docs/ops** should list the `.xlsx`.
 
 | Action | How |
 |--------|-----|
-| Align CC names to TC | On CC server: `scripts/ops/fix_mak_drift.py` (dry run) then `fix_mak_drift.py --apply` with `/opt/1pdb/.env` and TC token |
+| Align CC names to TC | On CC server: `/opt/cc-portal/backend/scripts/ops/fix_mak_drift.py` (dry run) then `--apply` with `/opt/1pdb/.env` and TC token |
 | Resolve EC2 host | On a machine with AWS creds: see `CONTEXT.md` → `aws ec2 describe-instances` (e.g. `af-south-1`) |
 | DB forensics | SSH to CC host, `psql` — compare `accounts` + `customers` for MAK rows in the workbook |
 
