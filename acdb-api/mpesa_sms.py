@@ -4,6 +4,11 @@ Lesotho M-Pesa and EcoCash SMS parsing and account resolution (Remark-first, pho
 EcoCash (Econet / short code 199, including MAT/ThunderCloud and Koios-backed sites) often does not match
 M-Pesa regexes; ``parse_ls_sms_payment`` tries M-Pesa first, then EcoCash-specific patterns.
 
+**SMS gateway (PHP):** ``SMSComms/read_payment_file.php`` parses **comma-separated payment files**
+(legacy file watcher; last field ``MPESA`` or ``199``), **not** free-text SMS bodies. Natural-language
+templates are implemented **here** for the JSON mirror to ``/api/sms/incoming``. See
+``docs/ops/sms-gateway-php-vs-cc-parsing.md``.
+
 Used by ingest.sms_incoming and by ops reconciliation scripts.
 """
 
