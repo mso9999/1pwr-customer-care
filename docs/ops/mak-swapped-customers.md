@@ -27,6 +27,15 @@ Verify on GitHub: **Repository → docs/ops** should list the `.xlsx`.
 
 5. **Koios** is **not** the authority for MAK (MAK is ThunderCloud). Comparing CC to Koios for MAK will look like “wrong” names even when TC is consistent.
 
+## Edit policy (ThunderCloud vs CC)
+
+| Phase | Authority | What to do |
+|--------|-----------|------------|
+| **Until alignment fix is complete** | **ThunderCloud** | Use TC (and meters UI) as the reference for which **customer code** belongs to which **person**. Bring **1PDB** in line with TC via **`fix_mak_drift.py`** (TC → 1PDB). Do not assume CC names/plots are correct until reconciled. |
+| **After ops sign off** | **Customer Care / 1PDB** | **Ongoing** name and account maintenance happens in **CC**; changes **push to ThunderCloud** (`sync_thundercloud_customer_name`, registration flows). **Future updates should not** rely on editing TC alone — use CC so 1PDB and TC stay aligned. |
+
+See **`CONTEXT.md`** → *CC → SparkMeter Customer Sync* for the same rule in portal context.
+
 ## What to do
 
 | Action | How |
