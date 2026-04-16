@@ -350,6 +350,16 @@ def list_rows(
         all_joins = f"{soft_join}{search_join}"
         where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
+        # Customers list: show real account code(s) from `accounts` (matches TC / billing), not
+        # plot-derived codes that can disagree (e.g. MAK 0259 HH → 0259MAK while TC has 0245MAK).
+        portal_acct_select = ""
+        if table_name.lower() == "customers":
+            portal_acct_select = (
+                ", (SELECT a.account_number FROM accounts a "
+                f"WHERE a.customer_id = {table_name}.id "
+                "ORDER BY a.account_number LIMIT 1) AS portal_account_number"
+            )
+
         # Count total (DISTINCT avoids inflation from 1:N account join)
         cursor.execute(
             f"SELECT COUNT(DISTINCT {table_name}.id) FROM {table_name}{all_joins}{where_sql}"
@@ -368,7 +378,7 @@ def list_rows(
         offset = (page - 1) * limit
         if search_join:
             sql = (
-                f"SELECT DISTINCT ON ({table_name}.id) {table_name}.* "
+                f"SELECT DISTINCT ON ({table_name}.id) {table_name}.*{portal_acct_select} "
                 f"FROM {table_name}{all_joins}{where_sql} "
                 f"ORDER BY {table_name}.id"
             )
@@ -379,7 +389,10 @@ def list_rows(
                 sql = f"SELECT * FROM ({sql}) _dedup LIMIT %s OFFSET %s"
             cursor.execute(sql, params + [limit, offset])
         else:
-            sql = f"SELECT {table_name}.* FROM {table_name}{all_joins}{where_sql}{order_sql} LIMIT %s OFFSET %s"
+            sql = (
+                f"SELECT {table_name}.*{portal_acct_select} FROM {table_name}"
+                f"{all_joins}{where_sql}{order_sql} LIMIT %s OFFSET %s"
+            )
             cursor.execute(sql, params + [limit, offset])
 
         rows = [_row_to_dict(cursor, row) for row in cursor.fetchall()]

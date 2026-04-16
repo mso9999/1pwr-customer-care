@@ -183,10 +183,18 @@ export default function CustomersPage() {
     return '';
   };
 
+  /** Prefer `accounts.account_number` from API (matches TC); plot-derived only as fallback. */
+  const displayAccountCell = (row: Record<string, any>): string => {
+    const linked = String(row['portal_account_number'] ?? '').trim();
+    if (linked) return linked;
+    const acct = deriveAccountNumber(row);
+    return acct || String(row['customer_id_legacy'] || '');
+  };
+
   const renderDesktopRow = (row: Record<string, any>, i: number) => {
     const rowId = String(row['id'] ?? row['customer_id_legacy'] ?? '');
     const acct = deriveAccountNumber(row);
-    const displayId = acct || String(row['customer_id_legacy'] || '');
+    const displayId = displayAccountCell(row);
     const name = [row['first_name'], row['last_name']].filter(Boolean).join(' ');
     const phone = String(row['phone'] || row['cell_phone_1'] || '');
     const site = String(row['community'] || '');
@@ -241,7 +249,7 @@ export default function CustomersPage() {
   const renderMobileCard = (row: Record<string, any>, i: number) => {
     const rowId = String(row['id'] ?? row['customer_id_legacy'] ?? '');
     const acct = deriveAccountNumber(row);
-    const displayId = acct || String(row['customer_id_legacy'] || '');
+    const displayId = displayAccountCell(row);
     const name = [row['first_name'], row['last_name']].filter(Boolean).join(' ');
     const phone = String(row['phone'] || row['cell_phone_1'] || '');
     const site = String(row['community'] || '');
