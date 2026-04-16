@@ -3,6 +3,15 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-16 202604161900 (Manual payment → `cc_mutations` audit)
+
+### What Was Done
+- **`POST /api/payments/record`** now requires **`require_employee`** (JWT) and writes **`cc_mutations`** (`action=create`, `table_name=transactions`, `metadata.kind=manual_payment`) in the **same transaction** as the payment insert, with amounts, reference, financing split, note snippet.
+- **`mutations.py`** module docstring notes manual payments.
+
+### What Next Session Should Know
+- Audit is **best-effort** if `try_log_mutation` fails (payment still commits). SMS ingest still has no `cc_mutations` row unless extended later.
+
 ## Session 2026-04-16 202604161430 (SMS: PHP `read_payment_file.php` vs CC `mpesa_sms.py`)
 
 ### What Was Done
