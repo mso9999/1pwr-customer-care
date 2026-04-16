@@ -3,6 +3,13 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-16 202604161400 (Customers list: Account column from `accounts`, not plot)
+
+### What Was Done
+- **Issue:** Mamaitin showed **0259MAK** in CC list (plot `MAK 0259 HH` derivation) while ThunderCloud / 1PDB `accounts` use **0245MAK**.
+- **Fix:** `GET /tables/customers` list adds **`portal_account_number`** (first `accounts.account_number` per customer). **`CustomersPage`** **Account** column prefers that, then plot fallback.
+- **Deploy:** Pushed `main` (`032d3c1`).
+
 ## Session 2026-04-16 202604161200 (MAK swapped: Customers list link vs plot-derived account)
 
 ### What Was Done
