@@ -3,6 +3,16 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-15 202604151600 (MAK: wrong customer on detail — pg id fix)
+
+### What Was Done
+- **RCA:** For URLs like `/customers/NNNNMAK`, the page called `getRecord('customers', customer_id_legacy)`. CRUD resolves numeric IDs as PostgreSQL **`id`**. When **`customer_id_legacy` equalled another row’s `id`**, the wrong customer loaded (e.g. list shows Mamaitin; detail shows Itumeleng).
+- **Fix:** `GET /api/customers/by-account/{account}` now includes **`pg_customer_id`**; **`CustomerDetailPage`** uses it for `getRecord`. **`docs/ops/mak-swapped-customers.md`** updated.
+- **Deploy:** Pushed `main` → GitHub Actions → cc.1pwrafrica.com.
+
+### What Next Session Should Know
+- Name drift vs ThunderCloud is separate; run **`fix_mak_drift.py`** if TC vs 1PDB names disagree. This fix is **routing/CRUD**, not name sync.
+
 ## Session 2026-04-15 202604151400 (Customer export: commission vs Active badge)
 
 ### What Was Done
