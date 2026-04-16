@@ -17,25 +17,55 @@ Usage:
 """
 import os, sys, re, psycopg2, requests
 
-with open("/opt/1pdb/.env") as f:
-    for line in f:
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            k, v = line.split("=", 1)
-            os.environ[k] = v
+
+def _load_env_file(path: str) -> None:
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, v = line.split("=", 1)
+                os.environ[k] = v
+
+
+# Production: /opt/1pdb/.env. Override with OP_ENV_FILE / ONEPWR_ENV_FILE for local runs.
+_env_path = os.environ.get("OP_ENV_FILE") or os.environ.get("ONEPWR_ENV_FILE")
+if not _env_path and os.path.isfile("/opt/1pdb/.env"):
+    _env_path = "/opt/1pdb/.env"
+if _env_path:
+    _load_env_file(_env_path)
 
 APPLY = "--apply" in sys.argv
 SYNC_ALL = "--sync-all-from-tc" in sys.argv
 
+
+def sanitize_tc_display_name(name: str) -> str:
+    """Strip common SparkMeter/TC glitches before storing in 1PDB."""
+    n = (name or "").strip()
+    n = re.sub(r"^['\"]+", "", n)
+    n = re.sub(r"\s+faulty\s*$", "", n, flags=re.IGNORECASE)
+    return n.strip()
+
+
+def norm_full(s):
+    return re.sub(r"\s+", " ", (s or "").strip().lower())
+
+
 # ---- Fetch ThunderCloud ----
 TC_BASE = os.environ.get("TC_API_BASE", "https://sparkcloud-u740425.sparkmeter.cloud")
 TC_TOKEN = os.environ.get("TC_AUTH_TOKEN", "")
+if not TC_TOKEN:
+    print("ERROR: TC_AUTH_TOKEN is not set (ThunderCloud API token).", file=sys.stderr)
+    sys.exit(1)
+
 r = requests.get(
     TC_BASE + "/api/v0/customers",
     params={"customers_only": "false", "reading_details": "false"},
     headers={"Authentication-Token": TC_TOKEN},
-    timeout=60,
+    timeout=120,
 )
+if r.status_code != 200:
+    print("ERROR: ThunderCloud GET /api/v0/customers failed: HTTP %s %s" % (r.status_code, r.text[:500]), file=sys.stderr)
+    sys.exit(1)
 tc_customers = r.json().get("customers", [])
 
 tc_by_code = {}
@@ -44,6 +74,7 @@ for c in tc_customers:
     if code and "MAK" in code:
         name = c.get("name", "").strip()
         name = re.sub(r"\s*\(.*?\)\s*$", "", name).strip()
+        name = sanitize_tc_display_name(name)
         meters = [m.get("serial", "") for m in c.get("meters", [])]
         tc_by_code[code] = {"name": name, "meters": meters}
 
@@ -66,10 +97,6 @@ for acct, fn, ln, cid in cur.fetchall():
 # ---- Find real mismatches ----
 def name_tokens(n):
     return set(n.lower().split())
-
-
-def norm_full(s):
-    return re.sub(r"\s+", " ", (s or "").strip().lower())
 
 
 def tc_name_to_first_last(tc_name: str):

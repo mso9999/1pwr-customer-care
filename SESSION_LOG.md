@@ -3,6 +3,16 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-15 202604152200 (MAK full TC → 1PDB name sync)
+
+### What Was Done
+- **`scripts/ops/fix_mak_drift.py`:** optional env file via `OP_ENV_FILE` / `ONEPWR_ENV_FILE`; TC HTTP errors and missing `TC_AUTH_TOKEN` fail fast; `sanitize_tc_display_name()` strips leading quotes and trailing ` faulty` before compare/apply.
+- **Production:** `fix_mak_drift.py --sync-all-from-tc --apply` on CC host (`cc_api` venv, `/tmp/fix_mak_drift.py`). **9** `customers` rows updated (TC authoritative for this one-off). Verify dry run: **0** mismatches on TC∩1PDB intersection.
+- **`docs/ops/rca-mak-drift-2026-04-15.md`:** appended follow-up section (policy: thereafter edit names in CC → push to TC via existing `sync_thundercloud_customer_name`).
+
+### What Next Session Should Know
+- **47** MAK accounts still **1PDB-only** vs TC bulk export; **0500MAK** TC-only — not resolved by name sync. Workbook rows for codes not yet in TC cannot align until those accounts exist in ThunderCloud.
+
 ## Session 2026-04-15 202604151200 (MAK drift RCA + TC name fix)
 
 ### What Was Done

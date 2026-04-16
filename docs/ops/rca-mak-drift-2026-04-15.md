@@ -153,6 +153,14 @@ The spreadsheet lists **58** apparent swaps. The automated fix uses a **conserva
 
 Re-run `fix_mak_drift.py` after any bulk MAK registration or TC imports.
 
+## Follow-up: full-string TC → 1PDB sync (2026-04-15)
+
+- **Policy:** ThunderCloud was treated as **authoritative for this one-off**; ongoing name edits should be made **in CC**, which **re-POSTs** to ThunderCloud for MAK/LAB via `sync_thundercloud_customer_name` on customer update (`acdb-api/crud.py`).
+- **Script:** `scripts/ops/fix_mak_drift.py --sync-all-from-tc --apply` on the CC host (venv as `cc_api`, env from `/opt/1pdb/.env`).
+- **TC name cleanup:** Leading quotes and trailing ` faulty` are stripped from TC display names before compare/apply (SparkMeter glitches).
+- **Result:** **9** `customers` rows updated so full name matches sanitized TC for accounts present **in both** TC export and 1PDB. Post-run `--sync-all-from-tc` dry run: **0** mismatches on that intersection.
+- **Not fixed by renaming:** **`0500MAK`** — in TC only (MAK Power House). **47** accounts in **1PDB only** vs TC bulk list (new registrations / not yet in ThunderCloud export). **Workbook rows** in SWAPPED MAK CUSTOMERS.xlsx that fall in that bucket are **not** a CC↔TC name mismatch until TC lists the same account code.
+
 ## Note on `docs/ops/agent-handoff-1pwr-cc-repo.md`
 
 That path was **not present** in the repo at the time of this RCA; procedure was inferred from `CONTEXT.md`, the workbook, and `scripts/ops/rca_mak_drift.py` / `fix_mak_drift.py`.
