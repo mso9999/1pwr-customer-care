@@ -3,6 +3,15 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-16 202604161200 (MAK swapped: Customers list link vs plot-derived account)
+
+### What Was Done
+- **RCA (prod 1PDB):** e.g. **0259MAK** → `customer_id` **1438** (Itumeleng); **Mamaitin Maitin** is **1424** with plot `MAK 0259 HH` but account **0245MAK**. The **list** showed **0259MAK** from plot derivation while the **hyperlink** used `/customers/0259MAK` → wrong person. Distinct from legacy-id collision (detail-by-account fix).
+- **Fix:** **`CustomersPage`** desktop + mobile links → **`/customers/{postgresql id}`**; display column still shows plot-derived / legacy id as before. **`mak-swapped-customers.md`** §RCA updated.
+
+### What Next Session Should Know
+- **Data alignment** (who owns **0259MAK** vs **0245MAK** vs TC) may still need **`fix_mak_drift.py`** or manual `accounts` correction; UI no longer misroutes from the list.
+
 ## Session 2026-04-15 202604151800 (MAT EcoCash SMS — auto-credit gaps)
 
 ### What Was Done
