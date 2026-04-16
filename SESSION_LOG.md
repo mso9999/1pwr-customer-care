@@ -6,7 +6,7 @@
 ## Session 2026-04-15 202604152200 (MAK full TC → 1PDB name sync)
 
 ### What Was Done
-- **`scripts/ops/fix_mak_drift.py`:** optional env file via `OP_ENV_FILE` / `ONEPWR_ENV_FILE`; TC HTTP errors and missing `TC_AUTH_TOKEN` fail fast; `sanitize_tc_display_name()` strips leading quotes and trailing ` faulty` before compare/apply.
+- **`acdb-api/scripts/ops/fix_mak_drift.py`:** optional env file via `OP_ENV_FILE` / `ONEPWR_ENV_FILE`; TC HTTP errors and missing `TC_AUTH_TOKEN` fail fast; `sanitize_tc_display_name()` strips leading quotes and trailing ` faulty` before compare/apply.
 - **Production:** `fix_mak_drift.py --sync-all-from-tc --apply` on CC host (`cc_api` venv, `/tmp/fix_mak_drift.py`). **9** `customers` rows updated (TC authoritative for this one-off). Verify dry run: **0** mismatches on TC∩1PDB intersection.
 - **`docs/ops/rca-mak-drift-2026-04-15.md`:** appended follow-up section (policy: thereafter edit names in CC → push to TC via existing `sync_thundercloud_customer_name`).
 

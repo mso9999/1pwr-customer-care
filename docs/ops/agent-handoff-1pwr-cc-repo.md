@@ -31,7 +31,7 @@ Operations reports **names in Customer Care (CC / 1PDB) do not match names in Ko
 
 1. **Customer detail by account** (`/customers/NNNNMAK`): After `GET /api/customers/by-account/{acct}`, the UI must load the full row using PostgreSQL **`customers.id`** (`pg_customer_id` in API), **not** only `customer_id_legacy`. Otherwise, if `customer_id_legacy` equals **another row’s `id`**, CRUD returns the **wrong person** (identity collision). Fix lives in `customer_api.py` (`pg_customer_id`) and `CustomerDetailPage.tsx` — ensure your branch has merged this if the bug still reproduces.
 
-2. **MAK name drift vs ThunderCloud:** `scripts/ops/rca_mak_drift.py` (RCA) and `scripts/ops/fix_mak_drift.py` (align 1PDB names to TC) — run **on the CC Linux host** with `/opt/1pdb/.env` and TC credentials. MAK is **ThunderCloud**; use TC as truth for `code` → `name`.
+2. **MAK name drift vs ThunderCloud:** `scripts/ops/rca_mak_drift.py` (RCA) and `acdb-api/scripts/ops/fix_mak_drift.py` (align 1PDB names to TC; deployed to `/opt/cc-portal/backend/scripts/ops/fix_mak_drift.py`) — run **on the CC Linux host** with `/opt/1pdb/.env` and TC credentials. MAK is **ThunderCloud**; use TC as truth for `code` → `name`.
 
 3. **Docs:** `docs/ops/mak-swapped-customers.md`, `docs/ops/apply-cc-migrations.md`, `CONTEXT.md` (SSH, AWS host resolution).
 
