@@ -1,7 +1,7 @@
 # 1PWR Customer Care - Session Log
 
 > AI session handoffs for continuity across conversations.
-> Read the last 2-3 entries at the start of each new conversation.
+> Read the last 2-3 entries at the start of each new session.
 
 ## Session 2026-04-15 202604151800 (MAT EcoCash SMS — auto-credit gaps)
 
