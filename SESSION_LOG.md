@@ -1,7 +1,17 @@
 # 1PWR Customer Care - Session Log
 
 > AI session handoffs for continuity across conversations.
-> Read the last 2-3 entries at the start of each new session.
+> Read the last 2-3 entries at the start of each new conversation.
+
+## Session 2026-04-15 202604151800 (MAT EcoCash SMS — auto-credit gaps)
+
+### What Was Done
+- **RCA:** MAT uses **ThunderCloud** (`credit_sparkmeter` → `_tc_get_customer_id` / `_tc_credit`), not Koios. Failures split into: (1) **SMS not parsed** — strict `M…received` phone regex missed spaced MSISDN; **EcoCash hint** required `"ecocash"` or sender **199**, so **Econet**-worded bodies could skip EcoCash labelling; (2) **TC credit** — account codes not **uppercase** can fail TC lookup while 1PDB match is case-insensitive; (3) **Observability** — unparsed LS messages and SM credit failures were hard to trace.
+- **Code:** `mpesa_sms.py` — flexible `MPESA_FALLBACK` phone + digit normalization; `_ecocash_hint` includes Econet+266; `sparkmeter_credit.py` — `account_number.strip().upper()` before routing; `ingest.py` — warning log for unparsed LS SMS; richer SM credit failure / exception logs.
+- **Tests:** `test_mpesa_sms.py` — spaced phone, Econet branding.
+
+### What Next Session Should Know
+- If issues remain: grep API logs for `SMS ingest: unparsed Lesotho`, `SMS path SM credit failed`, `Customer '…' not found on ThunderCloud`; confirm PHP mirror still POSTs EcoCash to `/api/sms/incoming`; verify `TC_AUTH_TOKEN` / `SMS_INGEST_PUSH_SPARKMETER=1` on host.
 
 ## Session 2026-04-15 202604151600 (MAK: wrong customer on detail — pg id fix)
 
