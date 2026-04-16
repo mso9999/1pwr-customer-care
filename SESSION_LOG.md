@@ -3,6 +3,13 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-16 202604161430 (SMS: PHP `read_payment_file.php` vs CC `mpesa_sms.py`)
+
+### What Was Done
+- **Clarification:** SMSComms `read_payment_file.php` parses **CSV-style payment file rows** (last field `MPESA` or `199`), not natural-language SMS bodies. NL templates live in **`mpesa_sms.py`** for the JSON mirror path.
+- **Docs:** Added **`docs/ops/sms-gateway-php-vs-cc-parsing.md`**; **`CONTEXT.md`** SMS row and **`mpesa_sms.py`** module docstring cross-link.
+- **Commit:** `0abb49e` on `main`.
+
 ## Session 2026-04-16 202604161400 (Customers list: Account column from `accounts`, not plot)
 
 ### What Was Done
