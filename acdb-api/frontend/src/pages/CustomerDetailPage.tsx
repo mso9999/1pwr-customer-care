@@ -290,16 +290,25 @@ export default function CustomerDetailPage() {
       })
         .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
         .then(data => {
-          const cust = data.customer;
+          const cust = data.customer as {
+            account_numbers?: string[];
+            customer_id_legacy?: string | number;
+            pg_customer_id?: number;
+          };
           const accts: string[] = cust.account_numbers || [];
           setAccountNumbers(accts);
           if (!accts.includes(urlParam.toUpperCase())) accts.push(urlParam.toUpperCase());
 
-          const legacyId = String(cust.customer_id_legacy || '');
-          if (legacyId) {
-            return getRecord('customers', legacyId).then(({ record: r }) => {
+          // Must use PostgreSQL primary key from by-account — not customer_id_legacy.
+          // Legacy IDs can numerically collide with another customer's `id`, loading the wrong row.
+          const crudId =
+            cust.pg_customer_id != null
+              ? String(cust.pg_customer_id)
+              : String(cust.customer_id_legacy ?? '');
+          if (crudId) {
+            return getRecord('customers', crudId).then(({ record: r }) => {
               setRecord(r);
-              setPgId(String(r['id'] ?? legacyId));
+              setPgId(String(r['id'] ?? crudId));
               const fd: Record<string, string> = {};
               for (const [k, v] of Object.entries(r)) fd[k] = v != null ? String(v) : '';
               setFormData(fd);

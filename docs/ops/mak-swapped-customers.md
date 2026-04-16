@@ -21,7 +21,7 @@ Verify on GitHub: **Repository → docs/ops** should list the `.xlsx`.
 
 2. **Drift** = same account code in CC shows **different** `first_name` / `last_name` than TC. Documented investigation: `scripts/ops/rca_mak_drift.py` (creation timeline, first mismatch boundary, “displaced” customers still in DB under other accounts).
 
-3. **UI bug (fixed on branch / merge separately):** opening `/customers/NNNNMAK` used `customer_id_legacy` for CRUD fetch; if that number collided with another row’s PostgreSQL `id`, the **wrong** person appeared. Fix: use **`pg_customer_id`** from `by-account` response for `getRecord`.
+3. **UI bug (fixed in app):** opening `/customers/NNNNMAK` previously used `customer_id_legacy` for CRUD `getRecord`; if that number **collided** with another row’s PostgreSQL `id`, the **wrong** person appeared. **Fix:** API `GET /api/customers/by-account/...` includes **`pg_customer_id`** (real primary key); `CustomerDetailPage` uses it for `getRecord`.
 
 4. **Koios** is **not** the authority for MAK (MAK is ThunderCloud). Comparing CC to Koios for MAK will look like “wrong” names even when TC is consistent.
 

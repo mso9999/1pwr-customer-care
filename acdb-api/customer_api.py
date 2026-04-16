@@ -461,7 +461,12 @@ def customer_by_account(account_number: str):
                     detail=f"Customer ID {cust_id} (from account {acct}) not found",
                 )
 
-            cust = _normalize_customer(_row_to_dict(cursor, row))
+            row_dict = _row_to_dict(cursor, row)
+            cust = _normalize_customer(row_dict)
+            # Primary key for CRUD (/tables/customers/{id}). The frontend must use this — not
+            # customer_id_legacy — when loading detail for account URLs; legacy values can equal
+            # another row's PostgreSQL id and show the wrong person (MAK / swapped-customer cases).
+            cust["pg_customer_id"] = row_dict.get("id")
             cust["account_numbers"] = _resolve_accounts_for_customer(
                 cursor, cust["customer_id_legacy"]
             )
