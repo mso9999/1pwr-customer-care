@@ -42,10 +42,16 @@ def export_customers_with_accounts(
 ):
     """Export customers with their account numbers for field distribution.
 
-    Includes commissioning fields. **customer_commissioned** is the DB flag set by
-    the commission wizard; **portal_service_active** matches Customer Detail
-    (connected date set, not terminated). After migration 011, the boolean is
-    backfilled when service was connected but the flag was never set.
+    **active_in_portal** — ``True`` when the customer has service connected and not
+    terminated; this matches the green **Active** badge on Customer Detail (same as
+    ``date_service_connected`` / ``date_service_terminated`` logic).
+
+    **commission_wizard_completed** — ``True`` only when commissioning finished via
+    ``POST /api/commission/execute`` (sets ``customer_commissioned`` in DB). Legacy
+    or manual date edits can leave this ``False`` while **active_in_portal** is
+    ``True``; use **active_in_portal** for parity with the portal UI. Migration
+    ``011_backfill_customer_commissioned_from_service_date.sql`` backfills the
+    wizard flag where appropriate.
     """
     with _get_connection() as conn:
         cursor = conn.cursor()
@@ -77,9 +83,9 @@ def export_customers_with_accounts(
             "c.community, c.district, c.customer_type, c.plot_number, "
             "c.national_id, "
             "c.date_service_connected, c.date_service_terminated, "
-            "c.customer_commissioned, "
             "(c.date_service_connected IS NOT NULL AND c.date_service_terminated IS NULL) "
-            "AS portal_service_active "
+            "AS active_in_portal, "
+            "c.customer_commissioned AS commission_wizard_completed "
             "FROM customers c "
             "LEFT JOIN accounts a ON a.customer_id = c.id "
             "LEFT JOIN meters m ON m.account_number = a.account_number "
@@ -94,7 +100,8 @@ def export_customers_with_accounts(
             "phone", "site", "district", "customer_type", "plot_number",
             "national_id",
             "date_service_connected", "date_service_terminated",
-            "customer_commissioned", "portal_service_active",
+            "active_in_portal",
+            "commission_wizard_completed",
         ]
         rows = cursor.fetchall()
 

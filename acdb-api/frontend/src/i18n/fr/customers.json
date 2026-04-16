@@ -1,6 +1,7 @@
 {
   "title": "Clients",
   "download": "Télécharger",
+  "exportTooltip": "Colonnes : active_in_portal = badge vert Actif (raccordé, non résilié). commission_wizard_completed = True seulement après l’assistant de mise en service.",
   "assignMeter": "Assigner un compteur",
   "commission": "Mise en service",
   "addCustomer": "Ajouter un client",

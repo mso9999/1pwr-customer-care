@@ -924,6 +924,9 @@ function ExportContent() {
           <li>Cliquer sur <Bold>Exporter</Bold> — le fichier se télécharge dans votre navigateur.</li>
         </Ol>
         <Tip>La page Vérification des paiements dispose aussi d'un bouton <Bold>Exporter XLSX</Bold> pour les archives de l'équipe financière.</Tip>
+        <Tip>
+          <Bold>Clients → Télécharger</Bold> : le fichier contient <Code>active_in_portal</Code> (comme le badge vert <Bold>Actif</Bold> sur la fiche client) et <Code>commission_wizard_completed</Code> (après l’assistant de mise en service seulement).
+        </Tip>
       </>
     );
   }
@@ -938,6 +941,9 @@ function ExportContent() {
         <li>Click <Bold>Export</Bold> — the file downloads to your browser.</li>
       </Ol>
       <Tip>The Payment Verification page also has its own <Bold>Export XLSX</Bold> button for finance team records.</Tip>
+      <Tip>
+        <Bold>Customers → Download</Bold> (active list): the spreadsheet includes <Code>active_in_portal</Code> (matches the green <Bold>Active</Bold> badge on Customer Detail) and <Code>commission_wizard_completed</Code> (set only when the commissioning wizard finishes). Comparing the wrong column to the badge caused apparent mismatches.
+      </Tip>
     </>
   );
 }

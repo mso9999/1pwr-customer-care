@@ -1,6 +1,7 @@
 {
   "title": "Customers",
   "download": "Download",
+  "exportTooltip": "Columns: active_in_portal matches the green Active badge (service connected, not terminated). commission_wizard_completed is True only after the commissioning wizard runs.",
   "assignMeter": "Assign Meter",
   "commission": "Commission",
   "addCustomer": "Add Customer",

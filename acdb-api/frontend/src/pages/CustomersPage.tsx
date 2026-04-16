@@ -297,6 +297,8 @@ export default function CustomersPage() {
         <div className="flex flex-wrap gap-2">
           {tab === 'active' && (
             <button
+              type="button"
+              title={t('customers:exportTooltip')}
               onClick={async () => {
                 setExporting(true);
                 try {
