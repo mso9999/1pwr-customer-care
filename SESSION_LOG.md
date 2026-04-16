@@ -3,6 +3,17 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-15 202604151400 (Customer export: commission vs Active badge)
+
+### What Was Done
+- **RCA:** CC green **Active** on customer detail uses service connection dates (`date_service_connected` and not terminated). Export previously labeled **`customer_commissioned`**, which is set only when the commission **wizard** completes (`POST /api/commission/execute`) — so CSV could show `False` while the UI looked commissioned.
+- **`exports.py`:** Renamed export headers to **`active_in_portal`** (parity with Active badge) and **`commission_wizard_completed`** (wizard flag). Docstring explains the distinction. **Breaking** for sheets keyed on old column names.
+- **UI:** Download button tooltip + Help **Export** tip (EN/FR) describing the two columns.
+
+### What Next Session Should Know
+- Update any external spreadsheets/automation that expected `customer_commissioned` / `portal_service_active`.
+- Optional: apply migration **`011_backfill_customer_commissioned_from_service_date.sql`** on prod if ops want the DB boolean aligned with service dates for legacy rows.
+
 ## Session 2026-04-15 202604152200 (MAK full TC → 1PDB name sync)
 
 ### What Was Done
