@@ -193,7 +193,12 @@ export default function CustomersPage() {
     const district = String(row['district'] || '');
     const terminated = row['date_service_terminated'];
     const isSelected = selected.has(rowId);
-    const linkTarget = acct || String(row['customer_id_legacy'] || rowId);
+    // Detail URL: PostgreSQL customer id, not plot-derived account. Plot-derived codes
+    // (e.g. 0259MAK from "MAK 0259 HH") can point at another row in `accounts` (swapped MAK).
+    const linkTarget =
+      row['id'] != null && row['id'] !== ''
+        ? String(row['id'])
+        : acct || String(row['customer_id_legacy'] || rowId);
 
     return (
       <tr key={i} className={`hover:bg-gray-50 ${isSelected ? 'bg-blue-50' : ''}`}>
@@ -242,7 +247,10 @@ export default function CustomersPage() {
     const site = String(row['community'] || '');
     const terminated = row['date_service_terminated'];
     const isSelected = selected.has(rowId);
-    const linkTarget = acct || String(row['customer_id_legacy'] || rowId);
+    const linkTarget =
+      row['id'] != null && row['id'] !== ''
+        ? String(row['id'])
+        : acct || String(row['customer_id_legacy'] || rowId);
 
     const cardContent = (
       <div className="flex items-start justify-between">

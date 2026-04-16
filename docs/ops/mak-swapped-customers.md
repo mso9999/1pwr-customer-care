@@ -23,7 +23,9 @@ Verify on GitHub: **Repository → docs/ops** should list the `.xlsx`.
 
 3. **UI bug (fixed in app):** opening `/customers/NNNNMAK` previously used `customer_id_legacy` for CRUD `getRecord`; if that number **collided** with another row’s PostgreSQL `id`, the **wrong** person appeared. **Fix:** API `GET /api/customers/by-account/...` includes **`pg_customer_id`** (real primary key); `CustomerDetailPage` uses it for `getRecord`.
 
-4. **Koios** is **not** the authority for MAK (MAK is ThunderCloud). Comparing CC to Koios for MAK will look like “wrong” names even when TC is consistent.
+4. **Customers list vs plot-derived account (fixed in app):** the list **displayed** an account code derived from **plot** (e.g. `0259MAK` from `MAK 0259 HH`) but the **link** went to `/customers/0259MAK`. If `accounts` linked `0259MAK` to another customer (drift), the row showed the **right** name while detail opened the **account owner**. **Fix:** `CustomersPage` links to **`/customers/{postgresql id}`**, not the derived code.
+
+5. **Koios** is **not** the authority for MAK (MAK is ThunderCloud). Comparing CC to Koios for MAK will look like “wrong” names even when TC is consistent.
 
 ## What to do
 
