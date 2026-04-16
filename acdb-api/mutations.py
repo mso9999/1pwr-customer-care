@@ -1,5 +1,7 @@
 """
-Mutation log: records every create/update/delete through the CC Portal API.
+Mutation log: records create/update/delete through the CC Portal API (CRUD and
+material workflows). Manual portal payments (``POST /api/payments/record``) log
+here as ``transactions`` creates with ``metadata.kind = manual_payment``.
 Provides list, detail, and revert endpoints.
 """
 

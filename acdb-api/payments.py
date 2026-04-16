@@ -24,6 +24,9 @@ from customer_api import get_connection
 from sparkmeter_credit import credit_sparkmeter, CreditResult
 from balance_engine import get_balance_kwh, record_payment_kwh
 from financing import compute_financing_split, apply_financing_payment
+from middleware import require_employee
+from models import CurrentUser
+from mutations import try_log_mutation
 
 logger = logging.getLogger("cc-api.payments")
 
@@ -221,7 +224,10 @@ def payment_webhook(
 
 
 @router.post("/record")
-def record_manual_payment(payload: ManualPayment):
+def record_manual_payment(
+    payload: ManualPayment,
+    user: CurrentUser = Depends(require_employee),
+):
     """Record a manual payment (e.g., from portal or field agent).
 
     Saves to 1PDB with kWh balance tracking and synchronously credits
@@ -229,6 +235,8 @@ def record_manual_payment(payload: ManualPayment):
 
     ``payment_reference`` (e.g. M-Pesa receipt) is required and must be unique
     across all transactions to prevent double crediting.
+
+    Writes an audit row to ``cc_mutations`` (same transaction as the payment).
     """
     if payload.amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be positive")
@@ -274,6 +282,33 @@ def record_manual_payment(payload: ManualPayment):
                 "UPDATE transactions SET financing_portion = %s, electricity_portion = %s WHERE id = %s",
                 (split["debt_portion"], elec_amount, txn_id),
             )
+
+            new_values = {
+                "account_number": payload.account_number,
+                "payment_reference": pref,
+                "amount_submitted": payload.amount,
+                "amount_electricity": elec_amount,
+                "debt_portion": float(split["debt_portion"] or 0),
+                "kwh_vended": kwh_vended,
+                "meter_id": meter_id,
+                "source": "portal",
+                "transaction_id": txn_id,
+                "note": (payload.note or "").strip()[:500] or None,
+                "has_financing": bool(split.get("has_financing")),
+            }
+            try_log_mutation(
+                user,
+                "create",
+                "transactions",
+                str(txn_id),
+                new_values=new_values,
+                metadata={
+                    "kind": "manual_payment",
+                    "endpoint": "POST /api/payments/record",
+                },
+                conn=conn,
+            )
+
             conn.commit()
 
             sm_credit_amount = elec_amount if elec_amount > 0 else 0
