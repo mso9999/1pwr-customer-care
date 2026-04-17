@@ -1322,6 +1322,8 @@ export interface CheckMeterHealth {
   meter_id: string;
   last_seen_utc: string | null;
   hours_since_report: number | null;
+  /** Reported by device via IoT → /api/meters/reading once firmware publishes it */
+  firmware_version?: string | null;
   status: 'online' | 'stale' | 'offline' | 'unknown';
 }
 

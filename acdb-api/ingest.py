@@ -242,6 +242,8 @@ class MeterReading(BaseModel):
     current: float = 0
     relay: str = "0"
     frequency: float = 0
+    # Set by onepwr-aws-mesh MQTT payload once published; forwarded by ingestion_gate Lambda.
+    firmware_version: Optional[str] = None
 
 
 @router.post("/api/meters/reading")
@@ -304,25 +306,30 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
                         SET kwh = hourly_consumption.kwh + EXCLUDED.kwh
                 """, (account, meter_id, hour_key, round(delta_kwh, 4), community))
 
+            fw = (reading.firmware_version or "").strip()[:64] or None
+
             cur.execute("""
                 INSERT INTO prototype_meter_state
                     (meter_id, account_number, last_energy_kwh,
-                     last_relay_status, last_seen_at, last_synced_at)
-                VALUES (%s, %s, %s, %s, %s, NOW())
+                     last_relay_status, last_seen_at, last_synced_at, firmware_version)
+                VALUES (%s, %s, %s, %s, %s, NOW(), %s)
                 ON CONFLICT (meter_id) DO UPDATE SET
                     last_energy_kwh = EXCLUDED.last_energy_kwh,
                     last_relay_status = EXCLUDED.last_relay_status,
                     last_seen_at = EXCLUDED.last_seen_at,
-                    last_synced_at = NOW()
+                    last_synced_at = NOW(),
+                    firmware_version = COALESCE(EXCLUDED.firmware_version, prototype_meter_state.firmware_version)
             """, (
                 meter_id, account, energy_for_delta,
-                reading.relay, ts,
+                reading.relay, ts, fw,
             ))
 
             conn.commit()
 
-            logger.info("Meter reading: %s energy=%.2f kWh delta=%.4f relay=%s",
-                        meter_id, reading.energy_active, delta_kwh, reading.relay)
+            logger.info(
+                "Meter reading: %s energy=%.2f kWh delta=%.4f relay=%s fw=%s",
+                meter_id, reading.energy_active, delta_kwh, reading.relay, fw or "-",
+            )
 
             return {
                 "status": "ok",
@@ -330,6 +337,7 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
                 "account": account,
                 "delta_kwh": round(delta_kwh, 4),
                 "relay": reading.relay,
+                "firmware_version_stored": fw,
             }
 
     except HTTPException:

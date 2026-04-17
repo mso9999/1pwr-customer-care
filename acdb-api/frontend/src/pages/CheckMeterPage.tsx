@@ -141,6 +141,12 @@ function StatCard({ pair, color }: { pair: CheckMeterPair; color: string }) {
                 {pair.health.hours_since_report != null && ` · ${formatLastSeen(pair.health)}`}
               </span>
             </div>
+            {pair.health.firmware_version != null && pair.health.firmware_version !== '' && (
+              <div className="flex justify-between text-xs">
+                <span className="text-gray-400">FW</span>
+                <span className="font-mono text-gray-700">{pair.health.firmware_version}</span>
+              </div>
+            )}
           </>
         )}
       </div>

@@ -2153,7 +2153,7 @@ def _build_check_meter_comparison(conn, days: int) -> Dict[str, Any]:
     if check_meter_ids:
         ph = ",".join(["%s"] * len(check_meter_ids))
         cursor.execute(
-            f"SELECT meter_id, account_number, last_seen_at, last_sample_time "
+            f"SELECT meter_id, account_number, last_seen_at, last_sample_time, firmware_version "
             f"FROM prototype_meter_state WHERE meter_id IN ({ph})",
             tuple(str(m) for m in check_meter_ids),
         )
@@ -2182,10 +2182,17 @@ def _build_check_meter_comparison(conn, days: int) -> Dict[str, Any]:
                     hours_ago = round((now - last_seen).total_seconds() / 3600, 1)
                 except (ValueError, IndexError):
                     pass
+            fw_ver = None
+            try:
+                if len(row) > 4 and row[4] is not None:
+                    fw_ver = str(row[4]).strip() or None
+            except (IndexError, TypeError):
+                fw_ver = None
             health_map[acct] = {
                 "meter_id": meter_id,
                 "last_seen_utc": last_seen.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S") if last_seen else None,
                 "hours_since_report": hours_ago,
+                "firmware_version": fw_ver,
                 "status": (
                     "online" if hours_ago is not None and hours_ago < 2
                     else "stale" if hours_ago is not None and hours_ago < 6
@@ -2198,6 +2205,7 @@ def _build_check_meter_comparison(conn, days: int) -> Dict[str, Any]:
             "meter_id": pair["check_meter_id"],
             "last_seen_utc": None,
             "hours_since_report": None,
+            "firmware_version": None,
             "status": "unknown",
         })
 
@@ -2262,6 +2270,7 @@ def _export_check_meter_comparison_xlsx(data: Dict[str, Any], days: int) -> Stre
         "primary_meter_id",
         "check_meter_id",
         "health_status",
+        "firmware_version",
         "last_seen_utc",
         "hours_since_report",
         "matched_hours",
@@ -2282,6 +2291,7 @@ def _export_check_meter_comparison_xlsx(data: Dict[str, Any], days: int) -> Stre
             pair.get("primary_meter_id"),
             pair.get("check_meter_id"),
             health.get("status"),
+            health.get("firmware_version"),
             health.get("last_seen_utc"),
             health.get("hours_since_report"),
             stats.get("n_matched_hours"),
