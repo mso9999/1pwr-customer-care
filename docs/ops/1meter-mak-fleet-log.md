@@ -36,6 +36,50 @@ Until the other **five** physical installs appear as **`meters`** rows (`platfor
 
 **Customer Care / 1PDB does not store per-device firmware version.** `prototype_meter_state` holds energy, relay, **`last_seen_at`**, **`last_sample_time`** only. Fleet FW tracking is **AWS IoT OTA** / device shadow / **`onepwr-aws-mesh`** tooling (see archived runbook `docs/archive/2026-03-worktree-cleanup/1meter/1Meter-Remote-Build-OTA-Runbook.md`). To assert “all on latest FW”, use the OTA / IoT console or a device-reported version pipeline—not the Check Meters page.
 
+## 2026-04-17 — AWS `meter_last_seen` vs S3 vs 1PDB
+
+### S3 (`s3://1meterdatacopy/`)
+
+The bucket currently holds a **small sample** file (`1meter_data_s3_copy.json`, on the order of hundreds of bytes) — **not** a full fleet export. It is **not** a reliable place to count “10 meters.” Use **DynamoDB** or **1PDB** for inventory.
+
+### DynamoDB `meter_last_seen` (region `us-east-1`)
+
+A full table scan shows **10** rows (live telemetry index). Canonical IDs are **12-digit** `meterId`:
+
+| meterId (Dynamo) | Short serial | In `meters` (1PDB)? | Role (from ops / `CONTEXT.md`) |
+|------------------|--------------|---------------------|----------------------------------|
+| 000023021847 | 23021847 | Yes | Customer check (0026MAK) |
+| 000023021886 | 23021886 | **No** | Unmapped — needs account before CC row |
+| 000023021888 | 23021888 | **No** | Unmapped — needs account before CC row |
+| 000023022613 | 23022613 | **No** | **Repeater** (powerhouse) — **not** a Check Meter pair |
+| 000023022628 | 23022628 | Yes | Customer check (0005MAK) |
+| 000023022646 | 23022646 | Yes | Customer check (0119MAK) |
+| 000023022667 | 23022667 | **No** | **Gateway** — **not** a Check Meter pair |
+| 000023022673 | 23022673 | Yes | Customer check (0045MAK) |
+| 000023022684 | 23022684 | Yes (decommissioned) | Was check; hardware swap / decom per ops |
+| 000023022696 | 23022696 | Yes | Customer check (0025MAK) |
+
+So: **10 online in AWS** matches the field team; **only six** serials have (or had) a **`meters`** row, and **five** are active **customer check** pairs on the Check Meters page. **Do not** register the **gateway** or **repeater** as `role = check` with a fake account — they are not SparkMeter comparison sites.
+
+### Adding missing devices to the Check Meters **portal**
+
+The UI only shows **primary + check** on the **same `account_number`**. Actionable steps:
+
+1. **23021886, 23021888** — Obtain the **MAK account code(s)** from the field team (one account per customer check install). Then add **`meters`** rows via **Assign Meter / commissioning** or a controlled **`INSERT INTO meters`** with `platform = prototype`, `role = check`, `status = active`, and the correct `account_number` where a **primary** SparkMeter already exists (see `ingest.py` meter resolution and `GET /api/meters/account/{account}`).
+2. **23022613, 23022667** — **Exclude** from Check Meters (infrastructure). Optionally add **`meters`** rows with `role = backup` or a dedicated non-billing role **only if** you want them in the registry for visibility — not as `check`.
+3. **23022684** — Reconcile with ops (DDS swap / recommission) before reactivating.
+
+**No safe automated INSERT** was applied from this repo without confirmed **account ↔ serial** mappings.
+
+### Firmware — “all on latest?”
+
+**Cannot be validated as yes/no from 1PDB.** Check IoT:
+
+- **OTA jobs** (example `us-east-1`): `AFR_OTA-1meter-ota-v1-0-8-20260415204200` was **IN_PROGRESS** targeting **one** thing (`OneMeter13` / **23022673**). Older jobs (e.g. `AFR_OTA-live-v1_0_2-MAKGroup`) show **mixed** execution history (many **CANCELED** per-thing).
+- **Thing attributes** in IoT are often **empty** — version is not reliably stored on the Thing object in this account.
+
+To claim fleet-wide “latest,” you need either **device-reported version** (shadow / MQTT), **per-thing job SUCCESS**, or a **single job** targeting the full **thing group** with all devices succeeded — which is **not** currently evidenced for all 10.
+
 ## Repeatable queries (read-only)
 
 ```sql
