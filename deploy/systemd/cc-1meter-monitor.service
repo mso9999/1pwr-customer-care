@@ -1,0 +1,16 @@
+[Unit]
+Description=1Meter fleet connectivity monitor (DynamoDB -> WhatsApp bridge alert)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=cc_api
+Group=cc_api
+WorkingDirectory=/opt/cc-portal/backend
+EnvironmentFile=/opt/1pdb/.env
+EnvironmentFile=-/etc/default/cc-1meter-monitor
+ExecStart=/opt/cc-portal/backend/venv/bin/python /opt/cc-portal/backend/scripts/ops/monitor_1meter_offline.py
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cc-1meter-monitor

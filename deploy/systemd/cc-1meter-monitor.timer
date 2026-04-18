@@ -1,0 +1,13 @@
+[Unit]
+Description=Run cc-1meter-monitor every 15 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+RandomizedDelaySec=60
+Unit=cc-1meter-monitor.service
+AccuracySec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

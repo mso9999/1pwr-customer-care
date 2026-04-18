@@ -3,6 +3,18 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-18 202604181600 (1Meter fleet connectivity monitor)
+
+### What Was Done
+- **New script `scripts/ops/monitor_1meter_offline.py`** — scans DynamoDB `meter_last_seen` via boto3, cross-references CC `meters` (role/account), and posts a WhatsApp alert via `CC_BRIDGE_NOTIFY_URL` when any prototype meter is silent past `THRESHOLD_HOURS` (default 6) and again when recovered. State in `/var/lib/cc-fleet-monitor/state.json` prevents spam; `DRY_RUN=1` no longer persists state.
+- **systemd** `cc-1meter-monitor.{service,timer}` under `deploy/systemd/` — installed and **enabled** on the CC host; timer runs every 15 min. First run confirmed: fleet=10, offline=10 (existing MAK outage, 29h+).
+- **Docs** `docs/ops/1meter-fleet-monitor.md` — install steps + how to turn on WA alerts (`/opt/1pdb/.env` has neither `CC_BRIDGE_NOTIFY_URL` nor `CC_BRIDGE_SECRET`; same gap silences SMS phone-fallback alerts).
+
+### What Next Session Should Know
+- **Add** `CC_BRIDGE_NOTIFY_URL` + `CC_BRIDGE_SECRET` to `/opt/1pdb/.env` to flip alerting on. WA bridge inbound runs on the CC host (PM2 `whatsapp-cc`); use its `BRIDGE_INBOUND_PORT`/secret.
+- Monitor runs regardless of WA config — journalctl captures fleet/online/offline counts.
+- Canary v1.1.0 OTA on `OneMeter13` still queued; device hasn’t checked in since 2026-04-17 12:43 UTC.
+
 ## Session 2026-04-18 202604181000 (1Meter FW OTA canary 1.1.0)
 
 ### What Was Done
