@@ -3,6 +3,22 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-18 202604181000 (1Meter FW OTA canary 1.1.0)
+
+### What Was Done
+- **1PDB repo** (`fec3915 / 278272f`): `prototype_sync.py` now captures `FirmwareVersion` from DynamoDB → `prototype_meter_state.firmware_version`. Deployed on CC host via scp; `prototype-sync.service` restarted.
+- **CC deploy:** migration 012 was blocked by a 26-minute idle-in-transaction (pid `407879`). Terminated; CI retry (`rerun --failed`) succeeded. `prototype_meter_state.firmware_version` column now exists.
+- **Firmware (`onepwr-aws-mesh`):** applied FirmwareVersion publish + `APP_VERSION=1.1.0` on the build host (`13.247.190.132:2222`, `/opt/1meter-firmware/onepwr-aws-mesh`) — host clone had diverged from my Dropbox clone so I patched directly, not via `git pull`.
+- **Build:** `ALLOW_DIRTY=1 OTA_APP_VERSION=1.1.0 build_firmware_remote.sh` → release `fw-version-publish-20260418093241-e7d8e16`.
+- **S3 publish:** artifacts uploaded to `s3://1pwr-ota-firmware/firmware-releases/v1.1.0/…` with VersionIds recorded.
+- **OTA:** cancelled stale 1.0.8 job; created canary `1meter-v1-1-0-canary-OneMeter13-20260418094036` (IoT job `AFR_OTA-1meter-v1-1-0-canary-OneMeter13-20260418094036`) targeting **OneMeter13** (`23022673` / `0045MAK`). Status `CREATE_COMPLETE` → IoT `IN_PROGRESS`.
+- **Lambda update held:** deploying the new `ingestion_gate` Lambda would double-count readings (prototype-sync service already writes to CC); pushed to GitHub but **not** deployed to AWS.
+
+### What Next Session Should Know
+- Poll the canary IoT job until **SUCCEEDED**; then `SELECT firmware_version FROM prototype_meter_state WHERE meter_id='23022673'` should show `1.1.0`.
+- Full-fleet roll: canary green → create second OTA targeting `MAK_V1_0_2` thing group (also confirm membership matches the 8 live check meters — current group is stale).
+- External-antenna PCB stock **exhausted** (field flag).
+
 ## Session 2026-04-17 202604171100 (1Meter: FW-version ingest + MAK fleet update)
 
 ### What Was Done

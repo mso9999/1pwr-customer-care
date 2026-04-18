@@ -17,6 +17,22 @@ End state: every device runs a **new** build that **publishes** its version stri
 - **`POST /api/meters/reading`** accepts optional **`firmware_version`** and stores it on **`prototype_meter_state`** (nullable; only overwrites when a non-empty value is sent).
 - **Check Meters** (`/om-report/check-meter-comparison`) and **XLSX summary** include **`firmware_version`** when present.
 
+## Canary in flight (2026-04-17)
+
+| Item | Value |
+|------|-------|
+| Release dir (build host) | `/opt/1meter-firmware/releases/fw-version-publish-20260418093241-e7d8e16` |
+| App version | **1.1.0** |
+| S3 prefix | `s3://1pwr-ota-firmware/firmware-releases/v1.1.0/fw-version-publish-20260418093241-e7d8e16/` |
+| Signing profile | `1PWR_OTA_ESP32_v2` |
+| Role | `arn:aws:iam::758201218523:role/1pwr-ota-service-role` |
+| OTA update id | `1meter-v1-1-0-canary-OneMeter13-20260418094036` |
+| IoT job id | `AFR_OTA-1meter-v1-1-0-canary-OneMeter13-20260418094036` |
+| Target | `OneMeter13` (1M `23022673` → `0045MAK`) |
+| Prior 1.0.8 job on OneMeter13 | **CANCELED** |
+
+Once this canary **SUCCEEDS** and we see **`FirmwareVersion: 1.1.0`** on the `prototype_meter_state` row for `23022673`, roll to the full MAK fleet (next section).
+
 ## 4) Build, publish, fleet OTA (AWS `us-east-1`)
 
 Use the remote build host and scripts (see archived **`docs/archive/2026-03-worktree-cleanup/1meter/1Meter-Remote-Build-OTA-Runbook.md`**) or local equivalents:
