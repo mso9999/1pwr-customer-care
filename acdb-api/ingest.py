@@ -314,6 +314,7 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
                      last_relay_status, last_seen_at, last_synced_at, firmware_version)
                 VALUES (%s, %s, %s, %s, %s, NOW(), %s)
                 ON CONFLICT (meter_id) DO UPDATE SET
+                    account_number = EXCLUDED.account_number,
                     last_energy_kwh = EXCLUDED.last_energy_kwh,
                     last_relay_status = EXCLUDED.last_relay_status,
                     last_seen_at = EXCLUDED.last_seen_at,

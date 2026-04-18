@@ -36,6 +36,32 @@ Until the other **five** physical installs appear as **`meters`** rows (`platfor
 
 **Customer Care / 1PDB does not store per-device firmware version.** `prototype_meter_state` holds energy, relay, **`last_seen_at`**, **`last_sample_time`** only. Fleet FW tracking is **AWS IoT OTA** / device shadow / **`onepwr-aws-mesh`** tooling (see archived runbook `docs/archive/2026-03-worktree-cleanup/1meter/1Meter-Remote-Build-OTA-Runbook.md`). To assert “all on latest FW”, use the OTA / IoT console or a device-reported version pipeline—not the Check Meters page.
 
+## 2026-04-17 — Field update (Motlatsi) + CC action
+
+> 1. MAK mission cancelled (rain).
+> 2. All meters still communicating.
+> 3. New meters:
+>    - 23022684, 0051MAK, OneMeter19, Mathabo Ntlatlapo, 58402356
+>    - 23021886, 0056MAK, OneMeter122, Matisetso Ntlatlapo, 51963779
+>    - 23021888, 0058MAK, OneMeter12, Mathato Rapuleng, 59020758
+> 4. ~90 % of external-antenna PCBs now deployed (better Wi-Fi); **stock exhausted**.
+
+### Actioned in `onepower_cc`
+
+- **`23022684`** reactivated → `role=check`, `status=active`, `account_number='0051MAK'`, `community='MAK'`, `platform='prototype'` (was `decommissioned`).
+- **`23021886`** inserted → `0056MAK`.
+- **`23021888`** inserted → `0058MAK`.
+- **`prototype_meter_state`** reassigned `23022684` to `0051MAK` (stale row). Next IoT sample will also update via fixed UPSERT (now carries `account_number` on conflict).
+
+### Portal after change
+
+`/check-meters` pairs: **8** (`0005MAK, 0025MAK, 0026MAK, 0045MAK, 0051MAK, 0056MAK, 0058MAK, 0119MAK`). `0051MAK` `last_seen_at` will refresh when Lambda posts the next sample for `23022684`. `0056MAK` / `0058MAK` have no `prototype_meter_state` row yet — created on first IoT reading.
+
+### Still not in check list (by design)
+
+- **`23022667`** — gateway/repeater at powerhouse.
+- **`23022613`** — repeater.
+
 ## 2026-04-17 — AWS `meter_last_seen` vs S3 vs 1PDB
 
 ### S3 (`s3://1meterdatacopy/`)

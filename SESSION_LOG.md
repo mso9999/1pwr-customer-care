@@ -3,6 +3,18 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-17 202604171100 (1Meter: FW-version ingest + MAK fleet update)
+
+### What Was Done
+- **CC:** migration `012` (`prototype_meter_state.firmware_version`), `POST /api/meters/reading` optional `firmware_version`, Check Meters health + XLSX include FW; UPSERT now keeps `account_number` in sync.
+- **Docs:** `docs/ops/1meter-fleet-ota-fw-version.md` — fleet OTA order (firmware publishes version → Lambda forwards → CC deploy → OTA).
+- **Field action (Motlatsi, rain cancelled mission):** Registered in prod `onepower_cc` — `23022684` reactivated on `0051MAK`, new check rows for `23021886→0056MAK`, `23021888→0058MAK`. Check Meters now shows **8** pairs (was 5).
+- **Known gap:** external-antenna PCBs exhausted; `23022613` / `23022667` remain infra (not in Check Meters).
+
+### What Next Session Should Know
+- Firmware work still lives in **`onepwr-aws-mesh`** and **`ingestion_gate`** — CC accepts `firmware_version` but it’s `NULL` until those repos publish/forward it.
+- Start of rollout: build + OTA via `/opt/1meter-firmware` (staging EC2 `13.247.190.132:2222`).
+
 ## Session 2026-04-16 202604161900 (Manual payment → `cc_mutations` audit)
 
 ### What Was Done
