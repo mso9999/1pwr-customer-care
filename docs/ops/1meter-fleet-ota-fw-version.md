@@ -2,16 +2,15 @@
 
 End state: every device runs a **new** build that **publishes** its version string on the normal telemetry path, **`ingestion_gate`** forwards it to CC, and **`prototype_meter_state.firmware_version`** + **Check Meters** show it.
 
-## 1) Firmware (`onepowerLS/onepwr-aws-mesh`)
+## 1) Firmware (`onepowerLS/onepwr-aws-mesh`) — **committed `21b8586`**
 
-- Add a stable field to the **MQTT JSON** (and/or the payload the Lambda forwards), e.g. **`firmware_version`**: semver or `OTA_APP_VERSION` / `PROJECT_VER` string from build.
-- Ensure the value is present **on every publish** (or at least on boot + hourly) so CC updates even when energy delta is 0.
-- Bump **OTA app version** so the image is **strictly higher** than every device (anti-rollback).
+- MQTT publish task (`main/tasks/onemeter_mqtt/onemeter_mqtt.c`) adds **`"FirmwareVersion": "%d.%d.%d"`** from `APP_VERSION_MAJOR/MINOR/BUILD` (via `ota_over_mqtt_demo_config.h`). Sent on every sample.
+- **`sdkconfig.defaults`**: bumped to **`1.1.0`** (`MAJOR=1, MINOR=1, BUILD=0`) so the new image is strictly higher than the deployed `1.0.8`.
+- Build + OTA via `/opt/1meter-firmware` on staging EC2 (see runbook in `docs/archive/2026-03-worktree-cleanup/1meter/1Meter-Remote-Build-OTA-Runbook.md`).
 
-## 2) Ingestion (`onepowerLS/ingestion_gate` Lambda)
+## 2) Ingestion (`onepowerLS/ingestion_gate` Lambda) — **committed `67f5ab3`**
 
-- Map the MQTT key into the POST body to **`https://cc.1pwrafrica.com/api/meters/reading`** (or regional CC URL) as optional **`firmware_version`** (string).
-- No change to `X-IoT-Key` contract.
+- `meter_ingest_gate.py` scans incoming payload for common FW keys (`FirmwareVersion`, `firmware_version`, `AppVersion`, `OTAAppVersion`, …) and forwards as **`firmware_version`** to CC `/api/meters/reading`. No change to `X-IoT-Key` contract.
 
 ## 3) Customer Care API (this repo) — deployed with migration **`012_*.sql`**
 
