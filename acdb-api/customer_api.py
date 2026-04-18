@@ -153,8 +153,56 @@ def _derive_account_from_plot(plot_number: str, concession: str) -> Optional[str
     return None
 
 
+def _resolve_accounts_by_pg_id(cursor, pg_customer_id: int) -> List[str]:
+    """Resolve account numbers for a customer by PostgreSQL primary key ``id``.
+
+    Preferred over ``_resolve_accounts_for_customer`` because it is immune to
+    ``id`` vs ``customer_id_legacy`` collisions (legacy values can equal other
+    rows' ``id``).
+    """
+    accounts: set = set()
+    try:
+        cursor.execute(
+            "SELECT a.account_number FROM accounts a WHERE a.customer_id = %s",
+            (int(pg_customer_id),),
+        )
+        for r in cursor.fetchall():
+            if r[0]:
+                accounts.add(str(r[0]).strip())
+    except Exception:
+        pass
+    try:
+        cursor.execute(
+            "SELECT DISTINCT m.account_number FROM meters m "
+            "JOIN accounts a ON m.account_number = a.account_number "
+            "WHERE a.customer_id = %s AND m.account_number IS NOT NULL",
+            (int(pg_customer_id),),
+        )
+        for r in cursor.fetchall():
+            if r[0]:
+                accounts.add(str(r[0]).strip())
+    except Exception:
+        pass
+    if not accounts:
+        try:
+            cursor.execute(
+                "SELECT plot_number, community FROM customers WHERE id = %s",
+                (int(pg_customer_id),),
+            )
+            row = cursor.fetchone()
+            if row:
+                derived = _derive_account_from_plot(
+                    str(row[0] or ""), str(row[1] or "")
+                )
+                if derived:
+                    accounts.add(derived)
+        except Exception:
+            pass
+    return sorted(accounts)
+
+
 def _resolve_accounts_for_customer(cursor, customer_id_legacy: str) -> List[str]:
-    """Resolve all known account numbers for a customer.
+    """Resolve all known account numbers for a customer (legacy path).
 
     Checks:
       1. accounts table (primary)
@@ -358,14 +406,15 @@ def customer_by_phone(phone: str):
             if not rows:
                 raise HTTPException(status_code=404, detail="No customer found for this phone number")
 
-            customers = [_normalize_customer(_row_to_dict(cursor, row)) for row in rows]
-
-            for cust in customers:
-                cid = cust["customer_id_legacy"]
-                if cid:
-                    cust["account_numbers"] = _resolve_accounts_for_customer(cursor, cid)
-                else:
-                    cust["account_numbers"] = []
+            row_dicts = [_row_to_dict(cursor, row) for row in rows]
+            customers = []
+            for rd in row_dicts:
+                cust = _normalize_customer(rd)
+                cust["pg_customer_id"] = rd.get("id")
+                cust["account_numbers"] = (
+                    _resolve_accounts_by_pg_id(cursor, rd["id"]) if rd.get("id") else []
+                )
+                customers.append(cust)
 
             return {"customers": customers, "count": len(customers)}
 
@@ -381,20 +430,43 @@ def customer_by_phone(phone: str):
 @app.get("/api/customers/by-id/{customer_id}")
 @app.get("/customers/by-id/{customer_id}")
 def customer_by_id(customer_id: str):
-    """Look up a customer by their legacy CUSTOMER ID."""
-    sql = "SELECT * FROM customers WHERE customer_id_legacy = %s"
+    """Look up a customer by their ``customers.id`` (PostgreSQL PK) first,
+    falling back to ``customer_id_legacy``.
+
+    The list page now links to PostgreSQL ``id``; treating the param as legacy
+    caused cross-customer misroutes when the pg ``id`` happened to equal another
+    row's ``customer_id_legacy`` (e.g. SHG-0020 vs MAK-0100 — both had id=503
+    / legacy=503 in different rows). Account numbers are resolved against the
+    **resolved row's pg id**, not the input token.
+    """
+    try:
+        cid_int = int(customer_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="customer_id must be numeric")
 
     try:
         with get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute(sql, (int(customer_id),))
+
+            cursor.execute("SELECT * FROM customers WHERE id = %s", (cid_int,))
             row = cursor.fetchone()
+            resolved_via = "pg_id"
+            if not row:
+                cursor.execute(
+                    "SELECT * FROM customers WHERE customer_id_legacy = %s LIMIT 1",
+                    (cid_int,),
+                )
+                row = cursor.fetchone()
+                resolved_via = "customer_id_legacy"
 
             if not row:
                 raise HTTPException(status_code=404, detail=f"No customer with ID {customer_id}")
 
-            cust = _normalize_customer(_row_to_dict(cursor, row))
-            cust["account_numbers"] = _resolve_accounts_for_customer(cursor, customer_id)
+            row_dict = _row_to_dict(cursor, row)
+            cust = _normalize_customer(row_dict)
+            cust["pg_customer_id"] = row_dict.get("id")
+            cust["resolved_via"] = resolved_via
+            cust["account_numbers"] = _resolve_accounts_by_pg_id(cursor, row_dict.get("id"))
 
             return {"customer": cust}
 
@@ -467,8 +539,8 @@ def customer_by_account(account_number: str):
             # customer_id_legacy — when loading detail for account URLs; legacy values can equal
             # another row's PostgreSQL id and show the wrong person (MAK / swapped-customer cases).
             cust["pg_customer_id"] = row_dict.get("id")
-            cust["account_numbers"] = _resolve_accounts_for_customer(
-                cursor, cust["customer_id_legacy"]
+            cust["account_numbers"] = _resolve_accounts_by_pg_id(
+                cursor, row_dict.get("id")
             )
 
             return {"customer": cust}

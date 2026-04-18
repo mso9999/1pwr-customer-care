@@ -42,6 +42,22 @@ See **`CONTEXT.md`** → *CC → SparkMeter Customer Sync* for the same rule in 
 |--------|-----|
 | Align CC names to TC | On CC server: `/opt/cc-portal/backend/scripts/ops/fix_mak_drift.py` (dry run) then `--apply` with `/opt/1pdb/.env` and TC token |
 | Resolve EC2 host | On a machine with AWS creds: see `CONTEXT.md` → `aws ec2 describe-instances` (e.g. `af-south-1`) |
+
+## 2026-04-18 — follow-up: cross-site detail (MAK → SHG)
+
+Even after the list links started using PostgreSQL `id`, the detail page still mis-resolved **one more** endpoint:
+
+- `GET /api/customers/by-id/{n}` queried **`customer_id_legacy`**, not `customers.id`.
+- When the URL is `/customers/503` (Mahlompho, MAK), the detail page called `by-id/503`, which returned the row with **`customer_id_legacy = 503`** — a different customer (Maseta, SHG). That customer's `account_numbers` (`0020SHG`) were then shown at the top of Mahlompho's detail page.
+
+**Fix** (`acdb-api/customer_api.py`):
+
+1. New `_resolve_accounts_by_pg_id(cursor, pg_customer_id)` — always joins on `accounts.customer_id` (pg id), immune to legacy/pg collisions.
+2. `customer_by_id`: resolves by **`id` first**, falls back to `customer_id_legacy`; returns `pg_customer_id` + `resolved_via`; accounts resolved against the returned row's pg id.
+3. `customer_by_account`: same account resolver swapped to pg id.
+4. `customer_by_phone`: same.
+
+Net: for any detail URL (account or numeric), accounts now belong to the actual row being displayed.
 | DB forensics | SSH to CC host, `psql` — compare `accounts` + `customers` for MAK rows in the workbook |
 
 Cloud agents typically **have no AWS keys** and **no SSH PEM**; run AWS CLI and `psql` on your Mac or a trusted ops host.
