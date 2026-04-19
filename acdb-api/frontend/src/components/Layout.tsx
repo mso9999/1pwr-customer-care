@@ -126,9 +126,19 @@ export default function Layout() {
     <>
       {/* Logo */}
       <div className="px-4 pt-4 pb-3">
-        <Link to="/" className="flex items-center gap-2.5" onClick={() => setSidebarOpen(false)}>
-          <img src="/1pwr-logo.png" alt="1PWR" className="h-8 w-auto" />
-          <span className="text-base font-bold text-blue-700 whitespace-nowrap">{t('appName')}</span>
+        <Link
+          to="/"
+          className="flex items-center gap-2 min-w-0 overflow-hidden"
+          onClick={() => setSidebarOpen(false)}
+        >
+          <img
+            src="/1pwr-logo.png"
+            alt="1PWR"
+            className="h-7 w-auto max-w-[72px] object-contain shrink-0"
+          />
+          <span className="text-sm font-bold text-blue-700 leading-tight truncate">
+            {t('appName')}
+          </span>
         </Link>
       </div>
 
@@ -265,9 +275,17 @@ export default function Layout() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
-            <Link to="/" className="flex items-center gap-2" onClick={() => setSidebarOpen(false)}>
-              <img src="/1pwr-logo.png" alt="1PWR" className="h-7 w-auto" />
-              <span className="text-base font-bold text-blue-700">{t('appName')}</span>
+            <Link
+              to="/"
+              className="flex items-center gap-2 min-w-0 overflow-hidden"
+              onClick={() => setSidebarOpen(false)}
+            >
+              <img
+                src="/1pwr-logo.png"
+                alt="1PWR"
+                className="h-6 w-auto max-w-[64px] object-contain shrink-0"
+              />
+              <span className="text-sm font-bold text-blue-700 truncate">{t('appName')}</span>
             </Link>
             <div className="w-10" />
           </div>
