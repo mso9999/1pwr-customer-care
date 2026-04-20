@@ -155,7 +155,13 @@ def fetch_meter_last_seen() -> list[dict]:
 
 
 def post_bridge_notify(text: str, payload_extra: dict | None = None) -> bool:
-    """POST to the WhatsApp bridge ``/notify``. Returns True on 2xx."""
+    """POST to the WhatsApp bridge ``/notify``. Returns True on 2xx.
+
+    Best-effort: *any* exception (URL, socket, HTTP, TLS, TimeoutError) is
+    swallowed so the caller can continue and persist state. The bridge sends
+    the WhatsApp message after this POST, and a timeout on the HTTP return
+    does **not** mean the message failed to reach the tracker group.
+    """
     if not NOTIFY_URL or not NOTIFY_SECRET:
         log.warning("No CC_BRIDGE_NOTIFY_URL/CC_BRIDGE_SECRET — skipping WA post")
         return False
@@ -177,10 +183,10 @@ def post_bridge_notify(text: str, payload_extra: dict | None = None) -> bool:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=8) as resp:
+        with urllib.request.urlopen(req, timeout=30) as resp:
             return 200 <= resp.status < 300
-    except urllib.error.URLError as exc:
-        log.warning("bridge notify failed: %s", exc)
+    except Exception as exc:  # noqa: BLE001 - best-effort notify
+        log.warning("bridge notify failed (best-effort, state will still save): %s", exc)
         return False
 
 
@@ -248,6 +254,26 @@ def main() -> int:
             lines.append(f"• {_label(roles.get(mid, {}), mid)} back online")
         alerts.append("\n".join(lines))
 
+    # Persist the observed state FIRST so transient notify failures don't cause
+    # the same alert to re-fire on the next tick. The observation (from
+    # DynamoDB) is authoritative; the WhatsApp post is best-effort.
+    if not DRY_RUN:
+        state["offline"] = {
+            mid: {
+                "first_seen_offline_utc": prev_offline.get(mid, {}).get(
+                    "first_seen_offline_utc",
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+                "last_accepted_utc": offline_now[mid]["last_accepted_utc"],
+                "hours_ago": offline_now[mid]["hours_ago"],
+            }
+            for mid in offline_now
+        }
+        state["last_run_utc"] = datetime.now(timezone.utc).isoformat()
+        save_state(state)
+    else:
+        log.info("DRY_RUN: not persisting state.")
+
     for text in alerts:
         log.info("alert:\n%s", text)
         post_bridge_notify(
@@ -260,23 +286,6 @@ def main() -> int:
             },
         )
 
-    if DRY_RUN:
-        log.info("DRY_RUN: not persisting state.")
-        return 0
-
-    state["offline"] = {
-        mid: {
-            "first_seen_offline_utc": prev_offline.get(mid, {}).get(
-                "first_seen_offline_utc",
-                datetime.now(timezone.utc).isoformat(),
-            ),
-            "last_accepted_utc": offline_now[mid]["last_accepted_utc"],
-            "hours_ago": offline_now[mid]["hours_ago"],
-        }
-        for mid in offline_now
-    }
-    state["last_run_utc"] = datetime.now(timezone.utc).isoformat()
-    save_state(state)
     return 0
 
 
