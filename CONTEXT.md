@@ -238,8 +238,8 @@ Three 1Meter prototypes are installed at MAK in series with SparkMeters for vali
 - 23022628 → 0005MAK (check), SparkMeter 57408 (primary)
 - 23022696 → 0025MAK (check), SparkMeter 58431 (primary)
 - 23022673 → 0045MAK (check), SparkMeter 41657 (primary)
-- 23022667 — repeater/gateway node at powerhouse (NOT a customer meter, not in meters table)
-- 23022613 — real meter, customer TBD (pending team confirmation)
+- 23022667 — labelled "gateway" in ops SOPs (powerhouse); **not a SPoF**. Firmware is ESP32 Mesh-Lite: **any** node with upstream Wi-Fi can be a root; mesh self-elects a root when the labelled one drops. Not a customer meter, not in `meters` table.
+- 23022613 — labelled "repeater" similarly; same mesh semantics apply.
 
 New meters are registered with one `INSERT INTO meters` row — the ingest API resolves
 meters dynamically from the DB (no hardcoded dicts).

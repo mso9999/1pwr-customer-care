@@ -3,6 +3,13 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-20 202604201745 (MAK outage — mesh semantics clarified)
+
+### What Was Done / Learned
+- Motlatsi confirmed ESP32 Mesh-Lite behaviour: "gateway"/"repeater" node labels are convenience, not SPoFs. Any node with upstream Wi-Fi can root; mesh self-heals when a hop drops.
+- Re-analysed DynamoDB last-seen timestamps: of the 5 still-silent meters, **4 dropped within a 6-minute window** (2026-04-17 10:42–10:48 UTC) — likely shared physical dependency (power/AP) near the cluster. **`23021888` (0058MAK) went silent ~1h40m earlier** (09:02 UTC) — independent per-device fault, watch it when the group returns.
+- `CONTEXT.md` Prototype 1Meters section updated so "gateway"/"repeater" language reflects Mesh-Lite reality; future sessions should not assume `23022667` is a SPoF.
+
 ## Session 2026-04-20 202604200830 (WA CC bridge relink + fingerprint + docs)
 
 ### What Was Done
