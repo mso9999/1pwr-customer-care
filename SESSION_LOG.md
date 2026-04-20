@@ -3,6 +3,22 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-20 202604200830 (WA CC bridge relink + fingerprint + docs)
+
+### What Was Done
+- Restored **`whatsapp-cc`** bridge after the earlier restart had invalidated the baileys session. Attempts to link failed repeatedly with **"Couldn't link device, try again later"**; WhatsApp Web on a laptop linked fine, isolating the failure to our bridge.
+- Root cause: default baileys fingerprint **`["Baileys","Chrome","6.0.0"]`** was being filtered by WA. Switched to **`Browsers.macOS("Desktop")`** (`Mac OS / Desktop / 14.4.1`); next QR scan connected immediately.
+- Also added: optional **pairing-code flow** via `BAILEYS_PAIR_PHONE`, verbose disconnect logging (`pino({level: "warn"})` by default, override via `BAILEYS_LOG_LEVEL`), and **`scripts/ops/fetch_cc_qr.sh`** to render a clean QR PNG from the raw payload at `/tmp/whatsapp-cc-qr.txt` (avoiding ASCII-half-block decoding).
+- Added `CC_BRIDGE_NOTIFY_URL=http://127.0.0.1:3847/notify` + `CC_BRIDGE_SECRET` to `/opt/1pdb/.env`; restarted `1pdb-api` / `1pdb-api-bn`. WA inbound server listening on 3847 — **1Meter fleet monitor + SMS phone-fallback alerts will now post** to the `1PWR LS - OnM Ticket Tracker` group.
+- Separately: fixed **cross-site customer detail** bug (MAK URL loading SHG accounts) in `/api/customers/by-id` (commit `660473d`) and the **sidebar logo overflow** in Layout (commit `b256bc0`).
+- Commits today: `660473d` (customer_api resolve-by-pg-id), `b256bc0` (UI sidebar), `db4caae` (bridge improvements + QR helper + docs).
+
+### What Next Session Should Know
+- Bridge is **online** since 2026-04-20 08:20 UTC, linked device shows **"Mac OS"** on the CC phone — cosmetic label, same Linux host process.
+- `whatsapp-baileys` (group logger) is a **separate** bridge process, untouched.
+- **MAK fleet still offline ~71 h**; OTA canary on `OneMeter13` still **QUEUED** — waiting for site gateway/backhaul to come back. No action needed on OTA side.
+- `whatsapp-bridge/whatsapp-customer-care.js` in repo now matches prod. Future bridge edits: commit first, deploy via rsync; pm2 restart will keep session thanks to `baileys_auth_cc`.
+
 ## Session 2026-04-18 202604181600 (1Meter fleet connectivity monitor)
 
 ### What Was Done
