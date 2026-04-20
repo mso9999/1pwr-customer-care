@@ -116,6 +116,16 @@ still point at the current CC API, not a deprecated Windows host.
 
 **CC API → bridge (`POST /notify`)**: Per-country env vars `CC_BRIDGE_NOTIFY_URL_<CC>` and `CC_BRIDGE_SECRET_<CC>` (e.g. `_BN`, `_ZM`) override the shared `CC_BRIDGE_NOTIFY_URL` / `CC_BRIDGE_SECRET`. Default port `BRIDGE_INBOUND_PORT` is often 3847. Deploy a separate bridge process (and tracker group JID) per country so each country’s Customer Care WhatsApp receives only its own alerts. See `docs/sop-add-new-country.md`.
 
+### Linking the bridge to WhatsApp (QR or pairing code)
+
+**QR flow (default).** Each time the bridge starts without a linked session, baileys emits a QR every ~60s. Rather than terminal-screenshot the ASCII QR, run **`scripts/ops/fetch_cc_qr.sh`** locally — it scp-pulls the raw QR payload from **`/tmp/whatsapp-cc-qr.txt`** on the host and renders a clean PNG to **`~/Downloads/cc_qr.png`**. Send that PNG to whoever holds the CC phone; on the phone they pick **Settings → Linked devices → Link a device → Scan QR code** and scan it off another screen. Rerun the script to refresh if the QR rotates.
+
+**Device fingerprint.** The bridge identifies itself to WhatsApp as **`Browsers.macOS("Desktop")`** (`Mac OS / Desktop / 14.4.1`). The baileys default (`Baileys / Chrome / 6.0.0`) has been observed to fail with **“Couldn’t link device, try again later”** while WhatsApp Web on the same account links fine. Don’t revert to the default without a reason.
+
+**Pairing-code flow (fallback).** Set **`BAILEYS_PAIR_PHONE=<E.164 without +>`** in the bridge PM2 env (e.g. `26658342168`) and restart the process. On startup the bridge will call `sock.requestPairingCode(...)`, write the 8-char code to **`/tmp/whatsapp-cc-pairing-code.txt`**, and log a `[PAIRING-CODE]` line. On the CC phone choose **Link with phone number instead** and type the code. This path is socket-scoped: if baileys reconnects, a new code is issued and the old one becomes invalid, so enter the code immediately.
+
+**Disconnect logging.** Set **`BAILEYS_LOG_LEVEL=debug`** (or `trace`) in PM2 env to surface all baileys internal events when diagnosing link failures. The default is `warn`; `[DISCONNECTED]` lines already include the status code, error message, and any `data` payload (e.g. `"stream:error"`).
+
 ### Anti-Spam / Message Filtering
 
 The bridge should skip:

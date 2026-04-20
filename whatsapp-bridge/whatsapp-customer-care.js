@@ -1,4 +1,4 @@
-const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, makeCacheableSignalKeyStore, fetchLatestBaileysVersion } = require("baileys");
+const { default: makeWASocket, DisconnectReason, useMultiFileAuthState, makeCacheableSignalKeyStore, fetchLatestBaileysVersion, Browsers } = require("baileys");
 const { Boom } = require("@hapi/boom");
 const fs = require("fs");
 const path = require("path");
@@ -183,7 +183,9 @@ var reconnectAttempt = 0;
 var botJid = null;         // e.g. "26658342168:42@s.whatsapp.net"
 var botNumber = null;      // e.g. "26658342168"
 var recentReplies = {};    // phone -> timestamp, rate limit replies
-var logger = pino({ level: "silent" });
+// "warn" surfaces baileys auth errors (pairing reject, stream errors) without
+// spamming debug chatter. Override via BAILEYS_LOG_LEVEL=debug when diagnosing.
+var logger = pino({ level: process.env.BAILEYS_LOG_LEVEL || "warn" });
 
 // Suppress noisy Baileys credential logging to stdout
 var _origStdoutWrite = process.stdout.write.bind(process.stdout);
@@ -1085,11 +1087,40 @@ async function startSocket() {
             keys: makeCacheableSignalKeyStore(state.keys, logger)
         },
         logger: logger,
+        // Present as a desktop client. The default ["Baileys", "Chrome", "6.0.0"]
+        // fingerprint can be rejected at pair time by WA; the macOS Desktop
+        // tuple matches what WhatsApp Web registers itself as.
+        browser: Browsers.macOS("Desktop"),
         printQRInTerminal: false,
         generateHighQualityLinkPreview: false,
         markOnlineOnConnect: true,
         keepAliveIntervalMs: 25000
     });
+
+    // Pairing-code flow (alternative to QR):
+    // Set BAILEYS_PAIR_PHONE=<E.164 without "+"> on the bridge env, e.g. "26658342168".
+    // On the CC phone: Linked Devices -> "Link with phone number instead" ->
+    // enter the phone number -> type the code we print below.
+    //
+    // Only requested when the device is not yet registered AND the previous
+    // request succeeded on this socket. Each new socket (reconnect) gets a
+    // new code because the baileys pairing is socket-scoped.
+    var pairPhone = (process.env.BAILEYS_PAIR_PHONE || "").replace(/[^0-9]/g, "");
+    if (pairPhone && !sock.authState.creds.registered) {
+        setTimeout(async function() {
+            try {
+                var code = await sock.requestPairingCode(pairPhone);
+                if (code && code.length) {
+                    fs.writeFileSync("/tmp/whatsapp-cc-pairing-code.txt", code);
+                    console.log("\n[PAIRING-CODE] phone=+" + pairPhone +
+                        " code=" + code +
+                        " (enter on WhatsApp -> Settings -> Linked devices -> Link with phone number)");
+                }
+            } catch (err) {
+                console.log("[PAIRING-CODE] requestPairingCode failed: " + err.message);
+            }
+        }, 3000);
+    }
 
     sock.ev.process(async function(events) {
         if (events["connection.update"]) {
@@ -1106,8 +1137,17 @@ async function startSocket() {
                 var statusCode = (update.lastDisconnect && update.lastDisconnect.error)
                     ? new Boom(update.lastDisconnect.error).output.statusCode : 0;
                 var shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+                var errMsg = update.lastDisconnect && update.lastDisconnect.error
+                    ? (update.lastDisconnect.error.message || String(update.lastDisconnect.error))
+                    : "(no error)";
+                var errData = update.lastDisconnect && update.lastDisconnect.error
+                    && update.lastDisconnect.error.data
+                    ? JSON.stringify(update.lastDisconnect.error.data).slice(0, 300)
+                    : "";
 
-                console.log("[DISCONNECTED] code=" + statusCode + " reconnect=" + shouldReconnect);
+                console.log("[DISCONNECTED] code=" + statusCode + " reconnect=" + shouldReconnect +
+                    " err=\"" + errMsg + "\"" +
+                    (errData ? " data=" + errData : ""));
                 saveState({ status: "disconnected", code: statusCode, at: new Date().toISOString(), ticketTrackerJid: TICKET_TRACKER_JID || "", ticketTrackerName: TICKET_TRACKER_GROUP_NAME });
 
                 if (shouldReconnect) {
