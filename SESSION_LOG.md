@@ -3,6 +3,18 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-21 202604210830 (OTA canary — stuck, needs serial flash)
+
+### What Was Done
+- Cancelled the original v1.1.0 canary on `OneMeter13`; recreated with `MAK_OTA_Profile` instead of `1PWR_OTA_ESP32_v2` to test cert-mismatch hypothesis. Both produced the identical stuck pattern: job `IN_PROGRESS`, `statusDetails={}`, device goes dark for ~11h (per the "suspend meter reads during OTA" feature), then reconnects still running the old image with no `FirmwareVersion` field.
+- Conclusion: repo-embedded signing cert (`18:92:8E:...`) doesn't match **any** of the three AWS signing profiles (`03:9E:44` / two × `CB:98:92`). Device fails signature verification silently. Previous `OneMeter6` success (March) used whichever cert was current at that flash time.
+- Cancelled + deleted both stuck OTA updates. Documented full investigation in **`docs/ops/1meter-ota-investigation-2026-04-20.md`**.
+
+### What Next Session Should Know
+- No OTA jobs queued against `OneMeter13` — device is free.
+- **Forward path**: serial-flash v1.1.0 on next field visit to seed a known-good device; capture/regenerate the signing key pair at that time so future OTAs work fleet-wide.
+- `sdkconfig.defaults` on build host stays at 1.1.0 for anti-rollback.
+
 ## Session 2026-04-20 202604201745 (MAK outage — mesh semantics clarified)
 
 ### What Was Done / Learned
