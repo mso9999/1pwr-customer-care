@@ -65,6 +65,41 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -T 30 -H ${{ secrets.EC2_LINUX_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
 
+      # Install the HR Portal credentials as a systemd drop-in for both API
+      # services. Previously the backend called /api/employees/lookup with no
+      # X-API-Key, which only worked because the HR endpoint had a fail-open
+      # auth bug. HR now enforces the key; see hr_portal commit 42fab508.
+      # The drop-in is re-written on every deploy (install -m 600) so
+      # rotations are just `gh secret set HR_PORTAL_API_KEY` + rerun.
+      - name: Install HR Portal systemd drop-in
+        env:
+          HR_PORTAL_URL: ${{ secrets.HR_PORTAL_URL }}
+          HR_PORTAL_API_KEY: ${{ secrets.HR_PORTAL_API_KEY }}
+        run: |
+          if [ -z "$HR_PORTAL_API_KEY" ]; then
+            echo "SKIP: HR_PORTAL_API_KEY not set in GH secrets — backend lookup_employee() will fail"
+            exit 0
+          fi
+          cat > /tmp/hr-api.conf <<EOF
+          [Service]
+          Environment="HR_PORTAL_URL=$HR_PORTAL_URL"
+          Environment="HR_PORTAL_API_KEY=$HR_PORTAL_API_KEY"
+          EOF
+          scp -i ~/.ssh/deploy_key /tmp/hr-api.conf \
+            ubuntu@${{ secrets.EC2_LINUX_HOST }}:/tmp/hr-api.conf
+          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_LINUX_HOST }} '
+            set -e
+            for svc in 1pdb-api 1pdb-api-bn; do
+              sudo mkdir -p /etc/systemd/system/${svc}.service.d
+              sudo install -m 600 -o root -g root /tmp/hr-api.conf \
+                /etc/systemd/system/${svc}.service.d/hr-api.conf
+            done
+            sudo systemctl daemon-reload
+            rm -f /tmp/hr-api.conf
+            echo "HR API drop-ins installed on 1pdb-api and 1pdb-api-bn"
+          '
+          rm -f /tmp/hr-api.conf
+
       - name: Deploy backend to Linux EC2
         run: |
           # Sync Python backend files (exclude frontend, venv, caches, db files)
