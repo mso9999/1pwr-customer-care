@@ -1673,6 +1673,213 @@ export async function downloadTicketsExcel(params: {
   return downloadFile(`/tickets/export${q ? `?${q}` : ''}`, 'Maintenance_Log.xlsx');
 }
 
+// ---------------------------------------------------------------------------
+// Gensite — generation-site commissioning + inverter telemetry
+// ---------------------------------------------------------------------------
+
+export interface GensiteCredentialSpec {
+  vendor: string;
+  backend: string;
+  label: string;
+  plain_fields: string[];
+  secret_fields: string[];
+  extra_fields: string[];
+  docs_url: string | null;
+  notes: string | null;
+}
+
+export interface GensiteVendor {
+  vendor: string;
+  display_name: string;
+  implementation_status: 'ready' | 'stub' | 'scrape' | 'modbus';
+  credential_specs: GensiteCredentialSpec[];
+}
+
+export interface GensiteVendorsResponse {
+  vendors: GensiteVendor[];
+  crypto_configured: boolean;
+}
+
+export interface GensiteSite {
+  code: string;
+  country: string;
+  kind: string;
+  display_name: string;
+  district: string | null;
+  gps_lat: number | null;
+  gps_lon: number | null;
+  ugp_project_id: string | null;
+  commissioned_at: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  last_reading_ts?: string | null;
+}
+
+export interface GensiteEquipment {
+  id: number;
+  site_code: string;
+  kind: string;
+  vendor: string;
+  model: string | null;
+  serial: string | null;
+  role: string | null;
+  nameplate_kw: number | null;
+  nameplate_kwh: number | null;
+  firmware_version: string | null;
+  commissioned_at: string | null;
+  decommissioned_at: string | null;
+  installed_by: string | null;
+  notes: string | null;
+}
+
+export interface GensiteCredentialMasked {
+  id: number;
+  site_code: string;
+  vendor: string;
+  backend: string;
+  base_url: string | null;
+  username: string | null;
+  username_masked?: string;
+  site_id_on_vendor: string | null;
+  extra: Record<string, unknown>;
+  created_by: string | null;
+  created_at: string;
+  rotated_at: string | null;
+  last_verified_at: string | null;
+  last_verified_ok: boolean | null;
+  last_verify_error: string | null;
+  has_secret: boolean;
+  has_api_key: boolean;
+}
+
+export interface GensiteLiveReading {
+  equipment_id: number;
+  ts_utc: string;
+  ac_kw: number | null;
+  ac_kwh_total: number | null;
+  pv_kw: number | null;
+  battery_kw: number | null;
+  battery_soc_pct: number | null;
+  grid_kw: number | null;
+  ac_freq_hz: number | null;
+  ac_v_avg: number | null;
+  status_code: string | null;
+  vendor: string;
+  kind: string;
+  model: string | null;
+  serial: string | null;
+  role: string | null;
+}
+
+export interface GensiteSiteDetail {
+  site: GensiteSite;
+  equipment: GensiteEquipment[];
+  credentials: GensiteCredentialMasked[];
+  latest_readings: GensiteLiveReading[];
+}
+
+export interface GensiteEquipmentInput {
+  kind: string;
+  vendor: string;
+  model?: string;
+  serial?: string;
+  role?: string;
+  nameplate_kw?: number;
+  nameplate_kwh?: number;
+  firmware_version?: string;
+  notes?: string;
+}
+
+export interface GensiteCredentialInput {
+  vendor: string;
+  backend: string;
+  base_url?: string;
+  username?: string;
+  secret?: string;
+  api_key?: string;
+  site_id_on_vendor?: string;
+  extra?: Record<string, unknown>;
+}
+
+export interface GensiteCommissionRequest {
+  site_code: string;
+  country: string;
+  kind: string;
+  display_name: string;
+  district?: string;
+  gps_lat?: number;
+  gps_lon?: number;
+  ugp_project_id?: string;
+  commissioned_at?: string;
+  notes?: string;
+  equipment: GensiteEquipmentInput[];
+  credentials: GensiteCredentialInput[];
+}
+
+export interface GensiteCommissionResponse {
+  site: GensiteSite;
+  equipment: GensiteEquipment[];
+  credentials: Array<{
+    credential: GensiteCredentialMasked;
+    verify: { ok: boolean; message: string };
+  }>;
+}
+
+export interface GensiteVerifyResponse {
+  site_code: string;
+  vendor: string;
+  backend: string;
+  ok: boolean;
+  message: string;
+  discovered_site_id: string | null;
+  discovered_equipment: Array<Record<string, unknown>>;
+}
+
+export async function getGensiteVendors(): Promise<GensiteVendorsResponse> {
+  return request('/gensite/vendors');
+}
+
+export async function listGensiteSites(country?: string): Promise<{ sites: GensiteSite[]; count: number }> {
+  const qs = country ? `?country=${encodeURIComponent(country)}` : '';
+  return request(`/gensite/sites${qs}`);
+}
+
+export async function getGensiteSite(code: string): Promise<GensiteSiteDetail> {
+  return request(`/gensite/sites/${encodeURIComponent(code)}`);
+}
+
+export async function getGensiteLive(code: string): Promise<{ site_code: string; readings: GensiteLiveReading[] }> {
+  return request(`/gensite/sites/${encodeURIComponent(code)}/live`);
+}
+
+export async function commissionGensite(req: GensiteCommissionRequest): Promise<GensiteCommissionResponse> {
+  return request('/gensite/commission', { method: 'POST', body: JSON.stringify(req) });
+}
+
+export async function verifyGensiteCredential(
+  code: string,
+  vendor: string,
+  backend: string,
+): Promise<GensiteVerifyResponse> {
+  return request(
+    `/gensite/sites/${encodeURIComponent(code)}/credentials/${encodeURIComponent(vendor)}/${encodeURIComponent(backend)}/verify`,
+    { method: 'POST' },
+  );
+}
+
+export async function rotateGensiteCredential(
+  code: string,
+  vendor: string,
+  backend: string,
+  body: Omit<GensiteCredentialInput, 'vendor' | 'backend'>,
+): Promise<{ credential: GensiteCredentialMasked; verify: { ok: boolean; message: string } }> {
+  return request(
+    `/gensite/sites/${encodeURIComponent(code)}/credentials/${encodeURIComponent(vendor)}/${encodeURIComponent(backend)}/rotate`,
+    { method: 'POST', body: JSON.stringify(body) },
+  );
+}
+
 // Health is at root level, not under /api
 export async function getHealth() {
   const res = await fetch('/health');

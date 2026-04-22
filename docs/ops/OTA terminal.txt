@@ -1,0 +1,344 @@
+
+I (390242) ota_over_mqtt_demo: Downloaded block 261 of 263.
+
+I (390262) ota_over_mqtt_demo: Request File Block event Received.
+
+I (390342) ota_over_mqtt_demo: Sent PUBLISH packet to broker $aws/things/OneMeter13/streams/AFR_OTA-79a38e5c-414b-49ae-9530-0e93e45a0d1f/get/json to broker.
+
+
+I (390342) ota_over_mqtt_demo: Data block request sent.
+
+I (390492) TIMER_TASKS: Reading meters and publishing data
+I (391142) coreMQTT: De-serialized incoming PUBLISH packet: DeserializerResult=MQTTSuccess.
+I (391142) coreMQTT: State record updated. New state=MQTTPublishDone.
+I (391142) ota_over_mqtt_demo: Received File Block event Received.
+
+I (391152) ota_over_mqtt_demo: Downloaded block 262 of 263.
+
+I (391162) ota_over_mqtt_demo: Free OTA buffers 2
+I (391162) ota_over_mqtt_demo: Close file event Received
+
+I (391452) AWS_OTA: Signature verification succeeded.
+I (391462) ota_over_mqtt_demo: Activate Image event Received
+
+I (391462) esp_image: segment 0: paddr=001b0020 vaddr=3c0d0020 size=299f0h (170480) map
+I (391492) TIMER_TASKS: Reading meters and publishing data
+I (391492) esp_image: segment 1: paddr=001d9a18 vaddr=3fc93200 size=03638h ( 13880)
+I (391492) esp_image: segment 2: paddr=001dd058 vaddr=40380000 size=02fc0h ( 12224)
+I (391502) esp_image: segment 3: paddr=001e0020 vaddr=42000020 size=c660ch (812556) map
+I (391612) esp_image: segment 4: paddr=002a6634 vaddr=40382fc0 size=10230h ( 66096)
+I (391622) esp_image: segment 5: paddr=002b686c vaddr=50000200 size=0001ch (    28)
+I (391622) esp_image: segment 0: paddr=001b0020 vaddr=3c0d0020 size=299f0h (170480) map
+I (391652) esp_image: segment 1: paddr=001d9a18 vaddr=3fc93200 size=03638h ( 13880)
+I (391652) esp_image: segment 2: paddr=001dd058 vaddr=40380000 size=02fc0h ( 12224)
+I (391662) esp_image: segment 3: paddr=001e0020 vaddr=42000020 size=c660ch (812556) map
+I (391772) esp_image: segment 4: paddr=002a6634 vaddr=40382fc0 size=10230h ( 66096)
+I (391782) esp_image: segment 5: paddr=002b686c vaddr=50000200 size=0001ch (    28)
+I (392342) wifi:state: run -> init (0)
+I (392342) wifi:pm stop, total sleep time: 0 us / 331703559 us
+
+I (392342) wifi:<ba-del>idx:1, tid:0
+I (392342) wifi:<ba-del>idx:0, tid:5
+I (392342) wifi:new:<6,0>, old:<6,2>, ap:<6,2>, sta:<6,0>, prof:1
+E (392352) [ESP_Mesh_Lite_Comm]: Disconnect reason : 8
+I (392352) core_mqtt_agent_manager: WiFi disconnected. Requesting reconnect.
+E (392362) network_transport: Error reading the message
+E (392372) coreMQTT: Call to receiveSingleIteration failed. Status=MQTTRecvFailed
+I (392372) MQTT_METER: coreMQTT-Agent disconnected. Preventing coreMQTT-Agent commands from being enqueued.
+I (392382) ota_over_mqtt_demo: coreMQTT-Agent disconnected. Suspending OTA agent.
+I (392392) core_mqtt_agent_manager: coreMQTT-Agent disconnected.
+W (392402) [vendor_ie]: esp_wifi_disconnect[352] return ESP_FAIL:0x3002
+I (392412) [ESP_Mesh_Lite_Comm]: Retry to connect to the AP
+I (392462) wifi:flush txq
+I (392462) wifi:stop sw txq
+I (392462) wifi:lmac stop hw txq
+ESP-ROM:esp32c3-api1-20210207
+Build:Feb  7 2021
+rst:0xc (RTC_SW_CPU_RST),boot:0xf (SPI_FAST_FLASH_BOOT)
+Saved PC:0x40380684
+--- 0x40380684: esp_reset_reason_set_hint at C:/Espressif/frameworks/esp-idf-v5.4.1/components/esp_system/port/soc/esp32c3/reset_reason.c:98 (discriminator 1)
+
+SPIWP:0xee
+mode:DIO, clock div:1
+load:0x3fcd5820,len:0x1188
+load:0x403cc710,len:0x96c
+load:0x403ce710,len:0x2c34
+entry 0x403cc710
+I (249) cpu_start: Unicore app
+I (257) cpu_start: Pro cpu start user code
+I (258) cpu_start: cpu freq: 160000000 Hz
+I (258) app_init: Application information:
+I (258) app_init: Project name:     FeaturedFreeRTOSIoTIntegration
+I (264) app_init: App version:      53ad310-dirty
+I (268) app_init: Compile time:     Apr 14 2026 14:57:48
+I (273) app_init: ELF file SHA256:  86e0b9e57...
+--- Warning: Checksum mismatch between flashed and built applications. Checksum of built application is ec88d4b41d15bb366c10004d1e9fc671f4563c48a8c73c24f3638c690be2f8c0
+I (277) app_init: ESP-IDF:          v5.4.1-dirty
+I (282) efuse_init: Min chip rev:     v0.3
+I (285) efuse_init: Max chip rev:     v1.99
+I (289) efuse_init: Chip rev:         v0.4
+I (293) heap_init: Initializing. RAM available for dynamic allocation:
+I (300) heap_init: At 3FCA5BE0 len 0001A420 (105 KiB): RAM
+I (305) heap_init: At 3FCC0000 len 0001C710 (113 KiB): Retention RAM
+I (311) heap_init: At 3FCDC710 len 00002950 (10 KiB): Retention RAM
+I (317) heap_init: At 50000288 len 00001D60 (7 KiB): RTCRAM
+I (323) spi_flash: detected chip: generic
+I (326) spi_flash: flash io: dio
+I (329) sleep_gpio: Configure to isolate all GPIO pins in sleep state
+I (335) sleep_gpio: Enable automatic switching of GPIO sleep configuration
+I (342) coexist: coex firmware version: e727207
+I (346) coexist: coexist rom version 9387209
+I (350) main_task: Started on CPU0
+I (350) main_task: Calling app_main()
+debug: local
+I (5350) main: Starting app_main().
+I (5350) main: esp_storage_init done.
+I (5350) meterstring: Starting init procedure
+0x02 0x03 0x00 0x10 0x00 0x03 0x04 0x3D I (6350) 1meter_mb: onemeter_modbus_read_registers received 0 bytes:
+[ ]
+E (6350) 1meter_mb: Rx timed out after 0 bytes.
+0x03 0x03 0x00 0x10 0x00 0x03 0x05 0xEC I (7350) 1meter_mb: onemeter_modbus_read_registers received 0 bytes:
+[ ]
+E (7350) 1meter_mb: Rx timed out after 0 bytes.
+0x04 0x03 0x00 0x10 0x00 0x03 0x04 0x5B I (8350) 1meter_mb: onemeter_modbus_read_registers received 0 bytes:
+[ ]
+E (8350) 1meter_mb: Rx timed out after 0 bytes.
+0x05 0x03 0x00 0x10 0x00 0x03 0x05 0x8A I (8520) 1meter_mb: onemeter_modbus_read_registers received 11 bytes:
+[ 0x05 0x03 0x06 0x00 0x00 0x23 0x02 0x26 0x73 0xE2 0x74 ]
+I (8520) meterstring: Found meter with SN: 000023022673 and modbus ID: 5
+0x06 0x03 0x00 0x10 0x00 0x03 0x05 0xB9 I (9530) 1meter_mb: onemeter_modbus_read_registers received 0 bytes:
+[ ]
+E (9530) 1meter_mb: Rx timed out after 0 bytes.
+0x07 0x03 0x00 0x10 0x00 0x03 0x04 0x68 I (10530) 1meter_mb: onemeter_modbus_read_registers received 0 bytes:
+[ ]
+E (10530) 1meter_mb: Rx timed out after 0 bytes.
+0x08 0x03 0x00 0x10 0x00 0x03 0x04 0x97 I (11530) 1meter_mb: onemeter_modbus_read_registers received 0 bytes:
+[ ]
+E (11530) 1meter_mb: Rx timed out after 0 bytes.
+0x09 0x03 0x00 0x10 0x00 0x03 0x05 0x46 I (12530) 1meter_mb: onemeter_modbus_read_registers received 0 bytes:
+[ ]
+E (12530) 1meter_mb: Rx timed out after 0 bytes.
+0x0A 0x03 0x00 0x10 0x00 0x03 0x05 0x75 I (13530) 1meter_mb: onemeter_modbus_read_registers received 0 bytes:
+[ ]
+E (13530) 1meter_mb: Rx timed out after 0 bytes.
+I (13530) meterstring: New baudrate: 2400 and status: 0
+0x01 0x03 0x00 0x10 0x00 0x03 0x04 0x0E I (14530) 1meter_mb: onemeter_modbus_read_registers received 0 bytes:
+[ ]
+E (14530) 1meter_mb: Rx timed out after 0 bytes.
+I (14530) meterstring: Restored baudrate: 2400 and status: 0
+I (14530) meterstring: Found 1 meters during init
+I (14540) meterstring: Restored energy state for 000023022673: 15.479552 kWh (prevW=0.0)
+I (14550) main: meter_string init done
+I (14550) app_wifi: Initializing Network Context.
+I (15550) esp_secure_cert: Pre-provisioned partition information:
+I (15550) esp_secure_cert: partition format: CUST_FLASH, partition name: esp_secure_cert
+W (15550) mmap: paddr block is mapped already, vaddr_start: 0x3c100000, size: 0x10000
+W (15560) mmap: paddr block is mapped already, vaddr_start: 0x3c100000, size: 0x10000
+W (15560) mmap: paddr block is mapped already, vaddr_start: 0x3c100000, size: 0x10000
+W (15570) mmap: paddr block is mapped already, vaddr_start: 0x3c100000, size: 0x10000
+I (15580) bridge_common: esp-iot-bridge version: 0.11.9
+I (15580) pp: pp rom version: 9387209
+I (15590) net80211: net80211 rom version: 9387209
+I (15600) wifi:wifi driver task: 3fcafb28, prio:23, stack:6656, core=0
+I (15600) wifi:wifi firmware version: 79fa3f41ba
+I (15600) wifi:wifi certification version: v7.0
+I (15610) wifi:config NVS flash: enabled
+I (15610) wifi:config nano formatting: disabled
+I (15610) wifi:Init data frame dynamic rx buffer num: 32
+I (15620) wifi:Init static rx mgmt buffer num: 5
+I (15620) wifi:Init management short buffer num: 32
+I (15630) wifi:Init dynamic tx buffer num: 32
+I (15630) wifi:Init static tx FG buffer num: 2
+I (15640) wifi:Init static rx buffer size: 1600
+I (15640) wifi:Init static rx buffer num: 10
+I (15640) wifi:Init dynamic rx buffer num: 32
+I (15650) wifi_init: rx ba win: 6
+I (15650) wifi_init: accept mbox: 6
+I (15650) wifi_init: tcpip mbox: 32
+I (15660) wifi_init: udp mbox: 6
+I (15660) wifi_init: tcp mbox: 6
+I (15660) wifi_init: tcp tx win: 5760
+I (15670) wifi_init: tcp rx win: 5760
+I (15670) wifi_init: tcp mss: 1440
+I (15670) wifi_init: WiFi IRAM OP enabled
+I (15680) wifi_init: WiFi RX IRAM OP enabled
+I (15680) phy_init: phy_version 1200,2b7123f9,Feb 18 2025,15:22:21
+W (15690) phy_init: failed to load RF calibration data (0xffffffff), falling back to full calibration
+I (15720) phy_init: Saving new calibration data due to checksum failure or outdated calibration data, mode(2)
+I (15740) wifi:mode : null
+I (15750) wifi:mode : softAP (b4:3a:45:7c:8c:89)
+I (15750) wifi:Total power save buffer number: 16
+I (15750) wifi:Init max length of beacon: 752/752
+I (15750) wifi:Init max length of beacon: 752/752
+I (15750) esp_netif_lwip: DHCP server started on interface WIFI_AP_DEF with IP: 192.168.4.1
+Add netif ap with 53ad310(commit id)
+I (15770) bridge_common: netif list add success
+I (15770) bridge_common: [WIFI_AP_DEF ]
+I (15770) bridge_common: Set ip info:192.168.5.1
+I (15780) bridge_wifi: SoftAP IP network segment has changed, deauth all station
+I (15790) wifi:Disabled PMF config for SoftAP
+I (15790) wifi:Total power save buffer number: 16
+I (15790) esp_netif_lwip: DHCP server started on interface WIFI_AP_DEF with IP: 192.168.5.1
+I (15800) bridge_common: [WIFI_AP_DEF ]Name Server1: 114.114.114.114
+I (15810) bridge_common: DHCPS Restart, deauth all station
+Add netif sta with 53ad310(commit id)
+I (15820) bridge_common: netif list add success
+I (15820) wifi:mode : sta (b4:3a:45:7c:8c:88) + softAP (b4:3a:45:7c:8c:89)
+I (15830) wifi:enable tsf
+I (15830) bridge_wifi: Found ssid MAK_Wifi-ext
+I (15830) bridge_wifi: Found password 1PWR_M@k123
+E (15840) NVS: Failed to read IP info from NVS
+I (15840) wifi:Disabled PMF config for STA
+I (15850) bridge_wifi: [esp_bridge_wifi_set_config] sta ssid: MAK_Wifi-ext password: 1PWR_M@k123
+W (15850) wifi:Password length matches WPA2 standards, authmode threshold changes from OPEN to WPA2
+I (15860) bridge_wifi: [esp_bridge_wifi_set_config] softap ssid: ESP_Bridge password: 12345678
+I (16120) wifi:Total power save buffer number: 16
+I (16120) esp_netif_lwip: DHCP server started on interface WIFI_AP_DEF with IP: 192.168.5.1
+I (16120) bridge_wifi: SoftAP config changed, deauth all station
+I (16120) Mesh-Lite: esp-mesh-lite component version: 1.0.1
+I (16130) ESPNOW: espnow [version: 2.0] init
+I (16130) [vendor_ie]: Mesh-Lite commit id: 3237c6d
+
+I (16140) [vendor_ie]: Mesh ID: 77
+W (16140) wifi:Haven't to connect to a suitable AP now!
+I (16150) [ESP_Mesh_Lite_Comm]: msg action add success
+I (16150) [ESP_Mesh_Lite_Comm]: Bind Socket 56, port 6364
+I (16160) [ESP_Mesh_Lite_Comm]: Bind Socket 57, port 6363
+I (16160) [ESP_Mesh_Lite_Comm]: Bind Socket 58, port 6366
+I (16170) [ESP_Mesh_Lite_Comm]: Bind Socket 59, port 6365
+I (16170) [mesh-lite-espnow]: Start espnow task
+I (16180) MQTT_METER: Subscribing to topic: m/000023022673/q
+I (16180) MQTT_METER: Sending subscribe request to agent for topic filter: m/000023022673/q with id 1
+I (16200) ota_over_mqtt_demo: OTA over MQTT demo, Application version 1.0.7
+I (16200) Mesh-Lite: Mesh-Lite connecting
+W (16200) wifi:In 2G band, 5G channel bitmap does not take effect
+E (16210) wifi:2g bitmap contains only invalid channels= 0xd1d0
+I (16210) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (16220) TIMER_TASKS: starting meter read task
+I (16220) TIMER_TASKS: Reading meters and publishing data
+I (16230) meterstring: Looking for index of SN: 000023022673
+0x05 0x03 0x00 0x16 0x00 0x12 0x25 0x87 I (16220) main: main_app done with initializations
+I (16240) main_task: Returned from app_main()
+I (16540) 1meter_mb: onemeter_modbus_read_registers received 41 bytes:
+[ 0x05 0x03 0x24 0x00 0x00 0x04 0xB0 0x00 0x00 0x06 0x0B 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x08 0xFA 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x03 0xE8 0x13 0x87 0x00 0x00 0x85 0xB8 ]
+I (16550) meterstring: The current time is: 202604151611
+I (19050) [vendor_ie]: Mesh-Lite Scan done
+W (19050) wifi:Haven't to connect to a suitable AP now!
+I (19050) [vendor_ie]: now parent node   : bssid:69:5f:73:63:61:6e, rssi:0, level:-1
+I (19050) [vendor_ie]: update parent node: bssid:b4:3a:45:66:53:59, rssi:-88, level:1
+I (19060) [vendor_ie]: RTC store: temp_mesh_id:255; ssid:; bssid:00:00:00:00:00:00; crc:591270722
+W (31150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (31150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (31930) [vendor_ie]: Mesh-Lite Scan done
+W (31930) [vendor_ie]: ap record is NULL
+W (41150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (41150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (41930) [vendor_ie]: Mesh-Lite Scan done
+W (41930) [vendor_ie]: ap record is NULL
+W (51150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (51150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (51930) [vendor_ie]: Mesh-Lite Scan done
+W (51930) [vendor_ie]: ap record is NULL
+W (61150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (61150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (61930) [vendor_ie]: Mesh-Lite Scan done
+W (61930) [vendor_ie]: ap record is NULL
+W (71150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (71150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (71930) [vendor_ie]: Mesh-Lite Scan done
+W (71930) [vendor_ie]: ap record is NULL
+W (81150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (81150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (81930) [vendor_ie]: Mesh-Lite Scan done
+W (81930) [vendor_ie]: ap record is NULL
+W (91150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (91150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (91930) [vendor_ie]: Mesh-Lite Scan done
+W (91930) [vendor_ie]: ap record is NULL
+W (101150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (101150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (101930) [vendor_ie]: Mesh-Lite Scan done
+W (101930) [vendor_ie]: ap record is NULL
+W (111150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (111150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (111930) [vendor_ie]: Mesh-Lite Scan done
+W (111930) [vendor_ie]: ap record is NULL
+W (121150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (121150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (121930) [vendor_ie]: Mesh-Lite Scan done
+W (121930) [vendor_ie]: ap record is NULL
+W (131150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (131150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (131930) [vendor_ie]: Mesh-Lite Scan done
+W (131930) [vendor_ie]: ap record is NULL
+I (135620) TIMER_TASKS: Reading meters and publishing data
+I (135620) meterstring: Looking for index of SN: 000023022673
+0x05 0x03 0x00 0x16 0x00 0x12 0x25 0x87 I (135920) 1meter_mb: onemeter_modbus_read_registers received 41 bytes:
+[ 0x05 0x03 0x24 0x00 0x00 0x04 0xB0 0x00 0x00 0x06 0x0B 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x08 0xFC 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x03 0xE8 0x13 0x86 0x00 0x00 0x5C 0xF0 ]
+I (135940) meterstring: The current time is: 202604151613
+W (141150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (141150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (141930) [vendor_ie]: Mesh-Lite Scan done
+W (141930) [vendor_ie]: ap record is NULL
+W (151150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (151150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (151930) [vendor_ie]: Mesh-Lite Scan done
+W (151930) [vendor_ie]: ap record is NULL
+W (161150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (161150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (161930) [vendor_ie]: Mesh-Lite Scan done
+W (161930) [vendor_ie]: ap record is NULL
+W (171150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (171150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (171930) [vendor_ie]: Mesh-Lite Scan done
+W (171930) [vendor_ie]: ap record is NULL
+W (181150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (181150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (181930) [vendor_ie]: Mesh-Lite Scan done
+W (181930) [vendor_ie]: ap record is NULL
+W (191150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (191150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (191930) [vendor_ie]: Mesh-Lite Scan done
+W (191930) [vendor_ie]: ap record is NULL
+W (201150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (201150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (201930) [vendor_ie]: Mesh-Lite Scan done
+W (201930) [vendor_ie]: ap record is NULL
+W (211150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (211150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (211930) [vendor_ie]: Mesh-Lite Scan done
+W (211930) [vendor_ie]: ap record is NULL
+W (221150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (221150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (221930) [vendor_ie]: Mesh-Lite Scan done
+W (221930) [vendor_ie]: ap record is NULL
+W (231150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (231150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (231930) [vendor_ie]: Mesh-Lite Scan done
+W (231930) [vendor_ie]: ap record is NULL
+W (241150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (241150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (241930) [vendor_ie]: Mesh-Lite Scan done
+W (241930) [vendor_ie]: ap record is NULL
+W (251150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (251150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (251930) [vendor_ie]: Mesh-Lite Scan done
+W (251930) [vendor_ie]: ap record is NULL
+I (255950) TIMER_TASKS: Reading meters and publishing data
+I (255950) meterstring: Looking for index of SN: 000023022673
+0x05 0x03 0x00 0x16 0x00 0x12 0x25 0x87 I (256250) 1meter_mb: onemeter_modbus_read_registers received 41 bytes:
+[ 0x05 0x03 0x24 0x00 0x00 0x04 0xB0 0x00 0x00 0x06 0x0B 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x08 0xFB 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x00 0x03 0xE8 0x13 0x87 0x00 0x00 0xB8 0x44 ]
+I (256270) meterstring: The current time is: 202604151615
+W (261150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (261150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (261930) [vendor_ie]: Mesh-Lite Scan done
+W (261930) [vendor_ie]: ap record is NULL
+W (271150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (271150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (271930) [vendor_ie]: Mesh-Lite Scan done
+W (271930) [vendor_ie]: ap record is NULL
+W (281150) wifi:In 2G band, 5G channel bitmap does not take effect
+I (281150) [vendor_ie]: esp_mesh_lite_wifi_scan_start return ESP_OK
+I (281930) [vendor_ie]: Mesh-Lite Scan done
+W (281930) [vendor_ie]: ap record is NULL
+W (291150) wifi:In 2G band, 5G channel bitmap

@@ -12,3 +12,4 @@ jinja2
 pandas
 pyarrow
 python-multipart
+cryptography

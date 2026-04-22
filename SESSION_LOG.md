@@ -3,6 +3,33 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-22 202604221600 (Gensite Phase 1 scaffold — commissioning + Victron adapter)
+
+### What Was Done
+- **Migration `013_gensite_equipment.sql`** — new 1PDB tables: `sites` (master site list, incl. PIH health centres once commissioned), `site_equipment` (installed inverter/BMS/meter/battery per site), `site_credentials` (Fernet-encrypted per-vendor backend creds), `inverter_readings` (append-only telemetry), `inverter_alarms` (event log with UGP ticket linkage). `updated_at` triggers + sensible indexes. Runs as `postgres` on deploy per the 010+ convention.
+- **New package `acdb-api/gensite/`** with:
+  - `crypto.py` — Fernet helper, lazy key load via `CC_CREDENTIAL_ENCRYPTION_KEY`, graceful 503 when missing rather than a boot failure.
+  - `adapters/base.py` — `InverterAdapter` Protocol + `CredentialSpec`, `SiteCredential`, `LiveReading`, `AlarmEvent` value objects.
+  - `adapters/victron.py` — **Victron VRM Portal adapter (ready)**: token or user/pass auth, installation discovery, `/widgets/Status` live reading, `fetch_day` / `fetch_alarms` deferred to Phase 2.
+  - `adapters/solarman.py`, `sinosoar.py`, `sma.py` — stubs with real credential schemas so commissioning can still store encrypted creds. Sinosoar confirmed as a separate backend at `sinosoarcloud.com` (needs DevTools XHR capture before `fetch_live` works).
+  - `store.py` — psycopg2 CRUD for sites/equipment/credentials/readings. Credential reads decrypt; API responses return `has_secret` booleans + masked username, never plaintext.
+  - `router.py` — `/api/gensite/{vendors, sites, sites/{code}, sites/{code}/live, commission, credentials/{vendor}/{backend}/{verify,rotate}}`. Writes gated on `superadmin|onm_team`; every commission/rotate writes `cc_mutations`.
+- **`customer_api.py`**: `app.include_router(gensite_router)` appended.
+- **Frontend** (TypeScript build clean):
+  - `src/lib/api.ts`: gensite client (types + 7 functions).
+  - `src/pages/GenSiteListPage.tsx` (index + live/stale/offline badge), `GenSitePage.tsx` (equipment + live tiles + credential verify button, honours `?return_to=` for UGP round-trip), `CommissionSitePage.tsx` (wizard: site → equipment rows → auto-generated credential blocks per distinct vendor).
+  - `App.tsx` routes + Layout nav entry **Ops → Generation Sites**; EN + FR nav labels.
+- **Docs**: `docs/ops/gensite-commissioning.md` (operator flow), `docs/ops/gensite-credentials.md` (Fernet key setup + rotation SOP). `CONTEXT.md` Backend section now references `gensite/`.
+- **Dependency**: `cryptography` added to `acdb-api/requirements.txt` for Fernet.
+
+### What Next Session Should Know
+- **No encryption key on prod yet.** Before the first commission, generate `CC_CREDENTIAL_ENCRYPTION_KEY` and add to `/opt/1pdb/.env`; restart both APIs. The wizard refuses to submit until `GET /api/gensite/vendors` returns `crypto_configured: true`.
+- **Sinosoar blocker still open.** Portal is `sinosoarcloud.com/energystorage/es`; capture login + dashboard XHR via DevTools on next ops login so `sinosoar.py` can be promoted from stub to ready. Adapter scaffolding is in place — only `verify()` + `fetch_live()` need bodies.
+- **No poller yet.** Commissioning stores encrypted creds and does an on-the-spot `verify()`, but `inverter_readings` stays empty until `scripts/ops/gensite_poller.py` + `cc-gensite-poll.{service,timer}` land (next deliverable after Victron is proven end-to-end on GBO).
+- **Victron is the Phase 1 smoke test.** Once the key is set, commission GBO with the existing Victron VRM login; the credential row should verify green and the dashboard will show live tiles as soon as the poller is deployed.
+- **UGP → CC URL is stable and ready**: `https://cc.1pwrafrica.com/gensite/{SITE_CODE}` — supports `?return_to=` for round-trip navigation. No UGP changes required to start using it.
+- **Alerting reuse**: the existing `cc_bridge_notify.py` pipes to CC phone + `1PWR LS - OnM Ticket Tracker` group. The Phase 2 poller will reuse it with `metadata.kind=gensite_alarm`.
+
 ## Session 2026-04-22 202604220730 (OTA canary — cert realignment + trust inventory)
 
 ### What Was Done

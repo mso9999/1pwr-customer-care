@@ -33,6 +33,9 @@ import PipelinePage from './pages/PipelinePage';
 import HelpPage from './pages/HelpPage';
 import TutorialPage from './pages/TutorialPage';
 import TicketsPage from './pages/TicketsPage';
+import GenSiteListPage from './pages/GenSiteListPage';
+import GenSitePage from './pages/GenSitePage';
+import CommissionSitePage from './pages/CommissionSitePage';
 
 function HomeRedirect() {
   const { user, loading } = useAuth();
@@ -76,6 +79,9 @@ export default function App() {
             <Route path="payment-verification" element={<ProtectedRoute requireEmployee><PaymentVerificationPage /></ProtectedRoute>} />
             <Route path="pipeline" element={<ProtectedRoute requireEmployee><PipelinePage /></ProtectedRoute>} />
             <Route path="tickets" element={<ProtectedRoute requireEmployee><TicketsPage /></ProtectedRoute>} />
+            <Route path="gensite" element={<ProtectedRoute requireEmployee><GenSiteListPage /></ProtectedRoute>} />
+            <Route path="gensite/commission" element={<ProtectedRoute requireEmployee requireRole={['superadmin', 'onm_team']}><CommissionSitePage /></ProtectedRoute>} />
+            <Route path="gensite/:code" element={<ProtectedRoute requireEmployee><GenSitePage /></ProtectedRoute>} />
             <Route path="help" element={<ProtectedRoute requireEmployee><HelpPage /></ProtectedRoute>} />
             <Route path="tutorial" element={<ProtectedRoute requireEmployee><TutorialPage /></ProtectedRoute>} />
             {/* Customer routes */}
