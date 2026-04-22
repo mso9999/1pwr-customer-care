@@ -3,6 +3,20 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-22 202604221330 (OTA RCA — Feb-21 laptop-local cert, key lost)
+
+### What Was Done
+- Read the onepwr-aws-mesh git history for real (ripgrep over bounded paths). Found commit `90ac9ad` (2026-02-27, **"Fix OTA signature verification: embed correct ACM code signing certificate"**). Its diff message explicitly says: *"The firmware had a different ECDSA certificate (generated Feb 21) than the one imported into ACM and used by 1PWR_OTA_ESP32_v2. AWS Signer signed with key A, but the device verified with key B — always failing."*
+- At the factory flash commit `6d68d97` (2026-02-21 "v1.0.0 field flash"), `main/certs/aws_codesign.crt` was git-ignored. The cert was a **laptop-local ECDSA pair generated Feb 21**. Private key was never committed and searching Dropbox/secrets/build host turned up nothing. **Unrecoverable.**
+- Therefore MAK fleet (8 devices: OneMeter5, 11, 13, 14, 15, 16, 17, 18) cannot be OTA'd remotely. OneMeter6 is the only historical success because it was re-flashed post-Feb-27 with the committed ACM cert.
+- Cancelled + deleted the realigned canary (`1meter-canary-OM13-realign-20260422074601`). Updated **`docs/ops/1meter-ota-trust-inventory.md`** with the proper timeline, implication, and the minimum-viable field-reflash procedure.
+
+### What Next Session Should Know
+- Do NOT create more OTA canaries to MAK fleet — they will all silently fail the same way.
+- Next field visit must serial-flash each MAK device with current build (cert `03:9E:44`, version ≥ 1.1.1), then update Thing attributes + move to a `MAK_V1_1_1` group.
+- Repo cert is now back to v2 on the build host; any build from this point is OTA-compatible with correctly-flashed devices.
+- `OneMeter6` remains OTA-capable (it already has v2 embedded). Could be used for future OTA tests before fleet reflash is complete.
+
 ## Session 2026-04-22 202604220730 (OTA canary — cert realignment + trust inventory)
 
 ### What Was Done
