@@ -3,6 +3,19 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-22 202604220730 (OTA canary — cert realignment + trust inventory)
+
+### What Was Done
+- Field team (Motlatsi) confirmed MAK fleet was **not** re-certed post-provisioning; only the Schyler-batch PCBs (~7, including one `ExampleThing`) were touched, none in field. MSO confirmed `1PWR_OTA_ESP32_v2` / cert `03:9E:44:...` is "ours" (org-issued). Conclusion: deployed fleet has v2 embedded; repo had drifted to an orphan cert `18:92:8E:...` with no matching AWS signing key → any recent build was un-OTA-able.
+- **Realigned** build-host repo `onepwr-aws-mesh/main/certs/aws_codesign.crt` to the real ACM cert for `1PWR_OTA_ESP32_v2`. Backed up the orphan cert under `.orphan18928E.<ts>`. Bumped `CONFIG_GRI_OTA_DEMO_APP_VERSION_*` to **1.1.1** (strictly greater than the failed 1.1.0 attempts).
+- Rebuilt, uploaded to `s3://1pwr-ota-firmware/firmware-releases/v1.1.1/fw-cert-realign-20260422073609-e7d8e16/`, created canary OTA `1meter-canary-OM13-realign-20260422074601` targeting `OneMeter13`, signed with `1PWR_OTA_ESP32_v2`. Status: `CREATE_COMPLETE`, execution `QUEUED`.
+- **Added** `docs/ops/1meter-ota-trust-inventory.md` — key-pair table, per-device provenance tracking, timeline of the drift, rotation SOP, Thing-attribute convention (`cert_fp`, `firmware_tag`). Rule 1 in the doc: never change the embedded cert without creating a matching Signer profile in the same PR and planning fleet reflash.
+
+### What Next Session Should Know
+- Poll `AFR_OTA-1meter-canary-OM13-realign-20260422074601` — if v1.1.1 lands successfully, `prototype_meter_state.firmware_version` for `23022673` will populate and `FirmwareVersion: "1.1.1"` will appear in DynamoDB telemetry. That's the signal to extend the OTA to the rest of the fleet.
+- If this ALSO stays stuck IN_PROGRESS with empty statusDetails, hypothesis shifts away from cert drift and toward a firmware-side OTA handler regression. Serial-flash on next field visit becomes the only remaining path.
+- Sync the cert change back to the Dropbox `onepwr-aws-mesh` clone and commit upstream when convenient — right now only the build host has the correct cert.
+
 ## Session 2026-04-21 202604210830 (OTA canary — stuck, needs serial flash)
 
 ### What Was Done
