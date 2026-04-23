@@ -32,10 +32,10 @@ superadmin or onm_team for writes):
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from middleware import require_employee
@@ -517,5 +517,175 @@ def rotate_credential(
     return {
         "credential": stored,
         "verify": {"ok": vr.ok, "message": vr.message},
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /sites/{code}/series — downsampled time series for charts
+# ---------------------------------------------------------------------------
+
+# Pick a reasonable bucket size based on the requested window.
+def _choose_bucket_seconds(span_seconds: int) -> int:
+    if span_seconds <= 6 * 3600:         # up to 6h: 1-min buckets
+        return 60
+    if span_seconds <= 48 * 3600:        # up to 2d: 5-min buckets
+        return 300
+    if span_seconds <= 14 * 86400:       # up to 2w: 15-min buckets
+        return 900
+    return 3600                          # longer: hourly
+
+
+@router.get("/sites/{code}/series")
+def get_series(
+    code: str,
+    metric: str = Query(..., description="ac_kw | pv_kw | battery_kw | battery_soc_pct | grid_kw | ac_freq_hz | ac_v_avg | ac_kwh_total | dc_kw"),
+    hours: int = Query(24, ge=1, le=24 * 90, description="Window size in hours (default 24, max 2160=90d)"),
+    to: Optional[datetime] = Query(None, description="End (UTC). Default: now."),
+    user: CurrentUser = Depends(require_employee),
+) -> Dict[str, Any]:
+    end = to or datetime.now(timezone.utc)
+    start = end - timedelta(hours=hours)
+    bucket = _choose_bucket_seconds(int((end - start).total_seconds()))
+    try:
+        points = store.readings_series(code, metric, start, end, bucket_seconds=bucket)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {
+        "site_code": code.upper(),
+        "metric": metric,
+        "start_utc": start.isoformat(timespec="seconds"),
+        "end_utc": end.isoformat(timespec="seconds"),
+        "bucket_seconds": bucket,
+        "points": points,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Alarms — list, ack, open UGP ticket
+# ---------------------------------------------------------------------------
+
+@router.get("/sites/{code}/alarms")
+def list_site_alarms(
+    code: str,
+    state: str = Query("open", description="open | all"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    user: CurrentUser = Depends(require_employee),
+) -> Dict[str, Any]:
+    if state not in ("open", "all"):
+        raise HTTPException(status_code=400, detail="state must be 'open' or 'all'")
+    rows = store.list_alarms(code, state=state, limit=limit, offset=offset)
+    return {
+        "site_code": code.upper(),
+        "state": state,
+        "count": len(rows),
+        "alarms": rows,
+    }
+
+
+class AckAlarmRequest(BaseModel):
+    note: Optional[str] = None
+
+
+@router.post("/alarms/{alarm_id}/ack")
+def ack_alarm(
+    alarm_id: int,
+    req: AckAlarmRequest,
+    user: CurrentUser = Depends(require_employee),
+) -> Dict[str, Any]:
+    row = store.acknowledge_alarm(alarm_id, user.user_id)
+    if not row:
+        # Either not found or already acked
+        existing = store.get_alarm(alarm_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="Alarm not found.")
+        raise HTTPException(status_code=409, detail="Alarm already acknowledged.")
+    _try_log_mutation(
+        user, "update", "inverter_alarms", str(alarm_id),
+        new_values={"acknowledged_by": user.user_id, "acknowledged_at": "now"},
+        metadata={
+            "kind": "gensite_alarm_ack",
+            "site_code": row.get("site_code"),
+            "note": req.note,
+        },
+    )
+    return {"alarm": row}
+
+
+class OpenUgpTicketRequest(BaseModel):
+    category: Optional[str] = "inverter"
+    priority: Optional[str] = "high"
+    fault_description: Optional[str] = None
+    services_affected: Optional[str] = None
+
+
+@router.post("/alarms/{alarm_id}/open-ugp-ticket")
+def open_ugp_ticket_for_alarm(
+    alarm_id: int,
+    req: OpenUgpTicketRequest,
+    user: CurrentUser = Depends(require_employee),
+) -> Dict[str, Any]:
+    _require_write_role(user)
+
+    alarm = store.get_alarm(alarm_id)
+    if not alarm:
+        raise HTTPException(status_code=404, detail="Alarm not found.")
+    if alarm.get("ticket_id_ugp"):
+        return {
+            "ticket_id_ugp": alarm["ticket_id_ugp"],
+            "message": "Alarm already linked to a ticket.",
+        }
+
+    # Mirror into wa_tickets via the existing /api/tickets path (shares DB schema
+    # + Excel export conventions). We write directly to the ticket store rather
+    # than HTTP-looping through the CC API.
+    from customer_api import get_connection
+
+    fault = req.fault_description or (alarm.get("vendor_msg") or alarm.get("vendor_code") or "Inverter alarm")
+    ticket_name = f"{alarm['site_code']} — inverter alarm ({alarm.get('vendor_code') or 'N/A'})"
+
+    with get_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO wa_tickets
+                    (ugp_ticket_id, source, site_code, fault_description,
+                     category, priority, reported_by, ticket_name,
+                     failure_time, services_affected, status)
+                VALUES (%s, 'gensite', %s, %s, %s, %s, %s, %s, %s, %s, 'open')
+                RETURNING id, created_at
+                """,
+                (
+                    f"gensite-alarm-{alarm_id}",
+                    alarm["site_code"],
+                    fault,
+                    req.category,
+                    req.priority,
+                    user.user_id,
+                    ticket_name,
+                    alarm["raised_at"],
+                    req.services_affected,
+                ),
+            )
+            row = cur.fetchone()
+            conn.commit()
+
+    ticket_pg_id = row[0]
+    ugp_ref = f"gensite-alarm-{alarm_id}"
+    store.attach_ugp_ticket(alarm_id, ugp_ref)
+    _try_log_mutation(
+        user, "create", "wa_tickets", str(ticket_pg_id),
+        new_values={
+            "source": "gensite",
+            "site_code": alarm["site_code"],
+            "ticket_name": ticket_name,
+        },
+        metadata={"kind": "gensite_alarm_to_ticket", "alarm_id": alarm_id},
+    )
+    return {
+        "ticket_pg_id": ticket_pg_id,
+        "ticket_id_ugp": ugp_ref,
+        "alarm_id": alarm_id,
+        "site_code": alarm["site_code"],
     }
 

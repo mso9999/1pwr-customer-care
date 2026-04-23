@@ -1880,6 +1880,83 @@ export async function rotateGensiteCredential(
   );
 }
 
+// Series + alarms
+
+export interface GensiteSeriesPoint {
+  ts: string;
+  equipment_id: number;
+  value: number;
+}
+
+export interface GensiteSeriesResponse {
+  site_code: string;
+  metric: string;
+  start_utc: string;
+  end_utc: string;
+  bucket_seconds: number;
+  points: GensiteSeriesPoint[];
+}
+
+export async function getGensiteSeries(
+  code: string,
+  metric: string,
+  hours = 24,
+): Promise<GensiteSeriesResponse> {
+  return request(
+    `/gensite/sites/${encodeURIComponent(code)}/series?metric=${encodeURIComponent(metric)}&hours=${hours}`,
+  );
+}
+
+export interface GensiteAlarm {
+  id: number;
+  equipment_id: number | null;
+  site_code: string;
+  vendor_code: string | null;
+  vendor_msg: string | null;
+  severity: string;
+  raised_at: string;
+  cleared_at: string | null;
+  acknowledged_by: string | null;
+  acknowledged_at: string | null;
+  ticket_id_ugp: string | null;
+  vendor?: string;
+  kind?: string;
+  model?: string | null;
+  serial?: string | null;
+}
+
+export async function listGensiteAlarms(
+  code: string,
+  state: 'open' | 'all' = 'open',
+): Promise<{ site_code: string; state: string; count: number; alarms: GensiteAlarm[] }> {
+  return request(`/gensite/sites/${encodeURIComponent(code)}/alarms?state=${state}`);
+}
+
+export async function ackGensiteAlarm(
+  alarmId: number,
+  note?: string,
+): Promise<{ alarm: GensiteAlarm }> {
+  return request(`/gensite/alarms/${alarmId}/ack`, {
+    method: 'POST',
+    body: JSON.stringify({ note: note ?? null }),
+  });
+}
+
+export async function openUgpTicketForAlarm(
+  alarmId: number,
+  body: {
+    category?: string;
+    priority?: string;
+    fault_description?: string;
+    services_affected?: string;
+  } = {},
+): Promise<{ ticket_pg_id: number; ticket_id_ugp: string; alarm_id: number; site_code: string }> {
+  return request(`/gensite/alarms/${alarmId}/open-ugp-ticket`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 // Health is at root level, not under /api
 export async function getHealth() {
   const res = await fetch('/health');

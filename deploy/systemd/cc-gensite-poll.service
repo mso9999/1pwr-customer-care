@@ -1,0 +1,20 @@
+[Unit]
+Description=CC gensite inverter telemetry poller (1PDB site_credentials -> inverter_readings/alarms)
+Wants=network-online.target postgresql.service
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+User=cc_api
+Group=cc_api
+WorkingDirectory=/opt/cc-portal/backend
+EnvironmentFile=/opt/1pdb/.env
+EnvironmentFile=-/etc/default/cc-gensite-poll
+StateDirectory=cc-gensite-poll
+Environment=STATE_FILE=/var/lib/cc-gensite-poll/state.json
+ExecStart=/opt/cc-portal/backend/venv/bin/python /opt/cc-portal/backend/scripts/ops/gensite_poller.py
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cc-gensite-poll
+# Guard against a stuck adapter holding the timer slot forever.
+TimeoutStartSec=180

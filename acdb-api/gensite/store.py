@@ -463,3 +463,173 @@ def _resolve_site_code_for_equipment(equipment_id: int) -> str:
         raise ValueError(f"equipment_id {equipment_id} not found")
     _equipment_site_cache[equipment_id] = row[0]
     return row[0]
+
+
+# ---------------------------------------------------------------------------
+# inverter_readings — time series for charts
+# ---------------------------------------------------------------------------
+
+# Allow-list prevents SQL injection via the `metric` query parameter.
+_SERIES_METRICS = {
+    "ac_kw", "ac_kwh_total", "dc_kw", "pv_kw", "battery_kw",
+    "battery_soc_pct", "grid_kw", "ac_freq_hz", "ac_v_avg",
+}
+
+
+def readings_series(
+    site_code: str,
+    metric: str,
+    start_utc: datetime,
+    end_utc: datetime,
+    bucket_seconds: int = 300,
+) -> List[Dict[str, Any]]:
+    """Downsampled time series for dashboard charts.
+
+    Returns per-equipment points: ``[{"ts": ..., "equipment_id": N, "value": X}, ...]``.
+    Downsampling uses a time-bucket average; pick ``bucket_seconds`` at the
+    caller based on range (5m for 24h, 1h for 30d, etc.).
+    """
+    if metric not in _SERIES_METRICS:
+        raise ValueError(f"Unknown metric '{metric}'. Allowed: {sorted(_SERIES_METRICS)}")
+
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                f"""
+                SELECT
+                    to_timestamp(floor(extract(epoch FROM ts_utc) / %s) * %s)
+                        AT TIME ZONE 'UTC' AS bucket_ts,
+                    equipment_id,
+                    AVG({metric})::FLOAT AS value
+                FROM inverter_readings
+                WHERE site_code = %s
+                  AND ts_utc >= %s
+                  AND ts_utc <  %s
+                  AND {metric} IS NOT NULL
+                GROUP BY bucket_ts, equipment_id
+                ORDER BY bucket_ts, equipment_id
+                """,
+                (bucket_seconds, bucket_seconds, site_code.upper(), start_utc, end_utc),
+            )
+            rows = cur.fetchall()
+
+    return [
+        {"ts": r["bucket_ts"], "equipment_id": r["equipment_id"], "value": r["value"]}
+        for r in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
+# inverter_alarms
+# ---------------------------------------------------------------------------
+
+def insert_alarms(alarms) -> int:
+    """Bulk-insert alarm events. Dedupes via the (equipment_id, vendor_code, raised_at) uniq key."""
+    if not alarms:
+        return 0
+    values = [
+        (
+            a.equipment_id, a.site_code.upper(), a.vendor_code, a.vendor_msg,
+            a.severity, a.raised_at, a.cleared_at,
+            psycopg2.extras.Json(a.event_json) if a.event_json is not None else None,
+        )
+        for a in alarms
+    ]
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            psycopg2.extras.execute_values(
+                cur,
+                """
+                INSERT INTO inverter_alarms (
+                    equipment_id, site_code, vendor_code, vendor_msg,
+                    severity, raised_at, cleared_at, event_json
+                )
+                VALUES %s
+                ON CONFLICT ON CONSTRAINT uq_inverter_alarms_vendor_event DO NOTHING
+                """,
+                values,
+            )
+            count = cur.rowcount
+        conn.commit()
+    return count or 0
+
+
+def list_alarms(
+    site_code: str,
+    *,
+    state: str = "open",   # 'open' | 'all'
+    limit: int = 100,
+    offset: int = 0,
+) -> List[Dict[str, Any]]:
+    q = [
+        "SELECT a.*, e.vendor, e.kind, e.model, e.serial",
+        "FROM inverter_alarms a",
+        "LEFT JOIN site_equipment e ON e.id = a.equipment_id",
+        "WHERE a.site_code = %s",
+    ]
+    params: List[Any] = [site_code.upper()]
+    if state == "open":
+        q.append("AND a.cleared_at IS NULL AND a.acknowledged_at IS NULL")
+    q.append("ORDER BY a.raised_at DESC LIMIT %s OFFSET %s")
+    params.extend([limit, offset])
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(" ".join(q), params)
+            return [dict(r) for r in cur.fetchall()]
+
+
+def acknowledge_alarm(alarm_id: int, user_id: str) -> Optional[Dict[str, Any]]:
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                UPDATE inverter_alarms
+                SET acknowledged_by = %s,
+                    acknowledged_at = NOW()
+                WHERE id = %s AND acknowledged_at IS NULL
+                RETURNING *
+                """,
+                (user_id, alarm_id),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    return dict(row) if row else None
+
+
+def attach_ugp_ticket(alarm_id: int, ugp_ticket_id: str) -> bool:
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE inverter_alarms SET ticket_id_ugp = %s WHERE id = %s",
+                (ugp_ticket_id, alarm_id),
+            )
+            ok = cur.rowcount > 0
+        conn.commit()
+    return ok
+
+
+def get_alarm(alarm_id: int) -> Optional[Dict[str, Any]]:
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute("SELECT * FROM inverter_alarms WHERE id = %s", (alarm_id,))
+            row = cur.fetchone()
+    return dict(row) if row else None
+
+
+# ---------------------------------------------------------------------------
+# Enumerate credentials for the poller (internal — never returned via API)
+# ---------------------------------------------------------------------------
+
+def enumerate_credentials_for_poller() -> List[Dict[str, Any]]:
+    """Return minimal rows for the poller: id, site_code, country, vendor, backend."""
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT c.id, c.site_code, s.country, c.vendor, c.backend
+                FROM site_credentials c
+                JOIN sites s ON s.code = c.site_code
+                ORDER BY c.site_code, c.vendor, c.backend
+                """
+            )
+            return [dict(r) for r in cur.fetchall()]

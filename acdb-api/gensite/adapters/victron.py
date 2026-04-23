@@ -272,7 +272,7 @@ class VictronAdapter(InverterAdapter):
         ]
 
     # -------------------------------------------------------------------
-    # fetch_day / fetch_alarms — deferred (Phase 2)
+    # fetch_day — hourly stats for 24 h / 30 d charts
     # -------------------------------------------------------------------
 
     def fetch_day(
@@ -281,9 +281,96 @@ class VictronAdapter(InverterAdapter):
         equipment: List[SiteEquipment],
         day: date,
     ) -> List[IntervalReading]:
-        # /installations/{idSite}/stats?interval=hours&start=...&end=...
-        # Implemented in Phase 2.
-        return []
+        """Return hourly interval readings for the UTC day ``day``.
+
+        VRM exposes `/installations/{idSite}/stats` with epoch-second start/end
+        and configurable interval. We ask for hourly buckets and attach each
+        to the first inverter-kind equipment row.
+        """
+        if not cred.site_id_on_vendor or not equipment:
+            return []
+        start_dt = datetime(day.year, day.month, day.day, tzinfo=timezone.utc)
+        end_dt = start_dt + timedelta(days=1)
+        return self._fetch_stats_range(cred, equipment, start_dt, end_dt, interval="hours")
+
+    def _fetch_stats_range(
+        self,
+        cred: SiteCredential,
+        equipment: List[SiteEquipment],
+        start_dt: datetime,
+        end_dt: datetime,
+        interval: str = "hours",
+    ) -> List[IntervalReading]:
+        session = self._session(cred)
+        self._auth_headers(cred, session)
+        base = (cred.base_url or VRM_BASE).rstrip("/")
+
+        params = {
+            "interval": interval,
+            "start": int(start_dt.timestamp()),
+            "end": int(end_dt.timestamp()),
+            "type": "live_feed",
+        }
+        try:
+            r = session.get(
+                f"{base}/installations/{cred.site_id_on_vendor}/stats",
+                params=params,
+                timeout=HTTP_TIMEOUT,
+            )
+        except requests.RequestException as exc:
+            raise AdapterError(f"VRM /stats request failed: {exc}") from exc
+        if r.status_code >= 400:
+            raise AdapterError(
+                f"VRM /stats returned {r.status_code}: {r.text[:200]}",
+                status=r.status_code,
+            )
+        payload = r.json() or {}
+        records = payload.get("records") or {}
+        if not isinstance(records, dict):
+            return []
+
+        target = next((e for e in equipment if e.kind == "inverter"), equipment[0])
+
+        # VRM returns `{"metric": [[ts_ms, value], [ts_ms, value], ...]}`.
+        # Collapse into one IntervalReading per bucket by merging metrics by timestamp.
+        by_ts: Dict[int, Dict[str, float]] = {}
+        for metric_key, series in records.items():
+            if not isinstance(series, list):
+                continue
+            for point in series:
+                if not isinstance(point, (list, tuple)) or len(point) < 2:
+                    continue
+                try:
+                    ts_ms = int(point[0])
+                    val = float(point[1]) if point[1] is not None else None
+                except (TypeError, ValueError):
+                    continue
+                if val is None:
+                    continue
+                by_ts.setdefault(ts_ms, {})[metric_key] = val
+
+        out: List[IntervalReading] = []
+        for ts_ms in sorted(by_ts):
+            m = by_ts[ts_ms]
+            out.append(
+                IntervalReading(
+                    equipment_id=target.id,
+                    ts_utc=datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc),
+                    pv_kw=m.get("Pg") or m.get("pvPower"),
+                    battery_kw=m.get("Pb") or m.get("batteryPower"),
+                    battery_soc_pct=m.get("bs") or m.get("soc"),
+                    grid_kw=m.get("Pgr") or m.get("gridPower"),
+                    ac_kw=m.get("Pc") or m.get("acLoad"),
+                    ac_v_avg=m.get("vAc"),
+                    ac_freq_hz=m.get("fAc"),
+                    raw_json=m,
+                )
+            )
+        return out
+
+    # -------------------------------------------------------------------
+    # fetch_alarms
+    # -------------------------------------------------------------------
 
     def fetch_alarms(
         self,
@@ -291,5 +378,75 @@ class VictronAdapter(InverterAdapter):
         equipment: List[SiteEquipment],
         since: datetime,
     ) -> List[AlarmEvent]:
-        # /installations/{idSite}/alarms — implemented in Phase 2.
-        return []
+        """Fetch alarms raised after `since` for the installation.
+
+        Uses `/installations/{idSite}/alarms`. VRM classifies by device; we
+        attach each alarm to the inverter equipment row for now and record
+        device identity in `event_json` for future per-device routing.
+        """
+        if not cred.site_id_on_vendor or not equipment:
+            return []
+        session = self._session(cred)
+        self._auth_headers(cred, session)
+        base = (cred.base_url or VRM_BASE).rstrip("/")
+
+        try:
+            r = session.get(
+                f"{base}/installations/{cred.site_id_on_vendor}/alarms",
+                timeout=HTTP_TIMEOUT,
+            )
+        except requests.RequestException as exc:
+            raise AdapterError(f"VRM /alarms request failed: {exc}") from exc
+        if r.status_code >= 400:
+            # VRM returns 401 if token expired — let caller decide to retry.
+            raise AdapterError(
+                f"VRM /alarms returned {r.status_code}: {r.text[:200]}",
+                status=r.status_code,
+            )
+        payload = r.json() or {}
+        records = payload.get("records") or []
+        if not isinstance(records, list):
+            return []
+
+        since_ts = int(since.timestamp()) if since else 0
+        target = next((e for e in equipment if e.kind == "inverter"), equipment[0])
+
+        out: List[AlarmEvent] = []
+        for item in records:
+            if not isinstance(item, dict):
+                continue
+            # VRM uses `started` as epoch seconds and `ended` as epoch seconds or null.
+            started = item.get("started") or item.get("startedAt") or item.get("startTime")
+            ended = item.get("ended") or item.get("endedAt")
+            try:
+                started_epoch = int(started) if started is not None else 0
+            except (TypeError, ValueError):
+                continue
+            if started_epoch < since_ts:
+                continue
+            try:
+                ended_dt = (
+                    datetime.fromtimestamp(int(ended), tz=timezone.utc)
+                    if ended not in (None, "", 0)
+                    else None
+                )
+            except (TypeError, ValueError):
+                ended_dt = None
+
+            severity_raw = str(item.get("severity") or item.get("level") or "warning").lower()
+            severity = "critical" if severity_raw in ("critical", "alarm", "severe") else (
+                "info" if severity_raw in ("info", "notice") else "warning"
+            )
+            out.append(
+                AlarmEvent(
+                    equipment_id=target.id,
+                    site_code=cred.site_code.upper(),
+                    vendor_code=str(item.get("code") or item.get("id") or ""),
+                    vendor_msg=str(item.get("description") or item.get("message") or ""),
+                    severity=severity,
+                    raised_at=datetime.fromtimestamp(started_epoch, tz=timezone.utc),
+                    cleared_at=ended_dt,
+                    event_json=item,
+                )
+            )
+        return out

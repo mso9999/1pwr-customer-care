@@ -3,6 +3,28 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-22 202604221800 (Gensite poller + series/alarms + chart)
+
+### What Was Done
+- **Poller** (`acdb-api/scripts/ops/gensite_poller.py`, auto-deploys via backend rsync): enumerates `site_credentials`, per-vendor cadence gate (Victron 60 s / Solarman+Deye 5 min / Sinosoar 2 min / SMA 10 min), exponential backoff on failure, alarm fetch every 5 min. State in `/var/lib/cc-gensite-poll/state.json`; transition-only WhatsApp alerts (offline at threshold / recovery / new CRITICAL) via existing `cc_bridge_notify.py` — same CC-phone + OnM-tracker channels as the 1Meter monitor. Skips `implementation_status=="stub"` adapters so Solarman/Sinosoar/SMA don't spam errors.
+- **systemd units** (`deploy/systemd/cc-gensite-poll.{service,timer}`): oneshot, `cc_api:cc_api`, `StateDirectory=cc-gensite-poll`, timer every 60 s with 10 s randomised delay + `Persistent=true`. Install doc: `docs/ops/gensite-poller.md`.
+- **Router extensions** (`acdb-api/gensite/router.py`):
+  - `GET /api/gensite/sites/{code}/series?metric=...&hours=...` — downsampled PG query with metric allow-list (anti-SQLi), bucket sized 1 min / 5 min / 15 min / 1 h based on window.
+  - `GET /api/gensite/sites/{code}/alarms?state=open|all`, `POST /alarms/{id}/ack`, `POST /alarms/{id}/open-ugp-ticket` — last writes directly into `wa_tickets` with `source='gensite'` + `ugp_ticket_id='gensite-alarm-{id}'`, mutations logged.
+- **Store additions** (`acdb-api/gensite/store.py`): `readings_series()` with metric allow-list, `insert_alarms()` (dedupe via unique constraint), `list_alarms()`, `acknowledge_alarm()`, `attach_ugp_ticket()`, `enumerate_credentials_for_poller()` (joined to `sites.country` for bridge routing).
+- **Victron adapter hardened**: `fetch_day()` → `/installations/{idSite}/stats?interval=hours` with metric merge-by-timestamp; `fetch_alarms()` → `/installations/{idSite}/alarms` with severity normalization (`critical` / `warning` / `info`).
+- **Frontend**:
+  - `src/lib/api.ts`: `getGensiteSeries`, `listGensiteAlarms`, `ackGensiteAlarm`, `openUgpTicketForAlarm` + types.
+  - `src/pages/GenSitePage.tsx`: alarms panel (filter open/all, Ack + Open-ticket buttons), telemetry chart (Recharts `AreaChart` — PV / Load / Batt / SoC overlay), 6 h / 24 h / 7 d / 30 d window toggle, empty-state message pointing at the poller.
+- **Docs**: `docs/ops/gensite-poller.md` — install / cadence / env / troubleshoot.
+- **Build checks**: `npx tsc -b --noEmit` green; `python3 -m compileall gensite/ scripts/ops/gensite_poller.py` green.
+
+### What Next Session Should Know
+- **Systemd install still manual.** Deploy rsyncs `acdb-api/` only, so `deploy/systemd/cc-gensite-poll.{service,timer}` must be copied onto the CC host once (`scp` + `sudo systemctl daemon-reload && enable --now`). Same pattern as `cc-1meter-monitor.{service,timer}` — runbook in `docs/ops/gensite-poller.md`.
+- **Solarman + Sinosoar adapters are still stubs** — the poller already skips them (`implementation_status=="stub"`), so enabling them is a matter of writing the adapter bodies and flipping the status; no poller changes required.
+- **Ticket linkage.** `open-ugp-ticket` currently writes to `wa_tickets` with `ugp_ticket_id="gensite-alarm-{id}"` rather than calling UGP directly. That's intentional for Phase 1 (reuses the maintenance-log UX operators already know); Phase 2 can replace with a real `UGPClient` ticket creation call if UGP exposes a ticket-create API.
+- **Chart aggregation** sums PV / Load / Batt across equipment per bucket and averages SoC — correct when a site has one inverter, approximate on sites with multiple devices of the same role. Revisit once there's a multi-inverter site in production.
+
 ## Session 2026-04-22 202604221600 (Gensite Phase 1 scaffold — commissioning + Victron adapter)
 
 ### What Was Done
