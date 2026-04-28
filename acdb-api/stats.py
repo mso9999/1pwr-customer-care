@@ -117,13 +117,15 @@ def _row_to_dict(cursor, row) -> Dict[str, Any]:
 def _extract_site(account_number: str) -> str:
     """Extract site code from the last 3 chars of account number (e.g. 0003MAS -> MAS).
 
-    Only returns a value if it matches a known site code.
+    Only returns a value if it matches a known site code in *any* registered
+    country (1PDB is consolidated, country-aware), so cross-country accounts
+    such as ``0001GBO`` are kept regardless of the active ``COUNTRY_CODE``.
     """
-    from country_config import KNOWN_SITES
+    from country_config import ALL_KNOWN_SITES
     if not account_number:
         return ""
     candidate = account_number.strip()[-3:].upper()
-    return candidate if candidate in KNOWN_SITES else ""
+    return candidate if candidate in ALL_KNOWN_SITES else ""
 
 
 @router.get("/site-summary")
@@ -202,8 +204,8 @@ def site_summary(user: CurrentUser = Depends(require_employee)):
             except Exception as e:
                 logger.warning("Failed to query monthly_transactions: %s", e)
 
-    from country_config import KNOWN_SITES
-    results = {k: v for k, v in results.items() if k in KNOWN_SITES}
+    from country_config import ALL_KNOWN_SITES
+    results = {k: v for k, v in results.items() if k in ALL_KNOWN_SITES}
 
     total_mwh = sum(s["mwh"] for s in results.values())
     total_lsl = sum(s["lsl_thousands"] for s in results.values())

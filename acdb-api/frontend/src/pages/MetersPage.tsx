@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -10,8 +10,10 @@ import {
   type MeterAssignment,
 } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
+import CountryPill from '../components/CountryPill';
 
 type ModalKind = 'delete' | 'decommission' | 'history' | null;
+interface Site { concession: string; country?: string | null }
 
 export default function MetersPage() {
   const { t } = useTranslation(['meters', 'common']);
@@ -20,9 +22,10 @@ export default function MetersPage() {
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [filterSite, setFilterSite] = useState('');
+  const [filterCountry, setFilterCountry] = useState('');
   const [filterPlatform, setFilterPlatform] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
-  const [sites, setSites] = useState<string[]>([]);
+  const [sites, setSites] = useState<Site[]>([]);
   const [loading, setLoading] = useState(true);
   const { canWriteCustomers } = useAuth();
 
@@ -40,9 +43,17 @@ export default function MetersPage() {
 
   useEffect(() => {
     fetch('/api/sites').then(r => r.json()).then(d => {
-      setSites((d.sites || []).map((s: any) => s.concession));
+      setSites((d.sites || []).map((s: any) => ({
+        concession: s.concession,
+        country: s.country ?? null,
+      })));
     }).catch(() => {});
   }, []);
+
+  const visibleSites = useMemo(
+    () => sites.filter(s => !filterCountry || (s.country || '').toUpperCase() === filterCountry),
+    [sites, filterCountry],
+  );
 
   const fetchData = useCallback(() => {
     setLoading(true);
@@ -54,14 +65,25 @@ export default function MetersPage() {
       search: search || undefined,
       filter_col: filterCol,
       filter_val: filterVal,
+      filter_country: !filterSite && filterCountry ? filterCountry : undefined,
     })
       .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, [page, search, filterSite, filterPlatform, filterStatus]);
+  }, [page, search, filterSite, filterCountry, filterPlatform, filterStatus]);
 
   useEffect(fetchData, [fetchData]);
-  useEffect(() => { setSelected(new Set()); }, [page, search, filterSite, filterPlatform, filterStatus]);
+  useEffect(() => { setSelected(new Set()); }, [page, search, filterSite, filterCountry, filterPlatform, filterStatus]);
+
+  useEffect(() => {
+    if (filterSite && filterCountry) {
+      const owner = sites.find(s => s.concession === filterSite)?.country;
+      if ((owner || '').toUpperCase() !== filterCountry) {
+        setFilterSite('');
+        setPage(1);
+      }
+    }
+  }, [filterCountry, filterSite, sites]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -201,7 +223,7 @@ export default function MetersPage() {
         )}
       </div>
 
-      <div className="space-y-2 sm:space-y-0 sm:flex sm:gap-3 sm:flex-wrap">
+      <div className="space-y-2 sm:space-y-0 sm:flex sm:gap-3 sm:flex-wrap sm:items-center">
         <form onSubmit={handleSearch} className="flex gap-2">
           <input
             value={searchInput}
@@ -211,13 +233,18 @@ export default function MetersPage() {
           />
           <button type="submit" className="px-3 py-2 bg-gray-100 border rounded-lg text-sm hover:bg-gray-200 whitespace-nowrap">{t('meters:search')}</button>
         </form>
+        <CountryPill
+          sites={sites}
+          value={filterCountry}
+          onChange={c => { setFilterCountry(c); setFilterPlatform(''); setFilterStatus(''); setPage(1); }}
+        />
         <select
           value={filterSite}
           onChange={e => { setFilterSite(e.target.value); setFilterPlatform(''); setFilterStatus(''); setPage(1); }}
           className="w-full sm:w-auto px-3 py-2 border rounded-lg text-sm bg-white"
         >
           <option value="">{t('meters:allSites')}</option>
-          {sites.map(s => <option key={s} value={s}>{s}</option>)}
+          {visibleSites.map(s => <option key={s.concession} value={s.concession}>{s.concession}</option>)}
         </select>
         <select
           value={filterPlatform}

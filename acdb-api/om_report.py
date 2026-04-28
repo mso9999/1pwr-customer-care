@@ -33,9 +33,14 @@ logger = logging.getLogger("acdb-api.om-report")
 router = APIRouter(prefix="/api/om-report", tags=["om-report"])
 
 from country_config import (
-    SITE_ABBREV, KNOWN_SITES, SITE_DISTRICTS,
+    ALL_SITE_ABBREV as SITE_ABBREV,
+    ALL_KNOWN_SITES as KNOWN_SITES,
+    ALL_SITE_DISTRICTS as SITE_DISTRICTS,
     COUNTRY, CURRENCY, CURRENCY_SYMBOL,
 )
+# 1PDB is consolidated and country-aware: the OM report aggregates data
+# across every concession in the DB, so all site-validation checks below
+# run against the registry-wide ``ALL_*`` sets, not just the active country's.
 
 
 def _matches_customer_type(ctype: str, filter_type: str) -> bool:

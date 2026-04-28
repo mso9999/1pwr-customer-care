@@ -3,6 +3,47 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-27 202604270900 (Mobile app BFF — `/api/app/active-countries`)
+
+### What Was Done
+- **Country registry exposed to the mobile app.** New router
+  `acdb-api/app_bff.py` mounts `GET /api/app/active-countries` under
+  `customer_api.py`, returning `{ countries: [{ countryCode, displayName,
+  active, appConfigUrl? }] }` shaped to match the Flutter client in
+  `1PWRBENIN-v2/lib/core/config/country_registry_client.dart`.
+- **`CountryConfig` extended** in `acdb-api/country_config.py` with
+  `active: bool = True` and `display_name: Optional[str]` (LS → "Lesotho",
+  BN → "Bénin"). Inactive rows are filtered server-side; the field stays
+  in the response for forward compatibility.
+- **Cache headers**: `Cache-Control: public, max-age=300`. Registry only
+  changes on deploy.
+- **Contract doc** at `docs/app-bff-contract.md` is now the single source
+  of truth for `/api/app/*`. Linked from the app repo's README.
+- **Tests** in `acdb-api/tests/test_app_bff.py` (6 cases — shape,
+  display-name fallback, inactive filtering, optional `appConfigUrl`,
+  cache header, router prefix). Local end-to-end ASGI smoke against
+  `httpx.ASGITransport` returns the documented payload.
+- **Companion repo:** see `1PWRBENIN-v2/docs/SESSION_LOG.md` entry of the
+  same date — no Flutter code change was required (client was already
+  pointed at this endpoint and parses the documented shape).
+
+### What Next Session Should Know
+- **Deploy:** standard CC rsync of `acdb-api/` ships
+  `app_bff.py` + the `customer_api.py` mount. systemd restart of
+  `1pdb-api` on the LS host is enough; `1pdb-api-bn` is not on the
+  `cc.1pwrafrica.com` path for this endpoint.
+- **Smoke after deploy** — see `docs/app-bff-contract.md` runbook
+  ("Post-deploy smoke runbook" section): `curl
+  https://cc.1pwrafrica.com/api/app/active-countries` then `flutter run`.
+- **Adding/disabling a country** is a Python edit in `country_config.py`
+  (`active=False` to stage an addition without exposing it). The clean
+  follow-up — promoting the registry to a `countries` table in 1PDB so
+  ops can toggle without a deploy — is unchanged by this PR.
+- **`appConfigUrl` is intentionally empty** in v1; the app keeps using
+  its bundled `assets/config/country_{bn,ls}.json`. Populate
+  `app_bff._REMOTE_CONFIG_URLS` once a `GET /api/app/country-config/{code}`
+  endpoint exists (placeholder section already in the contract doc).
+
 ## Session 2026-04-22 202604221800 (Gensite poller + series/alarms + chart)
 
 ### What Was Done

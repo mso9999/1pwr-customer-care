@@ -1,8 +1,11 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { listRows, deleteRecord, listColdStorage, restoreRecord, downloadCustomersExport, type PaginatedResponse } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
+import CountryPill from '../components/CountryPill';
+
+interface Site { concession: string; country?: string | null }
 
 type Tab = 'active' | 'cold';
 
@@ -19,7 +22,8 @@ export default function CustomersPage() {
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [filterSite, setFilterSite] = useState('');
-  const [sites, setSites] = useState<string[]>([]);
+  const [filterCountry, setFilterCountry] = useState('');
+  const [sites, setSites] = useState<Site[]>([]);
   const [loading, setLoading] = useState(true);
   const { canWriteCustomers } = useAuth();
   const { t } = useTranslation(['customers', 'common']);
@@ -32,9 +36,18 @@ export default function CustomersPage() {
   // Load sites once
   useEffect(() => {
     fetch('/api/sites').then(r => r.json()).then(d => {
-      setSites((d.sites || []).map((s: any) => s.concession));
+      setSites((d.sites || []).map((s: any) => ({
+        concession: s.concession,
+        country: s.country ?? null,
+      })));
     }).catch(() => {});
   }, []);
+
+  // Country pill narrows which sites appear in the site dropdown.
+  const visibleSites = useMemo(
+    () => sites.filter(s => !filterCountry || (s.country || '').toUpperCase() === filterCountry),
+    [sites, filterCountry],
+  );
 
   // Fetch data whenever tab, page, search, or filter changes
   const fetchData = useCallback(() => {
@@ -46,6 +59,7 @@ export default function CustomersPage() {
           search: search || undefined,
           filter_col: filterSite ? 'community' : undefined,
           filter_val: filterSite || undefined,
+          filter_country: !filterSite && filterCountry ? filterCountry : undefined,
         })
       : listColdStorage('customers', { page, limit: 50 });
 
@@ -53,12 +67,24 @@ export default function CustomersPage() {
       .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, [tab, page, search, filterSite]);
+  }, [tab, page, search, filterSite, filterCountry]);
 
   useEffect(fetchData, [fetchData]);
 
   // Clear selection on navigation changes
-  useEffect(() => { setSelected(new Set()); }, [tab, page, search, filterSite]);
+  useEffect(() => { setSelected(new Set()); }, [tab, page, search, filterSite, filterCountry]);
+
+  // If the active country changes and the selected site no longer belongs
+  // to it, reset the site selection so the dropdown stays consistent.
+  useEffect(() => {
+    if (filterSite && filterCountry) {
+      const owner = sites.find(s => s.concession === filterSite)?.country;
+      if ((owner || '').toUpperCase() !== filterCountry) {
+        setFilterSite('');
+        setPage(1);
+      }
+    }
+  }, [filterCountry, filterSite, sites]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,6 +98,7 @@ export default function CustomersPage() {
     setSearch('');
     setSearchInput('');
     setFilterSite('');
+    setFilterCountry('');
     setSelected(new Set());
   };
 
@@ -318,7 +345,12 @@ export default function CustomersPage() {
               onClick={async () => {
                 setExporting(true);
                 try {
-                  await downloadCustomersExport({ format: 'xlsx', site: filterSite || undefined, search: search || undefined });
+                  await downloadCustomersExport({
+                    format: 'xlsx',
+                    site: filterSite || undefined,
+                    country: !filterSite && filterCountry ? filterCountry : undefined,
+                    search: search || undefined,
+                  });
                 } catch { /* ignore */ }
                 setExporting(false);
               }}
@@ -379,7 +411,7 @@ export default function CustomersPage() {
 
       {/* Filters (active tab only) */}
       {tab === 'active' && (
-        <div className="space-y-2 sm:space-y-0 sm:flex sm:gap-3 sm:flex-wrap">
+        <div className="space-y-2 sm:space-y-0 sm:flex sm:gap-3 sm:flex-wrap sm:items-center">
           <form onSubmit={handleSearch} className="flex gap-2">
             <input
               value={searchInput}
@@ -389,13 +421,18 @@ export default function CustomersPage() {
             />
             <button type="submit" className="px-3 py-2 bg-gray-100 border rounded-lg text-sm hover:bg-gray-200 whitespace-nowrap">{t('customers:search')}</button>
           </form>
+          <CountryPill
+            sites={sites}
+            value={filterCountry}
+            onChange={c => { setFilterCountry(c); setPage(1); }}
+          />
           <select
             value={filterSite}
             onChange={e => { setFilterSite(e.target.value); setPage(1); }}
             className="w-full sm:w-auto px-3 py-2 border rounded-lg text-sm bg-white"
           >
             <option value="">{t('customers:allSites')}</option>
-            {sites.map(s => <option key={s} value={s}>{s}</option>)}
+            {visibleSites.map(s => <option key={s.concession} value={s.concession}>{s.concession}</option>)}
           </select>
         </div>
       )}

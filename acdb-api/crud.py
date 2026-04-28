@@ -255,6 +255,16 @@ def list_rows(
     search: Optional[str] = Query(None, description="Search across text columns"),
     filter_col: Optional[str] = Query(None, description="Column to filter"),
     filter_val: Optional[str] = Query(None, description="Value to filter by"),
+    filter_country: Optional[str] = Query(
+        None,
+        description=(
+            "Restrict to rows whose ``community`` belongs to a registered "
+            "country (e.g. ``LS``, ``BN``). Resolves to a ``community IN (...)`` "
+            "clause using ``country_config._REGISTRY``. Composes with "
+            "``filter_col=community`` (the more specific filter wins). "
+            "Only applied to tables that expose a ``community`` column."
+        ),
+    ),
     user: CurrentUser = Depends(get_current_user),
 ):
     """
@@ -307,6 +317,37 @@ def list_rows(
         if filter_col and filter_val:
             where_clauses.append(f"{filter_col} = %s")
             params.append(filter_val)
+
+        # Country filter — narrows to that country's communities. Skipped when
+        # a more specific community equality filter is already in play.
+        if filter_country and not (filter_col == "community" and filter_val):
+            from country_config import _REGISTRY  # type: ignore[attr-defined]
+
+            cc = filter_country.strip().upper()
+            cfg = _REGISTRY.get(cc)
+            if cfg is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Unknown filter_country '{filter_country}'. "
+                        f"Valid: {sorted(_REGISTRY)}"
+                    ),
+                )
+            site_codes = list(cfg.site_abbrev.keys())
+            if site_codes:
+                cursor.execute(
+                    "SELECT 1 FROM information_schema.columns "
+                    "WHERE table_schema = 'public' "
+                    "AND table_name = %s AND column_name = 'community'",
+                    (table_name,),
+                )
+                has_community = cursor.fetchone() is not None
+                if has_community:
+                    placeholders = ", ".join(["%s"] * len(site_codes))
+                    where_clauses.append(
+                        f"{table_name}.community IN ({placeholders})"
+                    )
+                    params.extend(site_codes)
 
         # Text search across text columns + numeric IDs + joined account_number
         search_join = ""

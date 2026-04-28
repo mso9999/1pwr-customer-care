@@ -198,7 +198,16 @@ export interface PaginatedResponse {
 
 export async function listRows(
   table: string,
-  params: { page?: number; limit?: number; sort?: string; order?: string; search?: string; filter_col?: string; filter_val?: string } = {},
+  params: {
+    page?: number;
+    limit?: number;
+    sort?: string;
+    order?: string;
+    search?: string;
+    filter_col?: string;
+    filter_val?: string;
+    filter_country?: string;
+  } = {},
 ): Promise<PaginatedResponse> {
   const qs = new URLSearchParams();
   if (params.page) qs.set('page', String(params.page));
@@ -208,6 +217,7 @@ export async function listRows(
   if (params.search) qs.set('search', params.search);
   if (params.filter_col) qs.set('filter_col', params.filter_col);
   if (params.filter_val) qs.set('filter_val', params.filter_val);
+  if (params.filter_country) qs.set('filter_country', params.filter_country);
   return request(`/tables/${encodeURIComponent(table)}?${qs}`);
 }
 
@@ -395,13 +405,18 @@ export function exportUrl(table: string, format: 'csv' | 'xlsx', search?: string
 }
 
 export async function downloadCustomersExport(params: {
-  format?: 'csv' | 'xlsx'; site?: string; search?: string;
+  format?: 'csv' | 'xlsx'; site?: string; country?: string; search?: string;
 } = {}): Promise<void> {
   const qs = new URLSearchParams();
   qs.set('format', params.format || 'csv');
   if (params.site) qs.set('site', params.site);
+  else if (params.country) qs.set('country', params.country);
   if (params.search) qs.set('search', params.search);
-  const name = params.site ? `customers_${params.site}` : 'customers';
+  const name = params.site
+    ? `customers_${params.site}`
+    : params.country
+      ? `customers_${params.country}`
+      : 'customers';
   return downloadFile(`/export/customers-with-accounts?${qs}`, `${name}.${params.format || 'csv'}`);
 }
 

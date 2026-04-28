@@ -1,10 +1,12 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { listRows, deleteRecord, type PaginatedResponse } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
+import CountryPill from '../components/CountryPill';
 
 type OrphanInfo = { account_number: string; reason: string };
+interface Site { concession: string; country?: string | null }
 
 export default function AccountsPage() {
   const { t } = useTranslation(['accounts', 'common']);
@@ -13,7 +15,8 @@ export default function AccountsPage() {
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [filterSite, setFilterSite] = useState('');
-  const [sites, setSites] = useState<string[]>([]);
+  const [filterCountry, setFilterCountry] = useState('');
+  const [sites, setSites] = useState<Site[]>([]);
   const [loading, setLoading] = useState(true);
   const { canWrite, canWriteCustomers, token } = useAuth();
 
@@ -25,7 +28,10 @@ export default function AccountsPage() {
 
   useEffect(() => {
     fetch('/api/sites').then(r => r.json()).then(d => {
-      setSites((d.sites || []).map((s: any) => s.concession));
+      setSites((d.sites || []).map((s: any) => ({
+        concession: s.concession,
+        country: s.country ?? null,
+      })));
     }).catch(() => {});
     if (token) {
       fetch('/api/tables/accounts/orphaned', { headers: { Authorization: `Bearer ${token}` } })
@@ -39,6 +45,11 @@ export default function AccountsPage() {
     }
   }, [token]);
 
+  const visibleSites = useMemo(
+    () => sites.filter(s => !filterCountry || (s.country || '').toUpperCase() === filterCountry),
+    [sites, filterCountry],
+  );
+
   const fetchData = useCallback(() => {
     setLoading(true);
     listRows('accounts', {
@@ -47,14 +58,25 @@ export default function AccountsPage() {
       search: search || undefined,
       filter_col: filterSite ? 'community' : undefined,
       filter_val: filterSite || undefined,
+      filter_country: !filterSite && filterCountry ? filterCountry : undefined,
     })
       .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, [page, search, filterSite]);
+  }, [page, search, filterSite, filterCountry]);
 
   useEffect(fetchData, [fetchData]);
-  useEffect(() => { setSelected(new Set()); }, [page, search, filterSite]);
+  useEffect(() => { setSelected(new Set()); }, [page, search, filterSite, filterCountry]);
+
+  useEffect(() => {
+    if (filterSite && filterCountry) {
+      const owner = sites.find(s => s.concession === filterSite)?.country;
+      if ((owner || '').toUpperCase() !== filterCountry) {
+        setFilterSite('');
+        setPage(1);
+      }
+    }
+  }, [filterCountry, filterSite, sites]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -150,7 +172,7 @@ export default function AccountsPage() {
         </div>
       )}
 
-      <div className="space-y-2 sm:space-y-0 sm:flex sm:gap-3 sm:flex-wrap">
+      <div className="space-y-2 sm:space-y-0 sm:flex sm:gap-3 sm:flex-wrap sm:items-center">
         <form onSubmit={handleSearch} className="flex gap-2">
           <input
             value={searchInput}
@@ -160,13 +182,18 @@ export default function AccountsPage() {
           />
           <button type="submit" className="px-3 py-2 bg-gray-100 border rounded-lg text-sm hover:bg-gray-200 whitespace-nowrap">{t('accounts:search')}</button>
         </form>
+        <CountryPill
+          sites={sites}
+          value={filterCountry}
+          onChange={c => { setFilterCountry(c); setPage(1); }}
+        />
         <select
           value={filterSite}
           onChange={e => { setFilterSite(e.target.value); setPage(1); }}
           className="w-full sm:w-auto px-3 py-2 border rounded-lg text-sm bg-white"
         >
           <option value="">{t('accounts:allSites')}</option>
-          {sites.map(s => <option key={s} value={s}>{s}</option>)}
+          {visibleSites.map(s => <option key={s.concession} value={s.concession}>{s.concession}</option>)}
         </select>
       </div>
 

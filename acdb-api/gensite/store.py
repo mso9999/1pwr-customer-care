@@ -38,33 +38,38 @@ def _conn():
 # ---------------------------------------------------------------------------
 
 def seed_sites_from_country_config() -> int:
-    """Insert one row per site known to country_config.site_abbrev for the
-    currently active country. Idempotent — only inserts missing codes.
+    """Insert one row per concession registered in ``country_config`` across
+    **all** countries. 1PDB is consolidated and country-aware, so a single
+    seed call should populate every country's sites (each row stamped with
+    its owning ``country`` code) — regardless of which ``COUNTRY_CODE`` the
+    API happens to be booted with. Idempotent — only inserts missing codes.
 
     Returns count of newly inserted rows.
     """
-    from country_config import SITE_ABBREV, SITE_DISTRICTS, COUNTRY
+    from country_config import _REGISTRY  # type: ignore[attr-defined]
 
     inserted = 0
     with _conn() as conn:
         with conn.cursor() as cur:
-            for code, name in SITE_ABBREV.items():
-                cur.execute(
-                    """
-                    INSERT INTO sites (code, country, kind, display_name, district, ugp_project_id)
-                    VALUES (%s, %s, 'minigrid', %s, %s, %s)
-                    ON CONFLICT (code) DO NOTHING
-                    """,
-                    (code, COUNTRY.code, name, SITE_DISTRICTS.get(code), code),
-                )
-                if cur.rowcount:
-                    inserted += cur.rowcount
+            for cc, cfg in _REGISTRY.items():
+                for code, name in cfg.site_abbrev.items():
+                    cur.execute(
+                        """
+                        INSERT INTO sites (code, country, kind, display_name, district, ugp_project_id)
+                        VALUES (%s, %s, 'minigrid', %s, %s, %s)
+                        ON CONFLICT (code) DO NOTHING
+                        """,
+                        (code, cc, name, cfg.site_districts.get(code), code),
+                    )
+                    if cur.rowcount:
+                        inserted += cur.rowcount
         conn.commit()
     if inserted:
         logger.info(
-            "gensite: seeded %d sites into 1PDB from country_config (%s)",
+            "gensite: seeded %d sites into 1PDB from country_config "
+            "(consolidated across %d countries)",
             inserted,
-            COUNTRY.code,
+            len(_REGISTRY),
         )
     return inserted
 
