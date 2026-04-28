@@ -3,6 +3,119 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-28 202604281830 (v1.1.2 OTA pulled, v1.1.3 rebuilt with MAK Wi-Fi creds + build-script guard)
+
+### Field team report (Motlatsi)
+
+1. FW updated on every PCB except the 3 newest installs (`23022684` /
+   `23021886` / `23021888`).
+2. 3 more meters installed but none picked up comms — far from the
+   powerhouse toward MAK cemetery, on built-in (low-gain) antenna PCBs
+   (external-antenna stock is exhausted).
+3. **Specific OTA ask:** use `23022673` (OneMeter13, 0045MAK) as the
+   canary, and **confirm the FreeRTOS firmware has Wi-Fi SSID
+   `MAK_Wifi-ext` and password `1PWR_M@k123`** before pushing.
+4. `23022673` apparent dropout was actually the PCB failing to read
+   its own DDS8888 (Modbus side), same symptom seen earlier on
+   `23022628` and worked around there by changing the Modbus ID.
+   Tracked as an open hardware/firmware bug.
+
+### What I did
+
+The Wi-Fi creds check uncovered a real near-miss: the **v1.1.2 OTA
+created earlier today** (`1m-v1-1-2-relay-cmd-20260428132839`) had
+been built **without** `SITE_CONFIG=site-configs/MAK.conf` set, so the
+artifact embedded the build-host default `CONFIG_ROUTER_SSID="DareMightyThings"`
+/ `CONFIG_ROUTER_PASSWORD="bestcity"` instead of MAK's. Inspected
+`main/networking/wifi/app_wifi.c::app_wifi_init()` to confirm: the
+build-time `CONFIG_ROUTER_SSID` is applied unconditionally on every
+boot via `esp_bridge_wifi_set_config(WIFI_IF_STA, ...)` — there is no
+NVS-stored override path. Any device that completed the OTA would
+have failed Wi-Fi join after reboot and bricked until a manual serial
+reflash. Field team's specific ask was a save.
+
+Actions:
+
+1. **Cancelled and deleted the v1.1.2 OTA** before any device finished
+   the download (`aws iot cancel-job` + `aws iot delete-ota-update`).
+   Job was `IN_PROGRESS` with no progress for 3 h; that pattern was
+   probably IoT scheduler latency rather than the cert-mismatch
+   hypothesis from this morning's RCA — see below.
+2. **Bumped to v1.1.3** to keep the contaminated 1.1.2 label
+   unambiguous (`onepwr-aws-mesh@f16ff3d`).
+3. **Rebuilt v1.1.3 on the build host with `SITE_CONFIG=/opt/1meter-firmware/site-configs/MAK.conf`**.
+   `release-manifest.json` confirms `router_ssid: MAK_Wifi-ext`,
+   `router_password_set: true`. `strings` on the binary verifies
+   `MAK_Wifi-ext` and `1PWR_M@k123` are baked in (no `DareMightyThings`
+   or `bestcity` survived).
+4. **Patched `/opt/1meter-firmware/scripts/build_firmware_remote.sh`**
+   on the build host (mirrored to `scripts/ops/build_firmware_remote.sh`):
+   - `release-manifest.json` now records `router_ssid` and
+     `router_password_set` for at-a-glance audit.
+   - Fail-closed Wi-Fi-SSID guard refuses to leave a release on disk
+     if the embedded SSID is `DareMightyThings`, unless
+     `ALLOW_DEFAULT_WIFI=1` is set (lab/dev opt-out).
+   - Verified the guard fires correctly (deliberately ran a build
+     without `SITE_CONFIG`, watched it abort and remove the release dir).
+5. **Created single-thing canary OTA**
+   `1m-v1-1-3-canary-OneMeter13-20260428163531` targeting
+   `OneMeter13` per field team's request. Job picked up by the device
+   in <1 min (vs the 1.1.2 stuck-IN_PROGRESS pattern), validating the
+   reception side. As of writing the device hasn't yet rebooted to
+   1.1.3 — telemetry still reports 1.1.1.
+6. **Updated docs:** new `docs/ops/1meter-build-and-ota-runbook.md`
+   capturing the safe build/OTA flow with the SITE_CONFIG step
+   non-negotiable; `docs/ops/1meter-ota-trust-inventory.md` updated
+   per-device row + 2026-04-28 timeline entries; MAK fleet log
+   appended with the snapshot table and cancellation notes.
+
+### Important takeaway
+
+The 2026-04-22 "OTA stuck silently for hours" pattern that the
+trust-inventory RCA blamed on the Feb-21 latent cert mismatch is
+**not** confirmed: today's v1.1.3 canary picked up in <1 min on
+OneMeter13 (one of the historically "stuck" devices), so the cert
+chain on these MAK fleet members is fine and the earlier stuck jobs
+were probably IoT scheduler / device-state issues rather than
+cryptographic rejection. The cert-mismatch story still applies to
+older un-reflashed devices (and the Schyler-batch units), but the
+fleet members the field team has been actively reflashing are
+OTA-capable now. Will refine the trust-inventory RCA after the
+canary completes successfully.
+
+### Known Open Items / Next Session
+
+1. **Wait for the v1.1.3 canary to finish.** Look for
+   `prototype_meter_state.firmware_version='1.1.3'` for `OneMeter13`.
+   If successful, follow up with a thing-group OTA against the rest
+   of `MAK_V1_1_1` (OneMeter11/17/18) plus an extension to cover
+   OneMeter5/14/15/16.
+2. **3 newest installs (23022684 / 23021886 / 23021888)** still need
+   serial flash to v1.1.3 — they're the Schyler-batch and don't
+   publish FirmwareVersion yet. Field-team next visit.
+3. **23021886 (0056MAK) is offline ~4 days** — flag to field team.
+4. **PCB Modbus dropout bug** (23022673, previously 23022628) — open
+   item for the firmware/hardware team. Workaround: change Modbus ID.
+5. **23022684 reactivation** — already done in CC (`role=check`,
+   `account=0051MAK`), but no FW yet.
+
+### Files Touched
+
+- `onepwr-aws-mesh@f16ff3d`: `sdkconfig.defaults` (build bump 2 → 3).
+- 1PWR CC: `scripts/ops/build_firmware_remote.sh` (mirror of patched
+  build host script), `docs/ops/1meter-build-and-ota-runbook.md`,
+  `docs/ops/1meter-ota-trust-inventory.md`,
+  `docs/ops/1meter-mak-fleet-log.md`, `SESSION_LOG.md`.
+- Build host (out of repo): patched
+  `/opt/1meter-firmware/scripts/build_firmware_remote.sh`; backups in
+  `/opt/1meter-firmware/scripts/build_firmware_remote.sh.bak.*`.
+- AWS state changes: cancelled + deleted OTA
+  `1m-v1-1-2-relay-cmd-20260428132839`; created OTA
+  `1m-v1-1-3-canary-OneMeter13-20260428163531` (single-thing canary);
+  S3 upload to `s3://1pwr-ota-firmware/firmware-releases/v1.1.3/...`.
+
+---
+
 ## Session 2026-04-28 202604281530 (1Meter billing migration — Phase 2 enablement infra-only)
 
 ### What Was Done

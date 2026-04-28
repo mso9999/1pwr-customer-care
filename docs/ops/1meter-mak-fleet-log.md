@@ -113,6 +113,49 @@ The UI only shows **primary + check** on the **same `account_number`**. Actionab
 
 To claim fleet-wide “latest,” you need either **device-reported version** (shadow / MQTT), **per-thing job SUCCESS**, or a **single job** targeting the full **thing group** with all devices succeeded — which is **not** currently evidenced for all 10.
 
+## 2026-04-28 — Field update (Motlatsi) + v1.1.3 OTA canary
+
+> 1. **Firmware status:** v1.1.1 confirmed flashed on every PCB *except* the
+>    three newest installs (23022684 / 23021886 / 23021888). Those still
+>    predate the FW-publish patch and therefore don't appear with a
+>    `FirmwareVersion` in MQTT telemetry. They will get serial-flashed to
+>    the current build during the next field visit.
+> 2. **3 more meters added today** but none picked up comms — installed
+>    far from the powerhouse toward the MAK cemetery, on built-in (low-gain)
+>    antenna PCBs because external-antenna stock is exhausted (see
+>    2026-04-17 note).
+> 3. **OTA target preference (per field team):** use `OneMeter13`
+>    (`23022673`, `0045MAK`) as the canary device. Confirm the build's
+>    Wi-Fi creds are `MAK_Wifi-ext` / `1PWR_M@k123` *before* publishing.
+> 4. **23022673 intermittent dropout** turned out to be the PCB failing
+>    to read its own DDS8888 (same symptom seen earlier on `23022628` and
+>    fixed there by changing the Modbus ID). The Wi-Fi link itself was
+>    fine. Tracked as a hardware/firmware bug; cause unknown.
+
+### Actioned in CC + AWS
+
+| Action | Detail |
+|--------|--------|
+| **Pulled the v1.1.2 OTA** (built earlier today targeting `MAK_V1_1_1`) | The artifact had been built without `SITE_CONFIG=site-configs/MAK.conf` and embedded the build-host default `DareMightyThings`/`bestcity`. `app_wifi_init()` applies build-time SSID/password unconditionally on every boot — no NVS override path — so any device that completed the OTA would have bricked on Wi-Fi. Cancelled and deleted before any device finished the download. |
+| **Built v1.1.3 with `SITE_CONFIG=site-configs/MAK.conf`** | `release-manifest.json` confirms `router_ssid: MAK_Wifi-ext`, `router_password_set: true`. Bumped to 1.1.3 to keep the contaminated 1.1.2 label distinguishable in the OTA / S3 history. Commit: `onepwr-aws-mesh@f16ff3d`. |
+| **Patched `build_firmware_remote.sh` with a fail-closed Wi-Fi-SSID guard** | Refuses to leave a release on disk if the embedded SSID is `DareMightyThings` unless `ALLOW_DEFAULT_WIFI=1`. Verified by triggering it. Mirror in the CC repo at `scripts/ops/build_firmware_remote.sh`; runbook at `docs/ops/1meter-build-and-ota-runbook.md`. |
+| **Created v1.1.3 single-thing OTA canary** | `1m-v1-1-3-canary-OneMeter13-20260428163531`, target ARN `…thing/OneMeter13`. Picked up by the device in <1 minute (vs the 3 h `IN_PROGRESS`-stuck pattern of the 1.1.2 attempt — which was probably IoT scheduler latency rather than the cert-mismatch hypothesis). |
+
+### MAK fleet snapshot (DynamoDB telemetry, 2026-04-28 ~18:30 SAST)
+
+| Serial | Role | Account | Last sample | FW | Notes |
+|---|---|---|---|---|---|
+| 23022613 | repeater | — | <1 min | 1.1.1 | |
+| 23022673 | check | 0045MAK (OneMeter13) | <1 min | 1.1.1 → **1.1.3 OTA in flight** | |
+| 23022628 | check | 0005MAK | <2 min | 1.1.1 | |
+| 23021847 | check | 0026MAK | <3 min | 1.1.1 | |
+| 23022696 | check | 0025MAK | ~1 h | 1.1.1 | |
+| 23022684 | check | 0051MAK | ~1.3 h | — | Schyler batch, no FW publish; needs serial reflash |
+| 23022646 | check | 0119MAK | ~4 h | 1.1.1 | |
+| 23021888 | check | 0058MAK | ~5.6 h | — | Schyler batch, no FW publish; needs serial reflash |
+| 23022667 | gateway | — | ~7 h | 1.1.1 | |
+| 23021886 | check | 0056MAK | **~4 days** | — | Schyler batch + offline since 24 Apr — flagged to field team |
+
 ## Repeatable queries (read-only)
 
 ```sql
