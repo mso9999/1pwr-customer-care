@@ -12,6 +12,11 @@
 -- Auto-trigger gate: in Phase 1 the relay channel is exercisable manually
 -- (POST /api/meters/{thing}/relay) but balance-zero auto-cutoff is gated by
 -- env RELAY_AUTO_TRIGGER_ENABLED=1, off by default.
+--
+-- Idempotency note: an earlier ad-hoc partial schema for relay_commands
+-- exists on prod from operational testing. This migration uses
+-- CREATE/ADD COLUMN IF NOT EXISTS so it converges to the canonical schema
+-- regardless of starting state.
 
 BEGIN;
 
@@ -36,6 +41,67 @@ CREATE TABLE IF NOT EXISTS relay_commands (
     ack_payload     JSONB,                                    -- full ack body (audit)
     cc_mutation_id  BIGINT REFERENCES cc_mutations(id)
 );
+
+-- If a partial table exists, bring it up to spec. ADD COLUMN IF NOT EXISTS is a
+-- no-op on a freshly-created table from the CREATE TABLE above; it only does
+-- real work when the table pre-exists with a subset of columns.
+ALTER TABLE relay_commands ADD COLUMN IF NOT EXISTS cmd_id          UUID;
+ALTER TABLE relay_commands ADD COLUMN IF NOT EXISTS thing_name      TEXT;
+ALTER TABLE relay_commands ADD COLUMN IF NOT EXISTS meter_id        TEXT;
+ALTER TABLE relay_commands ADD COLUMN IF NOT EXISTS account_number  TEXT;
+ALTER TABLE relay_commands ADD COLUMN IF NOT EXISTS action          TEXT;
+ALTER TABLE relay_commands ADD COLUMN IF NOT EXISTS reason          TEXT;
+ALTER TABLE relay_commands ADD COLUMN IF NOT EXISTS requested_by    TEXT;
+ALTER TABLE relay_commands ADD COLUMN IF NOT EXISTS requested_at    TIMESTAMPTZ NOT NULL DEFAULT NOW();
+ALTER TABLE relay_commands ADD COLUMN IF NOT EXISTS ttl_seconds     INTEGER NOT NULL DEFAULT 300;
+ALTER TABLE relay_commands ADD COLUMN IF NOT EXISTS published_at    TIMESTAMPTZ;
+ALTER TABLE relay_commands ADD COLUMN IF NOT EXISTS acked_at        TIMESTAMPTZ;
+ALTER TABLE relay_commands ADD COLUMN IF NOT EXISTS relay_after     TEXT;
+ALTER TABLE relay_commands ADD COLUMN IF NOT EXISTS status          TEXT NOT NULL DEFAULT 'queued';
+ALTER TABLE relay_commands ADD COLUMN IF NOT EXISTS error           TEXT;
+ALTER TABLE relay_commands ADD COLUMN IF NOT EXISTS payload         JSONB;
+ALTER TABLE relay_commands ADD COLUMN IF NOT EXISTS ack_payload     JSONB;
+ALTER TABLE relay_commands ADD COLUMN IF NOT EXISTS cc_mutation_id  BIGINT;
+
+-- UNIQUE on cmd_id (idempotent: skipped if a constraint with that name already
+-- exists from the freshly-CREATEd table). Only added when absent so we don't
+-- collide with the inline UNIQUE in the CREATE TABLE definition.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+          FROM pg_constraint
+         WHERE conname = 'relay_commands_cmd_id_key'
+    ) THEN
+        ALTER TABLE relay_commands ADD CONSTRAINT relay_commands_cmd_id_key UNIQUE (cmd_id);
+    END IF;
+END$$;
+
+-- CHECK constraints: drop+recreate is fine because we own the table and the
+-- semantics are stable.
+ALTER TABLE relay_commands DROP CONSTRAINT IF EXISTS relay_commands_action_check;
+ALTER TABLE relay_commands ADD  CONSTRAINT relay_commands_action_check
+    CHECK (action IN ('open', 'close'));
+
+ALTER TABLE relay_commands DROP CONSTRAINT IF EXISTS relay_commands_status_check;
+ALTER TABLE relay_commands ADD  CONSTRAINT relay_commands_status_check
+    CHECK (status IN ('queued', 'published', 'acked', 'completed', 'timed_out', 'rejected', 'failed'));
+
+-- FK to cc_mutations: only add if not already present.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+          FROM pg_constraint
+         WHERE conrelid = 'relay_commands'::regclass
+           AND contype  = 'f'
+           AND pg_get_constraintdef(oid) LIKE '%REFERENCES cc_mutations%'
+    ) THEN
+        ALTER TABLE relay_commands
+            ADD CONSTRAINT relay_commands_cc_mutation_id_fkey
+            FOREIGN KEY (cc_mutation_id) REFERENCES cc_mutations(id);
+    END IF;
+END$$;
 
 CREATE INDEX IF NOT EXISTS idx_relay_commands_thing_requested
     ON relay_commands (thing_name, requested_at DESC);
