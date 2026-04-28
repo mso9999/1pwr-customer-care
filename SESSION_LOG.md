@@ -3,6 +3,96 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-27 202604270900 (Mobile app BFF — `/api/app/active-countries`)
+
+### What Was Done
+- **Country registry exposed to the mobile app.** New router
+  `acdb-api/app_bff.py` mounts `GET /api/app/active-countries` under
+  `customer_api.py`, returning `{ countries: [{ countryCode, displayName,
+  active, appConfigUrl? }] }` shaped to match the Flutter client in
+  `1PWRBENIN-v2/lib/core/config/country_registry_client.dart`.
+- **`CountryConfig` extended** in `acdb-api/country_config.py` with
+  `active: bool = True` and `display_name: Optional[str]` (LS → "Lesotho",
+  BN → "Bénin"). Inactive rows are filtered server-side; the field stays
+  in the response for forward compatibility.
+- **Cache headers**: `Cache-Control: public, max-age=300`. Registry only
+  changes on deploy.
+- **Contract doc** at `docs/app-bff-contract.md` is now the single source
+  of truth for `/api/app/*`. Linked from the app repo's README.
+- **Tests** in `acdb-api/tests/test_app_bff.py` (6 cases — shape,
+  display-name fallback, inactive filtering, optional `appConfigUrl`,
+  cache header, router prefix). Local end-to-end ASGI smoke against
+  `httpx.ASGITransport` returns the documented payload.
+- **Companion repo:** see `1PWRBENIN-v2/docs/SESSION_LOG.md` entry of the
+  same date — no Flutter code change was required (client was already
+  pointed at this endpoint and parses the documented shape).
+
+### What Next Session Should Know
+- **Deploy:** standard CC rsync of `acdb-api/` ships
+  `app_bff.py` + the `customer_api.py` mount. systemd restart of
+  `1pdb-api` on the LS host is enough; `1pdb-api-bn` is not on the
+  `cc.1pwrafrica.com` path for this endpoint.
+- **Smoke after deploy** — see `docs/app-bff-contract.md` runbook
+  ("Post-deploy smoke runbook" section): `curl
+  https://cc.1pwrafrica.com/api/app/active-countries` then `flutter run`.
+- **Adding/disabling a country** is a Python edit in `country_config.py`
+  (`active=False` to stage an addition without exposing it). The clean
+  follow-up — promoting the registry to a `countries` table in 1PDB so
+  ops can toggle without a deploy — is unchanged by this PR.
+- **`appConfigUrl` is intentionally empty** in v1; the app keeps using
+  its bundled `assets/config/country_{bn,ls}.json`. Populate
+  `app_bff._REMOTE_CONFIG_URLS` once a `GET /api/app/country-config/{code}`
+  endpoint exists (placeholder section already in the contract doc).
+
+## Session 2026-04-22 202604221800 (Gensite poller + series/alarms + chart)
+
+### What Was Done
+- **Poller** (`acdb-api/scripts/ops/gensite_poller.py`, auto-deploys via backend rsync): enumerates `site_credentials`, per-vendor cadence gate (Victron 60 s / Solarman+Deye 5 min / Sinosoar 2 min / SMA 10 min), exponential backoff on failure, alarm fetch every 5 min. State in `/var/lib/cc-gensite-poll/state.json`; transition-only WhatsApp alerts (offline at threshold / recovery / new CRITICAL) via existing `cc_bridge_notify.py` — same CC-phone + OnM-tracker channels as the 1Meter monitor. Skips `implementation_status=="stub"` adapters so Solarman/Sinosoar/SMA don't spam errors.
+- **systemd units** (`deploy/systemd/cc-gensite-poll.{service,timer}`): oneshot, `cc_api:cc_api`, `StateDirectory=cc-gensite-poll`, timer every 60 s with 10 s randomised delay + `Persistent=true`. Install doc: `docs/ops/gensite-poller.md`.
+- **Router extensions** (`acdb-api/gensite/router.py`):
+  - `GET /api/gensite/sites/{code}/series?metric=...&hours=...` — downsampled PG query with metric allow-list (anti-SQLi), bucket sized 1 min / 5 min / 15 min / 1 h based on window.
+  - `GET /api/gensite/sites/{code}/alarms?state=open|all`, `POST /alarms/{id}/ack`, `POST /alarms/{id}/open-ugp-ticket` — last writes directly into `wa_tickets` with `source='gensite'` + `ugp_ticket_id='gensite-alarm-{id}'`, mutations logged.
+- **Store additions** (`acdb-api/gensite/store.py`): `readings_series()` with metric allow-list, `insert_alarms()` (dedupe via unique constraint), `list_alarms()`, `acknowledge_alarm()`, `attach_ugp_ticket()`, `enumerate_credentials_for_poller()` (joined to `sites.country` for bridge routing).
+- **Victron adapter hardened**: `fetch_day()` → `/installations/{idSite}/stats?interval=hours` with metric merge-by-timestamp; `fetch_alarms()` → `/installations/{idSite}/alarms` with severity normalization (`critical` / `warning` / `info`).
+- **Frontend**:
+  - `src/lib/api.ts`: `getGensiteSeries`, `listGensiteAlarms`, `ackGensiteAlarm`, `openUgpTicketForAlarm` + types.
+  - `src/pages/GenSitePage.tsx`: alarms panel (filter open/all, Ack + Open-ticket buttons), telemetry chart (Recharts `AreaChart` — PV / Load / Batt / SoC overlay), 6 h / 24 h / 7 d / 30 d window toggle, empty-state message pointing at the poller.
+- **Docs**: `docs/ops/gensite-poller.md` — install / cadence / env / troubleshoot.
+- **Build checks**: `npx tsc -b --noEmit` green; `python3 -m compileall gensite/ scripts/ops/gensite_poller.py` green.
+
+### What Next Session Should Know
+- **Systemd install still manual.** Deploy rsyncs `acdb-api/` only, so `deploy/systemd/cc-gensite-poll.{service,timer}` must be copied onto the CC host once (`scp` + `sudo systemctl daemon-reload && enable --now`). Same pattern as `cc-1meter-monitor.{service,timer}` — runbook in `docs/ops/gensite-poller.md`.
+- **Solarman + Sinosoar adapters are still stubs** — the poller already skips them (`implementation_status=="stub"`), so enabling them is a matter of writing the adapter bodies and flipping the status; no poller changes required.
+- **Ticket linkage.** `open-ugp-ticket` currently writes to `wa_tickets` with `ugp_ticket_id="gensite-alarm-{id}"` rather than calling UGP directly. That's intentional for Phase 1 (reuses the maintenance-log UX operators already know); Phase 2 can replace with a real `UGPClient` ticket creation call if UGP exposes a ticket-create API.
+- **Chart aggregation** sums PV / Load / Batt across equipment per bucket and averages SoC — correct when a site has one inverter, approximate on sites with multiple devices of the same role. Revisit once there's a multi-inverter site in production.
+
+## Session 2026-04-22 202604221600 (Gensite Phase 1 scaffold — commissioning + Victron adapter)
+
+### What Was Done
+- **Migration `013_gensite_equipment.sql`** — new 1PDB tables: `sites` (master site list, incl. PIH health centres once commissioned), `site_equipment` (installed inverter/BMS/meter/battery per site), `site_credentials` (Fernet-encrypted per-vendor backend creds), `inverter_readings` (append-only telemetry), `inverter_alarms` (event log with UGP ticket linkage). `updated_at` triggers + sensible indexes. Runs as `postgres` on deploy per the 010+ convention.
+- **New package `acdb-api/gensite/`** with:
+  - `crypto.py` — Fernet helper, lazy key load via `CC_CREDENTIAL_ENCRYPTION_KEY`, graceful 503 when missing rather than a boot failure.
+  - `adapters/base.py` — `InverterAdapter` Protocol + `CredentialSpec`, `SiteCredential`, `LiveReading`, `AlarmEvent` value objects.
+  - `adapters/victron.py` — **Victron VRM Portal adapter (ready)**: token or user/pass auth, installation discovery, `/widgets/Status` live reading, `fetch_day` / `fetch_alarms` deferred to Phase 2.
+  - `adapters/solarman.py`, `sinosoar.py`, `sma.py` — stubs with real credential schemas so commissioning can still store encrypted creds. Sinosoar confirmed as a separate backend at `sinosoarcloud.com` (needs DevTools XHR capture before `fetch_live` works).
+  - `store.py` — psycopg2 CRUD for sites/equipment/credentials/readings. Credential reads decrypt; API responses return `has_secret` booleans + masked username, never plaintext.
+  - `router.py` — `/api/gensite/{vendors, sites, sites/{code}, sites/{code}/live, commission, credentials/{vendor}/{backend}/{verify,rotate}}`. Writes gated on `superadmin|onm_team`; every commission/rotate writes `cc_mutations`.
+- **`customer_api.py`**: `app.include_router(gensite_router)` appended.
+- **Frontend** (TypeScript build clean):
+  - `src/lib/api.ts`: gensite client (types + 7 functions).
+  - `src/pages/GenSiteListPage.tsx` (index + live/stale/offline badge), `GenSitePage.tsx` (equipment + live tiles + credential verify button, honours `?return_to=` for UGP round-trip), `CommissionSitePage.tsx` (wizard: site → equipment rows → auto-generated credential blocks per distinct vendor).
+  - `App.tsx` routes + Layout nav entry **Ops → Generation Sites**; EN + FR nav labels.
+- **Docs**: `docs/ops/gensite-commissioning.md` (operator flow), `docs/ops/gensite-credentials.md` (Fernet key setup + rotation SOP). `CONTEXT.md` Backend section now references `gensite/`.
+- **Dependency**: `cryptography` added to `acdb-api/requirements.txt` for Fernet.
+
+### What Next Session Should Know
+- **No encryption key on prod yet.** Before the first commission, generate `CC_CREDENTIAL_ENCRYPTION_KEY` and add to `/opt/1pdb/.env`; restart both APIs. The wizard refuses to submit until `GET /api/gensite/vendors` returns `crypto_configured: true`.
+- **Sinosoar blocker still open.** Portal is `sinosoarcloud.com/energystorage/es`; capture login + dashboard XHR via DevTools on next ops login so `sinosoar.py` can be promoted from stub to ready. Adapter scaffolding is in place — only `verify()` + `fetch_live()` need bodies.
+- **No poller yet.** Commissioning stores encrypted creds and does an on-the-spot `verify()`, but `inverter_readings` stays empty until `scripts/ops/gensite_poller.py` + `cc-gensite-poll.{service,timer}` land (next deliverable after Victron is proven end-to-end on GBO).
+- **Victron is the Phase 1 smoke test.** Once the key is set, commission GBO with the existing Victron VRM login; the credential row should verify green and the dashboard will show live tiles as soon as the poller is deployed.
+- **UGP → CC URL is stable and ready**: `https://cc.1pwrafrica.com/gensite/{SITE_CODE}` — supports `?return_to=` for round-trip navigation. No UGP changes required to start using it.
+- **Alerting reuse**: the existing `cc_bridge_notify.py` pipes to CC phone + `1PWR LS - OnM Ticket Tracker` group. The Phase 2 poller will reuse it with `metadata.kind=gensite_alarm`.
+
 ## Session 2026-04-22 202604221330 (OTA RCA — Feb-21 laptop-local cert, key lost)
 
 ### What Was Done

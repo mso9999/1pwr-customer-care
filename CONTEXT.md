@@ -84,6 +84,7 @@ There are **two live gateway deployments** — **Lesotho** (M-Pesa) and **Benin*
 | File | Purpose |
 |------|---------|
 | `customer_api.py` | Main FastAPI app -- mounts all routers, psycopg2 pool, CORS, auth |
+| `gensite/` | Generation-site commissioning + inverter telemetry: router, vendor adapters (Victron ready; Deye/Solarman, Sinosoar, SMA stubs), Fernet-encrypted `site_credentials` store. Migration `013`. Docs: `docs/ops/gensite-commissioning.md`, `docs/ops/gensite-credentials.md`. |
 | `om_report.py` | O&M analytics endpoints: customer stats, consumption, sales, ARPU |
 | `crud.py` | Customer CRUD operations (PostgreSQL information_schema introspection) |
 | `auth.py` | Authentication (employee login, JWT tokens) |

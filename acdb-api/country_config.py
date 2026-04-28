@@ -29,6 +29,9 @@ class CountryConfig:
     site_districts: Dict[str, str]      # site_code → district/region
     koios_sites: Dict[str, str]         # site_code → Koios UUID
     payment_regex_id: str               # which M-PESA/MoMo regex set to use
+    active: bool = True                 # exposed via /api/app/active-countries
+    display_name: Optional[str] = None  # user-facing label for mobile app
+                                        # (falls back to ``name`` when None)
 
 
 LESOTHO = CountryConfig(
@@ -79,6 +82,8 @@ LESOTHO = CountryConfig(
         "TOS": "b564c8d6-a6c1-43d4-98d1-87ed8cd8ffd7",
     },
     payment_regex_id="mpesa_ls",
+    active=True,
+    display_name="Lesotho",
 )
 
 BENIN = CountryConfig(
@@ -104,6 +109,8 @@ BENIN = CountryConfig(
         "SAM": "8f80b0a8-0502-4e26-9043-7152979360aa",
     },
     payment_regex_id="momo_bj",
+    active=True,
+    display_name="Bénin",
 )
 
 _REGISTRY: Dict[str, CountryConfig] = {
@@ -135,11 +142,35 @@ CURRENCY_SYMBOL: str = COUNTRY.currency_symbol
 TIMEZONE: str = COUNTRY.timezone
 UTC_OFFSET_HOURS: int = COUNTRY.utc_offset_hours
 
+# Registry-wide aggregates.
+#
+# 1PDB is a single consolidated, country-aware database served by 1PWR CC,
+# so site lookups and data-validation checks that operate on the *whole* DB
+# (sites dropdown, OM report, stats aggregations, etc.) must see every
+# concession across every registered country — not just the active country's.
+#
+# Use ``ALL_KNOWN_SITES`` for "is this a real concession code anywhere?"
+# checks. Keep ``KNOWN_SITES`` (active country only) for things scoped to the
+# active country, e.g. new-customer registration site dropdown.
+ALL_SITE_ABBREV: Dict[str, str] = {}
+ALL_SITE_DISTRICTS: Dict[str, str] = {}
+for _cc, _cfg in _REGISTRY.items():
+    ALL_SITE_ABBREV.update(_cfg.site_abbrev)
+    ALL_SITE_DISTRICTS.update(_cfg.site_districts)
+ALL_KNOWN_SITES: Set[str] = set(ALL_SITE_ABBREV.keys())
+
 _SITE_TO_COUNTRY: Dict[str, str] = {}
 for _cc, _cfg in _REGISTRY.items():
     for _site in _cfg.site_abbrev:
         _SITE_TO_COUNTRY[_site] = _cc
 _SITE_TO_COUNTRY["MAK"] = "LS"
+
+
+def get_country_for_site(site_code: str) -> Optional[str]:
+    """Return the ISO country code (LS/BN/...) that owns *site_code*, or None."""
+    if not site_code:
+        return None
+    return _SITE_TO_COUNTRY.get(site_code.strip().upper())
 
 
 def get_tariff_rate_for_site(site_code: str) -> float:

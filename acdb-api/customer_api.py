@@ -304,6 +304,8 @@ from financing import router as financing_router
 from payment_verification import router as verification_router
 from tickets import router as tickets_router
 from customer_messages import router as customer_messages_router
+from gensite import router as gensite_router
+from app_bff import router as app_bff_router
 
 from db_auth import init_auth_db
 init_auth_db()
@@ -331,6 +333,8 @@ app.include_router(financing_router)
 app.include_router(verification_router)
 app.include_router(tickets_router)
 app.include_router(customer_messages_router)
+app.include_router(gensite_router)
+app.include_router(app_bff_router)
 ensure_meter_assignments_table()
 warm_stats_cache()
 
@@ -598,12 +602,20 @@ def customer_search(
 @app.get("/sites")
 @app.get("/api/sites")
 def list_sites():
-    """List all configured sites for this country, with live customer counts.
+    """List all concessions in the consolidated 1PDB, with live customer counts.
 
-    Includes every code in ``country_config.KNOWN_SITES`` (e.g. TOS) even when
-    the count is zero, so filters and registration dropdowns match ``/api/config``.
+    1PDB is a single country-aware database served by 1PWR CC, so this endpoint
+    returns the union of:
+      * every concession registered in ``country_config`` across **all**
+        countries (``ALL_KNOWN_SITES``) — so every site is filterable and
+        every active-country site stays visible even at zero customers, and
+      * every distinct ``community`` value actually present in the customers
+        table — so any legacy/imported code that isn't (yet) in country_config
+        is still selectable in the dropdown.
+
+    Each entry carries a ``country`` field so UIs can group/badge by country.
     """
-    from country_config import KNOWN_SITES
+    from country_config import ALL_KNOWN_SITES, get_country_for_site
 
     sql = """
         SELECT community, COUNT(*) AS customer_count
@@ -623,12 +635,16 @@ def list_sites():
                 if not row[0]:
                     continue
                 code = row[0].strip().upper()
-                if code in KNOWN_SITES:
-                    counts[code] = row[1]
+                counts[code] = counts.get(code, 0) + (row[1] or 0)
 
+            all_codes = set(ALL_KNOWN_SITES) | set(counts.keys())
             sites = [
-                {"concession": code, "customer_count": counts.get(code, 0)}
-                for code in sorted(KNOWN_SITES)
+                {
+                    "concession": code,
+                    "customer_count": counts.get(code, 0),
+                    "country": get_country_for_site(code),
+                }
+                for code in sorted(all_codes)
             ]
 
             return {"sites": sites, "total_sites": len(sites)}

@@ -37,6 +37,13 @@ def _row_to_dict(cursor, row) -> dict:
 def export_customers_with_accounts(
     format: str = Query("csv", regex="^(csv|xlsx)$"),
     site: Optional[str] = Query(None, description="Filter by site/community"),
+    country: Optional[str] = Query(
+        None,
+        description=(
+            "Restrict to a registered country (e.g. ``LS``, ``BN``). "
+            "Ignored when ``site`` is supplied (site is more specific)."
+        ),
+    ),
     search: Optional[str] = Query(None),
     user: CurrentUser = Depends(require_employee),
 ):
@@ -61,6 +68,23 @@ def export_customers_with_accounts(
         if site:
             clauses.append("c.community = %s")
             params.append(site.upper())
+        elif country:
+            from country_config import _REGISTRY  # type: ignore[attr-defined]
+
+            cc = country.strip().upper()
+            cfg = _REGISTRY.get(cc)
+            if cfg is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Unknown country '{country}'. Valid: {sorted(_REGISTRY)}"
+                    ),
+                )
+            site_codes = list(cfg.site_abbrev.keys())
+            if site_codes:
+                placeholders = ", ".join(["%s"] * len(site_codes))
+                clauses.append(f"c.community IN ({placeholders})")
+                params.extend(site_codes)
         if search:
             clauses.append(
                 "(c.first_name ILIKE %s OR c.last_name ILIKE %s "
@@ -108,6 +132,8 @@ def export_customers_with_accounts(
     name = "customers"
     if site:
         name = f"customers_{site}"
+    elif country:
+        name = f"customers_{country.strip().upper()}"
     if format == "csv":
         return _export_csv(name, columns, rows)
     else:
@@ -120,6 +146,14 @@ def export_table(
     format: str = Query("csv", regex="^(csv|xlsx)$"),
     filter_col: Optional[str] = Query(None),
     filter_val: Optional[str] = Query(None),
+    filter_country: Optional[str] = Query(
+        None,
+        description=(
+            "Restrict to rows whose ``community`` belongs to a registered "
+            "country (e.g. ``LS``, ``BN``). Skipped when "
+            "``filter_col=community`` is also set."
+        ),
+    ),
     search: Optional[str] = Query(None),
     user: CurrentUser = Depends(require_employee),
 ):
@@ -145,6 +179,32 @@ def export_table(
         if filter_col and filter_val:
             where_clauses.append(f"{filter_col} = %s")
             params.append(filter_val)
+
+        if filter_country and not (filter_col == "community" and filter_val):
+            from country_config import _REGISTRY  # type: ignore[attr-defined]
+
+            cc = filter_country.strip().upper()
+            cfg = _REGISTRY.get(cc)
+            if cfg is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Unknown filter_country '{filter_country}'. "
+                        f"Valid: {sorted(_REGISTRY)}"
+                    ),
+                )
+            site_codes = list(cfg.site_abbrev.keys())
+            if site_codes:
+                cursor.execute(
+                    "SELECT 1 FROM information_schema.columns "
+                    "WHERE table_schema = 'public' "
+                    "AND table_name = %s AND column_name = 'community'",
+                    (table_name,),
+                )
+                if cursor.fetchone() is not None:
+                    placeholders = ", ".join(["%s"] * len(site_codes))
+                    where_clauses.append(f"community IN ({placeholders})")
+                    params.extend(site_codes)
 
         if search:
             cursor.execute(
