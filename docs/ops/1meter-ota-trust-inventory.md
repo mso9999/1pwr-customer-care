@@ -48,13 +48,32 @@ Field team note (2026-04-21, Motlatsi): the Schyler batch (roughly 7 PCBs incl. 
 | Date | Event |
 |------|-------|
 | 2026-02-20 | `1PWR_OTA_ESP32_v2` signing profile + matching ACM cert `03:9E:44:...` created. |
-| 2026-02-21 | Fleet batch flashed with v2 cert embedded. |
-| 2026-03-10 | `v1.0.2-MAKGroup` OTA: **1 SUCCEEDED (OneMeter6), 7 CANCELED**. Root cause of the cancels was never fully diagnosed — in hindsight likely a policy/permissions issue rather than cert, because all devices were on v2 at that time. |
-| ~2026-04 | `aws_codesign.crt` in `onepwr-aws-mesh` gets overwritten with a new cert (`18:92:8E:...`) whose private key is not in any AWS signing profile. Source of this commit is unclear; may have been an exploratory key rotation by a developer. No new Signer profile created; no fleet reflash. **Orphan cert is now embedded in any new build.** |
-| 2026-04-18 | v1.1.0 canary OTA to `OneMeter13` signed with `1PWR_OTA_ESP32_v2` — stuck IN_PROGRESS silently. Diagnosed as signature rejection because the **orphan cert** was in the new build, not the v2 cert the device expects. |
-| 2026-04-20 | v1.1.0 canary retried under `MAK_OTA_Profile` (v1 cert) — same stuck pattern. |
-| 2026-04-21 | Field team confirms only the Schyler batch (non-deployed) had cert changes, so the deployed fleet is on v2. MSO confirms the v2 profile is legit ours. |
-| 2026-04-22 | **This fix.** `aws_codesign.crt` reverted in the build-host repo to the real v2 cert (`03:9E:44:...`). Version bumped to 1.1.1 (anti-rollback). Rebuilt; uploaded; OTA signed with `1PWR_OTA_ESP32_v2`. Trust inventory doc created. |
+| 2026-02-21 | **Factory flash** of OneMeter5/11/13/14/15/16/17/18 for the MAK field deployment. At that commit (`6d68d97`) `main/certs/aws_codesign.crt` was **git-ignored / untracked** — a locally-generated ECDSA cert sat on the build laptop. **Private key of that cert was never checked in anywhere.** AWS Signer was configured to sign with the ACM cert (`03:9E:44:...`); devices verified against the local cert. **Cryptographic mismatch baked into the fleet.** |
+| 2026-02-27 | Mistake spotted. Commit `90ac9ad` ("Fix OTA signature verification: embed correct ACM code signing certificate") committed the **ACM v2 cert** into the repo. Future builds are fine; already-flashed fleet is stuck because the Feb-21 local private key was disposed of. |
+| ~2026-03-04 | Two follow-up commits (`0c6842f`, `170201a`) registered the cert with the OTA PAL and fixed a linker symbol — making OTA *potentially* work for devices flashed after this point. |
+| 2026-03-10 | `v1.0.2-MAKGroup` OTA: **1 SUCCEEDED (OneMeter6), 7 CANCELED.** In hindsight: OneMeter6 was the one bench device re-flashed post-Feb-27 with the repo's new ACM cert. The 7 CANCELED devices are the factory-flashed MAK fleet still carrying the Feb-21 local cert — same silent signature-rejection we see today. |
+| 2026-04-08 | `aws_codesign.crt` in `onepwr-aws-mesh` gets overwritten at commit `53ad310` ("v1.0.5: NVS energy persistence") with a new cert (`18:92:8E:...`) whose private key is not in any AWS signing profile. No new Signer profile created; no fleet reflash. **Orphan cert is now embedded in any new build** — but moot for the MAK fleet, which would have rejected ACM-signed v2 builds anyway. |
+| 2026-04-18 → 2026-04-22 | Multiple OTA canary attempts on OneMeter13 (one with each AWS signing profile) — all stuck IN_PROGRESS with empty `statusDetails`, resume with old firmware. Confirms the Feb-21 cryptographic mismatch is the only root cause. |
+| 2026-04-22 | **RCA complete.** Confirmed via git history of `aws_codesign.crt` and the `90ac9ad` commit message that the Feb-21 factory flash used a cert whose private key is unrecoverable. **MAK fleet must be physically re-flashed** to escape this. Repo realigned to v2 cert (`03:9E:44`) so future OTAs will work from any device serial-flashed with the current build. Stuck canary cancelled. |
+
+## Implication: the MAK fleet cannot be OTA'd until a field visit
+
+`OneMeter6` is the only deployed device that can be OTA'd today because it's the only one with the ACM v2 cert baked in. All 8 MAK devices that went out in Feb must be **serial-flashed** (UART) with the current build (cert v2 + version ≥ 1.1.1) to rejoin the OTA-capable fleet.
+
+**Minimum viable field procedure:**
+
+1. Unbox a laptop with `idf.py` + this repo cloned at the latest main (build host or a colleague's).
+2. `cd /opt/1meter-firmware/onepwr-aws-mesh && idf.py -p /dev/ttyUSB0 flash`.
+3. Update the Thing attributes in AWS:
+
+   ```bash
+   aws iot update-thing --thing-name OneMeterXX --region us-east-1 \
+     --attribute-payload '{"attributes":{"cert_fp":"03:9E:44:...","firmware_tag":"v1.1.1"},"merge":true}'
+   ```
+4. Confirm on MQTT: `FirmwareVersion: "1.1.1"` appears in the next telemetry sample.
+5. Move Thing out of `MAK_V1_0_2` into a new `MAK_V1_1_1` group so the next OTA job can target only the re-flashed devices.
+
+From that point on, OTA works for those devices and we're out of the latent cert-mismatch hole for good.
 
 ## Adding a new device (checklist)
 
