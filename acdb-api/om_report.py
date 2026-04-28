@@ -2214,6 +2214,26 @@ def _build_check_meter_comparison(conn, days: int) -> Dict[str, Any]:
             "status": "unknown",
         })
 
+    # Phase 1 diagnostic: per-pair "what-if" balance under the opposite
+    # billing primacy. Surfaces on the Check Meters page so ops can watch
+    # the implied delta accumulate during the SM-vs-1M migration test.
+    # See docs/ops/1meter-billing-migration-protocol.md.
+    try:
+        from balance_engine import get_balance_kwh_what_if
+    except ImportError:
+        get_balance_kwh_what_if = None  # type: ignore[assignment]
+
+    if get_balance_kwh_what_if is not None:
+        for pair in pairs:
+            try:
+                wi = get_balance_kwh_what_if(conn, pair["account"])
+                pair["balance_what_if"] = wi
+            except Exception as exc:  # noqa: BLE001 - diagnostic only
+                logger.warning(
+                    "what-if balance failed for %s: %s", pair["account"], exc
+                )
+                pair["balance_what_if"] = None
+
     total_excluded = sum(
         len([hour_key for hour_key in visible_hours if hour_key in excluded_iot_hours.get(pair["account"], set())])
         for pair in pairs

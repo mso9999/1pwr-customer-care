@@ -3,6 +3,295 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-28 202604281530 (1Meter billing migration — Phase 2 enablement infra-only)
+
+### What Was Done
+
+Built and shipped all four "designed but NOT shipped" Phase 2 follow-ups
+from `docs/ops/1meter-billing-migration-protocol.md`. Scope is
+**infra-only** — `RELAY_AUTO_TRIGGER_ENABLED` and `GUARD_CREDIT_ENABLED`
+both stay 0 in env until ops confirm Phase 1 exit criteria, and no
+real-account `billing_meter_priority` flips were made.
+
+**Firmware (onepwr-aws-mesh @ `58df6f8`, shipped as v1.1.2):**
+
+- New task `main/tasks/onemeter_relay_cmd/{c,h}`. Subscribes to
+  `oneMeter/${CONFIG_GRI_THING_NAME}/cmd/relay`, publishes acks on
+  `.../cmd/relay/ack`. 16-entry RAM dedup ring, TTL via cloud-supplied
+  `requested_at_unix` vs `time(NULL)`, calls
+  `meter_string_open_relay`/`close_relay` (already public), reports
+  `relay_after` from cached Modbus state.
+- Wired into `main/main.c` after `mqtt_meter_start()`.
+- `sdkconfig.defaults` bumped to `CONFIG_GRI_OTA_DEMO_APP_VERSION_BUILD=2`
+  (= 1.1.2). Strictly > 1.1.1 ⇒ anti-rollback safe.
+- Build host (`13.247.190.132:2222`) ran
+  `ALLOW_DIRTY=1 OTA_APP_VERSION=1.1.2 build_firmware_remote.sh`.
+  Release: `phase2-relay-cmd-20260428132345-e7d8e16`. App binary
+  uploaded to `s3://1pwr-ota-firmware/firmware-releases/v1.1.2/<release>/`
+  (VersionId `h1KxjhhN1BsG1y2eWwH9qKYStqglrAsy`).
+- OTA `1m-v1-1-2-relay-cmd-20260428132839` created against thing group
+  `MAK_V1_1_1` (OneMeter11/13/17/18), signed with `1PWR_OTA_ESP32_v2`,
+  status `CREATE_COMPLETE`. Job id
+  `AFR_OTA-1m-v1-1-2-relay-cmd-20260428132839`.
+
+**Cloud (CC repo, this session, uncommitted Phase 1 + Phase 2 bits
+will land in one cohesive commit):**
+
+- `acdb-api/relay_control.py`: MQTT payload now includes `meter_id`
+  (so firmware can route to the right Modbus device) and
+  `requested_at_unix` (epoch seconds, integer, so firmware can do TTL
+  math without ISO-8601 parsing on-device). Both manual and auto
+  publish paths updated.
+
+**Lambda (ingestion_gate, deployed live):**
+
+- `meter_ingest_gate.py` `lambda_handler` now dispatches on
+  `event.mqttTopic`. Telemetry path unchanged. New
+  `_handle_relay_ack(event)` POSTs `{thing_name, cmd_id, meter_id,
+  status, relay_after, error}` to `${ONEPDB_RELAY_ACK_URL}` with
+  `X-IoT-Key`. Best-effort: failures log and return success so AWS
+  doesn't retry the IoT rule.
+- `aws iot create-topic-rule onemeter_relay_ack_rule` — SQL
+  `SELECT *, topic() AS mqttTopic, topic(2) AS thing_name,
+   clientid() AS clientId FROM 'oneMeter/+/cmd/relay/ack'` → Lambda
+  `meter_ingestion_gate`. Lambda granted `lambda:InvokeFunction` to
+  `iot.amazonaws.com` (statement id `iot-relay-ack-rule`).
+- Lambda updated via `aws lambda update-function-code`. Smoke-tested
+  with a synthetic ack — dispatch + topic parsing confirmed correct.
+  POST returned 404 because the deployed CC backend doesn't yet have
+  the Phase 1 `/api/meters/relay-ack` route (the file
+  `acdb-api/relay_control.py` is still uncommitted on `main`); chain
+  closes once Phase 1 backend ships.
+
+**SparkMeter guard-credit daemon (1PDB):**
+
+- `services/sparkmeter_guard_credit.py` — for each
+  `accounts.billing_meter_priority='1m'` account, sums SM-source
+  `hourly_consumption` since the last `cc_mutations.action='phase2_guard_credit'`
+  marker, calls `credit_sparkmeter()` with idempotent
+  `external_id=phase2_guard_credit:<acct>:<utc_iso>`, writes the
+  cycle marker. **Deliberately does NOT call `record_payment_kwh()`**
+  (would double-credit the 1M-primary balance). No-op until
+  `GUARD_CREDIT_ENABLED=1`.
+- `deploy/systemd/cc-guard-credit.{service,timer}` (1PWR CC) —
+  `Type=oneshot`, `User=cc_api`, env from `/opt/1pdb/.env` plus
+  `/etc/default/cc-guard-credit`, `OnUnitActiveSec=30min`. Mirrors
+  `cc-1meter-monitor.{service,timer}` pattern.
+
+**Docs:**
+
+- `docs/ops/1meter-billing-migration-protocol.md` — replaced the
+  "designed but NOT shipped" section with a "Phase 2 enablement:
+  shipped 2026-04-28" section that mirrors the actual implementation
+  (firmware payload field names, Lambda dispatch shape, IoT rule SQL,
+  guard-credit algorithm). Status banner updated. Added an end-to-end
+  env-flag flip procedure for when ops are ready to actually use the
+  channel (per-account priority flip → enable guard-credit →
+  manual relay round-trip smoke test → arm auto-cutoff). Expanded
+  IAM section with concrete `aws sts get-caller-identity` discovery,
+  inline-policy snippet, and `put-role-policy` /
+  `put-user-policy` attach commands plus `aws iot-data publish`
+  verification.
+- `docs/ops/1meter-ota-trust-inventory.md` — split the per-device
+  cert provenance row so OneMeter11/13/17/18 are now annotated as
+  v1.1.2 (Phase 2 OTA target group `MAK_V1_1_1`). Added 2026-04-28
+  timeline entry.
+
+### Known Open Items / Next Session
+
+1. **OTA delivery validation.** The OTA job is created and
+   `CREATE_COMPLETE` but device-side execution depends on each
+   meter being online and chosen by the IoT rollout scheduler. Poll:
+
+   ```bash
+   aws iot get-ota-update --ota-update-id 1m-v1-1-2-relay-cmd-20260428132839 \
+     --region us-east-1 --query 'otaUpdateInfo.{status:otaUpdateStatus,errorInfo:errorInfo}'
+   psql -d onepower_cc -c "SELECT meter_id, firmware_version, last_seen
+                              FROM prototype_meter_state
+                             WHERE meter_id IN ('OneMeter11','OneMeter13','OneMeter17','OneMeter18')"
+   ```
+
+   If devices stay on v1.1.1 after a few hours of online-time, fall
+   back to the cert-trust-inventory path (serial reflash of the
+   stuck units).
+
+2. **Phase 1 backend deploy.** `acdb-api/relay_control.py`,
+   `acdb-api/billing_priority.py`, `acdb-api/migrations/015_billing_meter_priority.sql`,
+   `acdb-api/migrations/016_relay_commands.sql`, the
+   `balance_engine.py` rewrite, and the frontend Check Meters
+   "what-if" UI bits are all on disk but uncommitted; this session's
+   commit will land them. CI-deploy them so the
+   `/api/meters/relay-ack` and `/api/billing-priority/...` routes
+   come up. Smoke-test:
+
+   ```bash
+   curl -X POST https://cc.1pwrafrica.com/api/meters/relay-ack \
+     -H 'X-IoT-Key: 1pwr-iot-ingest-2026' -H 'Content-Type: application/json' \
+     -d '{"thing_name":"OneMeter13","cmd_id":"smoke","status":"acked"}'
+   # Expected: 400 (invalid cmd_id, but auth passed) once deployed.
+   ```
+
+3. **IAM publish policy on the CC host.** `aws sts get-caller-identity`
+   from `cc_api`, then attach the inline policy from
+   `1meter-billing-migration-protocol.md` §IAM. Verify with
+   `aws iot-data publish --topic oneMeter/OneMeter13/cmd/relay
+   --qos 1 --payload "$(echo -n '{}' | base64)" --region us-east-1`.
+   Without this, `POST /api/meters/{thing}/relay` queues the row but
+   `_iot_publish` silently fails and the device never sees the
+   command.
+
+4. **Install systemd units on the CC host:**
+
+   ```bash
+   sudo cp /opt/cc-portal/backend/deploy/systemd/cc-guard-credit.service /etc/systemd/system/
+   sudo cp /opt/cc-portal/backend/deploy/systemd/cc-guard-credit.timer /etc/systemd/system/
+   sudo install -d /etc/default
+   sudo tee /etc/default/cc-guard-credit <<'EOF'
+   GUARD_CREDIT_ENABLED=0
+   GUARD_CREDIT_MIN_KWH=1.0
+   EOF
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now cc-guard-credit.timer
+   # First fire is 5 minutes after enable; will log "daemon disabled" until flag flipped.
+   ```
+
+5. **Phase 2 follow-ups left intentionally undone (out of scope this
+   session, called out in the plan):**
+   - No real-account `billing_meter_priority` flips.
+   - No `RELAY_AUTO_TRIGGER_ENABLED=1` flip.
+   - No sweeper for stuck `relay_commands.status='published'` rows
+     (operationally trivial at this scale; covered in protocol doc).
+   - No frontend admin UI for relay-cmd issuing or guard-credit
+     dashboard — CLI / direct API is sufficient for the test
+     population.
+
+### Files Touched (commit candidate)
+
+- `onepwr-aws-mesh@58df6f8` (already pushed): `main/CMakeLists.txt`,
+  `main/main.c`, `main/tasks/onemeter_relay_cmd/{c,h}`,
+  `sdkconfig.defaults`.
+- 1PWR CC: `acdb-api/relay_control.py`,
+  `deploy/systemd/cc-guard-credit.{service,timer}`,
+  `docs/ops/1meter-billing-migration-protocol.md`,
+  `docs/ops/1meter-ota-trust-inventory.md`, `SESSION_LOG.md`.
+- 1PDB: `services/sparkmeter_guard_credit.py`.
+- ingestion_gate: `meter_ingest_gate.py` (already deployed live).
+- AWS state changes: IoT Rule `onemeter_relay_ack_rule`, Lambda
+  permission `iot-relay-ack-rule`, S3 upload, OTA update
+  `1m-v1-1-2-relay-cmd-20260428132839`.
+
+### Follow-up: admin UI for billing primacy (same session)
+
+Built a self-serve UI for both flips that the protocol previously
+required `curl` for. Deliberately scoped to the existing Phase 1
+endpoints — no new backend code.
+
+- New page `acdb-api/frontend/src/pages/BillingPriorityPage.tsx`:
+  - **Fleet default toggle** (superadmin-gated in the form
+    fieldset): SM ↔ 1M segmented buttons, current default + per-side
+    override counts, optional operator note, confirm dialog before
+    apply.
+  - **Per-account override** (employee): account-number lookup →
+    shows resolved effective primacy + the explicit override + the
+    fleet default → 3-way segmented control (`Inherit fleet | SM |
+    1M`) with confirm dialog. Auto-refreshes both views after
+    mutation.
+- `acdb-api/frontend/src/lib/api.ts`: added `BillingPriority`,
+  `BillingPrioritySummary`, `BillingPriorityForAccount`,
+  `BillingPriorityUpdateResult` types and `getBillingPrioritySummary`
+  / `getAccountBillingPriority` / `setAccountBillingPriority` /
+  `setFleetBillingPriority` helpers — all hit
+  `/billing-priority[/{account}]`.
+- Routing: `App.tsx` mounts `/billing-priority` (`requireEmployee`).
+- Nav: `Layout.tsx` adds "Billing Primacy" under Operations next to
+  Check Meters; en/fr i18n strings added.
+- `tsc --noEmit` clean.
+
+This closes the "no admin UI ⇒ ops have to curl" item that was
+intentionally out of scope for the morning's plan.
+
+---
+
+## Session 2026-04-28 202604281230 (1Meter billing migration protocol — Phase 1 ship + Phase 2 design)
+
+### What Was Done
+
+Documented + scaffolded the 3-phase SM-to-1M billing migration test (full
+protocol in `docs/ops/1meter-billing-migration-protocol.md`).
+
+**Phase 1 shipped:**
+
+- `acdb-api/migrations/015_billing_meter_priority.sql` — `system_config`
+  default + `accounts.billing_meter_priority` per-account override,
+  CHECK-constrained to `('sm', '1m', NULL)`. Fleet default seeded to `'sm'`.
+- `acdb-api/balance_engine.py` rewritten priority-aware: replaces the old
+  `MAX(kwh)` per-hour dedup (which silently let either source override
+  the other) with `MAX(kwh) FILTER (WHERE source ...)` per source, then
+  `COALESCE(primary, gap_fill)` per the resolved priority. New
+  `_resolve_billing_priority(cur, account)` and
+  `get_balance_kwh_what_if(conn, account)` helpers.
+- `acdb-api/billing_priority.py` — `GET`/`PATCH` `/api/billing-priority`
+  (fleet, superadmin) and `/{account_number}` (per-account, employee).
+  Every change writes a `cc_mutations` row in the same DB transaction.
+- `acdb-api/om_report.py` `_build_check_meter_comparison` adds
+  `pair.balance_what_if = {actual_priority, actual_balance_kwh,
+  what_if_priority, what_if_balance_kwh, implied_balance_delta_kwh}`.
+- `acdb-api/frontend/src/pages/CheckMeterPage.tsx` `StatCard` shows
+  three new lines (actual balance, what-if balance, implied delta) when
+  the API returns it. New `CheckMeterWhatIf` type in `lib/api.ts`.
+
+**Phase 2 designed + scaffolded (auto-trigger gated OFF):**
+
+- `acdb-api/migrations/016_relay_commands.sql` — audit/state table
+  (cmd_id UUID, thing_name, action, reason, status, ttl, paired
+  `cc_mutation_id`, ack_payload).
+- `acdb-api/relay_control.py` — `POST /api/meters/{thing}/relay`
+  (employee + `superadmin`/`onm_team` role-gated, mutation-logged,
+  publishes via `boto3 iot-data` to topic
+  `oneMeter/<thing>/cmd/relay`); `POST /api/meters/relay-ack` (auth
+  via `X-IoT-Key`, idempotent on `cmd_id`); `maybe_auto_open_relay()`
+  hook gated by `RELAY_AUTO_TRIGGER_ENABLED` env (default `0`).
+  Fail-safes: 10 min debounce, 5 min payment grace, 30 min online check,
+  per-command TTL, `force=true` override.
+- `balance_engine.record_payment_kwh()` calls
+  `maybe_auto_open_relay(conn, account)` after a payment if the new
+  balance is `<= 0`. No-op until the env flag is flipped.
+
+**Designed in the protocol doc only (Phase 2 build follow-ups):**
+
+- `onepwr-aws-mesh` task to subscribe `oneMeter/<thing>/cmd/relay`,
+  dedup on `cmd_id` (NVS ring buffer), TTL-check, actuate via existing
+  `main/onemeter` Modbus path, publish ack on `.../cmd/relay/ack`.
+- `ingestion_gate` Lambda extension: forward acks from
+  `oneMeter/+/cmd/relay/ack` to `POST /api/meters/relay-ack` with
+  `X-IoT-Key`.
+- `1PDB/services/sparkmeter_guard_credit.py` — systemd timer pushing
+  compensating credits to SM via Koios/TC for accounts on 1M-primary so
+  SM-side balance never trips its own relay during Phase 2.
+
+**Doc cross-links:** `CONTEXT.md` Metering Architecture; `acdb-api/CONTEXT.md`
+backend modules table; `docs/ops/1meter-mak-fleet-log.md` test-population banner.
+
+### What Next Session Should Know
+
+- Migration files `015` and `016` will deploy on the next push to `main`
+  (CI's `apply_incremental` covers `010+`). Review the SQL before the
+  push if you want the gate manual.
+- `RELAY_AUTO_TRIGGER_ENABLED` is **off** on the host. Don't flip it
+  until firmware + Lambda + guard-credit are live; otherwise CC will
+  attempt to publish auto-cutoff commands to a fleet that can't process
+  them, and the rows will pile up in `relay_commands` as
+  `published`-with-no-ack.
+- Phase 1 entry-criteria placeholders (deviation %, observation window,
+  matched-hours minimum) are flagged in the protocol's "Open items"
+  section and need ops sign-off before Phase 2.
+- The Check Meters page now shows `Balance / What-if / Implied delta`
+  per pair as soon as `om_report` deploys. Expect non-zero deltas
+  immediately because pre-priority history was billed under the old
+  `MAX(kwh)` rule; the historical balance numbers should not have moved
+  much for accounts where SM was usually the higher source (which is
+  the normal case).
+
 ## Session 2026-04-27 202604270900 (Mobile app BFF — `/api/app/active-countries`)
 
 ### What Was Done

@@ -1342,12 +1342,24 @@ export interface CheckMeterHealth {
   status: 'online' | 'stale' | 'offline' | 'unknown';
 }
 
+/** Phase 1 diagnostic: parallel "what-if" balance under the opposite billing
+ *  primacy. See docs/ops/1meter-billing-migration-protocol.md. */
+export interface CheckMeterWhatIf {
+  actual_priority: 'sm' | '1m';
+  actual_balance_kwh: number;
+  what_if_priority: 'sm' | '1m';
+  what_if_balance_kwh: number;
+  implied_balance_delta_kwh: number;
+}
+
 export interface CheckMeterPair {
   account: string;
   check_meter_id: string;
   primary_meter_id: string;
   stats: CheckMeterPairStats;
   health: CheckMeterHealth;
+  /** Present when the balance engine could compute the alternate primacy. */
+  balance_what_if?: CheckMeterWhatIf | null;
 }
 
 export interface CheckMeterComparisonResponse {
@@ -1976,4 +1988,68 @@ export async function openUgpTicketForAlarm(
 export async function getHealth() {
   const res = await fetch('/health');
   return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Billing meter primacy (1Meter migration test)
+// See acdb-api/billing_priority.py and
+// docs/ops/1meter-billing-migration-protocol.md.
+// ---------------------------------------------------------------------------
+
+export type BillingPriority = 'sm' | '1m';
+
+export interface BillingPrioritySummary {
+  fleet_default: BillingPriority;
+  valid_priorities: BillingPriority[];
+  /** Counts of explicit per-account overrides, keyed by priority. */
+  per_account_overrides: Partial<Record<BillingPriority, number>>;
+}
+
+export interface BillingPriorityForAccount {
+  account_number: string;
+  /** The explicit per-account override, or null if the account inherits the fleet default. */
+  override: BillingPriority | null;
+  effective_priority: BillingPriority;
+  fleet_default: BillingPriority;
+}
+
+export interface BillingPriorityUpdateResult {
+  status: 'ok' | 'noop';
+  account_number?: string;
+  previous_override?: BillingPriority | null;
+  override?: BillingPriority | null;
+  effective_priority?: BillingPriority;
+  previous_default?: BillingPriority;
+  fleet_default?: BillingPriority;
+}
+
+export async function getBillingPrioritySummary(): Promise<BillingPrioritySummary> {
+  return request('/billing-priority');
+}
+
+export async function getAccountBillingPriority(
+  account_number: string,
+): Promise<BillingPriorityForAccount> {
+  return request(`/billing-priority/${encodeURIComponent(account_number)}`);
+}
+
+export async function setAccountBillingPriority(
+  account_number: string,
+  priority: BillingPriority | null,
+  note?: string,
+): Promise<BillingPriorityUpdateResult> {
+  return request(`/billing-priority/${encodeURIComponent(account_number)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ priority, note }),
+  });
+}
+
+export async function setFleetBillingPriority(
+  priority: BillingPriority,
+  note?: string,
+): Promise<BillingPriorityUpdateResult> {
+  return request('/billing-priority', {
+    method: 'PATCH',
+    body: JSON.stringify({ priority, note }),
+  });
 }

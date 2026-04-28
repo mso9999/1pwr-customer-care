@@ -1,0 +1,21 @@
+[Unit]
+Description=SparkMeter guard-credit daemon for 1Meter billing migration (Phase 2)
+Documentation=https://github.com/onepowerLS/1pwr-cc/blob/main/docs/ops/1meter-billing-migration-protocol.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=cc_api
+Group=cc_api
+WorkingDirectory=/opt/1pdb
+EnvironmentFile=/opt/1pdb/.env
+EnvironmentFile=-/etc/default/cc-guard-credit
+# 1PDB and CC backend share a Python venv on the CC host. The script imports
+# `sparkmeter_credit` from the CC backend (already on PYTHONPATH at deploy
+# time because both projects live under /opt).
+Environment=PYTHONPATH=/opt/cc-portal/backend:/opt/1pdb
+ExecStart=/opt/cc-portal/backend/venv/bin/python /opt/1pdb/services/sparkmeter_guard_credit.py
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cc-guard-credit

@@ -26,6 +26,7 @@ import SyncPage from './pages/SyncPage';
 import CommissionCustomerPage from './pages/CommissionCustomerPage';
 import TariffManagementPage from './pages/TariffManagementPage';
 import CheckMeterPage from './pages/CheckMeterPage';
+import BillingPriorityPage from './pages/BillingPriorityPage';
 import FinancingPage from './pages/FinancingPage';
 import RecordPaymentPage from './pages/RecordPaymentPage';
 import PaymentVerificationPage from './pages/PaymentVerificationPage';
@@ -74,6 +75,7 @@ export default function App() {
             <Route path="commission" element={<ProtectedRoute requireEmployee requireRole={['superadmin', 'onm_team']}><CommissionCustomerPage /></ProtectedRoute>} />
             <Route path="tariffs" element={<ProtectedRoute requireEmployee><TariffManagementPage /></ProtectedRoute>} />
             <Route path="check-meters" element={<ProtectedRoute requireEmployee><CheckMeterPage /></ProtectedRoute>} />
+            <Route path="billing-priority" element={<ProtectedRoute requireEmployee><BillingPriorityPage /></ProtectedRoute>} />
             <Route path="financing" element={<ProtectedRoute requireEmployee><FinancingPage /></ProtectedRoute>} />
             <Route path="record-payment" element={<ProtectedRoute requireEmployee><RecordPaymentPage /></ProtectedRoute>} />
             <Route path="payment-verification" element={<ProtectedRoute requireEmployee><PaymentVerificationPage /></ProtectedRoute>} />

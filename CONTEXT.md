@@ -234,6 +234,25 @@ The `meters` table has a `role` column (enum: `primary`, `check`, `backup`):
 When promoting a check meter to primary (via `PATCH /api/meters/{id}/role`), the old primary
 on that account is auto-demoted.
 
+### Billing-source primacy (1Meter migration test)
+
+The kWh balance engine [`acdb-api/balance_engine.py`](acdb-api/balance_engine.py) is now
+**source-priority aware** (replaces the previous `MAX(kwh)` per-hour dedup). For each
+`(account, reading_hour)` it picks **one** source — SparkMeter (`thundercloud` / `koios`)
+or 1Meter (`iot`) — based on:
+
+1. `accounts.billing_meter_priority` (per-account override)
+2. `system_config(key='billing_meter_priority')` (fleet default — `'sm'` today)
+3. Hardcoded `'sm'` fallback
+
+The non-primary source is computed in parallel as a "what-if" balance and surfaced on
+[Check Meters](acdb-api/frontend/src/pages/CheckMeterPage.tsx); never written to
+`transactions`. Phase 1 of the migration is in progress on the MAK fleet (SM primary,
+1M what-if). Phase 2 flips primacy and adds a CC-driven relay-command channel
+([`acdb-api/relay_control.py`](acdb-api/relay_control.py)) gated by
+`RELAY_AUTO_TRIGGER_ENABLED`. See **[`docs/ops/1meter-billing-migration-protocol.md`](docs/ops/1meter-billing-migration-protocol.md)**
+for the full protocol, gating criteria, and rollback procedures.
+
 ### Prototype 1Meters
 Three 1Meter prototypes are installed at MAK in series with SparkMeters for validation:
 - 23022628 → 0005MAK (check), SparkMeter 57408 (primary)

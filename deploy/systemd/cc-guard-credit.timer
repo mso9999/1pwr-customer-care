@@ -1,0 +1,13 @@
+[Unit]
+Description=Run cc-guard-credit every 30 minutes (no-op until GUARD_CREDIT_ENABLED=1)
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=30min
+RandomizedDelaySec=120
+Unit=cc-guard-credit.service
+AccuracySec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

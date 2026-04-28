@@ -306,6 +306,8 @@ from tickets import router as tickets_router
 from customer_messages import router as customer_messages_router
 from gensite import router as gensite_router
 from app_bff import router as app_bff_router
+from billing_priority import router as billing_priority_router
+from relay_control import router as relay_control_router
 
 from db_auth import init_auth_db
 init_auth_db()
@@ -335,6 +337,8 @@ app.include_router(tickets_router)
 app.include_router(customer_messages_router)
 app.include_router(gensite_router)
 app.include_router(app_bff_router)
+app.include_router(billing_priority_router)
+app.include_router(relay_control_router)
 ensure_meter_assignments_table()
 warm_stats_cache()
 

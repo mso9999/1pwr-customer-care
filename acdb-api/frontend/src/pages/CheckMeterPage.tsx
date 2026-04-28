@@ -149,6 +149,41 @@ function StatCard({ pair, color }: { pair: CheckMeterPair; color: string }) {
             )}
           </>
         )}
+        {pair.balance_what_if && (
+          <>
+            <hr className="border-gray-100" />
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-400">
+                Balance ({pair.balance_what_if.actual_priority.toUpperCase()} primary)
+              </span>
+              <span className="font-medium text-gray-700">
+                {pair.balance_what_if.actual_balance_kwh.toFixed(2)} kWh
+              </span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-400">
+                What-if ({pair.balance_what_if.what_if_priority.toUpperCase()} primary)
+              </span>
+              <span className="font-medium text-gray-700">
+                {pair.balance_what_if.what_if_balance_kwh.toFixed(2)} kWh
+              </span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-gray-400">Implied delta</span>
+              <span
+                className={`font-medium ${
+                  Math.abs(pair.balance_what_if.implied_balance_delta_kwh) < 1
+                    ? 'text-gray-700'
+                    : pair.balance_what_if.implied_balance_delta_kwh > 0
+                    ? 'text-amber-600'
+                    : 'text-blue-600'
+                }`}
+              >
+                {sign(pair.balance_what_if.implied_balance_delta_kwh)} kWh
+              </span>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

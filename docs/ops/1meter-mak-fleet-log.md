@@ -1,5 +1,12 @@
 # 1Meter MAK — field report vs 1PDB (CC)
 
+> **Phase 1 test population.** MAK is the test bed for the
+> [1Meter billing migration protocol](./1meter-billing-migration-protocol.md):
+> SparkMeter is the billing meter; 1Meter is run alongside as a "what-if"
+> check; the per-pair deviation watched on the Check Meters page is the
+> input to the Phase 1 -> Phase 2 entry decision. Fleet billing default
+> is `sm`; per-account overrides via `PATCH /api/billing-priority/{account}`.
+
 ## 2026-04-16 — Motlatsi (field)
 
 1. Three additional meters installed this round; **10 meters installed total** (cumulative in field).

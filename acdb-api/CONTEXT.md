@@ -35,6 +35,9 @@ Access/ACCDB era. The live system is now `1PDB`-backed and Linux-hosted.
 | `mutations.py` | Audit trail for data changes |
 | `admin.py` | Roles and permissions administration |
 | `pr_lookup.py` | Payment reference lookup |
+| `balance_engine.py` | Priority-aware kWh balance engine (SM/1M source primacy via `accounts.billing_meter_priority` + `system_config(key='billing_meter_priority')`); also exposes `get_balance_kwh_what_if` for the migration test |
+| `billing_priority.py` | `GET`/`PATCH` `/api/billing-priority(/account)` for ops to flip primacy per-account or fleet-wide; audited |
+| `relay_control.py` | CC -> AWS IoT relay command channel (`POST /api/meters/{thing}/relay`, `POST /api/meters/relay-ack`) plus `maybe_auto_open_relay` hook gated by `RELAY_AUTO_TRIGGER_ENABLED` env. See [`docs/ops/1meter-billing-migration-protocol.md`](../docs/ops/1meter-billing-migration-protocol.md) |
 
 ### Frontend Pages
 
