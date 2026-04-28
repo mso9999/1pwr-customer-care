@@ -198,6 +198,8 @@ if project_description_path.exists():
     project_description = json.loads(project_description_path.read_text())
 
 ota_version_bits = {}
+router_ssid = None
+router_password_set = False
 sdkconfig_path = release_dir / "sdkconfig"
 if sdkconfig_path.exists():
     for raw_line in sdkconfig_path.read_text().splitlines():
@@ -214,8 +216,6 @@ if sdkconfig_path.exists():
             router_password_set = bool(line.split('=', 1)[1].strip('"'))
 
 ota_app_version = None
-router_ssid = None
-router_password_set = False
 major = ota_version_bits.get("CONFIG_GRI_OTA_DEMO_APP_VERSION_MAJOR")
 minor = ota_version_bits.get("CONFIG_GRI_OTA_DEMO_APP_VERSION_MINOR")
 build = ota_version_bits.get("CONFIG_GRI_OTA_DEMO_APP_VERSION_BUILD")

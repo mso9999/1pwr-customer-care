@@ -180,3 +180,47 @@ trust-inventory record per-device should be updated post-OTA.
 * Bumped firmware version sequence to v1.1.3 to keep the
   contaminated-1.1.2 label clearly distinguishable in any forensic
   trail (also pushed in `onepwr-aws-mesh@f16ff3d`).
+* Built v1.1.4 (`onepwr-aws-mesh@50e4881`) adding two OTA operability
+  improvements: per-block progress publishing to the Jobs API every
+  16 blocks (so `aws iot describe-job-execution` actually shows
+  percent-complete), and a coreMQTT-Agent event handler that suspends
+  the periodic device reboot in `main.c::periodic_restart_task` while
+  an OTA is in progress (so the existing in-RAM resume across MQTT
+  reconnects isn't killed by the routine ~59 min reboot). Artifacts
+  uploaded to S3 at
+  `s3://1pwr-ota-firmware/firmware-releases/v1.1.4/phase2-ota-progress-mak-20260428175712-e7d8e16/`
+  (VersionId `iOxFBZpgjXiNkUI1reFL4FO6ZUYW0Jbm`). **Not pushed as an
+  OTA yet** — the v1.1.3 canary is still in flight; v1.1.4 will go
+  out as a follow-up canary once 1.1.3 lands (or as a replacement if
+  1.1.3 doesn't converge).
+* Manifest fix: an earlier build-script patch had a Python
+  variable-shadowing bug that left `router_ssid` always `null` in
+  `release-manifest.json` (initialisers placed after the parsing loop
+  instead of before). Repaired in-place on the build host and in
+  the mirrored copy.
+
+## OTA progress reporting (v1.1.4+)
+
+Once a device runs v1.1.4 firmware and an OTA targets it, the Jobs
+API surfaces real progress:
+
+```bash
+aws iot describe-job-execution \
+  --job-id AFR_OTA-<ota-id> --thing-name <thing> \
+  --region us-east-1 \
+  --query 'execution.{status:status,details:statusDetails,updated:lastUpdatedAt}'
+```
+
+Expected `statusDetails` shape:
+
+```json
+{
+  "blocks_received": "128",
+  "blocks_total": "276",
+  "percent": "46",
+  "bytes_received": "524288"
+}
+```
+
+Updates fire every 16 blocks (~64 KB). `lastUpdatedAt` ticks on each
+update, giving a quick visual signal that the download isn't dead.

@@ -3,6 +3,132 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-28 202604282000 (v1.1.4 firmware: OTA progress publish + reboot suspension during OTA)
+
+### Why
+
+While the v1.1.3 canary on OneMeter13 was downloading (and looked
+"stuck IN_PROGRESS for an hour" from the Jobs API perspective), I
+investigated and found:
+
+1. The IoT MQTT logs showed the device WAS actively downloading
+   blocks (453/15min initially, 755/10min later — it sped up after
+   the link stabilised). The "stuck" appearance was just because the
+   AFR OTA agent only publishes Jobs Updates at start and at end —
+   no per-block progress.
+2. The existing static OTA state vars in `ota_over_mqtt_demo.c`
+   (`globalJobId`, `currentBlockOffset`, `numOfBlocksRemaining`,
+   `totalBytesReceived`) DO survive MQTT reconnects, so the
+   reconnect-from-zero pattern in the IoT logs was misleading — each
+   reconnect resumes from where the prior one left off via the
+   duplicate-jobId branch in `receivedJobDocumentHandler`.
+3. They do NOT survive device reboots, and `main.c::periodic_restart_task`
+   hard-restarts every ~59 min. A 1.13 MB image over a flaky mesh
+   link routinely takes longer than that.
+
+So the user's ask — "conserve downloaded blocks across interruption,
+publish progress" — splits into:
+
+- ✅ Already-conserved across MQTT reconnect (no code change needed).
+- ❌ Lost across the periodic device reboot.
+- ❌ Not surfaced via the Jobs API.
+
+This session ships fixes for the latter two.
+
+### Changes (v1.1.4 = onepwr-aws-mesh@50e4881)
+
+**`main/tasks/ota_over_mqtt_demo/ota_over_mqtt_demo.c`:**
+
+- New `sendInProgressMessage(blocks_received, blocks_total)`. Builds
+  the Jobs Update body manually (Jobs_UpdateMsg() helper tops out at
+  48 bytes — too small for statusDetails). Body shape:
+
+  ```json
+  {"status":"IN_PROGRESS",
+   "statusDetails":{"blocks_received":"N","blocks_total":"M",
+                    "percent":"P","bytes_received":"B"}}
+  ```
+
+  `expectedVersion` intentionally omitted — Jobs makes it optional.
+
+- Called from the `OtaAgentEventReceivedFileBlock` branch every
+  `OTA_PROGRESS_REPORT_INTERVAL_BLOCKS = 16` blocks (~64 KB) after
+  the block-count increment.
+
+**`main/main.c`:**
+
+- `periodic_restart_task` now registers a coreMQTT-Agent event handler
+  that maintains a local `s_otaInProgress` flag (set on
+  `CORE_MQTT_AGENT_OTA_STARTED_EVENT`, cleared on `..._STOPPED_EVENT`).
+- Both the hard-restart and the comm-watchdog branches early-return
+  while `s_otaInProgress` is set. The OTA Agent will reboot itself on
+  activation success; on failure the STOPPED event re-arms the
+  watchdog.
+
+**`sdkconfig.defaults`:** version bump to 1.1.4
+(`CONFIG_GRI_OTA_DEMO_APP_VERSION_BUILD=4`).
+
+### Build artifacts
+
+- Built on the build host with `SITE_CONFIG=site-configs/MAK.conf`.
+- `release-manifest.json` confirms
+  `ota_app_version: "1.1.4"`, `router_ssid: "MAK_Wifi-ext"`,
+  `router_password_set: true`.
+- Uploaded to
+  `s3://1pwr-ota-firmware/firmware-releases/v1.1.4/phase2-ota-progress-mak-20260428175712-e7d8e16/`
+  (VersionId `iOxFBZpgjXiNkUI1reFL4FO6ZUYW0Jbm`).
+- **No OTA created.** The v1.1.3 canary on OneMeter13 is still in
+  flight (download accelerating to ~75 blocks/min; expected
+  completion this evening). v1.1.4 will go out as a follow-up canary
+  once 1.1.3 either lands or is cancelled.
+
+### Bonus fix: `release-manifest.json` SSID parser
+
+The earlier build-script patch had a variable-shadowing bug:
+`router_ssid = None` initialiser was placed AFTER the for-loop that
+parses the sdkconfig, so the parsed value was always overwritten
+back to None in every release manifest emitted today. Fixed in-place
+on the build host and mirrored to
+`scripts/ops/build_firmware_remote.sh`.
+
+### Out of scope (deferred)
+
+- **True resume across hard reset / power-cycle.** Would require
+  NVS-persisting `globalJobId` + `currentBlockOffset` + the OTA-Pal
+  flash partition handle, plus careful logic in
+  `receivedJobDocumentHandler` to skip `otaPal_CreateFileForRx` (which
+  truncates the OTA partition) on resume. Risky to ship without
+  device testing. Documented as a future enhancement; the current
+  reboot-suppression covers the common case (routine periodic
+  reboots) without that complexity.
+
+### Known Open Items / Next Session
+
+1. **Watch the v1.1.3 canary land.** It was at IN_PROGRESS, ~75
+   blocks/min as of 20:00 SAST. If `prototype_meter_state.firmware_version='1.1.3'`
+   shows up overnight, follow up with the v1.1.4 canary on the same
+   device to validate the new progress-publish + reboot-suspend
+   behaviour.
+2. **Push v1.1.4 OTA** once the v1.1.3 canary completes (or is
+   cancelled). Either to OneMeter13 again as a smoke test of the new
+   firmware, or directly to the MAK_V1_1_1 thing-group.
+3. **NVS-persisted resume** (cross-reboot) remains the next
+   incremental improvement if mesh reliability stays poor.
+
+### Files Touched
+
+- `onepwr-aws-mesh@50e4881`: `main/main.c`,
+  `main/tasks/ota_over_mqtt_demo/ota_over_mqtt_demo.c`,
+  `sdkconfig.defaults`.
+- 1PWR CC: `scripts/ops/build_firmware_remote.sh` (manifest-parser
+  fix), `docs/ops/1meter-build-and-ota-runbook.md` (v1.1.4 entry +
+  Jobs-API progress query example), `SESSION_LOG.md`.
+- Build host: `/opt/1meter-firmware/scripts/build_firmware_remote.sh`
+  (manifest-parser fix; in-place edit, no version control).
+- AWS state changes: S3 upload of v1.1.4 artifacts. **No OTA push.**
+
+---
+
 ## Session 2026-04-28 202604281830 (v1.1.2 OTA pulled, v1.1.3 rebuilt with MAK Wi-Fi creds + build-script guard)
 
 ### Field team report (Motlatsi)
