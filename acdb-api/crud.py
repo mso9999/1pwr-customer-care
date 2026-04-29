@@ -313,9 +313,14 @@ def list_rows(
                 where_clauses.append("account_number = %s")
                 params.append(user.user_id)
 
-        # Column filter
+        # Column filter. Qualify with the primary table so we don't collide
+        # with columns of the same name on a JOINed table (e.g. when the
+        # `customers` search-join brings in `accounts._srch_acct`, both have
+        # a `community` column → unqualified `community = ?` is ambiguous).
+        # RCA on 2026-04-29 from a `/api/tables/customers?search=0226mak&filter_col=community&filter_val=MAK`
+        # request that 500'd with `column reference "community" is ambiguous`.
         if filter_col and filter_val:
-            where_clauses.append(f"{filter_col} = %s")
+            where_clauses.append(f"{table_name}.{filter_col} = %s")
             params.append(filter_val)
 
         # Country filter — narrows to that country's communities. Skipped when

@@ -89,12 +89,18 @@ def _consumption_kwh(cur, account_number: str, priority: str) -> float:
     if priority not in VALID_PRIORITIES:
         priority = DEFAULT_PRIORITY
 
+    # `hourly_consumption.source` is the custom enum type `transaction_source`
+    # (see migrations seeding the type). psycopg2 sends Python list params as
+    # `text[]`, and Postgres won't implicitly cast `transaction_source = text`
+    # — so we must explicitly cast each ANY(...) array, otherwise this query
+    # 500s with `operator does not exist: transaction_source = text` (RCA on
+    # 2026-04-29 from a customer-data lookup on 0226MAK).
     cur.execute(
         """
         WITH per_hour AS (
             SELECT reading_hour,
-                MAX(kwh) FILTER (WHERE source = ANY(%s)) AS sm_kwh,
-                MAX(kwh) FILTER (WHERE source = ANY(%s)) AS m1_kwh
+                MAX(kwh) FILTER (WHERE source = ANY(%s::transaction_source[])) AS sm_kwh,
+                MAX(kwh) FILTER (WHERE source = ANY(%s::transaction_source[])) AS m1_kwh
             FROM hourly_consumption
             WHERE account_number = %s
             GROUP BY reading_hour
