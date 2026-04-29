@@ -173,11 +173,20 @@ def export_table(
         if not found:
             raise HTTPException(status_code=404, detail=f"Table '{table_name}' not found")
 
+        # Whitelist filter_col against the actual columns of this table.
+        # Without this gate, an authenticated employee could SQL-inject via
+        # `filter_col=...`. Mirror of the same gate in crud.list_table_rows.
+        if filter_col is not None:
+            from crud import _get_table_columns, _validate_identifier
+            _validate_identifier(
+                filter_col, _get_table_columns(conn, table_name), kind="filter_col",
+            )
+
         where_clauses = []
         params = []
 
         if filter_col and filter_val:
-            where_clauses.append(f"{filter_col} = %s")
+            where_clauses.append(f"{table_name}.{filter_col} = %s")
             params.append(filter_val)
 
         if filter_country and not (filter_col == "community" and filter_val):

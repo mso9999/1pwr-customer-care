@@ -127,6 +127,46 @@ def _row_to_dict(cursor, row) -> Dict[str, Any]:
     return d
 
 
+def _get_table_columns(conn, table_name: str) -> set[str]:
+    """Return the set of column names for ``table_name`` from
+    ``information_schema.columns``. Used to whitelist any user-supplied
+    column identifier that ends up string-interpolated into SQL (filter_col,
+    sort) — without this, a malicious authenticated employee could pass
+    e.g. ``filter_col=community OR 1=1 --`` and bypass the filter.
+
+    Returns an empty set if the table doesn't exist or the catalog query
+    fails; callers must check membership before interpolating.
+    """
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = %s",
+            (table_name,),
+        )
+        return {r[0] for r in cursor.fetchall()}
+    except Exception:
+        conn.rollback()
+        return set()
+
+
+def _validate_identifier(name: str, allowed: set[str], *, kind: str) -> str:
+    """Reject ``name`` if it isn't in ``allowed``.
+
+    Use this to gate any user input that gets interpolated into SQL as an
+    identifier (column or table name). 400 keeps the failure mode loud
+    rather than silently trusting the input.
+    """
+    from fastapi import HTTPException
+
+    if name not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid {kind} '{name}'. Allowed: {sorted(allowed)}",
+        )
+    return name
+
+
 def _get_primary_key(conn, table_name: str) -> Optional[str]:
     """Detect the primary key column for a table using pg_index."""
     cursor = conn.cursor()
@@ -287,6 +327,23 @@ def list_rows(
         )
         if not cursor.fetchone():
             raise HTTPException(status_code=404, detail=f"Table '{table_name}' not found")
+
+        # Whitelist any column-name input that gets string-interpolated into
+        # SQL below (filter_col, sort) against the actual columns of this
+        # table. Without this gate, an authenticated employee could pass
+        # e.g. `filter_col=community OR 1=1 --` and the resulting SQL would
+        # ignore the filter (or worse). 400 instead of 500 when the column
+        # is unknown.
+        valid_cols = _get_table_columns(conn, table_name)
+        if filter_col is not None:
+            _validate_identifier(filter_col, valid_cols, kind="filter_col")
+        if sort is not None:
+            _validate_identifier(sort, valid_cols, kind="sort")
+        if order is not None and order.lower() not in {"asc", "desc"}:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid order '{order}'. Allowed: asc, desc",
+            )
 
         # Build WHERE clause
         where_clauses: list[str] = []
