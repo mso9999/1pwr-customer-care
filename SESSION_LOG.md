@@ -3,6 +3,183 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-04-29 202604290700 (v1.1.6: RCA for OTA-stuck-IN_PROGRESS = case fall-through in resume handler)
+
+### What happened overnight
+
+Left the v1.1.5 (diag-only) canary on OneMeter13 running through the
+night to gather evidence on whether OTA could ever complete on the
+MAK mesh. Morning state at 07:05 SAST:
+
+- Job: still `IN_PROGRESS` since 21:33:52 the night before, no
+  `JobsUpdate` for 9h 33m.
+- 0 diag heartbeats on `/iot/onemeter-diag` (firmware never booted).
+- ~60,000 stream events delivered by AWS over 12 h.
+- ~440 disconnects (every ~95 s, dead steady).
+- Image size: **277 blocks**.
+
+That's **216× oversampling** for an image that should have completed
+in a single reconnect window (~95 s) at the observed delivery rate.
+The only explanation is that download progress isn't actually being
+preserved across reconnects, despite my earlier code reading
+suggesting otherwise.
+
+### RCA
+
+Re-read the `OtaAgentEventResume` handler in
+`ota_over_mqtt_demo.c::processOTAEvents()`:
+
+```c
+case OtaAgentEventResume:
+    switch( lastRecvEventIdBeforeSuspend ) {
+        case OtaAgentEventCreateFile:
+        case OtaAgentEventRequestFileBlock:
+        case OtaAgentEventReceivedFileBlock:
+            nextEvent.eventId = OtaAgentEventRequestFileBlock;
+            /* MISSING break — silently falls through */
+        case OtaAgentEventCloseFile:
+            nextEvent.eventId = OtaAgentEventActivateImage;
+            break;
+    }
+```
+
+On every MQTT disconnect/reconnect mid-download:
+
+1. coreMQTT-Agent fires `OTA_DISCONNECTED_EVENT` → `xSuspendOta=pdTRUE`
+   → agent goes to `Suspended`.
+2. Reconnect → `xSuspendOta=pdFALSE` → `OtaAgentEventResume` fires.
+3. `lastRecvEventIdBeforeSuspend == OtaAgentEventReceivedFileBlock`
+   (typical mid-download), so the handler sets nextEvent to
+   `RequestFileBlock` (correct) and then **falls through** to the
+   `OtaAgentEventCloseFile` case which **overwrites** nextEvent to
+   `ActivateImage` (wrong).
+4. `imageActivationHandler()` calls `otaPal_ActivateNewImage()` on a
+   partition with only N of 277 blocks; rejected.
+5. Agent's failure path eventually loops back to `RequestJobDocument`,
+   AWS responds with the same job doc, the duplicate-jobId branch
+   short-circuits to RequestFileBlock, and we get a few minutes of
+   downloading… until the next disconnect, when the bug fires again.
+
+The compiler emitted
+`-Wimplicit-fallthrough=` on every build of this file we'd done.
+We had been ignoring it.
+
+This is the same bug behind:
+
+- 22 Apr v1.0.8 canary stuck IN_PROGRESS for days
+- 28 Apr v1.1.3 canary stuck for hours (we attributed it to mesh
+  scheduler latency at the time)
+- 28 Apr overnight v1.1.5 canary (this one)
+
+The cert-mismatch RCA from 22 Apr is irrelevant; cert verification
+only happens at CloseFile, and the agent never reaches CloseFile
+because the resume bug derails it first.
+
+### Fix (v1.1.6, `onepwr-aws-mesh@06085f5`)
+
+Two changes to `main/tasks/ota_over_mqtt_demo/ota_over_mqtt_demo.c`:
+
+1. Add the missing `break` plus a defensive comment so it doesn't
+   regress.
+2. Bump `NUM_OF_BLOCKS_REQUESTED` from 1 → 4. Per-block GetStream
+   round-trip was the dominating cost on the MAK mesh; quadrupling
+   the request size fits comfortably in the 5-buffer OTA pool and
+   should bring effective throughput from ~1.5 blocks/sec to
+   ~6 blocks/sec → 277-block convergence in ~45 s of connected time,
+   well inside the ~95 s mean-time-between-disconnect.
+
+Plus the existing v1.1.4 wins carry forward: per-block progress
+publishing, periodic-restart suspension during OTA. v1.1.6 has
+`CONFIG_GRI_DIAG_BUILD=n` (full firmware with meter / Modbus /
+relay-cmd subscriber back).
+
+### Operational impact
+
+Critical: **v1.1.1 cannot OTA itself to v1.1.6.** The bug runs in the
+agent on the device, so it has to download v1.1.6 and the bug
+prevents the download. The MAK fleet must be serial-flashed.
+
+- 7 of 10 MAK devices are already on v1.1.1 from the field team's
+  recent reflash work — they need a second reflash to v1.1.6.
+- 3 (Schyler-batch: 23022684 / 23021886 / 23021888) were never on
+  v1.1.1; they go straight to v1.1.6.
+- After the field visit, future OTAs WILL work end-to-end:
+  `lastUpdatedAt` will tick on every progress publish, `currentBlockOffset`
+  will actually advance across reconnects, and v1.1.7+ can ship as
+  a thing-group OTA against `MAK_V1_1_6` without another field visit.
+
+Cancelled the v1.1.5 canary
+(`1m-v1-1-5-diag-canary-OneMeter13-20260428193307`) — it could not
+have completed.
+
+### v1.1.6 artifacts
+
+```text
+s3://1pwr-ota-firmware/firmware-releases/v1.1.6/resume-fix-mak-20260429051610-e7d8e16/
+  ├─ FeaturedFreeRTOSIoTIntegration.bin  (1132400 B)
+  ├─ bootloader.bin
+  ├─ partition-table.bin
+  ├─ ota_data_initial.bin
+  ├─ flasher_args.json
+  ├─ release-manifest.json
+  └─ sdkconfig
+```
+
+S3 VersionId of the app binary: `vIhvu.ty.xvtC0CzcYRqfoSnfd_ylbAZ`.
+Manifest confirms `router_ssid: "MAK_Wifi-ext"`,
+`router_password_set: true`, `ota_app_version: "1.1.6"`.
+
+### Cross-device canary survey
+
+Checked OneMeter11/13/17/18 disconnect rates over the last 24h
+before pivoting to v1.1.6:
+
+| Thing | Disconnects/24h | Mean interval |
+|---|---|---|
+| OneMeter11 | 765 | ~113 s |
+| OneMeter13 | 704 | ~123 s |
+| OneMeter17 | **2** | (offline since 28-Apr 09:33) |
+| OneMeter18 | 767 | ~113 s |
+
+OneMeter17 is offline; OneMeter11/18 have the same pattern as
+OneMeter13. No useful alternate canary — the bug would derail any
+of them identically.
+
+### Known Open Items / Next Session
+
+1. **Field team serial-flash the MAK fleet to v1.1.6.** Plan in
+   [`docs/ops/1meter-v1-1-6-field-flash.md`](docs/ops/1meter-v1-1-6-field-flash.md).
+   Pause the `cc-1meter-monitor.timer` during the visit to suppress
+   transient-offline alert spam.
+2. **Validate the fix with a no-op v1.1.7 OTA** (any cosmetic bump,
+   e.g. add a log line) targeting the first v1.1.6 device. Expect
+   `lastUpdatedAt` to tick every ~10 s with statusDetails percent
+   climbing, and `SUCCEEDED` within minutes — a complete inversion
+   of the v1.1.1 stuck-IN_PROGRESS pattern.
+3. **OneMeter17 offline since 28-Apr 09:33** — flag to field team
+   for the same visit.
+4. **Phase 2 enablement (relay command channel)** still gated by
+   `RELAY_AUTO_TRIGGER_ENABLED=0` and `GUARD_CREDIT_ENABLED=0` env
+   flags on the CC host. After v1.1.6 is on-fleet, those can be
+   flipped on per the [billing migration protocol §env-flag flip
+   procedure](docs/ops/1meter-billing-migration-protocol.md).
+5. **23021886 (0056MAK)** still offline ~5 days; field team should
+   investigate hardware on the same visit.
+
+### Files Touched
+
+- `onepwr-aws-mesh@06085f5`:
+  `main/tasks/ota_over_mqtt_demo/ota_over_mqtt_demo.c` (the fix +
+  throughput bump), `sdkconfig.defaults` (BUILD=6).
+- 1PWR CC: `docs/ops/1meter-v1-1-6-field-flash.md` (new),
+  `docs/ops/1meter-ota-trust-inventory.md` (RCA timeline entry),
+  `docs/ops/1meter-build-and-ota-runbook.md` (canary-stuck guidance
+  now points at the resume-handler bug), `SESSION_LOG.md`.
+- AWS state changes: cancelled + deleted v1.1.5 OTA; uploaded
+  v1.1.6 artifacts to S3.
+
+---
+
 ## Session 2026-04-28 202604282000 (v1.1.4 firmware: OTA progress publish + reboot suspension during OTA)
 
 ### Why

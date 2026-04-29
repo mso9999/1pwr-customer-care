@@ -138,8 +138,19 @@ psql onepower_cc -c "SELECT meter_id, firmware_version, last_seen_at
 ```
 
 If the job stays `IN_PROGRESS` indefinitely with empty
-`statusDetails`, that's the [latent cert-mismatch
-signature](./1meter-ota-trust-inventory.md). Cancel:
+`statusDetails` AND the device firmware on-target is `<= 1.1.5`, that
+is **NOT** a cert mismatch — it is the [`OtaAgentEventResume`
+fall-through bug fixed in
+v1.1.6](https://github.com/onepowerLS/onepwr-aws-mesh/commit/06085f5).
+Pre-v1.1.6 OTAs cannot complete on a disconnect-prone link
+regardless of cert configuration. Solution: serial-flash v1.1.6 onto
+the device(s) per the [v1.1.6 field-flash plan](./1meter-v1-1-6-field-flash.md).
+
+(If the device is already on v1.1.6+ and the same stuck pattern
+appears, then look at the cert-mismatch path —
+[trust inventory](./1meter-ota-trust-inventory.md).)
+
+Cancel:
 
 ```bash
 aws iot cancel-job --job-id AFR_OTA-${OTA_ID} --force --region us-east-1
