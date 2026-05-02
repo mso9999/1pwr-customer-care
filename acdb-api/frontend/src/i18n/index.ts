@@ -31,6 +31,8 @@ import recordPaymentEn from './en/recordPayment.json';
 import paymentVerificationEn from './en/paymentVerification.json';
 import customerDashboardEn from './en/customerDashboard.json';
 import myProfileEn from './en/myProfile.json';
+import programsEn from './en/programs.json';
+import coverageEn from './en/coverage.json';
 
 import commonFr from './fr/common.json';
 import loginFr from './fr/login.json';
@@ -62,6 +64,8 @@ import recordPaymentFr from './fr/recordPayment.json';
 import paymentVerificationFr from './fr/paymentVerification.json';
 import customerDashboardFr from './fr/customerDashboard.json';
 import myProfileFr from './fr/myProfile.json';
+import programsFr from './fr/programs.json';
+import coverageFr from './fr/coverage.json';
 
 const savedLang = localStorage.getItem('cc_lang');
 
@@ -102,6 +106,8 @@ i18n.use(initReactI18next).init({
       paymentVerification: paymentVerificationEn,
       customerDashboard: customerDashboardEn,
       myProfile: myProfileEn,
+      programs: programsEn,
+      coverage: coverageEn,
     },
     fr: {
       common: commonFr,
@@ -134,6 +140,8 @@ i18n.use(initReactI18next).init({
       paymentVerification: paymentVerificationFr,
       customerDashboard: customerDashboardFr,
       myProfile: myProfileFr,
+      programs: programsFr,
+      coverage: coverageFr,
     },
   },
 });

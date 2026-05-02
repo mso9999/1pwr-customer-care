@@ -19,6 +19,8 @@ import ExportPage from './pages/ExportPage';
 import MyProfilePage from './pages/MyProfilePage';
 import CustomerDashboardPage from './pages/CustomerDashboardPage';
 import AdminRolesPage from './pages/AdminRolesPage';
+import ProgramsPage from './pages/ProgramsPage';
+import CoverageAuditPage from './pages/CoverageAuditPage';
 import MutationsPage from './pages/MutationsPage';
 import OMReportPage from './pages/OMReportPage';
 import FinancialPage from './pages/FinancialPage';
@@ -91,6 +93,8 @@ export default function App() {
             <Route path="my/profile" element={<MyProfilePage />} />
             {/* Admin routes */}
             <Route path="admin/roles" element={<ProtectedRoute requireEmployee requireRole={['superadmin']}><AdminRolesPage /></ProtectedRoute>} />
+            <Route path="admin/programs" element={<ProtectedRoute requireEmployee requireRole={['superadmin']}><ProgramsPage /></ProtectedRoute>} />
+            <Route path="admin/coverage" element={<ProtectedRoute requireEmployee requireRole={['superadmin']}><CoverageAuditPage /></ProtectedRoute>} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

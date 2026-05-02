@@ -308,6 +308,9 @@ from gensite import router as gensite_router
 from app_bff import router as app_bff_router
 from billing_priority import router as billing_priority_router
 from relay_control import router as relay_control_router
+from odyssey_api import router as odyssey_api_router
+from programs import router as programs_router
+from coverage_audit import router as coverage_audit_router
 
 from db_auth import init_auth_db
 init_auth_db()
@@ -339,6 +342,9 @@ app.include_router(gensite_router)
 app.include_router(app_bff_router)
 app.include_router(billing_priority_router)
 app.include_router(relay_control_router)
+app.include_router(odyssey_api_router)
+app.include_router(programs_router)
+app.include_router(coverage_audit_router)
 ensure_meter_assignments_table()
 warm_stats_cache()
 

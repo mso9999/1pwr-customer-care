@@ -67,6 +67,8 @@
     "help": "Aide",
     "tutorial": "Tutoriel",
     "roles": "Rôles",
+    "programs": "Programmes",
+    "coverage": "Audit de couverture",
     "myAccount": "Mon compte"
   },
   "pagination": {

@@ -496,6 +496,368 @@ export async function listPRDepartments(): Promise<PRDepartment[]> {
 }
 
 // ---------------------------------------------------------------------------
+// Monthly staff-PIN broadcast (manual trigger from Admin Roles page)
+// ---------------------------------------------------------------------------
+
+export interface PinPreview {
+  year: number;
+  month: number;
+  active_countries: string[];
+  message: string;
+}
+
+export interface PinBroadcastResult {
+  country_code: string;
+  year: number;
+  month: number;
+  month_label: string;
+  pin_prefix: string;
+  ok: boolean;
+}
+
+export async function previewMonthlyPin(): Promise<PinPreview> {
+  return request('/admin/auth/pin-preview');
+}
+
+export async function broadcastMonthlyPin(
+  body: { countries?: string[]; include_next_month?: boolean } = {},
+): Promise<{ results: PinBroadcastResult[] }> {
+  return request('/admin/auth/broadcast-pin', {
+    method: 'POST',
+    body: JSON.stringify({ include_next_month: true, ...body }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Coverage audit (admin)
+// ---------------------------------------------------------------------------
+
+export interface CoverageMonthCell {
+  rows: number;
+  meters: number;
+}
+
+export interface CoverageDeficit {
+  site: string;
+  month: string;
+  rows: number;
+  baseline_median: number;
+  ratio: number;
+  missing_pct: number;
+  in_progress?: boolean;
+  expected_so_far?: number;
+  elapsed_fraction?: number;
+}
+
+export interface CoverageZeroMeter {
+  community: string;
+  meter_id: string;
+  account_number: string;
+  role: string;
+  customer_connect_date: string | null;
+}
+
+export interface CoverageStaleMeter {
+  community: string;
+  meter_id: string;
+  account_number: string;
+  last_reading: string | null;
+  stale_days: number | null;
+}
+
+export interface CoverageLastIngest {
+  last_reading: string | null;
+  last_insert: string | null;
+  rows_total: number;
+}
+
+export interface CoverageCrossCountry {
+  community: string;
+  meters: number;
+  accounts: number;
+  this_db_country: string;
+}
+
+export interface CoverageAuditPayload {
+  country: string;
+  database_label: string;
+  generated_at: string;
+  window_months: number;
+  stale_days: number;
+  deficit_threshold: number;
+  active_counts: Record<string, number>;
+  monthly_coverage: Record<string, Record<string, CoverageMonthCell>>;
+  monthly_deficits: CoverageDeficit[];
+  zero_coverage_meters: CoverageZeroMeter[];
+  zero_coverage_summary: Record<string, { active_meters: number; zero_coverage_meters: number; zero_coverage_pct: number | null }>;
+  stale_meters: CoverageStaleMeter[];
+  last_ingest: Record<string, Record<string, CoverageLastIngest>>;
+  cross_country_meters: CoverageCrossCountry[];
+  declared_sites_missing_data: string[];
+  orphan_sites: string[];
+  totals: {
+    active_meters: number;
+    zero_coverage_meters: number;
+    stale_meters: number;
+    monthly_deficits_flagged: number;
+    sites_with_active_meters: number;
+    sites_with_data: number;
+  };
+  upstream_freshness?: Record<string, unknown> | null;
+  upstream_checked_at?: string | null;
+}
+
+export interface CoverageSnapshotSummary {
+  id: number;
+  snapshot_at: string;
+  country_code: string;
+  active_meters: number;
+  zero_coverage_meters: number;
+  stale_meters: number;
+  monthly_deficits_flagged: number;
+  sites_with_active_meters: number;
+  sites_with_data: number;
+  triggered_by: string | null;
+  notes: string | null;
+  upstream_checked_at: string | null;
+}
+
+export interface CoverageTrendPoint {
+  snapshot_at: string;
+  active_meters: number;
+  zero_coverage_meters: number;
+  stale_meters: number;
+  monthly_deficits_flagged: number;
+}
+
+export async function liveCoverageAudit(params: {
+  country?: string;
+  window_months?: number;
+  stale_days?: number;
+  deficit_threshold?: number;
+} = {}): Promise<CoverageAuditPayload> {
+  const qs = new URLSearchParams();
+  if (params.country) qs.set('country', params.country);
+  if (params.window_months) qs.set('window_months', String(params.window_months));
+  if (params.stale_days) qs.set('stale_days', String(params.stale_days));
+  if (params.deficit_threshold !== undefined) qs.set('deficit_threshold', String(params.deficit_threshold));
+  const q = qs.toString();
+  return request(`/admin/coverage/audit${q ? `?${q}` : ''}`);
+}
+
+export async function takeCoverageSnapshot(body: {
+  country: string;
+  window_months?: number;
+  stale_days?: number;
+  deficit_threshold?: number;
+  notes?: string;
+  include_upstream?: boolean;
+}): Promise<{ snapshot_id: number; totals: CoverageAuditPayload['totals'] }> {
+  return request('/admin/coverage/snapshot', {
+    method: 'POST',
+    body: JSON.stringify({
+      country: body.country,
+      window_months: body.window_months ?? 8,
+      stale_days: body.stale_days ?? 30,
+      deficit_threshold: body.deficit_threshold ?? 0.5,
+      notes: body.notes,
+      include_upstream: body.include_upstream ?? false,
+    }),
+  });
+}
+
+export async function listCoverageSnapshots(
+  country?: string,
+  limit = 30,
+): Promise<CoverageSnapshotSummary[]> {
+  const qs = new URLSearchParams();
+  if (country) qs.set('country', country);
+  qs.set('limit', String(limit));
+  return request(`/admin/coverage/snapshots?${qs.toString()}`);
+}
+
+export async function getCoverageSnapshot(id: number): Promise<CoverageAuditPayload & {
+  id: number;
+  snapshot_at: string;
+  triggered_by: string | null;
+  notes: string | null;
+}> {
+  return request(`/admin/coverage/snapshots/${id}`);
+}
+
+export async function coverageTrend(
+  country = 'LS',
+  days = 60,
+): Promise<{ country: string; days: number; points: CoverageTrendPoint[] }> {
+  return request(`/admin/coverage/trend?country=${encodeURIComponent(country)}&days=${days}`);
+}
+
+export async function coverageUpstreamFreshness(
+  country = 'LS',
+  refresh = false,
+): Promise<Record<string, unknown>> {
+  const qs = new URLSearchParams();
+  qs.set('country', country);
+  if (refresh) qs.set('refresh', 'true');
+  return request(`/admin/coverage/upstream-freshness?${qs.toString()}`);
+}
+
+// ---------------------------------------------------------------------------
+// Programs (funder monitoring -- e.g. UEF/ZEDSI Odyssey API)
+// ---------------------------------------------------------------------------
+
+export interface Program {
+  id: number;
+  code: string;
+  name: string;
+  funder: string | null;
+  country_code: string | null;
+  description: string | null;
+  active: boolean;
+  created_at: string;
+  member_count: number;
+  active_token_count: number;
+}
+
+export interface ProgramMembership {
+  account_number: string;
+  customer_id_legacy: string | null;
+  customer_name: string | null;
+  site_id: string | null;
+  joined_at: string;
+  claim_milestone: string | null;
+  notes: string | null;
+  added_by: string | null;
+}
+
+export interface ProgramTokenSummary {
+  id: number;
+  label: string;
+  token_prefix: string;
+  issued_at: string;
+  issued_by: string | null;
+  expires_at: string | null;
+  revoked_at: string | null;
+  last_used_at: string | null;
+  last_used_ip: string | null;
+}
+
+export interface BulkMembershipResult {
+  action: 'add' | 'remove';
+  requested_count: number;
+  affected_count: number;
+  skipped_unknown: string[];
+}
+
+export interface ProgramTokenIssued {
+  token: string;
+  summary: ProgramTokenSummary;
+}
+
+export async function listPrograms(): Promise<Program[]> {
+  return request('/admin/programs');
+}
+
+export async function createProgram(body: {
+  code: string;
+  name: string;
+  funder?: string;
+  country_code?: string;
+  description?: string;
+  active?: boolean;
+}): Promise<Program> {
+  return request('/admin/programs', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export async function updateProgram(code: string, body: Partial<{
+  name: string;
+  funder: string;
+  country_code: string;
+  description: string;
+  active: boolean;
+}>): Promise<Program> {
+  return request(`/admin/programs/${encodeURIComponent(code)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function bulkProgramMembership(
+  code: string,
+  body: {
+    action: 'add' | 'remove';
+    country_codes?: string[];
+    site_codes?: string[];
+    account_numbers?: string[];
+    claim_milestone?: string;
+    notes?: string;
+  },
+): Promise<BulkMembershipResult> {
+  return request(`/admin/programs/${encodeURIComponent(code)}/memberships/bulk`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function listProgramMemberships(
+  code: string,
+  params: { site?: string; search?: string; page?: number; page_size?: number } = {},
+): Promise<{ program: string; total: number; page: number; page_size: number; items: ProgramMembership[] }> {
+  const qs = new URLSearchParams();
+  if (params.site) qs.set('site', params.site);
+  if (params.search) qs.set('search', params.search);
+  if (params.page) qs.set('page', String(params.page));
+  if (params.page_size) qs.set('page_size', String(params.page_size));
+  const q = qs.toString();
+  return request(`/admin/programs/${encodeURIComponent(code)}/memberships${q ? `?${q}` : ''}`);
+}
+
+export async function listProgramTokens(
+  code: string,
+  includeRevoked = false,
+): Promise<ProgramTokenSummary[]> {
+  const qs = includeRevoked ? '?include_revoked=true' : '';
+  return request(`/admin/programs/${encodeURIComponent(code)}/tokens${qs}`);
+}
+
+export async function issueProgramToken(
+  code: string,
+  body: { label: string; lifetime_days?: number | null },
+): Promise<ProgramTokenIssued> {
+  return request(`/admin/programs/${encodeURIComponent(code)}/tokens`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function revokeProgramToken(code: string, tokenId: number): Promise<{ revoked: boolean; token_id: number }> {
+  return request(`/admin/programs/${encodeURIComponent(code)}/tokens/${tokenId}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function previewProgramDataset(
+  code: string,
+  params: { dataset: 'electricity-payment' | 'meter-metrics'; from: string; to: string; page?: number; page_size?: number },
+): Promise<{ dataset: string; total: number; count: number; data: Record<string, unknown>[] }> {
+  const qs = new URLSearchParams();
+  qs.set('dataset', params.dataset);
+  qs.set('from', params.from);
+  qs.set('to', params.to);
+  if (params.page) qs.set('page', String(params.page));
+  if (params.page_size) qs.set('page_size', String(params.page_size));
+  return request(`/admin/programs/${encodeURIComponent(code)}/preview?${qs.toString()}`);
+}
+
+export async function downloadProgramConnections(code: string, milestone?: string): Promise<void> {
+  const qs = milestone ? `?milestone=${encodeURIComponent(milestone)}` : '';
+  return downloadFile(
+    `/admin/programs/${encodeURIComponent(code)}/connections.xlsx${qs}`,
+    `${code}_connections${milestone ? `_${milestone.replace(/\s+/g, '_')}` : ''}.xlsx`,
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Sites & health
 // ---------------------------------------------------------------------------
 
