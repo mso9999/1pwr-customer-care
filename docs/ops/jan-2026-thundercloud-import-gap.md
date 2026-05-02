@@ -1,6 +1,14 @@
 # RCA + backfill runbook: January 2026 ThunderCloud import gap
 
-**Status:** open as of 2026-05-01. Affects MAK (Lesotho) historical reporting only; CC operational features and live billing are unaffected.
+**Status:** open as of **2026-05-02 07:30 UTC**. Affects MAK (Lesotho) historical reporting only; CC operational features and live billing are unaffected.
+
+## Status log
+
+| Date (UTC) | Verifier | Outcome |
+|---|---|---|
+| 2026-05-01 14:30 | uGridPlan agent (initial RCA) | Gap identified. Bucket-59 mean = 3.33 kWh/month, raw HH1 Jan-2026 coverage = 17.6%. Runbook drafted. |
+| 2026-05-02 07:30 | uGridPlan agent (post-fix verification) | **STILL OPEN.** Re-ran the verification recipe (below) -- bucket-59 mean and raw coverage are byte-identical to 2026-05-01. Either (a) the import was attempted but didn't write to the prod DB, (b) the upstream pipeline error has been fixed but the historical backfill hasn't been kicked off, or (c) the work hasn't started yet. **Whoever picks this up next: please update this row and the row below.** |
+| _(template -- copy into a new row when you act)_ | _(your name / agent id)_ | _(what you did + verification result)_ |
 
 **Discovered by:** uGridPlan tenure-trend diagnostic (`scripts/diagnose_tenure_trend.py` in the `uGridPlan` repo) flagged a 10× drop in mean kWh/month at tenure-bucket 59 of `smp_hh1`. Root-cause traced to a calendar-month deficit in CC's `monthly_consumption` table for **January 2026** that propagated up through the tenure aggregation.
 
@@ -98,6 +106,88 @@ Acceptance criteria:
 
 - Step 3 returns at least ~150K hourly rows from at least 200 distinct MAK meters (matching TC parquet volume).
 - Step 5 average kWh per account for 2026-01 is in the 30–50 kWh range (i.e. similar to 2025-12 and 2026-02), not the depressed ~3 kWh that's currently there.
+
+---
+
+---
+
+## Verification recipe (run this BEFORE marking the gap closed)
+
+These three signals must all flip from "depressed" to "normal" before declaring victory. They can be run from any machine that can reach `https://cc.1pwrafrica.com` (no SSH or DB access needed); they hit only the public CC API.
+
+```bash
+# Setup (once per shell):
+export CC_BASE=https://cc.1pwrafrica.com
+export CC_EMP_ID=00   # date-based password from the CC scheme
+TOKEN=$(python3 -c "
+import sys, requests, datetime as dt
+yyyymm = dt.datetime.now(dt.timezone.utc).strftime('%Y%m')
+pw = f'{int(yyyymm)/int(yyyymm[::-1]):.10f}'.replace('.', '').lstrip('0')[:4]
+r = requests.post('${CC_BASE}/api/auth/employee-login',
+    json={'employee_id':'${CC_EMP_ID}','password':pw}, timeout=30)
+print(r.json()['access_token'])
+")
+H="Authorization: Bearer $TOKEN"
+```
+
+### Signal 1 -- Tenure endpoint, bucket 59 (HH1)
+
+```bash
+curl -s -H "$H" "$CC_BASE/api/om-report/consumption-by-tenure" | \
+  python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+for pt in d['chart_data']:
+  if pt['tenure_month'] == 59 and pt.get('HH1') is not None:
+    print(f\"bucket 59 HH1: mean={pt['HH1']:.2f}, max={pt.get('HH1_max',0):.2f}, _n={pt.get('HH1_n',0)}, _nd={pt.get('HH1_nd',0)}\")
+"
+```
+
+* **Currently (gap open):** `mean=3.33, max=11.65, _n=143, _nd=99`
+* **Expected post-backfill:** mean in `[20, 50]` kWh/month, max in `[80, 200]` kWh/month, `_nd` close to `_n` (~140).
+
+### Signal 2 -- Raw meter-export coverage for January 2026
+
+```bash
+curl -s -H "$H" "$CC_BASE/api/om-report/meter-export?customer_type=HH1&start_date=2026-01-01&end_date=2026-01-31" | \
+  python3 -c "
+import json, sys
+d = json.load(sys.stdin)
+readings = d['readings']
+meters = {r.get('meterid') for r in readings if r.get('meterid')}
+rpm = len(readings)/max(len(meters),1)
+print(f'HH1 Jan 2026: {len(meters)} meters, {len(readings):,} readings, {rpm:.0f} reads/meter, coverage = {100*rpm/(31*24):.1f}% of hourly expected')
+"
+```
+
+* **Currently (gap open):** `~922 meters, ~120K readings, ~131 reads/meter, coverage = 17.6%`
+* **Expected post-backfill:** coverage in `[30, 50]%` (matching surrounding months Nov 2025 / Dec 2025 / Feb 2026).
+
+### Signal 3 -- Spot-check ThunderCloud upstream (sanity)
+
+Confirms TC parquet files for January 2026 still exist (so the backfill HAS data to re-pull):
+
+```bash
+python3 -c "
+import re, urllib3, requests
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+TC = 'https://opl-location001.sparkmeter.cloud'
+s = requests.Session()
+r = s.get(f'{TC}/login', timeout=30, verify=False)
+csrf = re.search(r'name=\"csrf_token\"[^>]*value=\"([^\"]+)\"', r.text).group(1)
+import os
+s.post(f'{TC}/login', data={'csrf_token':csrf, 'email':os.environ.get('TC_EMAIL','makhoalinyane@1pwrafrica.com'), 'password':os.environ.get('TC_PASS','00001111')}, verify=False, allow_redirects=True)
+files = s.get(f'{TC}/history/list.json', verify=False).json().get('files', [])
+jan = [f for f in files if 'year=2026/month=01/' in (f.get('name') or '')]
+print(f'TC parquet files for Jan 2026: {len(jan)} (expect 31)')
+"
+```
+
+* **Required for backfill to be possible:** 31 daily files. If less than 31, the upstream itself has gaps and re-import alone won't help.
+
+### One-shot verifier script
+
+The 1PDB repo also has `services/diagnose_jan_2026_gap.py` (TODO: add this) that runs all three signals + diff against expected values, exit 0 if backfilled, 1 otherwise. Useful as a CI smoke test once landed.
 
 ---
 

@@ -1779,8 +1779,20 @@ def meter_data_export(
             return {"readings": [], "meta": {"error": str(e)}}
 
         # -- 3. Stream results with Python-side filtering --
+        # Dedup key for the hourly fallback is **(account_number, hour_bucket)** --
+        # NOT account-level. The previous account-level dedup hid every
+        # ``hourly_consumption`` row for any account that ever appeared in
+        # ``meter_readings`` (even just once), which made entire calendar
+        # months of hourly data invisible whenever the live-feed coverage
+        # didn't extend back that far. RCA: 2026-05-01 (January 2026
+        # tenure-bucket-59 deficit -- see
+        # ``docs/ops/jan-2026-thundercloud-import-gap.md``).
+        # The (account, hour) keying is also robust to meter_id format
+        # mismatch between the two tables (``meter_readings`` uses
+        # ``SMRSD-04-...`` SparkMeter serials; ``hourly_consumption``
+        # carries pre-migration numeric IDs for some communities).
         readings: List[Dict[str, Any]] = []
-        raw_accounts_covered: Set[str] = set()
+        raw_account_hours_covered: Set[Tuple[str, datetime]] = set()
         skipped = 0
         resolved_by_meter_id = 0
         resolved_by_account = 0
@@ -1842,7 +1854,9 @@ def meter_data_export(
             })
             source_rows["meter_readings"] += 1
             if acct:
-                raw_accounts_covered.add(acct)
+                raw_account_hours_covered.add(
+                    (acct, ts.replace(minute=0, second=0, microsecond=0))
+                )
 
         skipped_hourly_no_type = 0
         skipped_hourly_covered = 0
@@ -1870,9 +1884,6 @@ def meter_data_export(
                 if not acct:
                     skipped_hourly_no_type += 1
                     continue
-                if acct in raw_accounts_covered:
-                    skipped_hourly_covered += 1
-                    continue
 
                 ctype = acct_type.get(acct)
                 if not ctype:
@@ -1897,6 +1908,11 @@ def meter_data_export(
                 if start_dt and ts < start_dt:
                     continue
                 if end_exclusive_dt and ts >= end_exclusive_dt:
+                    continue
+
+                hour_bucket = ts.replace(minute=0, second=0, microsecond=0)
+                if (acct, hour_bucket) in raw_account_hours_covered:
+                    skipped_hourly_covered += 1
                     continue
 
                 meterid = str(row[1] or "").strip() or acct_meter.get(acct) or acct
@@ -1944,7 +1960,7 @@ def meter_data_export(
                     "meter_id": resolved_by_meter_id,
                     "account_number": resolved_by_account,
                 },
-                "raw_accounts_covered": len(raw_accounts_covered),
+                "raw_account_hours_covered": len(raw_account_hours_covered),
                 "hourly_fallback_accounts": len(hourly_accounts_used),
                 "filters": {
                     "customer_type": customer_type,
