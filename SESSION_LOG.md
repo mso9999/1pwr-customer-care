@@ -3,6 +3,58 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-05-02 202605020846 (Upstream reconciliation: TC/Koios vs 1PDB)
+
+### What Was Done
+Followed up on the user's question "do you confirm all data available in TC is synced to 1PDB?" -- the honest answer was no, I'd only verified MAK Jan 2026 internally. Built a reusable reconciliation script that probes the actual upstream (Koios v2 `data/historical` + TC `/history/list.json`) for the cells the coverage audit flagged.
+
+**Script: `scripts/ops/audit_upstream_reconciliation.py`**
+- Auto-discovers deficit cells from `audit_coverage_gaps.py` (or accepts `--cells SITE:YYYY-MM` for targeted runs).
+- Per-cell: 3 sample days × Koios `data/historical` (per_page=1000, paginated, ~1.5s/call). Compares to our `hourly_consumption` per (community, day).
+- Per-day strict classifier: `we_missed`, `we_missed_partial`, `match`, `we_have_extra`, `upstream_missing`, `probe_failed`. The earlier monthly-aggregate classifier was too lenient (called "match" when 1 of 3 sample days was 100% missed).
+- Country-aware re-pull recipe in the Markdown output (LS uses `import_hourly.py --site --no-skip`; BN uses `DATABASE_URL_BN ... import_hourly_bn.py --site --no-skip`). Paste-and-run.
+- For MAK: separate TC parquet inventory via `/history/list.json` (per-day filename → date).
+
+**Production run findings:**
+- **LS (15 cells)**: 6 `we_missed` + 8 `we_missed_partial` + 1 `match` (SEH 2026-03 truly matches). Zero `upstream_missing`.
+- **BN (3 cells)**: 1 `we_missed` (GBO 2025-10) + 2 `match`.
+- **MAK ThunderCloud**: 274 days in TC parquets, 274 days in 1PDB, 100% overlap. **No MAK ingest gap from TC at all.**
+- **Pattern**: Koios day 8 / day 16 of multiple months missing across sites -- consistent with the 15-min timer's 7-day rolling window expiring before a missed day gets retried.
+
+**Reports written to repo:**
+- `docs/ops/upstream-recon-2026-05-02-LS.md` (verdicts + paste-ready re-pull commands for all 15 LS cells)
+- `docs/ops/upstream-recon-2026-05-02-BN.md` (1 BN cell)
+- `docs/ops/upstream-recon-2026-05-02-summary.md` (TL;DR + day-pattern observation + prevention suggestion + action checklist)
+
+**CONTEXT.md** got an "Upstream Reconciliation" section above the existing "Coverage Audit" section.
+
+### Key Decisions
+- **Per-day strict classification** instead of monthly-aggregate ratio. The earlier classifier (`db_sample_total / upstream_total < 0.5`) called LSB 2026-02 a "match" because day 15 had 568 of our rows vs Koios's 24 -- but days 8 and 22 were both 0/24 (we missed). Per-day strict catches that correctly as `we_missed_partial` with `missed_days: [08, 22]`.
+- **Did NOT auto-trigger the re-pulls.** The recipe is in the report; ops chooses when to run. ~22.5K Koios calls total for the LS cells (~1.5K/cell × 15 cells), within the 30k/day budget but worth pacing.
+- **Caught Koios `per_page` validation early**: max is 1000, my first attempt sent 5000 and got a clean HTTP 400. Fixed in 1 line; retried.
+- **TC inventory via filename parsing** (year=YYYY/month=MM/day=DD pattern) -- no need to download each parquet to confirm a day is covered.
+
+### What Next Session Should Know
+- **Production data is in 1PDB but with quantified ingest gaps** -- not "all of TC/Koios". The 15 LS + 1 BN cells need re-pulling before downstream reports (uGridPlan tenure, ARPU at the affected sites/months) can be trusted at 100%.
+- **For uGridPlan specifically**: MAK is 100% reconciled. Tenure-bucket-59 (HH1/MAK/Jan-2026) is on the fully-clean path -- the rerun should now produce non-distorted numbers.
+- **Re-pull recipe** is in the report, paste-and-run. Important: use `--no-skip` flag, otherwise the staleness check will skip days that already have (partial) data.
+- **Prevention**: a weekly catch-up sweep on the trailing 60 days with `--no-skip` would stop this pattern from recurring. Not done in this session.
+
+### Files Modified
+- `scripts/ops/audit_upstream_reconciliation.py` -- new
+- `docs/ops/upstream-recon-2026-05-02-LS.md` -- new (production run output)
+- `docs/ops/upstream-recon-2026-05-02-BN.md` -- new
+- `docs/ops/upstream-recon-2026-05-02-summary.md` -- new (triage doc)
+- `CONTEXT.md` -- new "Upstream Reconciliation (2026-05-02)" section
+
+### Senescence Notes
+- No degradation. Single focused investigation; clean handoff.
+
+### Protocol Feedback
+- Pattern that worked well: ship a generic tool, run it on prod, classify findings, write a paste-ready recipe. No autonomous data writes; ops keeps control.
+
+---
+
 ## Session 2026-05-02 202605020734 (Comprehensive 1PDB coverage audit + in-CC tooling)
 
 ### What Was Done

@@ -452,6 +452,20 @@ CC employee login = `employee_id` (validated against the HR portal) **+** a shar
 - Login UX: hint on the employee login form ("PIN rotates on the 1st...") and a friendlier 401 message during the first 7 days of any month. The PIN is never echoed in API responses or logs.
 - Full doc / runbook: [`docs/ops/staff-pin-rotation.md`](docs/ops/staff-pin-rotation.md).
 
+## Upstream Reconciliation (2026-05-02)
+
+Companion to the coverage audit -- where the audit detects internally-deficient cells, the upstream reconciliation classifies WHY by sampling Koios v2 `data/historical` (and TC `/history/list.json` for MAK).
+
+* Script: [`scripts/ops/audit_upstream_reconciliation.py`](scripts/ops/audit_upstream_reconciliation.py)
+* Verdicts: `we_missed` / `we_missed_partial` / `upstream_missing` / `match` / `we_have_extra` / `probe_failed`. Per-day strict on three sample days per (site, month).
+* Output includes a **re-pull recipe** (country-aware: `import_hourly.py` for LS, `import_hourly_bn.py` for BN) so ops can paste-and-run.
+
+**First production run (2026-05-02)**: `docs/ops/upstream-recon-2026-05-02-{summary,LS,BN}.md`. Found:
+- LS: 6 fully-missed + 8 partially-missed + 1 match (15 deficit cells from coverage audit). MAK ThunderCloud is 100% reconciled (274/274 days).
+- BN: 1 fully-missed + 2 match.
+- **Zero `upstream_missing`**: every deficit is recoverable by re-pulling from Koios.
+- **Day-pattern**: Koios day 8 / day 16 of multiple months are missing across many sites. Suggests timer misses a day, the rolling 7-day re-fetch window expires, and the gap stays. **Prevention**: weekly catch-up `--no-skip` sweep on the trailing 60 days.
+
 ## Coverage Audit (2026-05-02)
 
 CC has self-serve tooling to detect 1PDB gaps versus what should be there:
