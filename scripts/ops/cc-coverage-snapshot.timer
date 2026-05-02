@@ -1,0 +1,14 @@
+[Unit]
+Description=Daily 1PDB coverage audit snapshot (~07:30 UTC, after Koios catches up)
+Documentation=file:///opt/cc-portal/backend/scripts/ops/audit_coverage_gaps.py
+
+[Timer]
+# 07:30 UTC = 09:30 SAST. Late enough that Koios has had its standard
+# ~1-day processing lag to catch up for the previous calendar day, early
+# enough that the snapshot is fresh by the time staff log in.
+OnCalendar=*-*-* 07:30:00 UTC
+Persistent=true
+Unit=cc-coverage-snapshot.service
+
+[Install]
+WantedBy=timers.target

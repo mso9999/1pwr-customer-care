@@ -3,6 +3,98 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-05-02 202605020734 (Comprehensive 1PDB coverage audit + in-CC tooling)
+
+### What Was Done
+
+Followed up the 2026-05-01 dedup-bug session by building the comprehensive audit + ongoing tooling the user asked for after questioning whether the symptom-level fix had actually closed the broader question.
+
+**Phase A — One-time audit script + production run:**
+- New `scripts/ops/audit_coverage_gaps.py` -- read-only, ~30s per country DB. Surfaces:
+  - per-site coverage overview (active / zero-coverage / stale counts);
+  - per-(site, month) coverage matrix (rows + distinct meters);
+  - **monthly deficits** vs trailing-month median, with **in-progress current month prorated** so day-2-of-31 doesn't false-positive;
+  - last ingest per (site, source);
+  - **zero-coverage active meters** -- joined via `account_number` (NOT `meter_id`, because of the post-migration format drift -- joining on meter_id gives nonsense like "172/172 KET meters zero-coverage" while account-keyed gives the truth);
+  - stale meters (>N days);
+  - cross-country leak (e.g. GBO/SAM rows in `onepower_cc`);
+  - declared-but-empty sites (`country_config` says yes, data says no);
+  - orphan sites (data says yes, `country_config` says no).
+- Both Markdown + JSON output, with a `--snapshot` flag for the systemd timer to write into `coverage_snapshots`.
+- Ran on production via SSH + `sudo`. Reports saved to `docs/ops/coverage-audit-2026-05-02-{LS,BN}.md`. Triage commentary at `docs/ops/coverage-audit-2026-05-02-triage.md`.
+
+**Findings (real gaps the audit surfaced):**
+- LS: 1,655 active meters / 221 zero-coverage / 363 stale / 18 monthly deficits flagged.
+- **15 historical complete-month deficits** in LS: LSB Mar 2026 (99.7% missing), MAT Mar (94.4%), KET Mar (92.6%), MAS Dec/Jan (~90%), KET Jan (85.8%), several others between 50-80%.
+- **Cross-country leak**: 135 GBO + 67 SAM meters living in the LS DB (last touched 2026-02-18, the same day everything else got bulk-imported -- multi-country migration left a stale shadow).
+- **8 LS sites declared but empty** (BOB, LEB, MAN, MET, NKU, RIB, SEB, TOS) -- consistent with CONTEXT.md note that some are pre-operational.
+- **1 orphan LS site** (UNK, 4 active meters, last reading 2024-12-31).
+- BN: 179 active / 14 zero-coverage / 4 stale / 4 deficits. The 14 zero-coverage includes 10 `TEST` meters (orphan test fixtures) -- actual production gap is just 4.
+- **Koios upstream lag** confirmed via `journalctl -u 1pdb-consumption.service`: HTTP 404s on recent dates (LSB 4 days, SEH 8 days) -- explains in-progress month deficits as upstream not bug.
+
+**Phase B — In-CC tooling (so this is self-serve and trended over time):**
+- Migration `018_coverage_snapshots.sql` -- `coverage_snapshots` table for daily persistence, JSONB blobs for detail, indexes on (country, snapshot_at).
+- `acdb-api/coverage_audit.py` mounted at `/api/admin/coverage/...` (superadmin):
+  - `GET  /audit` — live audit (no DB write)
+  - `POST /snapshot` — live audit + persist
+  - `GET  /snapshots` (lightweight) and `/snapshots/{id}` (full)
+  - `GET  /trend?country=&days=` for sparklines
+  - `GET  /upstream-freshness?country=&refresh=` — Koios `data/freshness` per site, **cached 5 min in-process** (Koios has 30k req/day per org)
+- Imports the ops script's `run_audit` rather than duplicating SQL, so the timer-driven and admin-triggered paths produce identical payloads.
+- New systemd unit `cc-coverage-snapshot.{service,timer}` runs daily at 07:30 UTC, snapshots both LS and BN if both DB URLs are configured.
+
+**Frontend:**
+- New `CoverageAuditPage.tsx` at `/admin/coverage` (superadmin only). Sections: control bar (country / window / stale / deficit knobs + refresh), headline-totals cards with sparklines from snapshot history, snapshot trigger panel (notes + optional upstream probe), per-site overview table, **per-month coverage heatmap** (relative-to-site-max colouring), deficits split into complete-vs-in-progress, last-ingest-per-source table, Koios upstream-freshness probe, expandable zero-coverage and stale-meter tables, cross-country/declared-missing/orphan summary cards, snapshots history.
+- API client + EN/FR i18n + nav entry under System.
+
+**Tests:** 12 new in `tests/test_coverage_audit.py` covering deficit detection (in-progress prorated, complete-month flagged, current-month excluded from baseline, too-few-months-skipped), zero-coverage rollup, median helper, markdown rendering smoke test. **89/89 backend tests pass; TypeScript clean; no lint errors.**
+
+### Key Decisions
+
+- **Joined zero-coverage on `account_number`, NOT `meter_id`.** Same root cause as the May 1 dedup-bug RCA -- the April 2026 SparkMeter-serial migration didn't fully take. Joining on meter_id reports 100% of KET meters as zero-coverage when they have 598K rows. Documented as a CONTEXT.md invariant.
+- **Excluded the current month from baseline + prorated its deficit check.** First-pass audit reported MAK/MAS/SHG May 2026 at 95-99% missing because we're only on day 2 of 31. Fixed by computing baseline from **complete** months only and reporting current month against `baseline * (days_elapsed / days_in_month)`. Now correctly distinguishes "Koios is normally lagged for the first day or two of the month" from a genuine current-month gap.
+- **Did NOT auto-trigger any production data backfill from the audit findings.** Per the workspace .cursorrules ("RCA over symptomatic fixes"), most current-month deficits are explained by Koios upstream lag (verified via `journalctl`), and historical deficits need source-side investigation (Koios `data/freshness`) before re-pull. The triage doc lists what's actionable manually; the new `/admin/coverage/upstream-freshness` endpoint makes it one click.
+- **Cached Koios upstream probe for 5 minutes in-process.** Koios v2 has a 30k req/day per-org rate limit. A naive uncached probe at every page load would exhaust that quickly with multiple superadmins refreshing.
+- **Coverage snapshot detail blobs in JSONB, not separate tables.** Keeps the migration to one table; queries that need a specific deficit drill-down can always extract from the JSONB later. Counter-pattern: would split if we ever need to JOIN snapshots against accounts -- not today.
+
+### What Next Session Should Know
+
+- **Apply migration 018** before `coverage_audit.py` snapshot endpoints can write. CI's incremental migration loop will pick it up automatically.
+- **Install the systemd timer** on the CC host (one-time, ops, instructions in `docs/ops/coverage-audit-tooling.md`). Until then, snapshots are admin-triggered only.
+- **Configure Koios API keys per-country** for the upstream-freshness probe to actually work. Resolves via `KOIOS_API_KEY[_CC]` / `KOIOS_API_SECRET[_CC]` env (fall back to the unsuffixed pair). LS already has these from the existing import path; BN/ZM may need them.
+- **Triage findings still open:** the items in `docs/ops/coverage-audit-2026-05-02-triage.md`. The portal at `/admin/coverage` is the new working surface for them; do them site by site.
+- **Long-term cleanup**: the cross-country GBO/SAM rows in `onepower_cc.meters` should be quarantined or deleted (135 + 67 = 202 rows); the LS UNK site should be classified; the BN TEST fixtures (10 meters) should be archived.
+
+### Files Modified
+
+- `scripts/ops/audit_coverage_gaps.py` -- new (CLI audit, --snapshot persists)
+- `scripts/ops/cc-coverage-snapshot.{service,timer}` -- new systemd units (daily 07:30 UTC)
+- `acdb-api/migrations/018_coverage_snapshots.sql` -- new
+- `acdb-api/coverage_audit.py` -- new (admin endpoints)
+- `acdb-api/customer_api.py` -- mount the new router
+- `acdb-api/tests/test_coverage_audit.py` -- 12 new tests
+- `acdb-api/frontend/src/pages/CoverageAuditPage.tsx` -- new page
+- `acdb-api/frontend/src/lib/api.ts` -- coverage* client functions
+- `acdb-api/frontend/src/i18n/{en,fr}/coverage.json` -- new locales
+- `acdb-api/frontend/src/i18n/{en,fr}/common.json` -- nav label
+- `acdb-api/frontend/src/i18n/index.ts` -- register coverage namespace
+- `acdb-api/frontend/src/components/Layout.tsx` -- nav entry under System (superadmin only)
+- `acdb-api/frontend/src/App.tsx` -- `/admin/coverage` route
+- `docs/ops/coverage-audit-tooling.md` -- new (operator reference)
+- `docs/ops/coverage-audit-2026-05-02-{LS,BN}.md` -- new (production audit reports)
+- `docs/ops/coverage-audit-2026-05-02-triage.md` -- new (findings + recommended ordering)
+- `CONTEXT.md` -- new "Coverage Audit (2026-05-02)" section
+
+### Senescence Notes
+
+- No degradation. Followed up cleanly from the previous session's RCA. All math from the dedup-bug fix carried forward correctly.
+
+### Protocol Feedback
+
+- The pattern of "ship the audit script + the in-CC tooling that runs the same code" worked well: testing and trust are shared between the timer-driven path and the admin UI. CONTEXT.md additions (the `(account, hour)` invariant from yesterday and the new account-keyed-zero-coverage invariant from today) are the right level of granularity for future sessions.
+
+---
+
 ## Session 2026-05-01 202605012000 (RCA: "Jan 2026 ThunderCloud import gap" was actually a `/meter-export` dedup bug)
 
 ### What Was Done
@@ -62,6 +154,141 @@ Compounding factor: `meter_id` is NOT comparable between the two tables -- `mete
 
 ### Protocol Feedback
 - The original runbook was a clear failure mode of "guess the cause from a downstream symptom" without verifying the data first. Adding a "verify before backfilling" step at the top of any future ops runbook would help. Updated the runbook to model that pattern.
+
+---
+
+## Session 2026-04-30 202604301301 (Odyssey Standard API for UEF / ZEDSI)
+
+### What Was Done
+
+Implemented sponsor-monitoring API per the Odyssey validator contract
+(https://platform.odysseyenergysolutions.com/#/standard-api/validator),
+scoped to a tag-based program model so the same code path works for any
+future funder/RBF scheme without rework.
+
+**Phase 1 — Programs + Odyssey API (live on existing LS/BN backend):**
+- Migration `017_programs_and_odyssey.sql` adds `programs`,
+  `program_memberships`, `odyssey_api_tokens`, plus
+  `customers.simple_category` and `customers.previous_energy_source`
+  (the only fields ZEDSI/Odyssey expect that we didn't already have).
+  Seeds `UEF_ZEDSI`.
+- `acdb-api/odyssey_api.py` -- public pull API at
+  `GET /api/odyssey/v1/{health,electricity-payment,meter-metrics}`.
+  Bearer-token auth (sha256 hash store), 25h max query window,
+  page/page_size pagination, joins through `program_memberships` so
+  only in-program accounts ever surface. Currency resolved per-row via
+  `country_config.get_currency_for_site`. Meter metrics roll up
+  `hourly_consumption` to UTC days and tag `error_type=offline` when no
+  readings exist for that day.
+- `acdb-api/programs.py` -- superadmin admin at
+  `/api/admin/programs/...`: CRUD, bulk tagging
+  (union of countries / sites / explicit accounts), token issue/revoke
+  (plaintext shown once), dataset preview (dry-run), and Phase 3 XLSX
+  export (`/connections.xlsx`).
+- Frontend `ProgramsPage.tsx` at `/admin/programs` (superadmin only)
+  with bulk-tag form, members table, token manager, payload preview,
+  and Connections claim export. Full EN/FR i18n.
+- Tests: `tests/test_odyssey_api.py` (20 tests covering ISO parsing,
+  window validation, payment/meter formatters, payment-type bucketing,
+  token hashing); `tests/test_programs_export.py` (7 tests, including
+  a guard test that `_CONN_COLUMNS` matches the canonical
+  `docs/uef_zedsi_claim_template.xlsx` headers and `parsingHeaders`
+  exactly).
+
+**Phase 2 — Zambia placeholder (deferred until ZEDSI sites are commissioned):**
+- Registered `ZAMBIA` in `country_config.py` with `active=False`,
+  empty `site_abbrev` / `koios_sites`, `payment_regex_id="momo_zm"`.
+  Frontend `COUNTRY_ROUTES.ZM = '/api/zm'` was already present.
+- `.github/workflows/deploy.yml` extended to apply incremental
+  migrations to `onepower_zm` if it exists, restart `1pdb-api-zm` if
+  the unit is installed, and (optionally) health-check `/api/zm/health`
+  -- all guarded so a host without ZM infra doesn't fail the deploy.
+- `docs/sop-add-new-country.md` updated with the concrete go-live steps
+  for Zambia (populate sites, implement `momo_zm` parser, stand up
+  systemd unit + Caddy route, flip `active=True`).
+
+**Phase 3 — Connections claim export (low effort, recommended):**
+- `GET /api/admin/programs/{code}/connections.xlsx?milestone=...`
+  emits an XLSX in the *exact* format the Odyssey Connections upload
+  template uses (one row per tagged account, with average monthly
+  revenue and kWh computed over the trailing 90 days). Hidden
+  `parsingHeaders` sheet preserves Odyssey internal IDs.
+- "Download claim XLSX" button on the Programs page.
+
+### Key Decisions
+- **Tag-based, not country-only**: a program (`UEF_ZEDSI`) tags
+  individual accounts so we can support partial-coverage cohorts and
+  multiple funder programs on the same backend. Bulk operations
+  (country / site / individual) keep ops easy.
+- **Token model**: bearer plaintext shown ONCE at issuance, sha256 hash
+  stored, optional 90-day expiry, revoke ⇒ subsequent calls 401. Each
+  token bound to a single `(program, country)` pair.
+- **Build on existing LS/BN backend first**: the Odyssey contract can
+  be validated against real data today (sandbox `UEF_ZEDSI_TEST`
+  program tagging a few MAK accounts) -- ZM stand-up not on critical
+  path. Same code activates on `1pdb-api-zm` once it exists.
+- **Field shape modeled on MicroPowerManager Odyssey reference**: the
+  validator's exact contract is gated behind their portal; build to
+  the published reference and refine via validator feedback (see
+  `docs/odyssey-standard-api.md` "Validator history" log).
+
+### What Next Session Should Know
+- **Apply migration 017** on `onepower_cc` (and `onepower_bj` if BN
+  should also expose the API) before the next `1pdb-api` restart, OR
+  let `deploy.yml` run it via the standard incremental migration loop.
+- **Run the validator** against the sandbox program before tagging
+  real ZEDSI customers; iterate `_format_payment_record` /
+  `_format_meter_metric_record` if Odyssey reports field-shape
+  mismatches (likely candidates: `external_id` format, `payment_type`
+  enum values, missing fields).
+- **Token storage**: plaintext is shown once on issue. The ops handoff
+  to Odyssey support is "issue, copy-paste into validator, click
+  Save". Rotate every 90 days.
+- **ZM go-live blockers**: SparkMeter / metering platform decision,
+  SMS/MoMo parser samples, `koios_org_id`, concrete site list. The
+  code path is ready; only data + ops remain.
+- **No customer fields lost**: migration 017 adds `simple_category` and
+  `previous_energy_source` as `TEXT NULL`; existing customers are
+  unaffected. The Connections XLSX export accepts blank values so an
+  early claim can be filed even before those fields are backfilled.
+
+### Files Modified
+- `acdb-api/migrations/017_programs_and_odyssey.sql` -- new
+- `acdb-api/odyssey_api.py` -- new (public pull API)
+- `acdb-api/programs.py` -- new (admin CRUD + bulk tag + token + preview + XLSX export)
+- `acdb-api/customer_api.py` -- mount the two new routers
+- `acdb-api/country_config.py` -- register `ZAMBIA` placeholder
+- `acdb-api/tests/test_odyssey_api.py` -- new (20 tests, all passing)
+- `acdb-api/tests/test_programs_export.py` -- new (7 tests, all passing)
+- `acdb-api/frontend/src/pages/ProgramsPage.tsx` -- new
+- `acdb-api/frontend/src/lib/api.ts` -- programs/Odyssey client + downloads
+- `acdb-api/frontend/src/i18n/{en,fr}/programs.json` -- new locales
+- `acdb-api/frontend/src/i18n/{en,fr}/common.json` -- nav label
+- `acdb-api/frontend/src/i18n/index.ts` -- register programs namespace
+- `acdb-api/frontend/src/components/Layout.tsx` -- nav entry under System (superadmin only)
+- `acdb-api/frontend/src/App.tsx` -- `/admin/programs` route
+- `.github/workflows/deploy.yml` -- optional ZM migration / restart / health check
+- `docs/odyssey-standard-api.md` -- new (contract / runbook / validator workflow)
+- `docs/sop-add-new-country.md` -- updated Zambia placeholder section
+- `CONTEXT.md` -- new "Funder Programs / Odyssey Standard API" section
+
+### Database Changes (Once Migration Applied)
+- `onepower_cc` (and any other 1PDB DB the migration is applied to):
+  - new tables: `programs` (1 seed row `UEF_ZEDSI`),
+    `program_memberships`, `odyssey_api_tokens`
+  - new columns: `customers.simple_category`,
+    `customers.previous_energy_source`
+
+### Senescence Notes
+- No degradation. Single feature, single session.
+
+### Protocol Feedback
+- CONTEXT.md was very helpful (architecture, schema hints, multi-country
+  pattern). The biggest unknown was the exact Odyssey contract shape --
+  the validator UI is public but the field schema is gated behind the
+  developer portal. Building to the MPM reference + iterating on
+  validator feedback is the documented workflow now in
+  `docs/odyssey-standard-api.md`.
 
 ---
 

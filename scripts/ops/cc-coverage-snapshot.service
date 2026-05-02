@@ -1,0 +1,35 @@
+[Unit]
+Description=Snapshot 1PDB coverage audit (LS + BN) into coverage_snapshots
+Documentation=file:///opt/cc-portal/backend/scripts/ops/audit_coverage_gaps.py
+Documentation=file:///opt/cc-portal/backend/docs/ops/coverage-audit-2026-05-02-triage.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=cc_api
+Group=cc_api
+EnvironmentFile=-/opt/1pdb/.env
+EnvironmentFile=-/etc/default/cc-portal
+WorkingDirectory=/opt/cc-portal/backend
+
+# Run LS audit first, then BN if the BN DATABASE_URL is configured. Both
+# write to coverage_snapshots in the country's own DB (LS audit -> LS
+# snapshots in onepower_cc; BN audit -> BN snapshots in onepower_bj).
+# A single SuccessExitStatus=0 1 lets the timer stay healthy even when one
+# country's bridge is temporarily down.
+ExecStart=/bin/bash -lc '\
+    /opt/cc-portal/backend/venv/bin/python3 \
+        /opt/cc-portal/backend/scripts/ops/audit_coverage_gaps.py \
+        --country LS --window-months 8 --snapshot --triggered-by timer \
+        --out /tmp/coverage-audit-LS.md ; \
+    if [ -n "$DATABASE_URL_BN" ]; then \
+        DATABASE_URL="$DATABASE_URL_BN" /opt/cc-portal/backend/venv/bin/python3 \
+            /opt/cc-portal/backend/scripts/ops/audit_coverage_gaps.py \
+            --country BN --window-months 8 --snapshot --triggered-by timer \
+            --out /tmp/coverage-audit-BN.md ; \
+    fi'
+
+StandardOutput=journal
+StandardError=journal
+SuccessExitStatus=0 1

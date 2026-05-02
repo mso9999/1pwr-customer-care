@@ -442,6 +442,38 @@ integration, SMS gateway.
 
 **Onboarding a new country** (e.g. Zambia): follow `docs/sop-add-new-country.md` — `country_config.py`, dedicated DB + systemd service + Caddy route, frontend `COUNTRY_ROUTES`, Koios/org keys, SMS/payment parsers, and per-country WhatsApp bridge env (`CC_BRIDGE_NOTIFY_URL_<CC>`).
 
+## Coverage Audit (2026-05-02)
+
+CC has self-serve tooling to detect 1PDB gaps versus what should be there:
+
+* CLI: [`scripts/ops/audit_coverage_gaps.py`](scripts/ops/audit_coverage_gaps.py) — read-only, JSON or Markdown output, runs in ~30s per country DB.
+* Daily snapshot: `cc-coverage-snapshot.timer` (07:30 UTC) → `coverage_snapshots` table (migration `018_*.sql`).
+* Admin UI: `/admin/coverage` (superadmin) — heatmap, deficit breakdown, zero-coverage list, stale-meter list, Koios upstream-freshness probe (cached 5 min), trend sparklines from snapshot history.
+* API: `/api/admin/coverage/{audit, snapshot, snapshots, snapshots/{id}, trend, upstream-freshness}` — all superadmin.
+
+**Key invariant**: zero-coverage check joins `meters` ↔ `hourly_consumption` on **`account_number`**, NOT `meter_id`. The meter_id format mismatch (April 2026 SparkMeter-serial migration didn't fully take — `hourly_consumption` still carries pre-migration numeric IDs for some MAK rows) means meter_id-keyed joins drastically overcount the gap. Same lesson as the [`/meter-export` dedup RCA](docs/ops/jan-2026-thundercloud-import-gap.md).
+
+**In-progress month handling**: the deficit detector excludes the current month from baseline computation AND prorates current-month rows by elapsed days, so day-2-of-31 with low volume isn't reported at "97% missing".
+
+Full operator reference: [`docs/ops/coverage-audit-tooling.md`](docs/ops/coverage-audit-tooling.md). First production audit + triage findings: [`docs/ops/coverage-audit-2026-05-02-triage.md`](docs/ops/coverage-audit-2026-05-02-triage.md).
+
+## Funder Programs / Odyssey Standard API (2026-04-30)
+
+CC exposes a tag-scoped, bearer-authenticated **pull API** that the **Odyssey** sponsor-monitoring platform calls to ingest electricity payments and meter metrics for a funder program. Initial use case is **UEF / ZEDSI** in Zambia.
+
+| Concept | Where it lives |
+|---|---|
+| Funder programs registry | `programs` table |
+| Account → program tagging | `program_memberships` table |
+| Bearer-token store | `odyssey_api_tokens` (sha256 of plaintext) |
+| Public API | `acdb-api/odyssey_api.py` → `GET /api/odyssey/v1/{health,electricity-payment,meter-metrics}` |
+| Admin (superadmin) | `acdb-api/programs.py` → `/api/admin/programs/...` (CRUD, bulk tag, token issue/revoke, dataset preview, Connections XLSX export) |
+| Admin UI | `frontend/src/pages/ProgramsPage.tsx` at `/admin/programs` |
+| Migration | `acdb-api/migrations/017_programs_and_odyssey.sql` (seeds `UEF_ZEDSI`) |
+| Runbook | `docs/odyssey-standard-api.md` |
+
+The API itself is country-agnostic: each token is bound to a single `(program, country)` pair, served from that country's backend. Customers not in `program_memberships` are invisible — no cross-program leakage on a shared backend. Validator: <https://platform.odysseyenergysolutions.com/#/standard-api/validator> (run `electricity-payment` and `meter-metrics` separately).
+
 ## `/meter-export` dedup is `(account, hour)`-grained (RCA: 2026-05-01)
 
 `acdb-api/om_report.py::meter_data_export` reads from `meter_readings` (high-res) first, then falls back to `hourly_consumption`. The dedup key is **`Set[(account_number, hour_bucket)]`**, NOT account-level. Account-level dedup (the previous behaviour) hid every `hourly_consumption` row for any account that ever appeared in `meter_readings`, which made all of January 2026 invisible after `import_tc_live.py` started populating `meter_readings_2026` from 2026-02-17. Regression test: `acdb-api/tests/test_om_report_meter_export.py`. Full RCA: [`docs/ops/jan-2026-thundercloud-import-gap.md`](docs/ops/jan-2026-thundercloud-import-gap.md).
