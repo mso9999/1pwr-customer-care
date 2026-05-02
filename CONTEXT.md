@@ -442,6 +442,12 @@ integration, SMS gateway.
 
 **Onboarding a new country** (e.g. Zambia): follow `docs/sop-add-new-country.md` — `country_config.py`, dedicated DB + systemd service + Caddy route, frontend `COUNTRY_ROUTES`, Koios/org keys, SMS/payment parsers, and per-country WhatsApp bridge env (`CC_BRIDGE_NOTIFY_URL_<CC>`).
 
+## `/meter-export` dedup is `(account, hour)`-grained (RCA: 2026-05-01)
+
+`acdb-api/om_report.py::meter_data_export` reads from `meter_readings` (high-res) first, then falls back to `hourly_consumption`. The dedup key is **`Set[(account_number, hour_bucket)]`**, NOT account-level. Account-level dedup (the previous behaviour) hid every `hourly_consumption` row for any account that ever appeared in `meter_readings`, which made all of January 2026 invisible after `import_tc_live.py` started populating `meter_readings_2026` from 2026-02-17. Regression test: `acdb-api/tests/test_om_report_meter_export.py`. Full RCA: [`docs/ops/jan-2026-thundercloud-import-gap.md`](docs/ops/jan-2026-thundercloud-import-gap.md).
+
+Note: `meter_id` is **not directly comparable** between `meter_readings` (uses `SMRSD-04-...` SparkMeter serials) and `hourly_consumption` (still carries pre-migration numeric IDs like `8721` for some MAK rows -- the April 2026 serial migration didn't fully take). `account_number` is the safe cross-table dedup key.
+
 ## Common Pitfalls
 
 ### 1. TypeScript Strict Mode

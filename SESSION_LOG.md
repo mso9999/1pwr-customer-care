@@ -3,6 +3,68 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-05-01 202605012000 (RCA: "Jan 2026 ThunderCloud import gap" was actually a `/meter-export` dedup bug)
+
+### What Was Done
+Followed `docs/ops/jan-2026-thundercloud-import-gap.md`, but only after verifying the runbook's premise. Per the workspace `.cursorrules` ("RCA over symptomatic fixes"), I took the extra step of querying production state before running the recommended backfill -- which turned out to be the right call.
+
+**What the runbook claimed:** `import_thundercloud.py` skipped ~half of January 2026, leaving `monthly_consumption` deficient. Action: re-pull TC parquet for 2026-01-01..31 and re-aggregate.
+
+**What's actually true (verified on prod via psql):**
+- `hourly_consumption` for Jan 2026 has 154,330 rows from 224 MAK meters (689 reads/meter), all loaded on 2026-02-18 from `thundercloud` source. **Healthy, no gap.**
+- `monthly_consumption` for 2026-01 has 224 accounts at 20.17 avg kWh -- consistent with Dec 2025 (21.37) and Feb 2026 (14.62). **Healthy.**
+- `meter_readings_2026` has zero rows for January, but earliest row in the table is 2026-02-17 -- `import_tc_live.py` simply hadn't started populating it yet. TC v0 live API has no historical endpoint, so this is non-backfillable from source (and unnecessary, because `hourly_consumption` has the equivalent data at 1-hour resolution).
+
+**Real RCA found:** `acdb-api/om_report.py::meter_data_export` (the `/api/om-report/meter-export` endpoint, which is what uGridPlan reads to build CDFs and the tenure arrays that surfaced the issue) deduped between `meter_readings` and `hourly_consumption` at **account level**:
+```python
+raw_accounts_covered: Set[str] = set()
+# ... in the hourly_consumption fallback ...
+if acct in raw_accounts_covered:
+    skipped_hourly_covered += 1; continue
+```
+Any account that appeared in `meter_readings` (Feb 2026 onwards for MAK) had its **entire `hourly_consumption` history hidden**, including all of January. Quantified on prod: 201 MAK accounts × 83,359 January hourly rows -- 100% shadowed, 0 surviving. This is the deficit the runbook described, just attributed to the wrong layer.
+
+Compounding factor: `meter_id` is NOT comparable between the two tables -- `meter_readings` uses `SMRSD-04-...` serials, `hourly_consumption` still carries pre-migration numeric IDs (e.g. `8721`) for MAK rows even after the April 2026 migration. So account-level was the pragmatic dedup key originally, but it should have been time-bucketed.
+
+**Fix shipped:** Changed dedup key from `Set[account_number]` to `Set[(account_number, hour_bucket)]`. An hourly row is now only skipped when `meter_readings` has a row for the same `(account, hour)`. Same-resolution preference is preserved (overlap → meter_readings wins), and any time bucket meter_readings doesn't cover surfaces the hourly fallback row.
+
+**Tests:** `acdb-api/tests/test_om_report_meter_export.py` -- 4 new tests pinning:
+1. January hourly row survives when `meter_readings` only has Feb data for the account (the headline regression).
+2. Same-hour overlap → meter_readings wins, hourly skipped.
+3. Distinct-hour-same-account hourly → survives.
+4. End-to-end row count matches expected (4 rows: 2 from meter_readings + 2 from hourly_consumption).
+
+77/77 backend tests pass.
+
+**Runbook rewritten** at `docs/ops/jan-2026-thundercloud-import-gap.md` to reflect the actual RCA, the fix, and the no-op nature of the original recommended backfill.
+
+**CONTEXT.md** got a new section documenting the `(account, hour)` dedup invariant + the meter_id format mismatch caveat, so future sessions touching `/meter-export` know not to re-introduce account-level dedup.
+
+### Key Decisions
+- **Did NOT run the recommended backfill.** Querying prod first showed the data was already there; running `import_thundercloud.py 2026-01-01 2026-01-31` would have been a no-op (idempotent ON CONFLICT) and left the actual `/meter-export` deficit unfixed. Per the .cursorrules: fixing the symptom (re-import data already present) would have masked the real bug at the API layer.
+- **`(account, hour)` dedup, not `(meter_id, hour)`.** meter_id format is inconsistent between the two tables until the April migration is finished; account_number is stable across both. Robust today, would still work after meter_id is fully normalised.
+- **Did NOT touch `import_tc_live.py` to backfill `meter_readings_2026`.** TC v0 live API has no historical endpoint -- not possible from source. The hourly fallback path now correctly fills the gap.
+
+### What Next Session Should Know
+- **Deploy needed**: push to `main`, frontend untouched but backend deploy must restart `1pdb-api` so the new `/meter-export` dedup is live. No DB migration required.
+- **Post-deploy smoke check** (curl recipe in the runbook): hit `/api/om-report/meter-export?site=MAK&customer_type=HH&start_date=2026-01-01&end_date=2026-01-31` and confirm `meta.source_rows.hourly_consumption` is ~75-85K (not 0).
+- **uGridPlan follow-up**: someone with the uGridPlan repo open needs to run `python3 scripts/refresh_tenure_arrays.py --sources smp_hh,smp_hh1` once the fix is deployed, then commit/push the refreshed NPZs. Their build-time `_validate_tenure_arrays` guard will catch any remaining distortion.
+- **Prevention work still TODO** (called out in the runbook): a daily coverage assertion that diffs yesterday's `hourly_consumption` row count against the trailing 7-day median for MAK. If/when prioritised, would have caught this in 24h.
+
+### Files Modified
+- `acdb-api/om_report.py` -- `meter_data_export` dedup key change + `meta.raw_account_hours_covered` rename
+- `acdb-api/tests/test_om_report_meter_export.py` -- 4 new regression tests
+- `docs/ops/jan-2026-thundercloud-import-gap.md` -- rewritten with actual RCA + post-fix verification recipe
+- `CONTEXT.md` -- new section documenting the dedup invariant
+
+### Senescence Notes
+- No degradation. Single focused investigation; clean handoff.
+
+### Protocol Feedback
+- The original runbook was a clear failure mode of "guess the cause from a downstream symptom" without verifying the data first. Adding a "verify before backfilling" step at the top of any future ops runbook would help. Updated the runbook to model that pattern.
+
+---
+
 ## Session 2026-04-29 202604290700 (v1.1.6: RCA for OTA-stuck-IN_PROGRESS = case fall-through in resume handler)
 
 ### What happened overnight
