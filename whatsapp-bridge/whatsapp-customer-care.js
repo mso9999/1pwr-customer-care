@@ -1030,7 +1030,14 @@ function startInboundHttpServer() {
         return;
     }
     var server = http.createServer(function(req, res) {
-        if (req.method !== "POST" || (req.url !== "/notify" && req.url !== "/notify/")) {
+        if (req.method !== "POST") {
+            res.writeHead(404);
+            res.end();
+            return;
+        }
+        var isNotify = (req.url === "/notify" || req.url === "/notify/");
+        var isBroadcast = (req.url === "/broadcast" || req.url === "/broadcast/");
+        if (!isNotify && !isBroadcast) {
             res.writeHead(404);
             res.end();
             return;
@@ -1052,6 +1059,32 @@ function startInboundHttpServer() {
                 res.end("bad json");
                 return;
             }
+            // /broadcast: send body.text VERBATIM (no "[App / meter relay]" prefix)
+            // to body.jid if provided, else the discovered ticket tracker.
+            // Used by CC monthly PIN broadcast and any future ops broadcasts.
+            if (isBroadcast) {
+                var text = (body && typeof body.text === "string") ? body.text : "";
+                if (!text) {
+                    res.writeHead(400);
+                    res.end("missing text");
+                    return;
+                }
+                var jid = body.jid || TICKET_TRACKER_JID;
+                if (!jid || !sock) {
+                    res.writeHead(503);
+                    res.end(JSON.stringify({ ok: false, reason: "wa_not_ready" }));
+                    return;
+                }
+                sock.sendMessage(jid, { text: text }).then(function() {
+                    res.writeHead(200);
+                    res.setHeader("Content-Type", "application/json");
+                    res.end(JSON.stringify({ ok: true, jid: jid, length: text.length }));
+                }).catch(function(e) {
+                    res.writeHead(500);
+                    res.end(e.message || "send failed");
+                });
+                return;
+            }
             if (!TICKET_TRACKER_JID || !sock) {
                 res.writeHead(503);
                 res.end(JSON.stringify({ ok: false, reason: "wa_not_ready" }));
@@ -1069,7 +1102,7 @@ function startInboundHttpServer() {
         });
     });
     server.listen(port, "127.0.0.1", function() {
-        console.log("[INBOUND] Listening on http://127.0.0.1:" + port + "/notify (set CC_BRIDGE_NOTIFY_URL on API)");
+        console.log("[INBOUND] Listening on http://127.0.0.1:" + port + "/notify and /broadcast (set CC_BRIDGE_NOTIFY_URL on API)");
     });
 }
 

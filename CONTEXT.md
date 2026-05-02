@@ -440,7 +440,17 @@ multi-country access), the codebase itself (deployed per-country with config).
 **What's separate**: Database, API instance, payment pipeline, SparkMeter/meter platform
 integration, SMS gateway.
 
-**Onboarding a new country** (e.g. Zambia): follow `docs/sop-add-new-country.md` — `country_config.py`, dedicated DB + systemd service + Caddy route, frontend `COUNTRY_ROUTES`, Koios/org keys, SMS/payment parsers, and per-country WhatsApp bridge env (`CC_BRIDGE_NOTIFY_URL_<CC>`).
+**Onboarding a new country** (e.g. Zambia): follow `docs/sop-add-new-country.md` — `country_config.py`, dedicated DB + systemd service + Caddy route, frontend `COUNTRY_ROUTES`, Koios/org keys, SMS/payment parsers, and per-country WhatsApp bridge env (`CC_BRIDGE_NOTIFY_URL_<CC>`). A `ZM` `CountryConfig` placeholder (currency `ZMW`, dial `260`, `active=False`) is already registered for UEF/ZEDSI; flip `active=True` once `1pdb-api-zm` and the `/api/zm` Caddy route are live.
+
+## Monthly Staff PIN (date-based, defense-in-depth on top of HR auth)
+
+CC employee login = `employee_id` (validated against the HR portal) **+** a shared **monthly staff PIN** computed from `YYYYMM / reverse(YYYYMM)` (first 4 significant digits). The PIN rotates at **00:00 UTC on the 1st of every month**.
+
+- Pure function: `acdb-api/auth.py::date_password_for(year, month)`. Pinned values: Apr 2026 = `4987`, May 2026 = `4002`, Jun 2026 = `3342`.
+- Auto-broadcast: `cc-auth-pin-broadcast.timer` (systemd, 04:00 UTC on the 1st) runs `scripts/ops/broadcast_monthly_pin.py`, which calls `auth_pin_broadcast.broadcast_pin_for_active_countries()` to push the new PIN to each country's CC WhatsApp tracker group via the bridge `/broadcast` route.
+- Manual fallback: `POST /api/admin/auth/broadcast-pin` (superadmin) — UI on `/admin/roles`.
+- Login UX: hint on the employee login form ("PIN rotates on the 1st...") and a friendlier 401 message during the first 7 days of any month. The PIN is never echoed in API responses or logs.
+- Full doc / runbook: [`docs/ops/staff-pin-rotation.md`](docs/ops/staff-pin-rotation.md).
 
 ## Coverage Audit (2026-05-02)
 

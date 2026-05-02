@@ -87,16 +87,22 @@ jobs:
           EOF
           scp -i ~/.ssh/deploy_key /tmp/hr-api.conf \
             ubuntu@${{ secrets.EC2_LINUX_HOST }}:/tmp/hr-api.conf
+          # Iterate over services that exist on this host. ZM (1pdb-api-zm) is
+          # optional — only install the drop-in if the unit is present.
           ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_LINUX_HOST }} '
             set -e
-            for svc in 1pdb-api 1pdb-api-bn; do
-              sudo mkdir -p /etc/systemd/system/${svc}.service.d
-              sudo install -m 600 -o root -g root /tmp/hr-api.conf \
-                /etc/systemd/system/${svc}.service.d/hr-api.conf
+            for svc in 1pdb-api 1pdb-api-bn 1pdb-api-zm; do
+              if systemctl list-unit-files | grep -q "^${svc}\.service"; then
+                sudo mkdir -p /etc/systemd/system/${svc}.service.d
+                sudo install -m 600 -o root -g root /tmp/hr-api.conf \
+                  /etc/systemd/system/${svc}.service.d/hr-api.conf
+                echo "HR API drop-in installed on ${svc}"
+              else
+                echo "Skipping ${svc} (unit not present on this host)"
+              fi
             done
             sudo systemctl daemon-reload
             rm -f /tmp/hr-api.conf
-            echo "HR API drop-ins installed on 1pdb-api and 1pdb-api-bn"
           '
           rm -f /tmp/hr-api.conf
 
@@ -151,11 +157,25 @@ jobs:
             else
               echo "Skipping onepower_bj (database not present on this host)"
             fi
+            # Zambia DB is optional until ZEDSI sites are commissioned (per
+            # docs/sop-add-new-country.md). Apply migrations only if the DB
+            # exists; the unit / Caddy route are stood up by ops separately.
+            if sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='onepower_zm'" 2>/dev/null | grep -q 1; then
+              apply_incremental onepower_zm
+            else
+              echo "Skipping onepower_zm (database not present on this host)"
+            fi
 
-            # Restart both API services (LS on :8100, BN on :8101)
-            sudo systemctl restart 1pdb-api
-            sudo systemctl restart 1pdb-api-bn
-            echo "Backend deployed and both services restarted"
+            # Restart API services that exist on this host (LS :8100, BN :8101, optional ZM :8102).
+            for svc in 1pdb-api 1pdb-api-bn 1pdb-api-zm; do
+              if systemctl list-unit-files | grep -q "^${svc}\.service"; then
+                sudo systemctl restart "$svc"
+                echo "Restarted ${svc}"
+              else
+                echo "Skipping ${svc} restart (unit not present)"
+              fi
+            done
+            echo "Backend deployed"
           DEPLOY_SCRIPT
 
       - name: Health check (LS)
@@ -187,3 +207,19 @@ jobs:
           done
           echo "WARNING: BN health check failed after 3 attempts"
           exit 1
+
+      # ZM is optional — health check passes silently if /api/zm/health is
+      # not yet routed through Caddy. Once Zambia goes live this becomes a
+      # hard check (mirror BN above by removing the 404 short-circuit).
+      - name: Health check (ZM, optional)
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://cc.1pwrafrica.com/api/zm/health || echo 000)
+          echo "ZM health check: HTTP $STATUS"
+          if [ "$STATUS" = "200" ]; then
+            curl -s https://cc.1pwrafrica.com/api/zm/health | python3 -m json.tool
+          elif [ "$STATUS" = "404" ] || [ "$STATUS" = "000" ]; then
+            echo "ZM API not yet deployed on this host — skipping (per SOP)"
+          else
+            echo "WARNING: ZM endpoint reachable but returned $STATUS"
+            exit 1
+          fi

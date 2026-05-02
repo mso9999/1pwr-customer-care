@@ -1,0 +1,23 @@
+[Unit]
+Description=Broadcast monthly CC staff PIN to WhatsApp groups
+Documentation=file:///opt/cc-portal/backend/scripts/ops/broadcast_monthly_pin.py
+After=network-online.target 1pdb-api.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=cc_api
+Group=cc_api
+# Reuse the same environment as the LS API (CC_BRIDGE_NOTIFY_URL_LS,
+# CC_BRIDGE_SECRET_LS, etc.). For BN-only or ZM-only hosts, drop the
+# corresponding LS lines and add the country's env file instead.
+EnvironmentFile=-/opt/cc-portal/backend/.env
+EnvironmentFile=-/etc/default/cc-portal
+WorkingDirectory=/opt/cc-portal/backend
+ExecStart=/opt/cc-portal/backend/venv/bin/python3 /opt/cc-portal/backend/scripts/ops/broadcast_monthly_pin.py
+StandardOutput=journal
+StandardError=journal
+
+# Don't fail the timer on a transient bridge outage -- the manual
+# /api/admin/auth/broadcast-pin endpoint is always available as a fallback.
+SuccessExitStatus=0 1

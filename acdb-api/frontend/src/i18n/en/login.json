@@ -16,6 +16,7 @@
   "signIn": "Sign In",
   "registrationSuccess": "Registration successful! You can now log in.",
   "loginFailed": "Login failed",
+  "pinRotationHint": "The staff PIN rotates on the 1st of each month. Check the Customer Care WhatsApp group for this month's PIN.",
   "firstTime": "First time?",
   "registerHere": "Register here",
   "alreadyRegistered": "Already registered?",

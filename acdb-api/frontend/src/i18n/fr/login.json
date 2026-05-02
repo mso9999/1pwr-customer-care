@@ -16,6 +16,7 @@
   "signIn": "Se connecter",
   "registrationSuccess": "Inscription réussie ! Vous pouvez maintenant vous connecter.",
   "loginFailed": "Échec de la connexion",
+  "pinRotationHint": "Le PIN du personnel change le 1er de chaque mois. Consultez le groupe WhatsApp Service Client pour le PIN de ce mois-ci.",
   "firstTime": "Première visite ?",
   "registerHere": "S'inscrire ici",
   "alreadyRegistered": "Déjà inscrit ?",

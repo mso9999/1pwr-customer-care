@@ -95,6 +95,86 @@ Followed up the 2026-05-01 dedup-bug session by building the comprehensive audit
 
 ---
 
+## Session 2026-05-01 202605011110 (Staff PIN rotation lockout — RCA + monthly broadcast + UX)
+
+### What happened
+On 2026-05-01 at 02:00 SAST the entire LS Customer Care team got 401 "Invalid credentials" on the portal. Pebane Ramohanoe reported it; the team was using April's PIN (`4987`) and the system had rotated to May's PIN (`4002`) at 00:00 UTC.
+
+### RCA
+No code change. The employee login uses a **date-based monthly PIN** (`auth.py::generate_date_password()`, formula `YYYYMM/reverse(YYYYMM)` → first 4 sig digits). The PIN rotates silently on the 1st of every month with no notification. The HR-portal lookup is enrichment-only and does **not** block login on its own — only the PIN can produce that 401. Confirmed by `git log --since="7 days ago"` showing no auth changes and by recomputing both months' values against the formula.
+
+### What Was Done
+Per user direction: keep the PIN as a defense-in-depth layer, but solve the silent-rotation lockout.
+
+**Bridge `/broadcast` route** (`whatsapp-bridge/whatsapp-customer-care.js`)
+- New POST route that sends `body.text` verbatim to `body.jid` (default: discovered ticket-tracker JID), no `[App / meter relay]` prefix decoration.
+
+**Python helpers**
+- `cc_bridge_notify.broadcast_to_bridge(text, country_code, jid?)` — derives `/broadcast` URL from the existing `CC_BRIDGE_NOTIFY_URL[_CC]`, posts verbatim, returns bool, never raises.
+- New `acdb-api/auth_pin_broadcast.py`:
+  - `date_password_for(year, month)` extracted from auth.py (pure function, parameterised).
+  - `compose_pin_message(year, month, include_next_month=True)` — renders the WhatsApp message; advance-notice for next month included by default.
+  - `broadcast_pin_for_active_countries()` — iterates `country_config._REGISTRY` (skips `active=False`, e.g. ZM placeholder), one bridge per country, independent failures.
+  - `is_first_week_of_month()` — used by auth.py for the friendlier 401.
+- Result dicts return `pin_prefix="4***"` only; the full PIN is never written to logs or API responses.
+
+**Ops automation**
+- `scripts/ops/broadcast_monthly_pin.py` — CLI wrapper with `--country`, `--year`/`--month`, `--dry-run`. Self-discovers backend dir for systemd context.
+- `scripts/ops/cc-auth-pin-broadcast.{service,timer}` — runs at `*-*-01 04:00:00 UTC` (06:00 SAST), `Persistent=true` so missed runs fire on next boot. Reads `/opt/cc-portal/backend/.env` + `/etc/default/cc-portal` for bridge env vars.
+- One-time install instructions in `docs/ops/staff-pin-rotation.md`.
+
+**Manual trigger + UI** (option-1 fallback)
+- `POST /api/admin/auth/broadcast-pin` and `GET /api/admin/auth/pin-preview` (both superadmin) on `acdb-api/admin.py`.
+- New panel on `/admin/roles` ("Monthly Staff PIN Broadcast"): shows preview of the message that would be sent + active country list + "Broadcast PIN to WhatsApp" button with per-country result chips.
+
+**Login UX** (option 2)
+- Login page: 11px hint under the password field in employee mode: "The staff PIN rotates on the 1st of each month..."
+- 401 detail upgrade: when wrong PIN is given during the first 7 days of any month, the message is "Invalid PIN. The 1PWR staff PIN rotates on the 1st of every month — check the Customer Care WhatsApp group for this month's PIN, or ask your manager." Outside that window: still "Invalid credentials".
+- Full EN/FR i18n on both halves.
+
+**Tests** (17 new, all passing; 73/73 backend total)
+- `tests/test_auth_pin_broadcast.py`: pinned-value tests for Apr/May/Jun 2026 PINs (drift here breaks the company), `compose_pin_message` content checks (incl. Dec→Jan rollover), `is_first_week_of_month` boundary tests, and `broadcast_pin_for_active_countries` behaviour (skips inactive ZM, honours `only=`, surfaces failures, doesn't leak PIN).
+
+### Key Decisions
+- **Keep the date-based PIN** as a 2nd factor on top of HR auth, per user direction. The lockout problem is a notification gap, not the rotation itself.
+- **Bridge `/broadcast` route** instead of stuffing the PIN into the existing `/notify` payload — keeps the verbatim message clean and doesn't conflate ticket-tracker pings with broadcasts.
+- **Advance-notice next month** in every broadcast — even one missed broadcast doesn't lock the team out twice in a row.
+- **`pin_prefix="4***"` only** in API/log responses — superadmin sees the full PIN in the message preview (they're already trusted), but the broadcast-result trail doesn't leak it.
+- **Friendly-401 only in the first 7 days** of a month — outside that window, the wrong-PIN message stays generic so we don't help dictionary attackers.
+- **Per-country independent broadcast** — a BN bridge outage doesn't block the LS broadcast and vice-versa.
+
+### What Next Session Should Know
+- **Production install needed** (one-time, ops): copy the systemd unit + timer to `/etc/systemd/system/`, `daemon-reload`, `enable --now cc-auth-pin-broadcast.timer`. Step-by-step in `docs/ops/staff-pin-rotation.md`.
+- **Immediate unblock** for May 2026: the team's PIN is `4002`. They can either get it from the WhatsApp group (once a superadmin clicks "Broadcast PIN" on `/admin/roles`) or from anyone with portal access.
+- **Bridge needs PM2 restart** after deploy of `whatsapp-customer-care.js` so the new `/broadcast` route is live: `pm2 restart whatsapp-cc`.
+- **Long-term**: replacing the shared monthly PIN with per-employee credentials is the proper fix; not done in this session per user direction. Track if/when prioritised.
+
+### Files Modified
+- `whatsapp-bridge/whatsapp-customer-care.js` — added `/broadcast` route
+- `acdb-api/auth.py` — extracted `date_password_for(year, month)`, friendlier 401 in first week of month
+- `acdb-api/auth_pin_broadcast.py` — new module
+- `acdb-api/cc_bridge_notify.py` — added `broadcast_to_bridge()`
+- `acdb-api/admin.py` — added `/auth/pin-preview` + `/auth/broadcast-pin` endpoints
+- `scripts/ops/broadcast_monthly_pin.py` — new ops script (executable)
+- `scripts/ops/cc-auth-pin-broadcast.service` — new systemd unit
+- `scripts/ops/cc-auth-pin-broadcast.timer` — new systemd timer (1st of month, 04:00 UTC)
+- `acdb-api/frontend/src/lib/api.ts` — `previewMonthlyPin` / `broadcastMonthlyPin`
+- `acdb-api/frontend/src/pages/AdminRolesPage.tsx` — `PinBroadcastSection` panel
+- `acdb-api/frontend/src/pages/LoginPage.tsx` — PIN-rotation hint
+- `acdb-api/frontend/src/i18n/{en,fr}/admin.json` — pinBroadcast* keys
+- `acdb-api/frontend/src/i18n/{en,fr}/login.json` — pinRotationHint
+- `acdb-api/tests/test_auth_pin_broadcast.py` — 17 new tests
+- `docs/ops/staff-pin-rotation.md` — runbook
+- `CONTEXT.md` — Monthly Staff PIN section
+
+### Senescence Notes
+- No degradation. Followed up cleanly from the Odyssey session (which is itself fully checkpointed in the prior entry).
+
+### Protocol Feedback
+- The earlier session's CONTEXT.md update had no entry for the PIN system, even though `auth.py` carries it. Adding it now so the next session that touches login won't re-discover the formula by reading source.
+
+---
+
 ## Session 2026-05-01 202605012000 (RCA: "Jan 2026 ThunderCloud import gap" was actually a `/meter-export` dedup bug)
 
 ### What Was Done

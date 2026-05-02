@@ -32,5 +32,15 @@
   "deptColLabel": "Label",
   "deptColRole": "CC Role",
   "deptUnmappedTitle": "Unmapped PR Departments",
-  "deptUnmappedDesc": "These departments exist in the PR system but have no CC role mapping. Click one to pre-fill the form."
+  "deptUnmappedDesc": "These departments exist in the PR system but have no CC role mapping. Click one to pre-fill the form.",
+
+  "pinBroadcastTitle": "Monthly Staff PIN Broadcast",
+  "pinBroadcastDesc": "The CC employee login PIN rotates at 00:00 UTC on the 1st of every month. A systemd timer broadcasts the new PIN to the Customer Care WhatsApp group automatically; this button is the manual fallback / re-send.",
+  "pinBroadcastTargets": "Targets",
+  "pinBroadcastPreview": "Message preview",
+  "pinBroadcastSend": "Broadcast PIN to WhatsApp",
+  "pinBroadcastSending": "Broadcasting…",
+  "pinBroadcastConfirm": "Send the current month's staff PIN to the Customer Care WhatsApp group(s) for every active country?",
+  "pinBroadcastOk": "Sent",
+  "pinBroadcastFailed": "Failed (check journalctl on bridge host)"
 }

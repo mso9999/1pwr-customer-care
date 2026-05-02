@@ -84,25 +84,34 @@ def lookup_employee(employee_id: str) -> Optional[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Date-based password
+# Date-based password (monthly staff PIN, defense-in-depth on top of HR auth)
 # ---------------------------------------------------------------------------
 
-def generate_date_password() -> str:
+def date_password_for(year: int, month: int) -> str:
+    """Return the staff PIN for an arbitrary ``(year, month)``.
+
+    Formula: ``int(YYYYMM) / int(reverse(YYYYMM))``, take the first 4
+    significant digits. Pure function -- exposed so we can compute next
+    month's PIN for the broadcast and unit-test fixed values.
     """
-    Compute the date-based password for the current month.
-    Formula: YYYYMM / reverse(YYYYMM), first 4 significant digits.
-    """
-    now = datetime.utcnow()
-    yyyymm = now.strftime("%Y%m")
+    yyyymm = f"{year:04d}{month:02d}"
     reversed_str = yyyymm[::-1]
     numerator = int(yyyymm)
     denominator = int(reversed_str)
     if denominator == 0:
         return "0000"
     result = numerator / denominator
-    # Extract first 4 significant digits
     result_str = f"{result:.10f}".replace(".", "").lstrip("0")
     return result_str[:4] if len(result_str) >= 4 else result_str.ljust(4, "0")
+
+
+def generate_date_password() -> str:
+    """
+    Compute the date-based password for the current month (UTC).
+    Thin wrapper around :func:`date_password_for` kept for callers / tests.
+    """
+    now = datetime.utcnow()
+    return date_password_for(now.year, now.month)
 
 
 # ---------------------------------------------------------------------------
@@ -115,12 +124,27 @@ def employee_login(req: EmployeeLoginRequest):
     Employee login with employee_id + date-based password.
     Cross-references HR portal for name/email.
     """
-    # Validate date-based password
+    # Validate date-based password (the monthly staff PIN -- defense-in-depth
+    # gate on top of HR-portal validation; rotates at 00:00 UTC on the 1st of
+    # every month, see ``date_password_for``).
     expected_password = generate_date_password()
     if req.password != expected_password:
+        # If we're in the first week of a month, the most likely cause is
+        # that the PIN just rotated and the staff member is still using last
+        # month's value. Surface the actionable hint -- without leaking the
+        # actual PIN.
+        from auth_pin_broadcast import is_first_week_of_month
+        if is_first_week_of_month():
+            detail = (
+                "Invalid PIN. The 1PWR staff PIN rotates on the 1st of every "
+                "month -- check the Customer Care WhatsApp group for this "
+                f"month's PIN, or ask your manager."
+            )
+        else:
+            detail = "Invalid credentials"
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
+            detail=detail,
         )
 
     # Look up employee in HR portal

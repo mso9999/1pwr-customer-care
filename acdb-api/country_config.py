@@ -7,6 +7,9 @@ dial code, Koios org ID, and other country-specific constants.
 Supported countries:
   LS  — Lesotho  (OnePower Lesotho, LSL, M-PESA)
   BN  — Benin    (MIONWA GENERATION, XOF, MTN MoMo)
+  ZM  — Zambia   (TBD operator, ZMW, Airtel/MTN MoMo) -- placeholder for
+                  UEF/ZEDSI onboarding; populate site_abbrev /
+                  koios_sites once concrete sites are commissioned.
 """
 
 import os
@@ -113,9 +116,31 @@ BENIN = CountryConfig(
     display_name="Bénin",
 )
 
+ZAMBIA = CountryConfig(
+    code="ZM",
+    name="Zambia",
+    currency="ZMW",
+    currency_symbol="K",
+    dial_code="260",
+    koios_org_id="",  # TBD -- set once SparkMeter / metering platform is selected
+    timezone="Africa/Lusaka",
+    utc_offset_hours=2,
+    default_tariff_rate=5.0,  # placeholder; align with ZESCO / ZEDSI tariff schedule before go-live
+    site_abbrev={},  # populate per UEF ZEDSI commissioning roadmap
+    site_districts={},  # provinces enumerated in customer.locationDistrictHidden of the claim template:
+        # Central, Copperbelt, Eastern, Luapula, Lusaka, Muchinga,
+        # North-Western, Northern, Southern, Western. Map per-site once sites are confirmed.
+    koios_sites={},  # populate when SparkMeter org / sites are provisioned
+    payment_regex_id="momo_zm",  # parser stub; implement when SMS gateway samples are available
+    active=False,  # flip to True once 1PDB-ZM and the API service are live
+    display_name="Zambia",
+)
+
+
 _REGISTRY: Dict[str, CountryConfig] = {
     "LS": LESOTHO,
     "BN": BENIN,
+    "ZM": ZAMBIA,
 }
 
 

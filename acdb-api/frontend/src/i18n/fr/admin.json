@@ -32,5 +32,15 @@
   "deptColLabel": "Libellé",
   "deptColRole": "Rôle CC",
   "deptUnmappedTitle": "Départements PR non mappés",
-  "deptUnmappedDesc": "Ces départements existent dans le système PR mais n'ont pas de rôle CC associé. Cliquez pour pré-remplir le formulaire."
+  "deptUnmappedDesc": "Ces départements existent dans le système PR mais n'ont pas de rôle CC associé. Cliquez pour pré-remplir le formulaire.",
+
+  "pinBroadcastTitle": "Diffusion mensuelle du PIN du personnel",
+  "pinBroadcastDesc": "Le PIN de connexion employé CC change à 00h00 UTC le 1er de chaque mois. Un timer systemd diffuse automatiquement le nouveau PIN dans le groupe WhatsApp Customer Care ; ce bouton est le déclencheur manuel / re-diffusion.",
+  "pinBroadcastTargets": "Cibles",
+  "pinBroadcastPreview": "Aperçu du message",
+  "pinBroadcastSend": "Diffuser le PIN sur WhatsApp",
+  "pinBroadcastSending": "Diffusion en cours…",
+  "pinBroadcastConfirm": "Envoyer le PIN du personnel pour ce mois au(x) groupe(s) WhatsApp Customer Care de chaque pays actif ?",
+  "pinBroadcastOk": "Envoyé",
+  "pinBroadcastFailed": "Échec (vérifier journalctl sur l'hôte du bridge)"
 }

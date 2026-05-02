@@ -275,3 +275,71 @@ def list_pr_departments(
     """Return all departments from the PR Firestore for the admin UI."""
     from pr_lookup import get_all_pr_departments
     return get_all_pr_departments()
+
+
+# ---------------------------------------------------------------------------
+# Monthly staff-PIN broadcast (manual trigger)
+# ---------------------------------------------------------------------------
+
+class _BroadcastPinRequest(BaseModel):
+    """Optional knobs for the manual PIN broadcast."""
+    countries: Optional[List[str]] = None  # e.g. ["LS"]; default: every active
+    include_next_month: bool = True
+
+
+@router.get("/auth/pin-preview")
+def auth_pin_preview(
+    user: CurrentUser = Depends(require_role(CCRole.superadmin)),
+):
+    """Preview the message that the monthly PIN broadcast would send.
+
+    Returns the rendered text + the active countries it would target. The
+    PIN itself is included since the requester is already authenticated as
+    superadmin (same trust level as anyone who can pull the PIN from the
+    server's env or run the systemd unit).
+    """
+    from auth_pin_broadcast import compose_pin_message
+    from country_config import _REGISTRY  # type: ignore[attr-defined]
+    from datetime import datetime, timezone
+
+    when = datetime.now(timezone.utc)
+    msg = compose_pin_message(when.year, when.month, include_next_month=True)
+    targets = sorted(c for c, cfg in _REGISTRY.items() if cfg.active)
+    return {
+        "year": when.year,
+        "month": when.month,
+        "active_countries": targets,
+        "message": msg,
+    }
+
+
+@router.post("/auth/broadcast-pin")
+def auth_broadcast_pin(
+    req: _BroadcastPinRequest,
+    user: CurrentUser = Depends(require_role(CCRole.superadmin)),
+):
+    """Manually trigger the monthly PIN WhatsApp broadcast.
+
+    Mirrors the systemd-timer-driven path
+    (``scripts/ops/broadcast_monthly_pin.py``) so ops have an in-portal
+    fallback when the timer is down or when the team needs a re-send.
+    """
+    from auth_pin_broadcast import broadcast_pin_for_active_countries
+
+    results = broadcast_pin_for_active_countries(
+        only=req.countries,
+        include_next_month=req.include_next_month,
+    )
+    try_log_mutation(
+        user, "broadcast_pin", "auth_pin_broadcast", "monthly",
+        new_values={"results": results},
+        metadata={"origin": "admin_manual_trigger"},
+    )
+    logger.info(
+        "Manual PIN broadcast by %s -- countries=%s ok=%d failed=%d",
+        user.user_id,
+        [r["country_code"] for r in results],
+        sum(1 for r in results if r["ok"]),
+        sum(1 for r in results if not r["ok"]),
+    )
+    return {"results": results}

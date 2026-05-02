@@ -95,6 +95,11 @@ export default function LoginPage() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                 required
               />
+              {mode === 'employee' && (
+                <p className="mt-1 text-[11px] text-gray-500">
+                  {t('pinRotationHint')}
+                </p>
+              )}
             </div>
 
             {error && <p className="text-red-600 text-sm bg-red-50 p-2 rounded">{error}</p>}

@@ -123,7 +123,17 @@ Never point a **production** `DATABASE_URL` at another country’s DB.
 
 ## Reference: Zambia placeholder
 
-`CONTEXT.md` already lists a **Zambia API** placeholder (`cc-api-zm`, ZMW, Airtel/MTN, TBD metering). Before marking Zambia “live,” replace TBD items with concrete Koios/operator IDs, parsers, and ports, then tick the checklist above.
+`CONTEXT.md` already lists a **Zambia API** placeholder (`cc-api-zm`, ZMW, Airtel/MTN, TBD metering). The codebase now ships a stub `ZAMBIA` `CountryConfig` in [`acdb-api/country_config.py`](../acdb-api/country_config.py) with `active=False`, empty `site_abbrev` / `koios_sites`, and `payment_regex_id="momo_zm"`. To go live:
+
+1. Populate `site_abbrev` / `site_districts` / `koios_sites` with the commissioned sites.
+2. Confirm tariff and metering platform; update `default_tariff_rate` and `koios_org_id`.
+3. Implement `momo_zm` SMS parser alongside `mpesa_sms.py` once SMS samples are available.
+4. Stand up `onepower_zm` DB (the deploy workflow already applies incremental migrations to it if the DB exists; same is true for the optional `1pdb-api-zm` systemd unit and the `/api/zm/health` health check).
+5. Add a Caddy route for `/api/zm/*` and `/api/zm/health` to the new service.
+6. Flip `active=True` in `country_config.py` so the country selector starts surfacing Zambia.
+7. Tick the checklist above.
+
+The Odyssey Standard API ([`docs/odyssey-standard-api.md`](odyssey-standard-api.md)) is country-agnostic — once `1pdb-api-zm` is up, the same `programs` / `program_memberships` migration (`017_*.sql`) wires UEF/ZEDSI customers into the API without code changes.
 
 ---
 

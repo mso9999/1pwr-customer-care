@@ -4,6 +4,8 @@ import {
   listRoles, assignRole, updateRole, removeRole, type RoleAssignment,
   listDepartmentMappings, addDepartmentMapping, removeDepartmentMapping,
   listPRDepartments, type DepartmentMapping, type PRDepartment,
+  previewMonthlyPin, broadcastMonthlyPin,
+  type PinPreview, type PinBroadcastResult,
 } from '../lib/api';
 
 const ROLES = ['superadmin', 'onm_team', 'finance_team', 'generic'];
@@ -311,6 +313,100 @@ export default function AdminRolesPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+      </div>
+
+      {/* ================================================================ */}
+      {/* SECTION 3: Monthly Staff PIN Broadcast                            */}
+      {/* ================================================================ */}
+      <PinBroadcastSection />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Monthly staff-PIN broadcast (manual trigger + preview)
+// ---------------------------------------------------------------------------
+function PinBroadcastSection() {
+  const { t } = useTranslation(['admin']);
+  const [preview, setPreview] = useState<PinPreview | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [results, setResults] = useState<PinBroadcastResult[] | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    previewMonthlyPin()
+      .then(setPreview)
+      .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const send = async () => {
+    if (!confirm(t('admin:pinBroadcastConfirm'))) return;
+    setBusy(true);
+    setErr('');
+    setResults(null);
+    try {
+      const r = await broadcastMonthlyPin();
+      setResults(r.results);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="border-t pt-6">
+      <h2 className="text-lg font-bold text-gray-800 mb-1">{t('admin:pinBroadcastTitle')}</h2>
+      <p className="text-sm text-gray-500 mb-4">{t('admin:pinBroadcastDesc')}</p>
+
+      {err && <p className="text-red-600 text-sm bg-red-50 p-3 rounded mb-3">{err}</p>}
+
+      <div className="bg-white rounded-lg shadow p-4 sm:p-5 space-y-3">
+        {loading ? (
+          <div className="text-sm text-gray-400">{t('admin:loading')}</div>
+        ) : preview ? (
+          <>
+            <div className="flex flex-wrap items-center gap-3 text-sm text-gray-600">
+              <span className="font-medium">{t('admin:pinBroadcastTargets')}:</span>
+              {preview.active_countries.length === 0 ? (
+                <span className="text-gray-400">--</span>
+              ) : (
+                preview.active_countries.map((c) => (
+                  <span key={c} className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-mono">
+                    {c}
+                  </span>
+                ))
+              )}
+            </div>
+            <div>
+              <p className="text-xs text-gray-500 mb-1">{t('admin:pinBroadcastPreview')}</p>
+              <pre className="bg-gray-50 border border-gray-200 rounded p-3 text-xs whitespace-pre-wrap font-mono">{preview.message}</pre>
+            </div>
+          </>
+        ) : null}
+
+        <button
+          onClick={send}
+          disabled={busy || loading || (preview?.active_countries?.length ?? 0) === 0}
+          className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700 disabled:opacity-50"
+        >
+          {busy ? t('admin:pinBroadcastSending') : t('admin:pinBroadcastSend')}
+        </button>
+
+        {results && (
+          <div className="space-y-1">
+            {results.map((r) => (
+              <div key={r.country_code} className={`text-xs px-2 py-1 rounded ${r.ok ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-700'}`}>
+                <span className="font-mono font-semibold">{r.country_code}</span>
+                <span className="ml-2">{r.month_label}</span>
+                <span className="ml-2">{r.ok ? t('admin:pinBroadcastOk') : t('admin:pinBroadcastFailed')}</span>
+              </div>
+            ))}
           </div>
         )}
       </div>
