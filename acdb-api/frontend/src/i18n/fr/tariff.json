@@ -10,6 +10,24 @@
     "pending": "En attente : {{rate}}",
     "help": "Tarif par défaut appliqué en l'absence de surcharge par concession ou par client."
   },
+  "countryFees": {
+    "title": "Frais de raccordement et de readyboard",
+    "subtitle": "Frais ponctuels par pays. Utilisés par le classifieur de paiements SMS / manuel.",
+    "edit": "Modifier",
+    "saved": "Frais pays mis à jour.",
+    "connection": "Frais de raccordement",
+    "readyboard": "Frais readyboard",
+    "help": "Un client payant exactement le frais de raccordement ou de readyboard est auto-étiqueté pour vérification finance au lieu d'être crédité en kWh. Après vérification, les paiements futurs du même montant suivent la voie normale."
+  },
+  "lowBalance": {
+    "title": "SMS solde bas (kWh)",
+    "subtitle": "Seuils par pays pour les SMS automatiques de solde bas. Le Lesotho et le Bénin ont chacun leur base de données.",
+    "edit": "Modifier",
+    "saved": "Seuils solde bas mis à jour.",
+    "warn": "Alerter à partir de (kWh)",
+    "clear": "Réinitialiser l’alerte au-dessus de (kWh)",
+    "help": "Lorsque le solde atteint le seuil d’alerte, un SMS est envoyé jusqu’à ce que le client recharge au-delà du seuil de réinitialisation. Les valeurs concernent uniquement ce pays (changez de pays à la connexion pour modifier l’autre)."
+  },
   "tabs": {
     "overrides": "Surcharges tarifaires",
     "history": "Historique des modifications"

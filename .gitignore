@@ -19,3 +19,7 @@ EOver.pem
 
 # Pandoc-generated Word exports (open locally; do not commit)
 docs/ops/*.docx
+
+# LaTeX build artifacts (e.g. 1meter-1pdb-white-paper.tex)
+docs/ops/*.aux
+docs/ops/*.out

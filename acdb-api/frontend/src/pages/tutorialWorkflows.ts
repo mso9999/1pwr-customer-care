@@ -44,6 +44,13 @@ export const TUTORIAL_WORKFLOWS: TutorialWorkflowDef[] = [
     helpSectionIds: ['payments', 'payments', 'data-browsers', 'customers'],
   },
   {
+    id: 'advances',
+    i18nKey: 'workflows.advances',
+    rolesKey: 'roles.financeOnm',
+    links: ['/tariffs', '/advances', '/advances', '/customer-data', '/payment-verification'],
+    helpSectionIds: ['tariffs', 'advances', 'advances', 'advances', 'payments'],
+  },
+  {
     id: 'reporting',
     i18nKey: 'workflows.reporting',
     rolesKey: 'roles.allEmployees',

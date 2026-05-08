@@ -10,6 +10,24 @@
     "pending": "Pending: {{rate}}",
     "help": "This is the default rate applied when no concession or customer override exists."
   },
+  "countryFees": {
+    "title": "Connection & Readyboard Fees",
+    "subtitle": "Country-level one-off fees. Used by the SMS / manual payment classifier.",
+    "edit": "Edit",
+    "saved": "Country fees updated.",
+    "connection": "Connection fee",
+    "readyboard": "Readyboard fee",
+    "help": "A customer paying exactly the connection or readyboard fee is auto-tagged for finance verification rather than credited as kWh. After the fee is verified, future payments of the same amount route normally."
+  },
+  "lowBalance": {
+    "title": "Low balance SMS (kWh)",
+    "subtitle": "Country-specific thresholds for automated low-balance text messages. Lesotho and Benin each use their own backend database.",
+    "edit": "Edit",
+    "saved": "Low balance thresholds updated.",
+    "warn": "Warn at or below (kWh)",
+    "clear": "Clear alert after above (kWh)",
+    "help": "When remaining balance falls to the warn level, customers receive one SMS until they top up past the clear level. Values apply only to this country (switch country at login to edit elsewhere)."
+  },
   "tabs": {
     "overrides": "Rate Overrides",
     "history": "Change History"

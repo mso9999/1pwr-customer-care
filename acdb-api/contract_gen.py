@@ -19,7 +19,6 @@ from os.path import join
 from pathlib import Path
 from typing import Optional
 from urllib.parse import quote
-
 import jinja2
 import requests
 from xhtml2pdf import pisa
@@ -46,7 +45,6 @@ TEMPLATE_SO = _env.get_template("template_so.html")
 # ---------------------------------------------------------------------------
 
 CUTTLY_TOKEN: Optional[str] = os.environ.get("CUTTLY_TOKEN")
-SMS_SERVER_URL: Optional[str] = os.environ.get("SMS_SERVER_URL")
 CONTRACT_BASE_URL: str = os.environ.get("CONTRACT_BASE_URL", "https://cc.1pwrafrica.com")
 
 STAFF_NAME = "Matthew Orosz"
@@ -210,20 +208,6 @@ def shorten_url(full_link: str) -> str:
 # SMS delivery
 # ---------------------------------------------------------------------------
 
-def _add_les_dialing_code(phone_number: str) -> str:
-    """Ensure Lesotho dialing code (266) is prepended."""
-    phone_number = str(phone_number).strip()
-    if not phone_number:
-        return phone_number
-    if "266" in phone_number:
-        return phone_number
-    if phone_number.startswith("+"):
-        return phone_number[1:]
-    if len(phone_number) == 8:
-        return f"266{phone_number}"
-    return phone_number
-
-
 def send_contract_sms(
     *,
     first_name: str,
@@ -237,9 +221,7 @@ def send_contract_sms(
     Sends a Sesotho message (primary language) with the Sesotho link.
     Returns True if the SMS was dispatched successfully.
     """
-    if not SMS_SERVER_URL:
-        logger.warning("SMS_SERVER_URL not set – skipping SMS")
-        return False
+    from sms_outbound import send_gateway_sms
 
     short_so = shorten_url(so_url)
 
@@ -249,18 +231,7 @@ def send_contract_sms(
         f"Hore u e bale u lokeloa ho e bula ka internet."
     )
 
-    number = _add_les_dialing_code(phone_number)
-    url = (
-        f"{SMS_SERVER_URL}/generate_and_send.php"
-        f"?message={quote(message)}&type=welcome&number={number}"
-    )
-    try:
-        requests.get(url, timeout=15)
-        logger.info("SMS sent to %s", number)
-        return True
-    except Exception as exc:
-        logger.error("SMS send failed for %s: %s", number, exc)
-        return False
+    return send_gateway_sms(phone_number, message, sms_type="welcome")
 
 
 # ---------------------------------------------------------------------------

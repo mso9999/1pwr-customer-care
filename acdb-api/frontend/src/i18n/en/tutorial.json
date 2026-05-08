@@ -9,7 +9,8 @@
     "allEmployees": "All employees",
     "onmSuperadmin": "superadmin, onm_team (plus others where noted)",
     "financeAll": "All employees; finance leads verification",
-    "financeOps": "Finance and operations (tariffs, financing, exports)"
+    "financeOps": "Finance and operations (tariffs, financing, exports)",
+    "financeOnm": "superadmin, finance_team, onm_team (write); all employees (view)"
   },
   "workflows": {
     "orientation": {
@@ -28,10 +29,10 @@
       "description": "End-to-end flow from registration through metering; align with your local SOPs.",
       "steps": [
         "Register the customer (identity, phone, site/concession, customer type).",
-        "Route connection or readyboard fees through payment verification when M-Pesa/MoMo posts need matching.",
+        "When the customer pays the connection fee or full readyboard fee by mobile money, the portal recognises the exact amount automatically and queues it for finance verification — no manual matching required. If the customer can't pay it in full, grant an advance instead (see the Advances walkthrough).",
         "Run the commissioning wizard to verify details, signatures, and paperwork.",
         "Assign or confirm the meter and serial in the meter registry.",
-        "Use Customer Data for balances, charts, and transaction history.",
+        "Use Customer Data for balances, charts, and transaction history (including any active advances).",
         "Track funnel position on the Pipeline page."
       ]
     },
@@ -39,10 +40,21 @@
       "title": "Payments & reconciliation",
       "description": "When SMS gateway data is missing or needs review, and how to trace credits.",
       "steps": [
-        "Record a missed mobile-money payment so 1PDB and SparkMeter stay aligned.",
-        "Work the verification queue for fees and deposits that need human matching.",
-        "Browse Transactions for recent credits and amounts site-wide.",
-        "Drill into Customer Data for a specific account’s history and balance context."
+        "Record a missed mobile-money payment so 1PDB and SparkMeter stay aligned. The classifier auto-detects connection / readyboard fees by exact amount; an active advance is repaid before electricity credit is applied.",
+        "Work the verification queue for fees and deposits that need human matching — connection and readyboard fees auto-route here.",
+        "Browse Transactions for recent credits and amounts site-wide; the kWh balance column reflects the kWh balance after each row.",
+        "Drill into Customer Data for a specific account’s history, balance context, and any Active Advances panel."
+      ]
+    },
+    "advances": {
+      "title": "Connection / readyboard advances",
+      "description": "Grant, manage, and reconcile fee advances when a customer can't pay the full amount up-front.",
+      "steps": [
+        "Confirm the country fee amounts on the Tariffs page (Connection & Readyboard Fees card). These are the exact amounts the classifier looks for and the defaults pre-filled when granting an advance.",
+        "On the Advances page, click 'New advance', pick the customer, type (connection or readyboard), repayment fraction (default 50%), monthly fee % (premium), and upload the signed contract — the contract upload is required.",
+        "Once active, every electricity payment automatically siphons the repayment fraction toward the advance; the rest is credited as kWh. The ledger shows every grant, repayment, monthly fee accrual, contract replacement, and write-off.",
+        "Open Customer Data for the affected account to see the Active Advances panel with progress bar; deep-link back to the Advances page to edit or replace the contract.",
+        "Recognised fee payments still flow through Payment Verification — the advance is only repaid by subsequent electricity payments, not by the matched fee."
       ]
     },
     "reporting": {

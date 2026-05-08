@@ -22,7 +22,7 @@
   "colKwh": "kWh",
   "colRate": "Tarif",
   "colType": "Type",
-  "colBalance": "Solde",
+  "colBalance": "Solde (kWh)",
   "payment": "Paiement",
   "vend": "Crédit",
   "deleting": "Suppression…",

@@ -123,6 +123,55 @@ async function downloadFile(path: string, fallbackFilename: string, options: Req
   URL.revokeObjectURL(url);
 }
 
+async function requestMultipart<T>(path: string, form: FormData, method = 'POST'): Promise<T> {
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(`${getApiBase()}${path}`, { method, headers, body: form });
+
+  if (res.status === 401) {
+    localStorage.removeItem('cc_token');
+    localStorage.removeItem('cc_user');
+    window.location.href = '/login';
+    throw new Error('Unauthorized');
+  }
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: res.statusText }));
+    const msg = formatApiErrorDetail(body.detail) || res.statusText || `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+
+  if (res.status === 204 || res.headers.get('content-length') === '0') {
+    return {} as T;
+  }
+  return res.json();
+}
+
+function openInNewTab(path: string): void {
+  const token = getToken();
+  // Authenticated download via blob fetch -> object URL.
+  fetch(`${getApiBase()}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  })
+    .then((res) => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.blob().then((blob) => ({ blob, type: res.headers.get('content-type') || '' }));
+    })
+    .then(({ blob }) => {
+      const url = URL.createObjectURL(blob);
+      window.open(url, '_blank', 'noopener');
+      // Defer revocation so the new tab has time to render.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    })
+    .catch((err) => {
+      console.error('openInNewTab failed', err);
+    });
+}
+
 // ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
@@ -2414,4 +2463,167 @@ export async function setFleetBillingPriority(
     method: 'PATCH',
     body: JSON.stringify({ priority, note }),
   });
+}
+
+// ---------------------------------------------------------------------------
+// Country fees (connection / readyboard)
+// ---------------------------------------------------------------------------
+
+export interface CountryFees {
+  connection_fee_amount: number;
+  readyboard_fee_amount: number;
+  /** Low-balance SMS: warn at or below this remaining kWh (country-specific). */
+  low_balance_kwh_threshold: number;
+  /** Reset “already warned” after balance rises above this kWh. */
+  low_balance_kwh_clear: number;
+  currency: string;
+  currency_symbol: string;
+  country_code: string;
+}
+
+export async function getCountryFees(): Promise<CountryFees> {
+  return request('/admin/country-fees');
+}
+
+export async function updateCountryFees(
+  payload: Partial<
+    Pick<
+      CountryFees,
+      'connection_fee_amount' | 'readyboard_fee_amount' | 'low_balance_kwh_threshold' | 'low_balance_kwh_clear'
+    >
+  >
+): Promise<CountryFees> {
+  return request('/admin/country-fees', {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Advances (connection / readyboard advance ledger)
+// ---------------------------------------------------------------------------
+
+export type AdvanceType = 'connection' | 'readyboard';
+export type AdvanceStatus = 'active' | 'paid_off' | 'written_off';
+export type AdvanceLedgerEntryType =
+  | 'grant'
+  | 'repayment'
+  | 'monthly_fee'
+  | 'adjustment'
+  | 'writeoff'
+  | 'contract_replaced';
+
+export interface AdvanceLedgerEntry {
+  id: number;
+  entry_type: AdvanceLedgerEntryType;
+  amount: number;
+  balance_after: number;
+  source_transaction_id: number | null;
+  accrual_period: string | null;
+  created_by: string | null;
+  created_at: string;
+  note: string | null;
+}
+
+export interface Advance {
+  id: number;
+  account_number: string;
+  advance_type: AdvanceType;
+  original_amount: number;
+  outstanding: number;
+  currency: string;
+  repayment_fraction: number;
+  monthly_fee_pct: number;
+  status: AdvanceStatus;
+  created_by: string;
+  created_at: string;
+  last_accrual_at: string | null;
+  paid_off_at: string | null;
+  note: string | null;
+  contract_url?: string;
+  contract_filename: string;
+  contract_content_type: string;
+  contract_size_bytes: number;
+  contract_sha256: string;
+  contract_uploaded_by: string;
+  contract_uploaded_at: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  ledger?: AdvanceLedgerEntry[];
+}
+
+export interface AdvanceListResponse {
+  advances: Advance[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export async function listAdvances(params?: {
+  account_number?: string;
+  status?: AdvanceStatus;
+  advance_type?: AdvanceType;
+  limit?: number;
+  offset?: number;
+}): Promise<AdvanceListResponse> {
+  const qs = new URLSearchParams();
+  if (params?.account_number) qs.set('account_number', params.account_number);
+  if (params?.status) qs.set('status', params.status);
+  if (params?.advance_type) qs.set('advance_type', params.advance_type);
+  if (params?.limit != null) qs.set('limit', String(params.limit));
+  if (params?.offset != null) qs.set('offset', String(params.offset));
+  const q = qs.toString();
+  return request(`/advances${q ? '?' + q : ''}`);
+}
+
+export async function getAdvance(id: number): Promise<Advance> {
+  return request(`/advances/${id}`);
+}
+
+export async function createAdvance(input: {
+  account_number: string;
+  advance_type: AdvanceType;
+  original_amount: number;
+  monthly_fee_pct?: number;
+  repayment_fraction?: number;
+  note?: string;
+  contract: File;
+}): Promise<{ id: number; status: string; contract: string }> {
+  const form = new FormData();
+  form.append('account_number', input.account_number);
+  form.append('advance_type', input.advance_type);
+  form.append('original_amount', String(input.original_amount));
+  form.append('monthly_fee_pct', String(input.monthly_fee_pct ?? 0));
+  form.append('repayment_fraction', String(input.repayment_fraction ?? 0.5));
+  if (input.note) form.append('note', input.note);
+  form.append('contract', input.contract);
+  return requestMultipart('/advances', form);
+}
+
+export async function patchAdvance(id: number, body: {
+  monthly_fee_pct?: number;
+  repayment_fraction?: number;
+  note?: string;
+}): Promise<{ status: string; id: number }> {
+  return request(`/advances/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function replaceAdvanceContract(id: number, contract: File): Promise<{ id: number; contract: string }> {
+  const form = new FormData();
+  form.append('contract', contract);
+  return requestMultipart(`/advances/${id}/contract`, form);
+}
+
+export async function writeoffAdvance(id: number, note?: string): Promise<{ id: number; wrote_off_outstanding: number }> {
+  return request(`/advances/${id}/writeoff`, {
+    method: 'POST',
+    body: JSON.stringify({ note: note || null }),
+  });
+}
+
+export function openAdvanceContract(id: number): void {
+  openInNewTab(`/advances/${id}/contract`);
 }

@@ -311,6 +311,8 @@ from relay_control import router as relay_control_router
 from odyssey_api import router as odyssey_api_router
 from programs import router as programs_router
 from coverage_audit import router as coverage_audit_router
+from advances import router as advances_router
+from country_fees import router as country_fees_router
 
 from db_auth import init_auth_db
 init_auth_db()
@@ -345,6 +347,8 @@ app.include_router(relay_control_router)
 app.include_router(odyssey_api_router)
 app.include_router(programs_router)
 app.include_router(coverage_audit_router)
+app.include_router(advances_router)
+app.include_router(country_fees_router)
 ensure_meter_assignments_table()
 warm_stats_cache()
 

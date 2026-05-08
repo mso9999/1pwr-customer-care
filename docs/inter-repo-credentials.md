@@ -37,12 +37,13 @@
 | Kind | Location | Notes |
 |------|-----------|--------|
 | **GitHub Actions** | Repo → *Settings → Secrets and variables → Actions* | `EC2_SSH_KEY`, `EC2_LINUX_HOST` — see `.github/workflows/deploy.yml`. |
-| **Production API env** | `/opt/1pdb/.env` (Lesotho), `/opt/1pdb-bn/.env` (Benin) | `DATABASE_URL`, Koios keys, optional `DATABASE_URL_BN`, bridge URLs, `IOT_INGEST_KEY` (must match Lambda), etc. Owner `cc_api`. |
+| **Production API env** | `/opt/1pdb/.env` (Lesotho), `/opt/1pdb-bn/.env` (Benin) | `DATABASE_URL`, Koios keys, optional `DATABASE_URL_BN`, bridge URLs, `IOT_INGEST_KEY` (must match Lambda), **`SMS_SERVER_URL`** (outbound customer SMS via gateway PHP), **`SMS_PAYMENT_RECEIPT_ENABLED`** (default on — post-payment balance SMS from `/api/sms/incoming`; set `0` to disable), **`LOW_BALANCE_ALERTS_ENABLED`** for the scheduled low-balance job, etc. Owner `cc_api`. |
 | **Portal artifacts** | `/opt/cc-portal/frontend/`, `/opt/cc-portal/backend/` | Deployed from CI; `.env` never rsync’d from git. |
 | **Caddy** | `/etc/caddy/Caddyfile`, TLS/ACME | No DB passwords. |
 | **WhatsApp bridge** | PM2 on CC host | `CC_BRIDGE_SECRET`, `CC_API`, per-country `CC_BRIDGE_NOTIFY_*` — see `docs/whatsapp-customer-care.md`. |
 | **Firebase** | Server-only | `firebase-service-account.json` excluded from deploy rsync; must exist on host if used. |
 | **Ingest API** | `acdb-api/ingest.py` | Prototype meter POST `/api/meters/reading` uses env `IOT_INGEST_KEY`; must match **ingestion_gate** Lambda env `ONEPDB_API_KEY`. |
+| **SMS gateway ↔ CC balance** | Same env as webhook | **`SMS_GATEWAY_KEY`** authenticates **`GET /api/payments/gateway/balance/{account}`** (balance by account) and **`GET /api/payments/gateway/balances-by-phone?phone=…`** (callback / handset → all accounts + balances). Matches **1PDB** (`balance_engine`), not Koios/ThunderCloud. |
 
 ---
 
@@ -60,6 +61,7 @@
 
 | Kind | Location | Notes |
 |------|-----------|--------|
+| **1PDB balance for outbound SMS** | Team vault + CC `/opt/1pdb/.env` `SMS_GATEWAY_KEY` | PHP should **`GET https://cc.1pwrafrica.com/api/payments/gateway/balance/{account}`** with **`X-Gateway-Key`** — see 1PWR CC `CONTEXT.md` (*SMS payment gateways*). Replaces ThunderCloud/Koios balance reads for customer-facing SMS. **SMS host:** set **`CC_GATEWAY_KEY`** (same value) and optional **`CC_PORTAL_BASE`** in the env used by `sparkmeter/new_file_watcher.php` (see `SMSComms/sparkmeter/cc_1pdb_gateway.php`). |
 | **PHP / DB** | `db.php` on the gateway host | DB address and credentials for SMS metadata; not in git. |
 | **SMS provider** | `send.php` / CM.com | API keys for outbound SMS — hosting or env on PHP server. |
 | **Hosting** | cPanel / FTP / provider | Domain and TLS managed outside CC repo. |

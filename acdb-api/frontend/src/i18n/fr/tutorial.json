@@ -9,7 +9,8 @@
     "allEmployees": "Tous les employés",
     "onmSuperadmin": "superadmin, onm_team (et autres selon les cas)",
     "financeAll": "Tous les employés ; la finance pilote la vérification",
-    "financeOps": "Finance et opérations (tarifs, financement, exports)"
+    "financeOps": "Finance et opérations (tarifs, financement, exports)",
+    "financeOnm": "superadmin, finance_team, onm_team (écriture) ; tous les employés (lecture)"
   },
   "workflows": {
     "orientation": {
@@ -28,10 +29,10 @@
       "description": "De l’inscription au comptage ; adaptez aux procédures locales.",
       "steps": [
         "Enregistrer le client (identité, téléphone, site/concession, type).",
-        "Faire passer les frais de raccordement ou de tableau par la file de vérification lorsque les paiements M-Pesa/MoMo doivent être rapprochés.",
+        "Lorsque le client paie le frais de raccordement ou le tableau complet par mobile money, le portail reconnaît automatiquement le montant exact et le place en file de vérification — aucun rapprochement manuel requis. S'il ne peut pas payer la totalité, accordez plutôt une avance (voir le parcours Avances).",
         "Lancer l’assistant de mise en service pour vérifier les informations, signatures et documents.",
         "Attribuer ou confirmer le compteur et le numéro de série dans le registre.",
-        "Utiliser Données clients pour soldes, graphiques et historique des transactions.",
+        "Utiliser Données clients pour soldes, graphiques et historique des transactions (y compris toute avance active).",
         "Suivre l’avancement dans le Pipeline."
       ]
     },
@@ -39,10 +40,21 @@
       "title": "Paiements et rapprochement",
       "description": "Lorsque la passerelle SMS est incomplète ou à contrôler, et pour tracer les crédits.",
       "steps": [
-        "Enregistrer un paiement mobile manquant pour garder 1PDB et SparkMeter alignés.",
-        "Traiter la file de vérification pour les frais et acomptes à rapprocher manuellement.",
-        "Parcourir les Transactions pour les crédits récents et les montants par site.",
-        "Approfondir avec Données clients pour l’historique et le contexte de solde d’un compte."
+        "Enregistrer un paiement mobile manquant pour garder 1PDB et SparkMeter alignés. La passerelle de classification détecte automatiquement les frais de raccordement / tableau par montant exact ; toute avance active est remboursée avant l'application du crédit électricité.",
+        "Traiter la file de vérification pour les frais et acomptes à rapprocher — les frais de raccordement et tableau y sont automatiquement routés.",
+        "Parcourir les Transactions pour les crédits récents et les montants par site ; la colonne Solde (kWh) reflète le solde en kWh après chaque ligne.",
+        "Approfondir avec Données clients pour l’historique, le contexte de solde et le panneau Avances actives."
+      ]
+    },
+    "advances": {
+      "title": "Avances raccordement / tableau",
+      "description": "Accorder, gérer et rapprocher les avances de frais lorsqu'un client ne peut pas payer le montant complet à l'avance.",
+      "steps": [
+        "Vérifier les montants pays sur la page Tarifs (carte Frais de raccordement et tableau). Ce sont les montants exacts que la passerelle de classification reconnaît, et les valeurs pré-remplies à la création d'une avance.",
+        "Sur la page Avances, cliquer sur « Nouvelle avance », sélectionner le client, le type (raccordement ou tableau), la fraction de remboursement (par défaut 50 %), le frais mensuel % (prime), et téléverser le contrat signé — le contrat est obligatoire.",
+        "Une fois active, chaque paiement d'électricité prélève automatiquement la fraction de remboursement vers l'avance ; le reste est crédité en kWh. Le grand livre montre chaque octroi, remboursement, frais mensuel, remplacement de contrat et abandon de créance.",
+        "Ouvrir Données clients pour voir le panneau Avances actives avec barre de progression ; un lien profond renvoie à la page Avances pour modification ou remplacement de contrat.",
+        "Les paiements de frais reconnus passent toujours par la Vérification des paiements — l'avance n'est remboursée que par les paiements d'électricité ultérieurs, jamais par le frais reconnu."
       ]
     },
     "reporting": {

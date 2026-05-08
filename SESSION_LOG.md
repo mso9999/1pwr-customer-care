@@ -3,6 +3,73 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-05-08 202605081245 (SMS payment receipt + SMSComms 1PDB balance/callback)
+
+### What Was Done
+- **`acdb-api/sms_payment_receipt.py`** — After a successful electricity-path SMS payment commit, dispatches an outbound SMS via `sms_outbound.send_gateway_sms` with acknowledgement + **updated balance from 1PDB** (`get_balance_kwh` + tariff). Lesotho Sesotho-style template; Benin French + CFA. Gated by **`SMS_PAYMENT_RECEIPT_ENABLED`** (default on) and **`SMS_SERVER_URL`**.
+- **`acdb-api/ingest.py`** — Registers `BackgroundTasks` job after `conn.commit()` for each processed electricity payment (not fee-only branch).
+- **SMSComms** (`sparkmeter/`): New **`cc_1pdb_gateway.php`** (curl to CC `GET /api/payments/gateway/balance/{account}` and `balances-by-phone` with **`X-Gateway-Key`**). **`customer.php`** — `send_balance_sms_via_1pdb`, `send_callback_balances_via_1pdb`, ThunderCloud snapshot fallback. **`new_file_watcher.php`** — balance request tries 1PDB first (fixes Koios-only accounts); callback uses 1PDB-by-phone when gateway key is set, else legacy ThunderCloud. **`deploy.php`** — includes `cc_1pdb_gateway.php` in SparkMeter deploy list.
+- **`docs/inter-repo-credentials.md`** — `SMS_PAYMENT_RECEIPT_ENABLED`, SMS host `CC_GATEWAY_KEY` / `CC_PORTAL_BASE`.
+
+### What Next Session Should Know
+- **Ops:** On the Lesotho SMS host, set **`CC_GATEWAY_KEY`** (same as **`SMS_GATEWAY_KEY`** in `/opt/1pdb/.env`). Without it, PHP falls back to ThunderCloud/Koios for balance/callback. **`SMSComms-BN`** (or `smsbn`) needs the same pattern if Benin uses file-watcher balance/callback.
+- **Deploy CC** to activate payment receipts; **`npx tsc -b --noEmit`** not required for this change (Python + PHP only).
+
+## Session 2026-05-07 202605071009 (Connection / readyboard fee classifier + advances ledger)
+
+### What Was Done
+End-to-end build of the country-aware fee classifier and the connection/readyboard advances ledger requested by the user. Backend, ingestion paths, monthly-fee accrual job, and frontend all landed in one push.
+
+**Backend (acdb-api/):**
+- `migrations/019_account_advances.sql` — enums (`advance_type_enum`, `advance_status_enum`), `account_advances` (incl. mandatory `contract_path`, `contract_filename`, `contract_sha256`, etc.), `account_advance_ledger` (entry types `grant/repayment/monthly_fee/adjustment/writeoff/contract_replaced`, partial unique index on `(advance_id, accrual_period) WHERE entry_type='monthly_fee'` for idempotent re-runs), and new `transactions` columns (`payment_category`, `advance_portion`, `electricity_portion`, `financing_portion`, `advance_id`). Seeds `system_config` rows `connection_fee_amount=501`, `readyboard_fee_amount=499` (Lesotho defaults).
+- `country_config.py` — added `default_connection_fee` / `default_readyboard_fee` to `CountryConfig`, set Lesotho to 501 / 499.
+- `country_fees.py` — new module exposing `GET/PUT /api/admin/country-fees` (gated to superadmin/onm_team/finance_team), and a `get_country_fees(conn)` helper that other modules consume.
+- `fee_classifier.py` — `classify_payment(conn, account, amount)` implementing the **exact-until-paid** rule: amount matches the country fee AND no `payment_verifications` row of that type with `status='verified'` for this account → `connection_fee` / `readyboard_fee`; else `electricity`.
+- `advances.py` — `/api/advances` CRUD with multipart contract upload (PDF / PNG / JPEG, default 10 MiB cap), per-row contract download (auth) and replace (gated, archives the old file under `<SITE>/advances/archive/`), `PATCH` for `monthly_fee_pct` / `repayment_fraction` / `note`, write-off endpoint, plus exported helpers `get_active_advance`, `compute_advance_split`, `apply_advance_payment` for the ingestion paths.
+- `balance_engine.py` — added `record_fee_transaction()` so fee rows insert with `kwh_value=0`, snapshot the existing balance, and accept extra-column kwargs for SMS metadata.
+- `payments.py` (`/webhook` + `/record`) — both routes now run the classifier first; fee → `record_fee_transaction` + `payment_verification.create_verification_entry`, no SparkMeter push. Otherwise: advance split first, then existing financing split on the *electricity* leftover, then `record_payment_kwh`, then ledger updates, then SparkMeter on the final electricity slice.
+- `ingest.py` (`/api/sms/incoming`) — same two-stage routing wired into the SMS path. Closes the previously-flagged gap where SMS payments bypassed split logic. Preserves the SMS-specific columns (`sms_payer_phone`, `sms_remark_raw`, `sms_allocation`) and keeps the legacy fallback INSERTs for stale schemas.
+- `customer_api.py` — registered `advances_router` and `country_fees_router`.
+- `scripts/ops/accrue_advance_fees.py` + `cc-advance-accrual.timer/.service` — monthly fee accrual (`outstanding * monthly_fee_pct`) on the 1st at 02:00 UTC, idempotent via the partial unique index, runs LS/BN/ZM databases serially using `DATABASE_URL_BN` / `DATABASE_URL_ZM` if present.
+
+**Frontend (acdb-api/frontend/):**
+- `pages/AdvancesPage.tsx` at `/advances` — list with status/type/account filters, total active outstanding, create modal with **required** drag-and-drop contract uploader (PDF/PNG/JPEG), per-row contract link (clickable `contract_filename` with sha256 tooltip), edit modal for fee % / repayment fraction / note, replace-contract modal, write-off button. Role-gated UI for write actions (`superadmin / onm_team / finance_team`).
+- `pages/TariffManagementPage.tsx` — new "Connection & Readyboard Fees" card under the global rate, reads/writes via `/api/admin/country-fees`.
+- `pages/CustomerDataPage.tsx` — new "Active Advances" panel (blue) next to the existing "Active Financing" panel (amber), with per-advance progress bar and a button that deep-links to `/advances?account=…`.
+- `lib/api.ts` — typed wrappers (`getCountryFees`, `updateCountryFees`, `listAdvances`, `getAdvance`, `createAdvance` (multipart), `patchAdvance`, `replaceAdvanceContract`, `writeoffAdvance`, `openAdvanceContract`), plus a small `requestMultipart` helper.
+- `App.tsx` + `Layout.tsx` + `i18n` — `/advances` route, sidebar nav entry under Commerce, full EN + FR translations (`advances.json`, plus tariff/customerData/common keys).
+- `npx tsc -b --noEmit` is clean.
+
+### Key Decisions
+- **Separate ledger from `financing_agreements`** per the user's explicit choice. The advance system is a flat monthly fee % + 50/50 split tied to the connection event; the financing module remains for movable assets with interest schedules. Advance + financing splits chain (advance first on the full amount, financing then on the electricity leftover) so a customer with both is handled cleanly.
+- **Exact-until-paid classifier**: amount matches AND no verified fee on file. Once finance verifies the connection fee, future 501 LSL payments for kWh route normally. The check is on `payment_verifications.status='verified'`, not on `account_advances.status='paid_off'`, because the verification table is the audited trail of fee receipt regardless of whether the customer paid up-front or via an advance.
+- **Contract upload is mandatory at the database level** (`contract_path NOT NULL`), the API rejects creation without a file, and replacements archive the old contract rather than overwrite.
+- **Idempotent monthly accrual** via a partial unique index on `(advance_id, accrual_period)` for `entry_type='monthly_fee'`. Safe to re-run mid-month or re-trigger by hand.
+- **SparkMeter credit only on the electricity portion** (post-advance, post-financing). Prevents over-vending kWh when a payment is split.
+- **Site code derivation for contract storage** via `account_number`'s last 3 chars (`0001MAK` → `MAK`), mirroring `contract_gen.py` conventions.
+
+### What Next Session Should Know
+- Migration 019 will be applied automatically by the GitHub Actions deploy job (`apply_incremental` picks up `019_*.sql` for `onepower_cc`, `onepower_bj`, and `onepower_zm` if present). Country fee defaults are seeded by the migration but managed live in `system_config`; per-country values for Benin / Zambia should be set via `PUT /api/admin/country-fees` after first deploy (or by editing `country_config.py`'s `default_connection_fee` / `default_readyboard_fee`).
+- The systemd timer files in `scripts/ops/cc-advance-accrual.{timer,service}` need to be installed on the host (`sudo cp` to `/etc/systemd/system/`, `systemctl enable --now cc-advance-accrual.timer`). Not part of the auto-deploy yet.
+- `payment_verifications.create_verification_entry` is now called from both `payments.py` and `ingest.py` — the existing payment verification queue will start receiving `connection_fee` / `readyboard_fee` rows automatically. If the verification queue UI doesn't already surface those `payment_type` values, finance may want a quick filter tweak (out of scope for this session).
+- `SMS_INGEST_PUSH_SPARKMETER` continues to gate the SparkMeter push for the SMS path; my changes only narrow the credited amount to the electricity portion when an advance is active.
+- All endpoints are role-gated; superadmin / onm_team / finance_team can manage advances and fees, the rest can only read.
+
+### Follow-up: RCA on `transactions.current_balance` unit drift + Help/Tutorial refresh
+- **RCA** at `docs/ops/2026-05-07-current-balance-unit-rca.md`. Root cause: the kWh balance engine (`record_payment_kwh`, 2026-02-19) wrote `current_balance` in **kWh**, but the SMS ingest path (`ingest.py`, 2026-02-18) preserved the older ACCDB-era convention of running **currency** totals. `current_balance` is a denormalised snapshot column that the canonical balance code (`get_balance_kwh`) never reads, so customer-facing balances, auto-cutoff, and reports were unaffected — the symptom was only mixed units in the per-row "Balance" column displayed on the Transactions page and the Customer Data history table.
+- **Fix**: `acdb-api/ingest.py` now reads `prev_balance` via `get_balance_kwh` and writes `prev_balance + kwh` (kWh) for all four cascading INSERT branches; `balance_engine.py` docstring spells out the kWh contract; the i18n column header was changed from "Balance" → "Balance (kWh)" in `transactions.json` and `customerData.json` (EN + FR). Historical rows are left as-is on purpose — the column is cosmetic, and a backfill would carry more risk than payoff. From this commit forward `current_balance` is uniformly kWh.
+- **Help guide refresh** (`acdb-api/frontend/src/pages/helpSections.tsx` + `i18n/{en,fr}/help.json`): added a new dedicated **Connection & Readyboard Advances** section (with an `advances` id deep-linkable as `/help#advances`), refreshed the Payments section to describe the **exact-until-paid** classifier, and extended the Tariffs section with the new **Connection & Readyboard Fees** card. Added the `/advances` page to the feature-map table. EN + FR.
+- **Tutorial refresh** (`acdb-api/frontend/src/pages/tutorialWorkflows.ts` + `i18n/{en,fr}/tutorial.json`): new `advances` workflow (5 steps, role: `financeOnm`) covering tariff defaults → grant with mandatory contract upload → automatic 50/50 split → Customer Data Active Advances panel → verification queue interplay. Updated the `lifecycle` and `payments` workflows to mention the auto-classifier and the kWh-balance column rename. EN + FR.
+- TypeScript build clean (`npx tsc -b --noEmit`); modified Python files parse cleanly.
+
+### Senescence Notes
+- Started this session in plan mode and refined the scope twice (first user added "uploaded contract" requirement; then we confirmed the dedicated-ledger choice). Mode-switch to Agent had to be done by the user manually.
+- Follow-up RCA + docs work was a tight focused round-trip; context still fresh at session end.
+
+### Protocol Feedback
+- CONTEXT.md is rich and was useful. The new "Connection / Readyboard Fee Classifier + Advances Ledger" section captures the routing rule, the ledger semantics, and the SMS-path behaviour change.
+- One small gap I rediscovered: the existing SMS ingest path was tracking `current_balance` in **currency**, not kWh, contrary to `balance_engine.record_payment_kwh`. I preserved that convention to avoid scope creep but flagged it inline. A future session could RCA whether to converge.
+
 ## Session 2026-05-02 202605020846 (Upstream reconciliation: TC/Koios vs 1PDB)
 
 ### What Was Done

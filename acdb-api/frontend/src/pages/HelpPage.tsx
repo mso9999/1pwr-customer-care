@@ -12,6 +12,7 @@ const SECTION_TITLE_KEYS: Record<string, string> = {
   commission: 'help:sections.commissioning',
   payments: 'help:sections.payments',
   'balance-adjustments': 'help:sections.balanceAdjustments',
+  advances: 'help:sections.advances',
   financing: 'help:sections.financing',
   meters: 'help:sections.metering',
   reports: 'help:sections.reporting',

@@ -7,9 +7,9 @@ import {
 } from 'recharts';
 import {
   getCustomerData, createRecord, updateRecord, deleteRecord,
-  getAccountMeterHistory, getCustomerFinancing,
+  getAccountMeterHistory, getCustomerFinancing, listAdvances,
   type CustomerDataResponse, type Transaction, type HourlyPoint, type MeterAssignment,
-  type CustomerFinancingSummary,
+  type CustomerFinancingSummary, type Advance,
 } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -207,6 +207,9 @@ export default function CustomerDataPage() {
   // Financing
   const [financing, setFinancing] = useState<CustomerFinancingSummary | null>(null);
 
+  // Connection / readyboard advances
+  const [advances, setAdvances] = useState<Advance[]>([]);
+
   // Fetch data when account changes (or after CRUD refresh)
   useEffect(() => {
     if (!account) return;
@@ -222,6 +225,9 @@ export default function CustomerDataPage() {
     getCustomerFinancing(account)
       .then(setFinancing)
       .catch(() => setFinancing(null));
+    listAdvances({ account_number: account, status: 'active' })
+      .then(res => setAdvances(res.advances || []))
+      .catch(() => setAdvances([]));
   }, [account, refreshKey]);
 
   // CRUD helpers
@@ -532,6 +538,45 @@ export default function CustomerDataPage() {
                     <div className="flex justify-between text-xs text-gray-500 mt-1">
                       <span>{t('customerData:paid')}: M {(Number(a.total_owed) - Number(a.outstanding_balance)).toFixed(2)}</span>
                       <span>{t('common:total')}: M {Number(a.total_owed).toFixed(2)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Connection / readyboard advances */}
+          {advances.length > 0 && (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-bold text-blue-800">{t('customerData:activeAdvances')}</h3>
+                <button
+                  onClick={() => navigate(`/advances?account=${account}`)}
+                  className="text-xs bg-blue-200 text-blue-800 px-2 py-0.5 rounded-full font-medium hover:bg-blue-300"
+                >
+                  {t('customerData:manageAdvances')}
+                </button>
+              </div>
+              <div className="space-y-2">
+                {advances.map(a => (
+                  <div key={a.id} className="bg-white rounded-lg p-3 border border-blue-100">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-medium text-gray-800">
+                        {t(`advances:types.${a.advance_type}`)}
+                      </span>
+                      <span className="text-red-600 font-bold tabular-nums">
+                        {Number(a.outstanding).toFixed(2)} {a.currency}
+                      </span>
+                    </div>
+                    <div className="w-full bg-blue-100 rounded-full h-2 mt-2">
+                      <div
+                        className="bg-green-500 h-2 rounded-full transition-all"
+                        style={{ width: `${Math.min(((Number(a.original_amount) - Number(a.outstanding)) / Number(a.original_amount)) * 100, 100)}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between text-xs text-gray-500 mt-1">
+                      <span>{t('customerData:paid')}: {(Number(a.original_amount) - Number(a.outstanding)).toFixed(2)} {a.currency}</span>
+                      <span>{t('common:total')}: {Number(a.original_amount).toFixed(2)} {a.currency}</span>
                     </div>
                   </div>
                 ))}

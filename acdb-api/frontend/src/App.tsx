@@ -30,6 +30,7 @@ import TariffManagementPage from './pages/TariffManagementPage';
 import CheckMeterPage from './pages/CheckMeterPage';
 import BillingPriorityPage from './pages/BillingPriorityPage';
 import FinancingPage from './pages/FinancingPage';
+import AdvancesPage from './pages/AdvancesPage';
 import RecordPaymentPage from './pages/RecordPaymentPage';
 import PaymentVerificationPage from './pages/PaymentVerificationPage';
 import PipelinePage from './pages/PipelinePage';
@@ -79,6 +80,7 @@ export default function App() {
             <Route path="check-meters" element={<ProtectedRoute requireEmployee><CheckMeterPage /></ProtectedRoute>} />
             <Route path="billing-priority" element={<ProtectedRoute requireEmployee><BillingPriorityPage /></ProtectedRoute>} />
             <Route path="financing" element={<ProtectedRoute requireEmployee><FinancingPage /></ProtectedRoute>} />
+            <Route path="advances" element={<ProtectedRoute requireEmployee><AdvancesPage /></ProtectedRoute>} />
             <Route path="record-payment" element={<ProtectedRoute requireEmployee><RecordPaymentPage /></ProtectedRoute>} />
             <Route path="payment-verification" element={<ProtectedRoute requireEmployee><PaymentVerificationPage /></ProtectedRoute>} />
             <Route path="pipeline" element={<ProtectedRoute requireEmployee><PipelinePage /></ProtectedRoute>} />

@@ -77,6 +77,22 @@ There are **two live gateway deployments** — **Lesotho** (M-Pesa) and **Benin*
 
 **CC ingest** (`acdb-api/ingest.py`) is the **consumer** of those mirrors: parse payment text → 1PDB row → optional `credit_sparkmeter` to Koios/ThunderCloud. Any **second** path that credits SparkMeter for the same SMS (legacy PHP, Iometer, native Koios payment gateway, etc.) causes **double credits** — see deployment notes in `ingest.py` (`SMS_INGEST_PUSH_SPARKMETER`).
 
+**Customer-visible balance (SMS replies, printed receipts, staff scripts)** must come from **1PDB / Customer Care**, not from SparkMeter APIs. The canonical computation is `balance_engine.get_balance_kwh()` (payments minus source-priority consumption). Expose to the PHP gateway with **`GET /api/payments/gateway/balance/{account_number}`** and header **`X-Gateway-Key`** (same secret as `SMS_GATEWAY_KEY` / `POST /api/payments/webhook`). Do **not** use Koios/ThunderCloud customer lookup for balance text in SMS—those can drift from CC when SM credit fails or imports lag.
+
+**Callback SMS** (customer texts the short code / keyword with **no account**, only handset identity): SMSComms historically used ThunderCloud **`getCustomersByPhoneNumber`**. Replace that with **`GET /api/payments/gateway/balances-by-phone?phone=...`** (same **`X-Gateway-Key`**), which resolves **all `accounts` linked to that phone** in 1PDB and returns **`balance_kwh` / `balance_currency`** per account—the same logic as the portal. If `accounts` is empty, reply with the existing “not registered” Sesotho template (mirror `sendCustomerBalance(..., null)`).
+
+**Low-balance SMS alerts** are **not** driven by SparkMeter or SMSComms `customer_info.json`. Run **`scripts/ops/run_low_balance_alerts.py`** on a timer (see **`deploy/systemd/cc-low-balance-alerts.timer`**): it uses **`balance_engine.get_balance_kwh()`**, compares thresholds from **`country_fees.get_low_balance_thresholds()`** (stored in **`system_config`**, editable on **Tariff Management** → *Low balance SMS (kWh)* — Lesotho vs Benin use separate backends/databases), tracks **`accounts.low_balance_alert_sent_at`**, and sends SMS via **`sms_outbound.send_gateway_sms`**. Code defaults differ by **`country_config`** (e.g. BN **5 / 12** kWh vs LS **10 / 20** kWh) when keys are absent. Enable with **`LOW_BALANCE_ALERTS_ENABLED=1`** (migration **`020_low_balance_alert_state.sql`**). Legacy PHP **`customer_info.php`** low-balance paths should be retired once this job is live.
+
+### Payment gateway without deep telecom-operator integration
+
+New markets do **not** require a lengthy, costly integration with each carrier (Vodacom, MTN, bespoke USSD/short-code products, or operator API programs). The **merchant-gateway** pattern is:
+
+1. Open a **standard merchant / agent mobile-money account** with the local provider (normal commercial onboarding).
+2. Install the **SMS gateway app** on the merchant’s Android phone ([SMS-Gateway-APP](https://github.com/onepowerLS/SMS-Gateway-APP)): it forwards **transaction confirmation SMS** to the country’s PHP `receive.php`, which mirrors JSON into CC.
+3. **Parse** confirmations in CC (`ingest.py` and country-specific parsers) → **1PDB** (`transactions`, etc.) → optional **SparkMeter credit** — closing the loop **without** coupling the minigrid stack to each operator’s telecom menu, USSD stack, or direct billing APIs.
+
+This is **orthogonal** to the **1Meter mesh “gateway”** (a Mesh-Lite node at the powerhouse that provides internet backhaul for meters). **Financial loop** = merchant phone + gateway app + CC API; **meter telemetry / relay / OTA** = AWS IoT and mesh uplink. Full narrative: [`docs/ops/1meter-1pdb-white-paper.tex`](docs/ops/1meter-1pdb-white-paper.tex) (PDF: `docs/ops/1meter-1pdb-white-paper.pdf`).
+
 ## Key Files
 
 ### Backend (`acdb-api/`)
@@ -258,7 +274,7 @@ Three 1Meter prototypes are installed at MAK in series with SparkMeters for vali
 - 23022628 → 0005MAK (check), SparkMeter 57408 (primary)
 - 23022696 → 0025MAK (check), SparkMeter 58431 (primary)
 - 23022673 → 0045MAK (check), SparkMeter 41657 (primary)
-- 23022667 — labelled "gateway" in ops SOPs (powerhouse); **not a SPoF**. Firmware is ESP32 Mesh-Lite: **any** node with upstream Wi-Fi can be a root; mesh self-elects a root when the labelled one drops. Not a customer meter, not in `meters` table.
+- 23022667 — **mesh gateway** (ops label, powerhouse): provides **Wi‑Fi / internet backhaul** for Mesh-Lite; **not a SPoF** — **any** node with upstream Wi‑Fi can be root; mesh self-elects if this unit drops. Not a customer meter, not in `meters` table. (Do not confuse with the **merchant payment gateway**: Android app + PHP mirror — see §Payment gateway without deep telecom-operator integration above.)
 - 23022613 — labelled "repeater" similarly; same mesh semantics apply.
 
 New meters are registered with one `INSERT INTO meters` row — the ingest API resolves
@@ -266,8 +282,8 @@ meters dynamically from the DB (no hardcoded dicts).
 
 **Energy resolution**: The DDS8888 Modbus register reports energy in 0.01 kWh (10 Wh) steps.
 Firmware implements power integration (trapezoidal rule on `activePowerW`) to get ~0.8 Wh
-resolution, published as `EnergyIntegrated` alongside `EnergyActive` in the MQTT payload.
-Backend uses `EnergyIntegrated` for delta calculations when available.
+effective resolution, published as `EnergyIntegrated` alongside `EnergyActive` in the MQTT payload.
+**CC hourly deltas** use **`energy_active`** (Modbus cumulative) in `ingest.py` — it survives power cycles; `energy_integrated` resets on ESP32 reboot and is not used for production deltas.
 
 **Timestamps**: 1Meters report in SAST (UTC+2). `ingest.py` and `prototype_sync.py` convert
 to UTC before storing. The CC portal's `_to_local()` converts back to SAST for display.
@@ -498,6 +514,43 @@ CC exposes a tag-scoped, bearer-authenticated **pull API** that the **Odyssey** 
 
 The API itself is country-agnostic: each token is bound to a single `(program, country)` pair, served from that country's backend. Customers not in `program_memberships` are invisible — no cross-program leakage on a shared backend. Validator: <https://platform.odysseyenergysolutions.com/#/standard-api/validator> (run `electricity-payment` and `meter-metrics` separately).
 
+## Connection / Readyboard Fee Classifier + Advances Ledger (2026-05-07)
+
+Three payment categories are now distinguished at ingestion time:
+
+| Category | Trigger | Effect |
+|---|---|---|
+| `connection_fee` | Amount = country `connection_fee_amount` (501 LSL in LS) **and** the account has no prior **verified** `connection_fee` row in `payment_verifications` | No kWh credit, no SparkMeter push. Inserts a `transactions` row with `payment_category = 'connection_fee'` and creates a **pending** `payment_verifications` entry for finance. |
+| `readyboard_fee` | Same logic as above with `readyboard_fee_amount` (499 LSL in LS) | Same as above with `payment_category = 'readyboard_fee'`. |
+| `electricity` (default) | Anything else | Normal kWh credit + optional advance / financing split. |
+
+This is the **"exact-until-paid"** rule: once finance verifies the fee, future payments of the same nominal amount route as electricity, so a customer paying 501 LSL for kWh after their connection fee is paid is no longer mis-classified.
+
+**Country fee amounts** live in `system_config` (keys `connection_fee_amount` / `readyboard_fee_amount`) and are managed via `GET/PUT /api/admin/country-fees` (gated to superadmin / onm_team / finance_team). The seed defaults are in `country_config.py` (`default_connection_fee` / `default_readyboard_fee`).
+
+**Account advances** (currency-denominated) are how 1PWR carries customers who can't pay the up-front fee:
+
+| Concept | Where it lives |
+|---|---|
+| Currency-denominated advance + monthly fee | `account_advances` (one **active** row per `(account, advance_type)`; `advance_type = connection \| readyboard`) |
+| Append-only audit trail | `account_advance_ledger` (`grant`, `repayment`, `monthly_fee`, `adjustment`, `writeoff`, `contract_replaced`) |
+| Per-payment split columns | `transactions.payment_category`, `advance_portion`, `electricity_portion`, `financing_portion`, `advance_id` |
+| Migration | `acdb-api/migrations/019_account_advances.sql` |
+| API | `acdb-api/advances.py` → `/api/advances` (list/detail/create/patch/writeoff + contract upload/download/replace) |
+| Classifier | `acdb-api/fee_classifier.py` → `classify_payment(conn, account, amount)` |
+| Country fee admin | `acdb-api/country_fees.py` → `/api/admin/country-fees` |
+| Helper for ingestion | `advances.compute_advance_split` + `advances.apply_advance_payment` |
+| Fee accrual job | `scripts/ops/accrue_advance_fees.py` + `cc-advance-accrual.timer/.service` (1st of each month, 02:00 UTC) |
+| Frontend | `frontend/src/pages/AdvancesPage.tsx` (list / create / patch / contract download / replace / writeoff), Country Fees card on `TariffManagementPage`, advance progress strip on `CustomerDataPage` |
+
+**Contracts are mandatory.** Every advance row has `contract_path`, `contract_filename`, `contract_sha256`, `contract_uploaded_by`, `contract_uploaded_at` as `NOT NULL` columns. Files live under `acdb-api/contracts/<SITE>/advances/` (mirroring `contract_gen.py` conventions); replacements move the previous file to `.../advances/archive/`. Allowed types are PDF / PNG / JPEG, capped at `ADVANCE_CONTRACT_MAX_BYTES` (default 10 MiB).
+
+**Payment ingestion behaviour change.** Both `payments.py` (webhook + manual `/record`) **and** `ingest.py` (SMS `/api/sms/incoming`) now run the classifier first:
+- Fee match → `record_fee_transaction` (no kWh, no SM credit) + `payment_verifications` row.
+- Otherwise → `compute_advance_split` (defaults to 50/50: half to advance outstanding, half to kWh) chained with the existing `compute_financing_split` for movable-asset financing. SparkMeter is credited only on the electricity portion, not the full payment.
+
+**Why advances are NOT in `financing_agreements`.** The `financing` module is reserved for movable assets (fridges, readyboards as financed appliances, etc.) with an interest schedule and dunning calendar. Connection / readyboard advances are different: short-lived working-capital extensions tied to the connection event itself, with a flat monthly fee % rather than an interest schedule, and a hard contract requirement. Mixing the two in one ledger would have made finance reporting harder for both.
+
 ## `/meter-export` dedup is `(account, hour)`-grained (RCA: 2026-05-01)
 
 `acdb-api/om_report.py::meter_data_export` reads from `meter_readings` (high-res) first, then falls back to `hourly_consumption`. The dedup key is **`Set[(account_number, hour_bucket)]`**, NOT account-level. Account-level dedup (the previous behaviour) hid every `hourly_consumption` row for any account that ever appeared in `meter_readings`, which made all of January 2026 invisible after `import_tc_live.py` started populating `meter_readings_2026` from 2026-02-17. Regression test: `acdb-api/tests/test_om_report_meter_export.py`. Full RCA: [`docs/ops/jan-2026-thundercloud-import-gap.md`](docs/ops/jan-2026-thundercloud-import-gap.md).
@@ -557,6 +610,7 @@ single source of truth behind the CC API.
 | `docs/inter-repo-credentials.md` | **Inter-repo credential map** (same doc copied in 1PDB, SMSComms, uGridPlan, om-portal, ingestion_gate, onepwr-aws-mesh, etc.) |
 | In-app **Help** (`/help`) | User guide: bilingual EN/FR body copy in `frontend/src/pages/helpSections.tsx`; UI chrome in `i18n/*/help.json`. Use **FR** toggle for full translation. |
 | In-app **Tutorial** (`/tutorial`) | UX onboarding: orientation plus workflow walkthroughs; copy in `i18n/*/tutorial.json`, routes in `pages/tutorialWorkflows.ts`. |
+| `docs/ops/1meter-1pdb-white-paper.tex` / `.pdf` | Technical white paper: 1Meter, DDS8888, mesh vs merchant gateway, 1PDB, migration status |
 | `SESSION_LOG.md` | AI session handoffs (read recent entries) |
 
 ---

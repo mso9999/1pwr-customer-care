@@ -15,6 +15,7 @@ import metersEn from './en/meters.json';
 import newCustomerEn from './en/newCustomer.json';
 import commissionEn from './en/commission.json';
 import financingEn from './en/financing.json';
+import advancesEn from './en/advances.json';
 import tariffEn from './en/tariff.json';
 import syncEn from './en/sync.json';
 import mutationsEn from './en/mutations.json';
@@ -48,6 +49,7 @@ import metersFr from './fr/meters.json';
 import newCustomerFr from './fr/newCustomer.json';
 import commissionFr from './fr/commission.json';
 import financingFr from './fr/financing.json';
+import advancesFr from './fr/advances.json';
 import tariffFr from './fr/tariff.json';
 import syncFr from './fr/sync.json';
 import mutationsFr from './fr/mutations.json';
@@ -90,6 +92,7 @@ i18n.use(initReactI18next).init({
       newCustomer: newCustomerEn,
       commission: commissionEn,
       financing: financingEn,
+      advances: advancesEn,
       tariff: tariffEn,
       sync: syncEn,
       mutations: mutationsEn,
@@ -124,6 +127,7 @@ i18n.use(initReactI18next).init({
       newCustomer: newCustomerFr,
       commission: commissionFr,
       financing: financingFr,
+      advances: advancesFr,
       tariff: tariffFr,
       sync: syncFr,
       mutations: mutationsFr,

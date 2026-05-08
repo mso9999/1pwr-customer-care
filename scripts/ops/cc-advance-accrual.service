@@ -1,0 +1,33 @@
+[Unit]
+Description=Apply monthly fee accruals to active connection / readyboard advances
+Documentation=file:///opt/cc-portal/backend/scripts/ops/accrue_advance_fees.py
+Documentation=file:///opt/cc-portal/backend/docs/ops/connection-readyboard-advances.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=cc_api
+Group=cc_api
+EnvironmentFile=-/opt/1pdb/.env
+EnvironmentFile=-/etc/default/cc-portal
+WorkingDirectory=/opt/cc-portal/backend
+
+# Run LS first, then BN if the BN database URL is configured. Each country
+# gets its own accrual run against its own onepower_<cc> database. ZM is
+# wired the same way once it goes live (see docs/sop-add-new-country.md).
+ExecStart=/bin/bash -lc '\
+    /opt/cc-portal/backend/venv/bin/python3 \
+        /opt/cc-portal/backend/scripts/ops/accrue_advance_fees.py ; \
+    if [ -n "$DATABASE_URL_BN" ]; then \
+        DATABASE_URL="$DATABASE_URL_BN" /opt/cc-portal/backend/venv/bin/python3 \
+            /opt/cc-portal/backend/scripts/ops/accrue_advance_fees.py ; \
+    fi ; \
+    if [ -n "$DATABASE_URL_ZM" ]; then \
+        DATABASE_URL="$DATABASE_URL_ZM" /opt/cc-portal/backend/venv/bin/python3 \
+            /opt/cc-portal/backend/scripts/ops/accrue_advance_fees.py ; \
+    fi'
+
+StandardOutput=journal
+StandardError=journal
+SuccessExitStatus=0 1

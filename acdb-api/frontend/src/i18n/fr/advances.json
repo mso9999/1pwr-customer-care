@@ -1,0 +1,77 @@
+{
+  "title": "Avances raccordement / readyboard",
+  "newAdvance": "+ Nouvelle avance",
+  "createTitle": "Créer une avance",
+  "createSubmit": "Créer l'avance",
+  "editTitle": "Modifier l'avance n°{{id}}",
+  "save": "Enregistrer",
+  "saving": "Enregistrement…",
+  "loading": "Chargement…",
+  "outstanding": "en cours",
+  "emptyList": "Aucune avance ne correspond à ces filtres.",
+  "writeoffPrompt": "Motif de la passation en pertes (facultatif, conservé dans le grand livre) :",
+  "replaceContractTitle": "Remplacer le contrat de l'avance n°{{id}}",
+  "replaceContractHint": "Contrat actuel : {{filename}}. Le téléversement d'un nouveau fichier archivera celui-ci.",
+  "replaceSubmit": "Téléverser le remplacement",
+  "ledgerTitle": "Grand livre de l'avance n°{{id}}",
+  "types": {
+    "connection": "Raccordement",
+    "readyboard": "Readyboard"
+  },
+  "status": {
+    "active": "Actif",
+    "paid_off": "Soldé",
+    "written_off": "Passé en pertes"
+  },
+  "fields": {
+    "account": "Numéro de compte",
+    "type": "Type d'avance",
+    "amount": "Montant initial",
+    "repaymentFraction": "Fraction de remboursement (0–1)",
+    "monthlyFeePct": "Frais mensuel en % (décimal)",
+    "monthlyFeePctHint": "0,015 = 1,5 % / mois cumulé sur le solde restant dû.",
+    "note": "Note",
+    "contract": "Contrat signé (PDF ou image)",
+    "contractHint": "PDF, PNG ou JPEG jusqu'à 10 Mo. Le contrat signé est obligatoire et sera stocké sur le serveur."
+  },
+  "filters": {
+    "status": "Statut",
+    "type": "Type",
+    "account": "Numéro de compte",
+    "all": "Tous",
+    "search": "Rechercher"
+  },
+  "totals": {
+    "activeOutstanding": "Solde actif restant"
+  },
+  "cols": {
+    "account": "Compte",
+    "customer": "Client",
+    "type": "Type",
+    "original": "Initial",
+    "outstanding": "Restant",
+    "feePct": "% mensuel",
+    "repayPct": "% remb.",
+    "status": "Statut",
+    "contract": "Contrat",
+    "actions": "Actions"
+  },
+  "actions": {
+    "ledger": "Grand livre",
+    "edit": "Modifier",
+    "replaceContract": "Remplacer",
+    "writeoff": "Passer en pertes"
+  },
+  "ledger": {
+    "date": "Date",
+    "type": "Type",
+    "amount": "Montant",
+    "balanceAfter": "Solde après",
+    "note": "Note",
+    "empty": "Aucune écriture pour le moment."
+  },
+  "errors": {
+    "contractRequired": "Un contrat signé est obligatoire pour créer une avance."
+  },
+  "badge": "Avance : {{outstanding}} restant"
+}

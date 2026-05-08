@@ -1,0 +1,18 @@
+[Unit]
+Description=Low-balance customer SMS from 1PDB (balance_engine)
+Documentation=file:///opt/cc-portal/backend/scripts/ops/run_low_balance_alerts.py
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=cc_api
+Group=cc_api
+WorkingDirectory=/opt/cc-portal/backend
+EnvironmentFile=/opt/1pdb/.env
+EnvironmentFile=-/etc/default/cc-low-balance-alerts
+Environment=PYTHONPATH=/opt/cc-portal/backend
+ExecStart=/opt/cc-portal/backend/venv/bin/python /opt/cc-portal/backend/scripts/ops/run_low_balance_alerts.py
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cc-low-balance-alerts

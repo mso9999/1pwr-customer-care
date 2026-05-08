@@ -1,0 +1,14 @@
+[Unit]
+Description=Monthly accrual of advance fees on connection / readyboard advances
+Documentation=file:///opt/cc-portal/backend/scripts/ops/accrue_advance_fees.py
+
+[Timer]
+# 02:00 UTC on the 1st of every month: well after the staff PIN broadcast
+# at 04:00 (different concern) and before working hours in any of our
+# operating timezones (LS = SAST UTC+2, BN = WAT UTC+1, ZM = CAT UTC+2).
+OnCalendar=*-*-01 02:00:00 UTC
+Persistent=true
+Unit=cc-advance-accrual.service
+
+[Install]
+WantedBy=timers.target

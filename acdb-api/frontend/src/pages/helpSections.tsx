@@ -78,6 +78,7 @@ const FEATURE_ROWS: [string, string, string, string, string][] = [
   ['Metering',       'Comptage',              'Check meter comparison',            'Comparaison des compteurs de contrôle',    '/check-meters'],
   ['Payments',       'Paiements',             'Record missed payment',             'Enregistrer un paiement manqué',           '/record-payment'],
   ['Payments',       'Paiements',             'Payment verification',              'Vérification des paiements',               '/payment-verification'],
+  ['Advances',       'Avances',               'Connection / readyboard advance ledger', 'Grand livre des avances raccordement / tableau', '/advances'],
   ['Financing',      'Financement',           'Product templates & agreements',    'Modèles de produits et accords',           '/financing'],
   ['Financing',      'Financement',           'Extend credit (from customer page)','Accorder un crédit (depuis la fiche client)', '/customers/:id'],
   ['Reports',        'Rapports',              'O&M quarterly report',              'Rapport trimestriel O&M',                  '/om-report'],
@@ -475,6 +476,18 @@ function PaymentsContent() {
           Si le client a un financement actif, le paiement est automatiquement réparti entre l'électricité et le remboursement de la dette. Un indicateur affiche la répartition sur l'écran de résultat.
         </Warning>
 
+        <SubHead>Reconnaissance automatique des frais (raccordement / tableau de distribution)</SubHead>
+        <P>
+          Le portail reconnaît automatiquement les paiements pour les frais de <Bold>raccordement</Bold> et de
+          <Bold> tableau de distribution complet</Bold> par leur montant exact (configuré par pays — ex : 501 LSL pour le
+          raccordement et 499 LSL pour le tableau au Lesotho ; voir <PageLink to="/tariffs">Tarifs → Frais de raccordement et tableau</PageLink>).
+        </P>
+        <Ul>
+          <li><Bold>Règle « exact-jusqu'à-payé »</Bold> : un paiement est classé comme frais de raccordement / tableau uniquement si le compte n'a pas encore de paiement <Bold>vérifié</Bold> de ce type. Une fois le frais vérifié, les futurs paiements du même montant exact sont traités comme paiements d'électricité normaux (avec répartition d'avance / financement le cas échéant).</li>
+          <li>Les paiements de frais reconnus <Bold>n'augmentent pas le crédit kWh</Bold> ; ils sont placés en <Bold>Vérification des paiements</Bold> en attente d'approbation par l'équipe financière.</li>
+          <li>Cette règle s'applique de manière identique aux paiements SMS (M-Pesa, MTN MoMo) et aux paiements manuels / webhook.</li>
+        </Ul>
+
         <SubHead>Vérification des paiements (<PageLink to="/payment-verification">/payment-verification</PageLink>)</SubHead>
         <P>Les frais de raccordement et de tableau de distribution nécessitent une vérification par l'équipe financière.</P>
         <Ol>
@@ -485,6 +498,12 @@ function PaymentsContent() {
           <li>Cliquer sur <Bold>Vérifier</Bold> ou <Bold>Rejeter</Bold>.</li>
         </Ol>
         <P>Utilisez le bouton <Bold>Exporter XLSX</Bold> pour télécharger la vue actuelle pour les archives de l'équipe financière.</P>
+
+        <Tip>
+          Si un client ne peut pas payer le frais en totalité d'avance, l'équipe O&amp;M / Finance peut accorder une
+          <Bold> avance</Bold> qui sera remboursée automatiquement sur les paiements futurs. Voir
+          <PageLink to="#advances"> Avances raccordement et tableau</PageLink>.
+        </Tip>
       </>
     );
   }
@@ -504,6 +523,22 @@ function PaymentsContent() {
         If the customer has active financing, the payment is automatically split between electricity and debt repayment. An indicator shows the split on the result screen.
       </Warning>
 
+      <SubHead>Automatic fee recognition (connection / readyboard)</SubHead>
+      <P>
+        The portal automatically recognises <Bold>connection-fee</Bold> and <Bold>full-readyboard-fee</Bold> payments by
+        their <Bold>exact amount</Bold> (configured per country — e.g. 501 LSL for connection and 499 LSL for the
+        readyboard fee in Lesotho; see <PageLink to="/tariffs">Tariffs → Connection &amp; Readyboard Fees</PageLink>).
+      </P>
+      <Ul>
+        <li><Bold>"Exact-until-paid" rule</Bold>: a payment is only classified as a connection / readyboard fee if the
+          account does <Bold>not</Bold> already have a verified fee of that type on file. Once that fee is verified,
+          subsequent payments of the same exact amount route normally as electricity payments (and trigger advance /
+          financing splits where applicable).</li>
+        <li>Recognised fee payments <Bold>do not credit kWh</Bold>; they land in <Bold>Payment Verification</Bold> for
+          finance to approve.</li>
+        <li>The rule applies identically to SMS payments (M-Pesa, MTN MoMo) and to manual / webhook payments.</li>
+      </Ul>
+
       <SubHead>Payment Verification (<PageLink to="/payment-verification">/payment-verification</PageLink>)</SubHead>
       <P>Connection fees and readyboard fees require finance team verification.</P>
       <Ol>
@@ -514,6 +549,157 @@ function PaymentsContent() {
         <li>Click <Bold>Verify</Bold> or <Bold>Reject</Bold>.</li>
       </Ol>
       <P>Use the <Bold>Export XLSX</Bold> button to download the current view for the finance team's records.</P>
+
+      <Tip>
+        If a customer can't pay the fee in full up-front, the O&amp;M / Finance team can grant an
+        <Bold> advance</Bold> that will be auto-repaid from future payments. See
+        <PageLink to="#advances"> Connection &amp; Readyboard Advances</PageLink>.
+      </Tip>
+    </>
+  );
+}
+
+function AdvancesContent() {
+  const fr = useHelpLangIsFr();
+
+  if (fr) {
+    return (
+      <>
+        <P>
+          Le module <PageLink to="/advances">Avances</PageLink> permet à 1PWR d'avancer les frais de
+          <Bold> raccordement</Bold> ou de <Bold>tableau de distribution complet</Bold> à un client qui ne peut
+          pas régler le montant total au moment de la mise en service. L'avance est remboursée automatiquement
+          sur les paiements ultérieurs et un <Bold>frais mensuel</Bold> peut être appliqué (prime de portage).
+        </P>
+
+        <Warning>
+          Les avances sont distinctes du module <PageLink to="/financing">Financement</PageLink> (réservé aux
+          biens mobiliers comme les frigos, lampes solaires, etc.). Le grand livre, le contrat et la logique de
+          répartition sont indépendants.
+        </Warning>
+
+        <SubHead>Accorder une avance</SubHead>
+        <P>Sur la page <PageLink to="/advances">Avances</PageLink>, cliquer sur <Bold>Nouvelle avance</Bold> :</P>
+        <Ol>
+          <li><Bold>Compte</Bold> — Numéro du client (ex : <Code>0045MAK</Code>).</li>
+          <li><Bold>Type</Bold> — <Code>connection</Code> ou <Code>readyboard</Code>.</li>
+          <li><Bold>Montant initial</Bold> — Pré-rempli avec le frais pays par défaut (modifiable).</li>
+          <li><Bold>Fraction de remboursement</Bold> — Part de chaque paiement d'électricité affectée à l'avance (par défaut <Code>0.50</Code> = moitié à l'avance, moitié aux kWh).</li>
+          <li><Bold>Frais mensuel %</Bold> — Pourcentage appliqué chaque mois sur le solde restant (par défaut <Code>0</Code> ; ex : <Code>0.015</Code> = 1,5 % / mois).</li>
+          <li><Bold>Contrat signé</Bold> — <Bold>Obligatoire</Bold>. Téléverser le PDF / image du contrat signé par le client (max 10 Mo, PDF / JPEG / PNG / WEBP).</li>
+        </Ol>
+        <P>Une seule avance <Bold>active</Bold> par compte et par type est autorisée. Le contrat est stocké de manière sécurisée et un hash SHA-256 est conservé pour la non-altération.</P>
+
+        <SubHead>Comment fonctionne le remboursement</SubHead>
+        <Ul>
+          <li>Quand le client paie pour de l'électricité (M-Pesa, MoMo ou paiement manuel), la <Bold>fraction de remboursement</Bold> est prélevée automatiquement et affectée au solde de l'avance ; le reste est crédité en kWh.</li>
+          <li>Si une avance ET un accord de financement actifs coexistent, l'<Bold>avance est remboursée en premier</Bold>, puis le financement applique sa propre répartition sur la portion électricité restante.</li>
+          <li>Quand l'avance atteint zéro, son statut passe à <Bold>paid_off</Bold> et 100 % des paiements suivants vont aux kWh (et aux financements actifs le cas échéant).</li>
+          <li>Les paiements <Bold>reconnus comme frais de raccordement / tableau</Bold> par leur montant exact ne réduisent pas l'avance — ils sont mis en file pour vérification par les finances.</li>
+        </Ul>
+
+        <SubHead>Frais mensuel automatique</SubHead>
+        <P>
+          Un service <Code>cc-advance-accrual.timer</Code> (systemd) s'exécute le 1er de chaque mois à 02:00 UTC.
+          Pour chaque avance active avec <Code>monthly_fee_pct &gt; 0</Code>, le système :
+        </P>
+        <Ol>
+          <li>Calcule <Code>solde × frais_mensuel_pct</Code>.</li>
+          <li>Augmente <Code>outstanding</Code> du même montant.</li>
+          <li>Inscrit une ligne <Code>monthly_fee</Code> dans le grand livre de l'avance (avec la période AAAA-MM, idempotent — pas de double accrual).</li>
+        </Ol>
+        <P>L'historique complet (avance accordée, remboursements, frais mensuels, ajustements, contrat remplacé, abandon de créance) est visible dans le détail de chaque avance.</P>
+
+        <SubHead>Modifier ou clôturer une avance</SubHead>
+        <Ul>
+          <li><Bold>Modifier</Bold> — Ajuster la fraction de remboursement, le pourcentage de frais mensuel, ou ajouter une note.</li>
+          <li><Bold>Remplacer le contrat</Bold> — Téléverser une nouvelle version. L'ancienne est archivée (jamais supprimée) et un événement <Code>contract_replaced</Code> est ajouté au grand livre.</li>
+          <li><Bold>Télécharger le contrat</Bold> — Récupérer le PDF / image originale.</li>
+          <li><Bold>Abandon de créance (writeoff)</Bold> — Marque l'avance comme <Code>written_off</Code> ; le solde restant est passé en perte. Réservé aux rôles <Bold>superadmin</Bold> et <Bold>finance_team</Bold>.</li>
+        </Ul>
+
+        <SubHead>Rôles et permissions</SubHead>
+        <Ul>
+          <li><Bold>Voir</Bold> — Tous les employés (O&amp;M, finance, admin).</li>
+          <li><Bold>Créer / modifier / remplacer le contrat</Bold> — <Bold>superadmin</Bold>, <Bold>onm_team</Bold>, <Bold>finance_team</Bold>.</li>
+          <li><Bold>Abandon de créance</Bold> — <Bold>superadmin</Bold>, <Bold>finance_team</Bold> uniquement.</li>
+          <li><Bold>Modifier les montants pays par défaut</Bold> — Page <PageLink to="/tariffs">Tarifs</PageLink>, carte <Bold>Frais de raccordement et tableau</Bold>.</li>
+        </Ul>
+
+        <Tip>
+          Sur la page <PageLink to="/customer-data">Données client</PageLink>, un panneau <Bold>Avances actives</Bold>
+          affiche le solde restant et un lien direct vers la page Avances pour gestion.
+        </Tip>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <P>
+        The <PageLink to="/advances">Advances</PageLink> module lets 1PWR advance the
+        <Bold> connection fee</Bold> or <Bold>full readyboard fee</Bold> to a customer who can't pay the
+        full amount up-front. The advance is automatically repaid from future payments and an optional
+        <Bold> monthly fee</Bold> can be charged on the outstanding balance (carrying premium).
+      </P>
+
+      <Warning>
+        Advances are kept separate from the <PageLink to="/financing">Financing</PageLink> module (which is reserved
+        for movable assets like fridges, solar lanterns, etc.). The ledger, contract, and split logic are independent.
+      </Warning>
+
+      <SubHead>Granting an advance</SubHead>
+      <P>On the <PageLink to="/advances">Advances</PageLink> page, click <Bold>New advance</Bold>:</P>
+      <Ol>
+        <li><Bold>Account</Bold> — Customer number (e.g., <Code>0045MAK</Code>).</li>
+        <li><Bold>Type</Bold> — <Code>connection</Code> or <Code>readyboard</Code>.</li>
+        <li><Bold>Original amount</Bold> — Pre-filled with the country default fee (editable).</li>
+        <li><Bold>Repayment fraction</Bold> — Portion of every electricity payment redirected to the advance (default <Code>0.50</Code> = half to advance, half to kWh).</li>
+        <li><Bold>Monthly fee %</Bold> — Percentage charged each month on the outstanding balance (default <Code>0</Code>; e.g. <Code>0.015</Code> = 1.5% / month).</li>
+        <li><Bold>Signed contract</Bold> — <Bold>Required</Bold>. Upload the customer-signed PDF / image (max 10 MB; PDF / JPEG / PNG / WEBP).</li>
+      </Ol>
+      <P>Only <Bold>one active</Bold> advance per account per type is allowed. The contract is stored securely and a SHA-256 hash is recorded for tamper-evidence.</P>
+
+      <SubHead>How repayment works</SubHead>
+      <Ul>
+        <li>When the customer pays for electricity (M-Pesa, MoMo, or manual record), the <Bold>repayment fraction</Bold> is automatically siphoned to the advance balance; the remainder is credited as kWh.</li>
+        <li>If both an advance and an active financing agreement exist, the <Bold>advance is repaid first</Bold>; the financing module then applies its own split to the remaining electricity portion.</li>
+        <li>When the advance reaches zero, status flips to <Bold>paid_off</Bold> and 100% of subsequent payments go to kWh (and to active financings, if any).</li>
+        <li>Payments <Bold>recognised as connection / readyboard fees</Bold> by their exact amount do <Bold>not</Bold> reduce the advance — those are queued for finance verification instead.</li>
+      </Ul>
+
+      <SubHead>Automatic monthly fee accrual</SubHead>
+      <P>
+        A <Code>cc-advance-accrual.timer</Code> systemd unit runs on the 1st of each month at 02:00 UTC.
+        For every active advance with <Code>monthly_fee_pct &gt; 0</Code>, the script:
+      </P>
+      <Ol>
+        <li>Computes <Code>outstanding × monthly_fee_pct</Code>.</li>
+        <li>Increases <Code>outstanding</Code> by that amount.</li>
+        <li>Writes a <Code>monthly_fee</Code> entry in the advance ledger (tagged with the YYYY-MM period; idempotent — no double-accrual).</li>
+      </Ol>
+      <P>The full ledger (grant, repayments, monthly fees, adjustments, contract replacement, write-off) is visible in each advance's detail view.</P>
+
+      <SubHead>Editing or closing an advance</SubHead>
+      <Ul>
+        <li><Bold>Edit</Bold> — Adjust repayment fraction, monthly fee %, or add a note.</li>
+        <li><Bold>Replace contract</Bold> — Upload a new version. The previous file is archived (never deleted) and a <Code>contract_replaced</Code> event is logged in the ledger.</li>
+        <li><Bold>Download contract</Bold> — Retrieve the original PDF / image.</li>
+        <li><Bold>Write-off</Bold> — Marks the advance as <Code>written_off</Code>; the remaining outstanding is recorded as a loss. Limited to <Bold>superadmin</Bold> and <Bold>finance_team</Bold> roles.</li>
+      </Ul>
+
+      <SubHead>Roles &amp; permissions</SubHead>
+      <Ul>
+        <li><Bold>View</Bold> — All employees (O&amp;M, finance, admin).</li>
+        <li><Bold>Create / edit / replace contract</Bold> — <Bold>superadmin</Bold>, <Bold>onm_team</Bold>, <Bold>finance_team</Bold>.</li>
+        <li><Bold>Write-off</Bold> — <Bold>superadmin</Bold>, <Bold>finance_team</Bold> only.</li>
+        <li><Bold>Edit country default fees</Bold> — <PageLink to="/tariffs">Tariffs</PageLink> page, <Bold>Connection &amp; Readyboard Fees</Bold> card.</li>
+      </Ul>
+
+      <Tip>
+        On the <PageLink to="/customer-data">Customer Data</PageLink> page, an <Bold>Active Advances</Bold> panel
+        shows the outstanding balance and a deep-link to the Advances page for management.
+      </Tip>
     </>
   );
 }
@@ -961,6 +1147,18 @@ function TariffsContent() {
           <li>La configuration des tarifs par pays est prise en charge.</li>
         </Ul>
         <Warning>La modification d'un tarif affecte la conversion en kWh des paiements futurs. Les transactions existantes ne sont pas recalculées.</Warning>
+
+        <SubHead>Frais de raccordement et de tableau de distribution (par pays)</SubHead>
+        <P>
+          La carte <Bold>Frais de raccordement et tableau</Bold> de la page Tarifs définit les <Bold>montants exacts</Bold>
+          que la passerelle de classification reconnaît comme paiements de frais (par défaut : <Code>501</Code> pour le
+          raccordement et <Code>499</Code> pour le tableau au Lesotho). Toute modification s'applique à partir du paiement
+          suivant ; les paiements déjà classés ne sont pas recatégorisés.
+        </P>
+        <Tip>
+          Réservé aux rôles <Bold>superadmin</Bold>, <Bold>onm_team</Bold> ou <Bold>finance_team</Bold>.
+          Les avances accordées avant un changement conservent leur montant initial — voir <PageLink to="#advances">Avances</PageLink>.
+        </Tip>
       </>
     );
   }
@@ -974,6 +1172,18 @@ function TariffsContent() {
         <li>Country-specific tariff configuration is supported.</li>
       </Ul>
       <Warning>Changing a tariff rate affects how future payments are converted to kWh. Existing transactions are not recalculated.</Warning>
+
+      <SubHead>Connection &amp; Readyboard Fees (per-country)</SubHead>
+      <P>
+        The <Bold>Connection &amp; Readyboard Fees</Bold> card on the Tariffs page defines the <Bold>exact amounts</Bold>
+        the classifier recognises as fee payments (defaults: <Code>501</Code> for connection, <Code>499</Code> for the
+        readyboard fee in Lesotho). Edits take effect from the next incoming payment; previously classified payments are
+        not recategorised.
+      </P>
+      <Tip>
+        Restricted to <Bold>superadmin</Bold>, <Bold>onm_team</Bold>, and <Bold>finance_team</Bold> roles.
+        Advances granted before a fee change keep their original amount — see <PageLink to="#advances">Advances</PageLink>.
+      </Tip>
     </>
   );
 }
@@ -1064,8 +1274,9 @@ export function useHelpSections(): HelpSection[] {
     { id: 'sites',                content: <SitesContent />, searchKeywords: 'community concession tosing site code dropdown new site' },
     { id: 'customers',            content: <CustomerMgmtContent />, searchKeywords: 'register superadmin onm_team' },
     { id: 'commission',           content: <CommissionContent /> },
-    { id: 'payments',             content: <PaymentsContent /> },
+    { id: 'payments',             content: <PaymentsContent />, searchKeywords: 'fee classifier connection readyboard exact match 499 501 lesotho benin verification' },
     { id: 'balance-adjustments',  content: <BalanceAdjustmentsContent /> },
+    { id: 'advances',             content: <AdvancesContent />, searchKeywords: 'advance ledger connection readyboard fee monthly accrual contract upload writeoff repayment fraction premium' },
     { id: 'financing',            content: <FinancingContent /> },
     { id: 'meters',               content: <MetersContent /> },
     { id: 'reports',              content: <ReportsContent /> },

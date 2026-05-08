@@ -3,9 +3,291 @@ import { useTranslation } from 'react-i18next';
 import {
   getTariffCurrent, updateGlobalRate, updateConcessionRate, updateCustomerRate,
   deleteConcessionOverride, deleteCustomerOverride, getTariffHistory,
-  type TariffCurrentResponse, type TariffHistoryEntry,
+  getCountryFees, updateCountryFees,
+  type TariffCurrentResponse, type TariffHistoryEntry, type CountryFees,
 } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
+
+const FEE_ADMIN_ROLES = new Set(['superadmin', 'onm_team', 'finance_team']);
+
+function CountryFeesCard() {
+  const { t } = useTranslation(['tariff']);
+  const { user } = useAuth();
+  const canEdit = !!user?.role && FEE_ADMIN_ROLES.has(user.role as string);
+  const [fees, setFees] = useState<CountryFees | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({ connection: 0, readyboard: 0 });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const reload = useCallback(async () => {
+    try {
+      const data = await getCountryFees();
+      setFees(data);
+      setDraft({
+        connection: data.connection_fee_amount,
+        readyboard: data.readyboard_fee_amount,
+      });
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      await updateCountryFees({
+        connection_fee_amount: draft.connection,
+        readyboard_fee_amount: draft.readyboard,
+      });
+      setSuccess(t('tariff:countryFees.saved'));
+      setTimeout(() => setSuccess(''), 4000);
+      setEditing(false);
+      reload();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!fees) return null;
+
+  return (
+    <div className="bg-white rounded-xl border p-5">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
+            {t('tariff:countryFees.title')}
+          </h2>
+          <p className="text-xs text-gray-400 mt-0.5">{t('tariff:countryFees.subtitle')}</p>
+        </div>
+        {canEdit && !editing && (
+          <button onClick={() => setEditing(true)}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition">
+            {t('tariff:countryFees.edit')}
+          </button>
+        )}
+      </div>
+
+      {success && (
+        <div className="mb-3 p-2 bg-green-50 border border-green-200 rounded-lg text-green-700 text-xs">{success}</div>
+      )}
+      {error && (
+        <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs">{error}</div>
+      )}
+
+      {!editing ? (
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <span className="text-xs text-gray-400 uppercase tracking-wide">{t('tariff:countryFees.connection')}</span>
+            <div className="mt-1 text-2xl font-bold text-gray-800 tabular-nums">
+              {fees.connection_fee_amount.toFixed(2)} <span className="text-base text-gray-400">{fees.currency}</span>
+            </div>
+          </div>
+          <div>
+            <span className="text-xs text-gray-400 uppercase tracking-wide">{t('tariff:countryFees.readyboard')}</span>
+            <div className="mt-1 text-2xl font-bold text-gray-800 tabular-nums">
+              {fees.readyboard_fee_amount.toFixed(2)} <span className="text-base text-gray-400">{fees.currency}</span>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-4">
+          <label className="block">
+            <span className="text-xs text-gray-500 uppercase tracking-wide">{t('tariff:countryFees.connection')}</span>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={draft.connection}
+              onChange={e => setDraft({ ...draft, connection: Number(e.target.value) })}
+              className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none"
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs text-gray-500 uppercase tracking-wide">{t('tariff:countryFees.readyboard')}</span>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={draft.readyboard}
+              onChange={e => setDraft({ ...draft, readyboard: Number(e.target.value) })}
+              className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none"
+            />
+          </label>
+          <div className="col-span-2 flex justify-end gap-3 pt-1">
+            <button
+              type="button"
+              onClick={() => { setEditing(false); setDraft({ connection: fees.connection_fee_amount, readyboard: fees.readyboard_fee_amount }); }}
+              className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
+            >
+              {t('tariff:modal.cancel')}
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="px-5 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              {saving ? t('tariff:modal.saving') : t('tariff:modal.save')}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <p className="text-xs text-gray-400 mt-3">{t('tariff:countryFees.help')}</p>
+    </div>
+  );
+}
+
+function LowBalanceKwhCard() {
+  const { t } = useTranslation(['tariff']);
+  const { user } = useAuth();
+  const canEdit = !!user?.role && FEE_ADMIN_ROLES.has(user.role as string);
+  const [fees, setFees] = useState<CountryFees | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({ warn: 10, clear: 20 });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const reload = useCallback(async () => {
+    try {
+      const data = await getCountryFees();
+      setFees(data);
+      setDraft({
+        warn: data.low_balance_kwh_threshold,
+        clear: data.low_balance_kwh_clear,
+      });
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      await updateCountryFees({
+        low_balance_kwh_threshold: draft.warn,
+        low_balance_kwh_clear: draft.clear,
+      });
+      setSuccess(t('tariff:lowBalance.saved'));
+      setTimeout(() => setSuccess(''), 4000);
+      setEditing(false);
+      reload();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!fees) return null;
+
+  return (
+    <div className="bg-white rounded-xl border p-5">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
+            {t('tariff:lowBalance.title')}
+          </h2>
+          <p className="text-xs text-gray-400 mt-0.5">{t('tariff:lowBalance.subtitle')}</p>
+        </div>
+        {canEdit && !editing && (
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition"
+          >
+            {t('tariff:lowBalance.edit')}
+          </button>
+        )}
+      </div>
+
+      {success && (
+        <div className="mb-3 p-2 bg-green-50 border border-green-200 rounded-lg text-green-700 text-xs">{success}</div>
+      )}
+      {error && (
+        <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs">{error}</div>
+      )}
+
+      {!editing ? (
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <span className="text-xs text-gray-400 uppercase tracking-wide">{t('tariff:lowBalance.warn')}</span>
+            <div className="mt-1 text-2xl font-bold text-gray-800 tabular-nums">
+              {fees.low_balance_kwh_threshold.toFixed(1)} <span className="text-base text-gray-400">kWh</span>
+            </div>
+          </div>
+          <div>
+            <span className="text-xs text-gray-400 uppercase tracking-wide">{t('tariff:lowBalance.clear')}</span>
+            <div className="mt-1 text-2xl font-bold text-gray-800 tabular-nums">
+              {fees.low_balance_kwh_clear.toFixed(1)} <span className="text-base text-gray-400">kWh</span>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-4">
+          <label className="block">
+            <span className="text-xs text-gray-500 uppercase tracking-wide">{t('tariff:lowBalance.warn')}</span>
+            <input
+              type="number"
+              step="0.1"
+              min="0.1"
+              value={draft.warn}
+              onChange={e => setDraft({ ...draft, warn: Number(e.target.value) })}
+              className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none"
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs text-gray-500 uppercase tracking-wide">{t('tariff:lowBalance.clear')}</span>
+            <input
+              type="number"
+              step="0.1"
+              min="0.1"
+              value={draft.clear}
+              onChange={e => setDraft({ ...draft, clear: Number(e.target.value) })}
+              className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none"
+            />
+          </label>
+          <div className="col-span-2 flex justify-end gap-3 pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setEditing(false);
+                setDraft({
+                  warn: fees.low_balance_kwh_threshold,
+                  clear: fees.low_balance_kwh_clear,
+                });
+              }}
+              className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
+            >
+              {t('tariff:modal.cancel')}
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving || draft.clear <= draft.warn}
+              className="px-5 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              {saving ? t('tariff:modal.saving') : t('tariff:modal.save')}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <p className="text-xs text-gray-400 mt-3">{t('tariff:lowBalance.help')}</p>
+    </div>
+  );
+}
 
 function fmtDate(iso: string) {
   if (!iso) return '--';
@@ -348,6 +630,10 @@ export default function TariffManagementPage() {
           </p>
         </div>
       )}
+
+      <CountryFeesCard />
+
+      <LowBalanceKwhCard />
 
       <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
         {([['overrides', t('tariff:tabs.overrides')], ['history', t('tariff:tabs.history')]] as const).map(([key, label]) => (

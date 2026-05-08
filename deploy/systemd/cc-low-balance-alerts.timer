@@ -1,0 +1,9 @@
+[Unit]
+Description=Twice-daily low-balance SMS sweep (1PDB)
+
+[Timer]
+OnCalendar=*-*-* 07,19:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

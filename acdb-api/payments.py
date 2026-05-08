@@ -22,8 +22,15 @@ from pydantic import BaseModel, Field
 
 from customer_api import get_connection
 from sparkmeter_credit import credit_sparkmeter, CreditResult
-from balance_engine import get_balance_kwh, record_payment_kwh
+from balance_engine import get_balance_kwh, record_payment_kwh, record_fee_transaction
 from financing import compute_financing_split, apply_financing_payment
+from advances import (
+    apply_advance_payment,
+    compute_advance_split,
+    get_active_advance,
+)
+from fee_classifier import classify_payment
+from payment_verification import create_verification_entry
 from middleware import require_employee
 from models import CurrentUser
 from mutations import try_log_mutation
@@ -162,8 +169,47 @@ def payment_webhook(
             meter_id = _resolve_meter(conn, payload.account_number, payload.meter_id)
             rate = _get_tariff_rate(conn, payload.account_number)
 
-            split = compute_financing_split(conn, payload.account_number, payload.amount)
-            elec_amount = split["electricity_portion"]
+            classification = classify_payment(conn, payload.account_number, payload.amount)
+            category = classification["category"]
+
+            if category in ("connection_fee", "readyboard_fee"):
+                txn_id, balance_kwh = record_fee_transaction(
+                    conn, payload.account_number, meter_id,
+                    amount_currency=payload.amount,
+                    payment_category=category,
+                    source="sms_gateway",
+                    timestamp=ts,
+                    payment_reference=ext_ref,
+                )
+                create_verification_entry(
+                    conn, txn_id, payload.account_number, category, payload.amount,
+                )
+                conn.commit()
+                return {
+                    "status": "ok",
+                    "transaction_id": txn_id,
+                    "account_number": payload.account_number,
+                    "amount": payload.amount,
+                    "kwh_vended": 0,
+                    "rate": rate,
+                    "balance_kwh": balance_kwh,
+                    "meter_id": meter_id,
+                    "fee": {
+                        "category": category,
+                        "matched_amount": classification["matched_amount"],
+                        "verification_status": "pending",
+                    },
+                }
+
+            advance = get_active_advance(conn, payload.account_number)
+            adv_split = compute_advance_split(advance, payload.amount)
+
+            fin_split = compute_financing_split(
+                conn, payload.account_number, adv_split["electricity_portion"],
+            )
+            elec_amount = fin_split["electricity_portion"]
+            advance_portion = adv_split["advance_portion"]
+            financing_portion = fin_split["debt_portion"]
 
             txn_id, kwh_vended, new_balance_kwh = record_payment_kwh(
                 conn, payload.account_number, meter_id,
@@ -172,16 +218,32 @@ def payment_webhook(
                 payment_reference=ext_ref,
             )
 
-            if split["has_financing"] and split["debt_portion"] > 0:
+            if advance and advance_portion > 0:
+                apply_advance_payment(
+                    conn, adv_split["advance_id"], advance_portion,
+                    source_transaction_id=txn_id,
+                    created_by="sms_gateway",
+                )
+
+            if fin_split["has_financing"] and financing_portion > 0:
                 apply_financing_payment(
-                    conn, split["agreement_id"], split["debt_portion"],
+                    conn, fin_split["agreement_id"], financing_portion,
                     source_transaction_id=txn_id,
                 )
 
             cur = conn.cursor()
             cur.execute(
-                "UPDATE transactions SET financing_portion = %s, electricity_portion = %s WHERE id = %s",
-                (split["debt_portion"], elec_amount, txn_id),
+                """
+                UPDATE transactions
+                   SET payment_category    = 'electricity',
+                       financing_portion   = %s,
+                       advance_portion     = %s,
+                       advance_id          = %s,
+                       electricity_portion = %s
+                 WHERE id = %s
+                """,
+                (financing_portion, advance_portion,
+                 adv_split["advance_id"], elec_amount, txn_id),
             )
             conn.commit()
 
@@ -208,11 +270,18 @@ def payment_webhook(
                 "balance_kwh": new_balance_kwh,
                 "meter_id": meter_id,
             }
-            if split["has_financing"]:
+            if advance:
+                result["advance"] = {
+                    "advance_id": adv_split["advance_id"],
+                    "advance_portion": advance_portion,
+                    "electricity_portion": elec_amount + financing_portion,
+                    "advance_type": advance["advance_type"],
+                }
+            if fin_split["has_financing"]:
                 result["financing"] = {
-                    "debt_portion": split["debt_portion"],
+                    "debt_portion": financing_portion,
                     "electricity_portion": elec_amount,
-                    "is_dedicated_payment": split["is_dedicated_payment"],
+                    "is_dedicated_payment": fin_split["is_dedicated_payment"],
                 }
             return result
 
@@ -260,27 +329,104 @@ def record_manual_payment(
             meter_id = _resolve_meter(conn, payload.account_number, payload.meter_id)
             rate = _get_tariff_rate(conn, payload.account_number)
 
-            split = compute_financing_split(conn, payload.account_number, payload.amount)
-            elec_amount = split["electricity_portion"]
+            classification = classify_payment(conn, payload.account_number, payload.amount)
+            category = classification["category"]
 
+            if category in ("connection_fee", "readyboard_fee"):
+                txn_id, balance_kwh = record_fee_transaction(
+                    conn, payload.account_number, meter_id,
+                    amount_currency=payload.amount,
+                    payment_category=category,
+                    source="portal",
+                    payment_reference=pref,
+                )
+                create_verification_entry(
+                    conn, txn_id, payload.account_number, category, payload.amount,
+                )
+                try_log_mutation(
+                    user, "create", "transactions", str(txn_id),
+                    new_values={
+                        "account_number": payload.account_number,
+                        "payment_reference": pref,
+                        "amount_submitted": payload.amount,
+                        "payment_category": category,
+                        "kwh_vended": 0,
+                        "meter_id": meter_id,
+                        "source": "portal",
+                        "transaction_id": txn_id,
+                        "note": (payload.note or "").strip()[:500] or None,
+                    },
+                    metadata={
+                        "kind": "manual_payment_fee",
+                        "endpoint": "POST /api/payments/record",
+                        "category": category,
+                    },
+                    conn=conn,
+                )
+                conn.commit()
+                return {
+                    "status": "ok",
+                    "transaction_id": txn_id,
+                    "amount": payload.amount,
+                    "kwh": 0,
+                    "balance_kwh": balance_kwh,
+                    "sm_credit": None,
+                    "fee": {
+                        "category": category,
+                        "matched_amount": classification["matched_amount"],
+                        "verification_status": "pending",
+                    },
+                }
+
+            advance = get_active_advance(conn, payload.account_number)
+            adv_split = compute_advance_split(advance, payload.amount)
+
+            fin_split = compute_financing_split(
+                conn, payload.account_number, adv_split["electricity_portion"],
+            )
+            elec_amount = fin_split["electricity_portion"]
+            advance_portion = adv_split["advance_portion"]
+            financing_portion = fin_split["debt_portion"]
+
+            kwh_override = (
+                payload.kwh
+                if (advance is None and not fin_split["has_financing"])
+                else None
+            )
             txn_id, kwh_vended, new_balance_kwh = record_payment_kwh(
                 conn, payload.account_number, meter_id,
                 amount_currency=elec_amount, rate=rate,
-                kwh_override=payload.kwh if not split["has_financing"] else None,
+                kwh_override=kwh_override,
                 source="portal",
                 payment_reference=pref,
             )
 
-            if split["has_financing"] and split["debt_portion"] > 0:
+            if advance and advance_portion > 0:
+                apply_advance_payment(
+                    conn, adv_split["advance_id"], advance_portion,
+                    source_transaction_id=txn_id,
+                    created_by=user.user_id,
+                )
+
+            if fin_split["has_financing"] and financing_portion > 0:
                 apply_financing_payment(
-                    conn, split["agreement_id"], split["debt_portion"],
+                    conn, fin_split["agreement_id"], financing_portion,
                     source_transaction_id=txn_id,
                 )
 
             cur = conn.cursor()
             cur.execute(
-                "UPDATE transactions SET financing_portion = %s, electricity_portion = %s WHERE id = %s",
-                (split["debt_portion"], elec_amount, txn_id),
+                """
+                UPDATE transactions
+                   SET payment_category    = 'electricity',
+                       financing_portion   = %s,
+                       advance_portion     = %s,
+                       advance_id          = %s,
+                       electricity_portion = %s
+                 WHERE id = %s
+                """,
+                (financing_portion, advance_portion,
+                 adv_split["advance_id"], elec_amount, txn_id),
             )
 
             new_values = {
@@ -288,13 +434,16 @@ def record_manual_payment(
                 "payment_reference": pref,
                 "amount_submitted": payload.amount,
                 "amount_electricity": elec_amount,
-                "debt_portion": float(split["debt_portion"] or 0),
+                "advance_portion": advance_portion,
+                "advance_id": adv_split["advance_id"],
+                "financing_portion": financing_portion,
                 "kwh_vended": kwh_vended,
                 "meter_id": meter_id,
                 "source": "portal",
                 "transaction_id": txn_id,
                 "note": (payload.note or "").strip()[:500] or None,
-                "has_financing": bool(split.get("has_financing")),
+                "has_financing": bool(fin_split.get("has_financing")),
+                "has_advance": advance is not None,
             }
             try_log_mutation(
                 user,
@@ -333,11 +482,18 @@ def record_manual_payment(
                 "balance_kwh": new_balance_kwh,
                 "sm_credit": sm_result,
             }
-            if split["has_financing"]:
+            if advance:
+                result["advance"] = {
+                    "advance_id": adv_split["advance_id"],
+                    "advance_portion": advance_portion,
+                    "electricity_portion": elec_amount + financing_portion,
+                    "advance_type": advance["advance_type"],
+                }
+            if fin_split["has_financing"]:
                 result["financing"] = {
-                    "debt_portion": split["debt_portion"],
+                    "debt_portion": financing_portion,
                     "electricity_portion": elec_amount,
-                    "is_dedicated_payment": split["is_dedicated_payment"],
+                    "is_dedicated_payment": fin_split["is_dedicated_payment"],
                 }
             return result
     except HTTPException:
@@ -399,26 +555,115 @@ def sm_credit_status():
     return is_configured()
 
 
+def _normalize_phone_digits(phone: str) -> str:
+    """Match ``customer_by_phone`` / SMS gateway handset formats (digits only)."""
+    digits = "".join(c for c in phone if c.isdigit())
+    if digits.startswith("266") and len(digits) > 9:
+        digits = digits[3:]
+    digits = digits.lstrip("0")
+    return digits
+
+
+def _account_numbers_for_phone(conn, phone: str) -> list[str]:
+    """All distinct ``accounts.account_number`` rows for customers matching handset (last 8 digits)."""
+    norm = _normalize_phone_digits(phone)
+    if len(norm) < 5:
+        return []
+    like_pattern = f"%{norm[-8:]}"
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT DISTINCT a.account_number
+        FROM customers c
+        JOIN accounts a ON a.customer_id = c.id
+        WHERE c.phone LIKE %s
+           OR c.cell_phone_1 LIKE %s
+           OR c.cell_phone_2 LIKE %s
+        ORDER BY a.account_number
+        """,
+        (like_pattern, like_pattern, like_pattern),
+    )
+    return [str(r[0]).strip() for r in cur.fetchall() if r and r[0]]
+
+
+def _balance_payload_for_conn(conn, account_number: str) -> dict:
+    balance_kwh, as_of = get_balance_kwh(conn, account_number)
+    rate = _get_tariff_rate(conn, account_number)
+    return {
+        "account_number": account_number,
+        "balance_kwh": balance_kwh,
+        "balance_currency": round(balance_kwh * rate, 2),
+        "tariff_rate": rate,
+        "as_of": as_of.isoformat() if as_of else None,
+    }
+
+
+def _balance_payload(account_number: str) -> dict:
+    """Canonical balance from 1PDB via ``get_balance_kwh`` (same engine as portal dashboard)."""
+    with get_connection() as conn:
+        return _balance_payload_for_conn(conn, account_number)
+
+
 @router.get("/balance/{account_number}")
 def get_balance(account_number: str):
     """Get the current kWh balance for an account.
 
-    Computes: last_transaction_balance_kwh - consumption_kwh_since.
+    Computes from **1PDB** (payments minus consumption); not SparkMeter.
+
     Also returns the currency equivalent at current tariff.
     """
     try:
-        with get_connection() as conn:
-            balance_kwh, as_of = get_balance_kwh(conn, account_number)
-            rate = _get_tariff_rate(conn, account_number)
-            return {
-                "account_number": account_number,
-                "balance_kwh": balance_kwh,
-                "balance_currency": round(balance_kwh * rate, 2),
-                "tariff_rate": rate,
-                "as_of": as_of.isoformat() if as_of else None,
-            }
+        return _balance_payload(account_number)
     except Exception as e:
         logger.error("Balance query failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/gateway/balance/{account_number}")
+def get_balance_for_sms_gateway(
+    account_number: str,
+    _=Depends(_verify_gateway_key),
+):
+    """Same body as ``GET /balance/{account}`` but requires ``X-Gateway-Key``.
+
+    Use from **SMSComms** / gateway PHP when sending balance SMS so customer-facing
+    text matches Customer Care (1PDB), not Koios/ThunderCloud snapshots.
+    """
+    try:
+        return _balance_payload(account_number)
+    except Exception as e:
+        logger.error("Gateway balance query failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/gateway/balances-by-phone")
+def get_balances_by_phone_for_sms_gateway(
+    phone: str = Query(
+        ...,
+        min_length=5,
+        description="Handset number as received on callback SMS (e.g. +2665… or local digits)",
+    ),
+    _=Depends(_verify_gateway_key),
+):
+    """**Callback balance check:** all accounts in 1PDB tied to this phone, with balances.
+
+    Use instead of ThunderCloud ``getCustomersByPhoneNumber`` when ``receive.php`` drops
+    a callback file containing only the sender phone (see SMSComms ``processed_callback_files``).
+    Response mirrors multiple-household cases: one SMS per account or a concatenated message in PHP.
+    """
+    try:
+        with get_connection() as conn:
+            accounts = _account_numbers_for_phone(conn, phone)
+            if not accounts:
+                return {
+                    "phone": phone,
+                    "accounts": [],
+                    "error": "no_customer",
+                }
+            balances = [_balance_payload_for_conn(conn, acct) for acct in accounts]
+            return {"phone": phone, "accounts": balances, "count": len(balances)}
+    except Exception as e:
+        logger.error("Gateway balances-by-phone failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
 
 

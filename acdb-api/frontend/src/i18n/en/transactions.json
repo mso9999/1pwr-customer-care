@@ -22,7 +22,7 @@
   "colKwh": "kWh",
   "colRate": "Rate",
   "colType": "Type",
-  "colBalance": "Balance",
+  "colBalance": "Balance (kWh)",
   "payment": "Payment",
   "vend": "Vend",
   "deleting": "Deleting…",

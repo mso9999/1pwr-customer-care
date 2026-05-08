@@ -35,6 +35,16 @@ class CountryConfig:
     active: bool = True                 # exposed via /api/app/active-countries
     display_name: Optional[str] = None  # user-facing label for mobile app
                                         # (falls back to ``name`` when None)
+    # One-off fee defaults (currency units of the country). 0 disables the
+    # auto-classifier for that fee. The live values are stored in
+    # ``system_config`` (key = ``connection_fee_amount`` / ``readyboard_fee_amount``)
+    # so finance/onm/superadmin can edit them via /api/admin/country-fees
+    # without a redeploy; CountryConfig only provides the seed default.
+    default_connection_fee: float = 0.0
+    default_readyboard_fee: float = 0.0
+    # Low-balance SMS job (``low_balance_alerts``): seeds when ``system_config`` missing.
+    default_low_balance_kwh_threshold: float = 10.0
+    default_low_balance_kwh_clear: float = 20.0
 
 
 LESOTHO = CountryConfig(
@@ -87,6 +97,10 @@ LESOTHO = CountryConfig(
     payment_regex_id="mpesa_ls",
     active=True,
     display_name="Lesotho",
+    default_connection_fee=501.0,
+    default_readyboard_fee=499.0,
+    default_low_balance_kwh_threshold=10.0,
+    default_low_balance_kwh_clear=20.0,
 )
 
 BENIN = CountryConfig(
@@ -114,6 +128,8 @@ BENIN = CountryConfig(
     payment_regex_id="momo_bj",
     active=True,
     display_name="Bénin",
+    default_low_balance_kwh_threshold=5.0,
+    default_low_balance_kwh_clear=12.0,
 )
 
 ZAMBIA = CountryConfig(

@@ -1,0 +1,77 @@
+{
+  "title": "Connection / Readyboard Advances",
+  "newAdvance": "+ New Advance",
+  "createTitle": "Create Advance",
+  "createSubmit": "Create Advance",
+  "editTitle": "Edit Advance #{{id}}",
+  "save": "Save",
+  "saving": "Saving…",
+  "loading": "Loading…",
+  "outstanding": "outstanding",
+  "emptyList": "No advances match these filters.",
+  "writeoffPrompt": "Reason for write-off (optional, kept in the ledger):",
+  "replaceContractTitle": "Replace contract for advance #{{id}}",
+  "replaceContractHint": "Current contract on file: {{filename}}. Uploading a new file will archive this one.",
+  "replaceSubmit": "Upload replacement",
+  "ledgerTitle": "Advance #{{id}} ledger",
+  "types": {
+    "connection": "Connection",
+    "readyboard": "Readyboard"
+  },
+  "status": {
+    "active": "Active",
+    "paid_off": "Paid off",
+    "written_off": "Written off"
+  },
+  "fields": {
+    "account": "Account number",
+    "type": "Advance type",
+    "amount": "Original amount",
+    "repaymentFraction": "Repayment fraction (0–1)",
+    "monthlyFeePct": "Monthly fee % (decimal)",
+    "monthlyFeePctHint": "0.015 = 1.5% / month accrued on the outstanding balance.",
+    "note": "Note",
+    "contract": "Signed contract (PDF or image)",
+    "contractHint": "PDF, PNG, or JPEG up to 10 MB. The signed contract is required and will be stored on the server."
+  },
+  "filters": {
+    "status": "Status",
+    "type": "Type",
+    "account": "Account number",
+    "all": "All",
+    "search": "Search"
+  },
+  "totals": {
+    "activeOutstanding": "Active outstanding"
+  },
+  "cols": {
+    "account": "Account",
+    "customer": "Customer",
+    "type": "Type",
+    "original": "Original",
+    "outstanding": "Outstanding",
+    "feePct": "Fee %",
+    "repayPct": "Repay %",
+    "status": "Status",
+    "contract": "Contract",
+    "actions": "Actions"
+  },
+  "actions": {
+    "ledger": "Ledger",
+    "edit": "Edit",
+    "replaceContract": "Replace",
+    "writeoff": "Write off"
+  },
+  "ledger": {
+    "date": "Date",
+    "type": "Type",
+    "amount": "Amount",
+    "balanceAfter": "Balance After",
+    "note": "Note",
+    "empty": "No ledger entries yet."
+  },
+  "errors": {
+    "contractRequired": "A signed contract file is required to create an advance."
+  },
+  "badge": "Advance: {{outstanding}} outstanding"
+}

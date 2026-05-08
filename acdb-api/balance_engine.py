@@ -217,6 +217,15 @@ def record_payment_kwh(
 
     Computes the current balance from full history, adds the new
     payment's kWh, and stores the snapshot in current_balance.
+
+    ``current_balance`` is a per-row, kWh-denominated snapshot. It is
+    *denormalised* and never read by ``get_balance_kwh()`` -- the canonical
+    balance is always recomputed from full transaction + hourly_consumption
+    history. This column is preserved for legacy displays
+    (TransactionsPage, customer history table) and is kept consistent with
+    kWh across all writers (``record_payment_kwh``, ``record_fee_transaction``,
+    and the SMS ingest path). See
+    ``docs/ops/2026-05-07-current-balance-unit-rca.md``.
     """
     cur = conn.cursor()
     ts = timestamp or datetime.now(timezone.utc)
@@ -268,3 +277,63 @@ def record_payment_kwh(
 def balance_to_currency(balance_kwh: float, rate: float) -> float:
     """Convert a kWh balance to currency equivalent at a given rate."""
     return round(balance_kwh * rate, 4)
+
+
+def record_fee_transaction(
+    conn,
+    account_number: str,
+    meter_id: str,
+    amount_currency: float,
+    payment_category: str,
+    source: str = "portal",
+    timestamp: datetime | None = None,
+    payment_reference: str | None = None,
+    extra_columns: dict | None = None,
+) -> tuple[int, float]:
+    """Insert a one-off fee payment (connection / readyboard) and return (txn_id, balance_kwh).
+
+    Fees do NOT credit kWh; the kWh balance is unchanged. We still snapshot
+    the current balance into ``current_balance`` so downstream queries that
+    look at the latest row see a consistent value.
+
+    ``extra_columns`` is an optional dict of extra column→value pairs the
+    caller wants to persist alongside the row (e.g. SMS metadata).
+    """
+    if payment_category not in ("connection_fee", "readyboard_fee"):
+        raise ValueError(f"Unsupported fee category: {payment_category}")
+
+    cur = conn.cursor()
+    ts = timestamp or datetime.now(timezone.utc)
+    prev_balance, _ = get_balance_kwh(conn, account_number)
+
+    base_cols = [
+        "account_number", "meter_id", "transaction_date",
+        "transaction_amount", "rate_used", "kwh_value",
+        "is_payment", "current_balance", "source",
+        "payment_reference", "payment_category",
+        "advance_portion", "electricity_portion", "financing_portion",
+    ]
+    base_vals = [
+        account_number, meter_id, ts,
+        amount_currency, 0, 0,
+        True, prev_balance, source,
+        payment_reference, payment_category,
+        0, 0, 0,
+    ]
+
+    extra = extra_columns or {}
+    cols = base_cols + list(extra.keys())
+    vals = base_vals + list(extra.values())
+
+    placeholders = ", ".join(["%s"] * len(vals))
+    sql = (
+        f"INSERT INTO transactions ({', '.join(cols)}) "
+        f"VALUES ({placeholders}) RETURNING id"
+    )
+    cur.execute(sql, vals)
+    txn_id = int(cur.fetchone()[0])
+    logger.info(
+        "Fee txn=%d acct=%s category=%s amount=%.2f (no kWh credit)",
+        txn_id, account_number, payment_category, amount_currency,
+    )
+    return txn_id, prev_balance
