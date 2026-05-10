@@ -31,7 +31,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import requests as http_requests
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from country_config import COUNTRY, KOIOS_SITES, UTC_OFFSET_HOURS
@@ -58,6 +58,51 @@ logger = logging.getLogger("cc-api.ingest")
 SMS_INGEST_PUSH_SPARKMETER = os.environ.get("SMS_INGEST_PUSH_SPARKMETER", "1").lower() in (
     "1", "true", "yes",
 )
+
+
+def _log_sms_inbound(
+    conn, *, gateway_msg_id: str, sender: str, content: str,
+    parsed: dict | None, account: str | None, amount: float | None,
+    receipt_key: str | None,
+) -> int | None:
+    """Insert a row into sms_inbound_log and return its id (or None if table missing)."""
+    parsed_ok = parsed is not None
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO sms_inbound_log
+                (gateway_msg_id, sender, content, country_code,
+                 parsed_ok, parse_result, account_number, amount, receipt_key)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (
+            gateway_msg_id, sender, content, COUNTRY.code,
+            parsed_ok, json.dumps(parsed) if parsed else None,
+            account, amount, receipt_key,
+        ))
+        return cur.fetchone()[0]
+    except Exception as exc:
+        if "sms_inbound_log" in str(exc).lower() and "does not exist" in str(exc).lower():
+            conn.rollback()
+            return None
+        conn.rollback()
+        logger.debug("sms_inbound_log insert failed: %s", exc)
+        return None
+
+
+def _update_sms_inbound(conn, log_id: int | None, outcome: str,
+                        error: str | None = None, transaction_id: int | None = None) -> None:
+    """Update outcome on an sms_inbound_log row (best-effort)."""
+    if log_id is None:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE sms_inbound_log SET outcome=%s, error=%s, transaction_id=%s WHERE id=%s",
+            (outcome, error, transaction_id, log_id),
+        )
+    except Exception:
+        pass
 
 _METER_TZ = timezone(timedelta(hours=UTC_OFFSET_HOURS))
 
@@ -606,9 +651,19 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
         reference = parsed.get("reference") or ""
         receipt_key = (parsed.get("txn_id") or "").strip() or (reference or "").strip()
 
+        sms_log_id: int | None = None
         try:
             with get_connection() as conn:
+                sms_log_id = _log_sms_inbound(
+                    conn, gateway_msg_id=msg_id, sender=sender, content=content,
+                    parsed=parsed, account=None, amount=amount,
+                    receipt_key=receipt_key,
+                )
+                conn.commit()
+
                 if receipt_key and mpesa_receipt_in_use(conn, receipt_key):
+                    _update_sms_inbound(conn, sms_log_id, "duplicate")
+                    conn.commit()
                     logger.info(
                         "SMS duplicate payment ref %s — skipping",
                         receipt_key,
@@ -619,7 +674,16 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
                     conn, content, parsed,
                 )
 
+                if sms_log_id and account:
+                    _update_sms_inbound(conn, sms_log_id, "resolving", transaction_id=None)
+                    cur2 = conn.cursor()
+                    cur2.execute("UPDATE sms_inbound_log SET account_number=%s WHERE id=%s",
+                                 (account, sms_log_id))
+                    conn.commit()
+
                 if not account:
+                    _update_sms_inbound(conn, sms_log_id, "no_account")
+                    conn.commit()
                     if COUNTRY.code == "BN":
                         logger.warning(
                             "SMS payment %.0f %s from %s (ref %s) — no account (text/phone)",
@@ -692,6 +756,8 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
                         else:
                             raise
                     if _fee_ok:
+                        _update_sms_inbound(conn, sms_log_id, "fee", transaction_id=txn_db_id)
+                        conn.commit()
                         logger.info(
                             "SMS fee payment: txn=%d acct=%s category=%s amount=%.2f from %s receipt=%s",
                             txn_db_id, account, category, amount, phone, receipt_key,
@@ -816,6 +882,9 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
 
                 conn.commit()
 
+                _update_sms_inbound(conn, sms_log_id, "electricity", transaction_id=txn_db_id)
+                conn.commit()
+
                 background_tasks.add_task(
                     send_electricity_payment_receipt_sms,
                     account,
@@ -871,9 +940,54 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
 
         except Exception as e:
             logger.error("SMS payment processing failed (forwarded OK): %s", e)
+            try:
+                with get_connection() as err_conn:
+                    _update_sms_inbound(err_conn, sms_log_id, "error", error=str(e))
+                    err_conn.commit()
+            except Exception:
+                pass
 
     # Mirror endpoint returns nothing to PHP — outbound receipts via sms_payment_receipt + SMS_SERVER_URL
     return {"messages": []}
+
+
+@router.get("/api/sms/inbound-log")
+def get_sms_inbound_log(
+    receipt_key: str | None = Query(None),
+    account: str | None = Query(None),
+    outcome: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=500),
+):
+    """Query the SMS inbound audit log. Returns full SMS content for replay/investigation."""
+    with get_connection() as conn:
+        cur = conn.cursor()
+        clauses = []
+        params: list = []
+        if receipt_key:
+            clauses.append("receipt_key = %s")
+            params.append(receipt_key)
+        if account:
+            clauses.append("account_number = %s")
+            params.append(account)
+        if outcome:
+            clauses.append("outcome = %s")
+            params.append(outcome)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        params.append(limit)
+        try:
+            cur.execute(f"""
+                SELECT id, received_at, gateway_msg_id, sender, content,
+                       country_code, parsed_ok, account_number, amount,
+                       receipt_key, outcome, error, transaction_id
+                FROM sms_inbound_log {where}
+                ORDER BY received_at DESC LIMIT %s
+            """, params)
+        except Exception as exc:
+            if "sms_inbound_log" in str(exc).lower() and "does not exist" in str(exc).lower():
+                return {"rows": [], "note": "sms_inbound_log table not yet created (migration 024)"}
+            raise
+        cols = [d[0] for d in cur.description]
+        return {"rows": [dict(zip(cols, row)) for row in cur.fetchall()]}
 
 
 # ---------------------------------------------------------------------------
