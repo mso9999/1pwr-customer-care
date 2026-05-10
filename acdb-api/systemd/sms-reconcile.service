@@ -1,0 +1,21 @@
+[Unit]
+Description=SMS Gateway ↔ CC Reconciliation
+After=network-online.target 1pdb-api.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=cc_api
+Group=cc_api
+WorkingDirectory=/opt/cc-portal/backend
+EnvironmentFile=/opt/1pdb/.env
+ExecStart=/opt/cc-portal/backend/venv/bin/python3 sms_gateway_reconcile.py --lookback-hours 4
+
+# Logging goes to journalctl -u sms-reconcile
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sms-reconcile
+
+# Safety limits
+TimeoutStartSec=120
+MemoryMax=256M

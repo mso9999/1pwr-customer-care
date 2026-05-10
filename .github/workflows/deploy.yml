@@ -175,6 +175,17 @@ jobs:
                 echo "Skipping ${svc} restart (unit not present)"
               fi
             done
+
+            # Install SMS gateway reconciliation timer (runs every 15 min).
+            SYSD=/opt/cc-portal/backend/systemd
+            if [ -f "$SYSD/sms-reconcile.service" ]; then
+              sudo cp "$SYSD/sms-reconcile.service" /etc/systemd/system/
+              sudo cp "$SYSD/sms-reconcile.timer"   /etc/systemd/system/
+              sudo systemctl daemon-reload
+              sudo systemctl enable --now sms-reconcile.timer
+              echo "SMS reconcile timer installed"
+            fi
+
             echo "Backend deployed"
           DEPLOY_SCRIPT
 
