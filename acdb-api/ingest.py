@@ -636,6 +636,20 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
 
         parsed = _parse_gateway_payment(content, sender)
         if not parsed:
+            try:
+                with get_connection() as log_conn:
+                    _log_sms_inbound(
+                        log_conn, gateway_msg_id=msg_id, sender=sender, content=content,
+                        parsed=None, account=None, amount=None, receipt_key=None,
+                    )
+                    cur_up = log_conn.cursor()
+                    cur_up.execute(
+                        "UPDATE sms_inbound_log SET outcome='unparsed' WHERE gateway_msg_id=%s",
+                        (msg_id,),
+                    )
+                    log_conn.commit()
+            except Exception:
+                pass
             if COUNTRY.code == "LS":
                 logger.warning(
                     "SMS ingest: unparsed Lesotho message (no M-Pesa/EcoCash match) "
@@ -988,6 +1002,47 @@ def get_sms_inbound_log(
             raise
         cols = [d[0] for d in cur.description]
         return {"rows": [dict(zip(cols, row)) for row in cur.fetchall()]}
+
+
+@router.post("/api/sms/reconcile")
+def reconcile_sms(body: dict):
+    """Compare a list of gateway receipt_keys against CC records.
+
+    POST body: ``{"receipt_keys": ["07XEP756ESYR", ...]}``
+
+    Returns which keys are present in ``transactions`` (credited),
+    which are in ``sms_inbound_log`` only (received but not credited),
+    and which are completely missing from CC.
+    """
+    keys = body.get("receipt_keys", [])
+    if not keys:
+        return {"error": "receipt_keys list required"}
+
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT DISTINCT payment_reference FROM transactions "
+            "WHERE payment_reference = ANY(%s)", (keys,),
+        )
+        in_txn = {r[0] for r in cur.fetchall()}
+
+        in_log: set = set()
+        try:
+            cur.execute(
+                "SELECT DISTINCT receipt_key FROM sms_inbound_log "
+                "WHERE receipt_key = ANY(%s)", (keys,),
+            )
+            in_log = {r[0] for r in cur.fetchall()}
+        except Exception:
+            conn.rollback()
+
+        missing = [k for k in keys if k not in in_txn and k not in in_log]
+        return {
+            "total": len(keys),
+            "credited": sorted(in_txn),
+            "received_not_credited": sorted(in_log - in_txn),
+            "missing_from_cc": sorted(missing),
+        }
 
 
 # ---------------------------------------------------------------------------
