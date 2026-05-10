@@ -656,6 +656,7 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
                 category = classification["category"]
 
                 if category in ("connection_fee", "readyboard_fee"):
+                    _fee_ok = False
                     try:
                         txn_db_id, _ = record_fee_transaction(
                             conn, account, "",
@@ -674,26 +675,39 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
                             conn, txn_db_id, account, category, amount,
                         )
                         conn.commit()
+                        _fee_ok = True
                     except psycopg2.IntegrityError:
                         conn.rollback()
                         logger.info("SMS skipped duplicate payment ref %s", receipt_key)
                         continue
-                    logger.info(
-                        "SMS fee payment: txn=%d acct=%s category=%s amount=%.2f from %s receipt=%s",
-                        txn_db_id, account, category, amount, phone, receipt_key,
-                    )
-                    if allocation == "phone_fallback":
-                        background_tasks.add_task(
-                            _notify_sms_phone_fallback,
-                            account, amount, phone,
-                            remark_stored or "",
-                            receipt_key, fb_reason,
-                            (parsed.get("provider") or "mpesa"),
+                    except Exception as fee_exc:
+                        conn.rollback()
+                        err_low = str(fee_exc).lower()
+                        if "does not exist" in err_low:
+                            logger.warning(
+                                "Fee branch failed (migration 019 pending?) — "
+                                "falling through to electricity path: %s", fee_exc,
+                            )
+                            category = "electricity"
+                        else:
+                            raise
+                    if _fee_ok:
+                        logger.info(
+                            "SMS fee payment: txn=%d acct=%s category=%s amount=%.2f from %s receipt=%s",
+                            txn_db_id, account, category, amount, phone, receipt_key,
                         )
-                    # No SparkMeter credit, no Koios sync: fees do not credit
-                    # the meter -- they are reconciled separately on
-                    # /payment-verification by finance.
-                    continue
+                        if allocation == "phone_fallback":
+                            background_tasks.add_task(
+                                _notify_sms_phone_fallback,
+                                account, amount, phone,
+                                remark_stored or "",
+                                receipt_key, fb_reason,
+                                (parsed.get("provider") or "mpesa"),
+                            )
+                        # No SparkMeter credit, no Koios sync: fees do not credit
+                        # the meter -- they are reconciled separately on
+                        # /payment-verification by finance.
+                        continue
 
                 # ------------------------------------------------------------
                 # Electricity payment: maybe split toward an active advance.

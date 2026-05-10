@@ -216,20 +216,32 @@ class WriteoffRequest(BaseModel):
 
 
 def get_active_advance(conn, account_number: str) -> Optional[dict]:
-    """Return the active advance row for an account (one or none)."""
+    """Return the active advance row for an account (one or none).
+
+    Returns ``None`` when ``account_advances`` does not exist (migration 019
+    not yet applied) so callers degrade gracefully to full-electricity credit.
+    """
     cur = conn.cursor()
-    cur.execute(
-        """
-        SELECT id, account_number, advance_type,
-               original_amount, outstanding, currency,
-               repayment_fraction, monthly_fee_pct, status
-        FROM account_advances
-        WHERE account_number = %s AND status = 'active'
-        ORDER BY created_at ASC
-        LIMIT 1
-        """,
-        (account_number,),
-    )
+    try:
+        cur.execute(
+            """
+            SELECT id, account_number, advance_type,
+                   original_amount, outstanding, currency,
+                   repayment_fraction, monthly_fee_pct, status
+            FROM account_advances
+            WHERE account_number = %s AND status = 'active'
+            ORDER BY created_at ASC
+            LIMIT 1
+            """,
+            (account_number,),
+        )
+    except Exception as exc:
+        err = str(exc).lower()
+        if "account_advances" in err or "does not exist" in err:
+            conn.rollback()
+            logger.debug("account_advances table missing — no advance split: %s", exc)
+            return None
+        raise
     row = cur.fetchone()
     if not row:
         return None

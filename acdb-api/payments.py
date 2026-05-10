@@ -173,33 +173,44 @@ def payment_webhook(
             category = classification["category"]
 
             if category in ("connection_fee", "readyboard_fee"):
-                txn_id, balance_kwh = record_fee_transaction(
-                    conn, payload.account_number, meter_id,
-                    amount_currency=payload.amount,
-                    payment_category=category,
-                    source="sms_gateway",
-                    timestamp=ts,
-                    payment_reference=ext_ref,
-                )
-                create_verification_entry(
-                    conn, txn_id, payload.account_number, category, payload.amount,
-                )
-                conn.commit()
-                return {
-                    "status": "ok",
-                    "transaction_id": txn_id,
-                    "account_number": payload.account_number,
-                    "amount": payload.amount,
-                    "kwh_vended": 0,
-                    "rate": rate,
-                    "balance_kwh": balance_kwh,
-                    "meter_id": meter_id,
-                    "fee": {
-                        "category": category,
-                        "matched_amount": classification["matched_amount"],
-                        "verification_status": "pending",
-                    },
-                }
+                try:
+                    txn_id, balance_kwh = record_fee_transaction(
+                        conn, payload.account_number, meter_id,
+                        amount_currency=payload.amount,
+                        payment_category=category,
+                        source="sms_gateway",
+                        timestamp=ts,
+                        payment_reference=ext_ref,
+                    )
+                    create_verification_entry(
+                        conn, txn_id, payload.account_number, category, payload.amount,
+                    )
+                    conn.commit()
+                    return {
+                        "status": "ok",
+                        "transaction_id": txn_id,
+                        "account_number": payload.account_number,
+                        "amount": payload.amount,
+                        "kwh_vended": 0,
+                        "rate": rate,
+                        "balance_kwh": balance_kwh,
+                        "meter_id": meter_id,
+                        "fee": {
+                            "category": category,
+                            "matched_amount": classification["matched_amount"],
+                            "verification_status": "pending",
+                        },
+                    }
+                except Exception as fee_exc:
+                    conn.rollback()
+                    if "does not exist" in str(fee_exc).lower():
+                        logger.warning(
+                            "Fee branch failed (migration 019 pending?) — "
+                            "falling through to electricity: %s", fee_exc,
+                        )
+                        category = "electricity"
+                    else:
+                        raise
 
             advance = get_active_advance(conn, payload.account_number)
             adv_split = compute_advance_split(advance, payload.amount)
@@ -333,50 +344,61 @@ def record_manual_payment(
             category = classification["category"]
 
             if category in ("connection_fee", "readyboard_fee"):
-                txn_id, balance_kwh = record_fee_transaction(
-                    conn, payload.account_number, meter_id,
-                    amount_currency=payload.amount,
-                    payment_category=category,
-                    source="portal",
-                    payment_reference=pref,
-                )
-                create_verification_entry(
-                    conn, txn_id, payload.account_number, category, payload.amount,
-                )
-                try_log_mutation(
-                    user, "create", "transactions", str(txn_id),
-                    new_values={
-                        "account_number": payload.account_number,
-                        "payment_reference": pref,
-                        "amount_submitted": payload.amount,
-                        "payment_category": category,
-                        "kwh_vended": 0,
-                        "meter_id": meter_id,
-                        "source": "portal",
+                try:
+                    txn_id, balance_kwh = record_fee_transaction(
+                        conn, payload.account_number, meter_id,
+                        amount_currency=payload.amount,
+                        payment_category=category,
+                        source="portal",
+                        payment_reference=pref,
+                    )
+                    create_verification_entry(
+                        conn, txn_id, payload.account_number, category, payload.amount,
+                    )
+                    try_log_mutation(
+                        user, "create", "transactions", str(txn_id),
+                        new_values={
+                            "account_number": payload.account_number,
+                            "payment_reference": pref,
+                            "amount_submitted": payload.amount,
+                            "payment_category": category,
+                            "kwh_vended": 0,
+                            "meter_id": meter_id,
+                            "source": "portal",
+                            "transaction_id": txn_id,
+                            "note": (payload.note or "").strip()[:500] or None,
+                        },
+                        metadata={
+                            "kind": "manual_payment_fee",
+                            "endpoint": "POST /api/payments/record",
+                            "category": category,
+                        },
+                        conn=conn,
+                    )
+                    conn.commit()
+                    return {
+                        "status": "ok",
                         "transaction_id": txn_id,
-                        "note": (payload.note or "").strip()[:500] or None,
-                    },
-                    metadata={
-                        "kind": "manual_payment_fee",
-                        "endpoint": "POST /api/payments/record",
-                        "category": category,
-                    },
-                    conn=conn,
-                )
-                conn.commit()
-                return {
-                    "status": "ok",
-                    "transaction_id": txn_id,
-                    "amount": payload.amount,
-                    "kwh": 0,
-                    "balance_kwh": balance_kwh,
-                    "sm_credit": None,
-                    "fee": {
-                        "category": category,
-                        "matched_amount": classification["matched_amount"],
-                        "verification_status": "pending",
-                    },
-                }
+                        "amount": payload.amount,
+                        "kwh": 0,
+                        "balance_kwh": balance_kwh,
+                        "sm_credit": None,
+                        "fee": {
+                            "category": category,
+                            "matched_amount": classification["matched_amount"],
+                            "verification_status": "pending",
+                        },
+                    }
+                except Exception as fee_exc:
+                    conn.rollback()
+                    if "does not exist" in str(fee_exc).lower():
+                        logger.warning(
+                            "Fee branch failed (migration 019 pending?) — "
+                            "falling through to electricity: %s", fee_exc,
+                        )
+                        category = "electricity"
+                    else:
+                        raise
 
             advance = get_active_advance(conn, payload.account_number)
             adv_split = compute_advance_split(advance, payload.amount)
