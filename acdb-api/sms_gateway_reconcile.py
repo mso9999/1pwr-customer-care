@@ -123,8 +123,76 @@ def parse_recent_payments(log_text: str, lookback_hours: int) -> list[dict]:
     return results
 
 
+def _extract_account_from_payload(payload_json: str) -> str | None:
+    """Best-effort extract of account reference from the SMS content."""
+    try:
+        data = json.loads(payload_json)
+        content = data["messages"][0].get("content", "")
+    except (json.JSONDecodeError, KeyError, IndexError):
+        return None
+    # Lesotho M-Pesa: "Reference: 0065 MAS"
+    m = re.search(r"Reference:\s*(\d{4})\s+([A-Z]{3})", content)
+    if m:
+        return f"{m.group(1)}{m.group(2)}"
+    return None
+
+
+def _fuzzy_already_credited(cur, account: str | None, amount_str: str,
+                            sms_ts_iso: str) -> bool:
+    """Check if a payment for the same account+amount exists within ±24h.
+
+    Catches manual ops entries that used a different payment_reference
+    (e.g. hand-typed receipt or balance correction).
+    """
+    if not account:
+        return False
+    try:
+        amt = float(amount_str)
+    except (ValueError, TypeError):
+        return False
+    try:
+        ts = datetime.fromisoformat(sms_ts_iso)
+    except ValueError:
+        return False
+
+    window_start = ts - timedelta(hours=24)
+    window_end = ts + timedelta(hours=24)
+
+    cur.execute("""
+        SELECT 1 FROM transactions
+        WHERE account_number = %s
+          AND is_payment = true
+          AND transaction_amount BETWEEN %s AND %s
+          AND transaction_date BETWEEN %s AND %s
+        LIMIT 1
+    """, (account, amt - 0.01, amt + 0.01, window_start, window_end))
+    if cur.fetchone():
+        return True
+
+    # Also check balance_corrections (manual kWh adjustments)
+    try:
+        cur.execute("""
+            SELECT 1 FROM balance_corrections
+            WHERE account_number = %s
+              AND created_at BETWEEN %s AND %s
+            LIMIT 1
+        """, (account, window_start, window_end))
+        if cur.fetchone():
+            return True
+    except Exception:
+        pass
+
+    return False
+
+
 def check_missing(payments: list[dict]) -> list[dict]:
-    """Return payments whose receipt_key is NOT in the transactions table."""
+    """Return payments not yet credited, with robust duplicate detection.
+
+    Checks three layers:
+      1. Exact receipt_key match in transactions.payment_reference
+      2. Fuzzy match: same account + same amount ± 24h (catches manual ops)
+      3. sms_inbound_log for recently-received-but-errored entries
+    """
     if not payments:
         return []
 
@@ -133,6 +201,8 @@ def check_missing(payments: list[dict]) -> list[dict]:
     conn = psycopg2.connect(DATABASE_URL)
     try:
         cur = conn.cursor()
+
+        # Layer 1: exact receipt match
         cur.execute(
             "SELECT DISTINCT payment_reference FROM transactions "
             "WHERE payment_reference = ANY(%s)",
@@ -140,7 +210,7 @@ def check_missing(payments: list[dict]) -> list[dict]:
         )
         in_txn = {r[0] for r in cur.fetchall()}
 
-        # Also check sms_inbound_log for recently-received-but-errored
+        # Layer 3: inbound log errored entries (for reporting)
         in_log_errored: set = set()
         try:
             cur.execute(
@@ -151,15 +221,30 @@ def check_missing(payments: list[dict]) -> list[dict]:
             in_log_errored = {r[0] for r in cur.fetchall()}
         except Exception:
             conn.rollback()
+
+        missing = []
+        for p in payments:
+            k = p["receipt_key"]
+
+            # Layer 1: exact match
+            if k in in_txn:
+                continue
+
+            # Layer 2: fuzzy — same account + amount + window
+            account = _extract_account_from_payload(p["payload_json"])
+            if _fuzzy_already_credited(cur, account, p["amount"], p["timestamp"]):
+                logger.info(
+                    "Skipping %s M%s — fuzzy match found (account=%s, manual ops likely)",
+                    k, p["amount"], account,
+                )
+                continue
+
+            p["reason"] = "errored" if k in in_log_errored else "never_received"
+            p["resolved_account"] = account
+            missing.append(p)
     finally:
         conn.close()
 
-    missing = []
-    for p in payments:
-        k = p["receipt_key"]
-        if k not in in_txn:
-            p["reason"] = "errored" if k in in_log_errored else "never_received"
-            missing.append(p)
     return missing
 
 
