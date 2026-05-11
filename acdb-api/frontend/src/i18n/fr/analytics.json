@@ -1,0 +1,42 @@
+{
+  "title": "Explorateur Analytique",
+  "subtitle": "Créez des tableaux et des graphiques temporels personnalisés à partir des données clients, financières et de consommation.",
+  "basis": {
+    "label": "Je veux voir les données...",
+    "site": "Par Site",
+    "customerType": "Par Type de Client",
+    "time": "Dans le Temps",
+    "overview": "Vue d'Ensemble",
+    "timeGranularity": "Granularité :",
+    "month": "Mensuel",
+    "quarter": "Trimestriel",
+    "year": "Annuel",
+    "noMetrics": "Aucun produit de données disponible pour cette vue."
+  },
+  "selectMetrics": "Sélectionner les produits de données",
+  "runQuery": "Exécuter",
+  "filters": "Filtres",
+  "country": "Pays",
+  "allCountries": "Tous les pays",
+  "sites": "Sites",
+  "allSites": "Tous les sites",
+  "customerTypes": "Types de client",
+  "allCustomerTypes": "Tous les types",
+  "dateFrom": "Du",
+  "dateTo": "Au",
+  "results": "Résultats",
+  "chart": "Graphique",
+  "table": "Tableau",
+  "barChart": "Histogramme",
+  "lineChart": "Courbe",
+  "exportCsv": "Exporter CSV",
+  "noMetricsSelected": "Choisissez une base ci-dessus, puis sélectionnez des produits de données et cliquez sur Exécuter.",
+  "noData": "Aucune donnée ne correspond aux filtres actuels.",
+  "loading": "Requête en cours...",
+  "category": {
+    "funnel": "Entonnoir client",
+    "customer": "Base clients",
+    "financial": "Finances",
+    "consumption": "Consommation"
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "title": "Analytics Explorer",
+  "subtitle": "Build custom tables and time-series charts from customer, financial, and consumption data.",
+  "basis": {
+    "label": "I want to see data...",
+    "site": "By Site",
+    "customerType": "By Customer Type",
+    "time": "Over Time",
+    "overview": "Overview",
+    "timeGranularity": "Granularity:",
+    "month": "Monthly",
+    "quarter": "Quarterly",
+    "year": "Yearly",
+    "noMetrics": "No data products available for this view."
+  },
+  "selectMetrics": "Select Data Products",
+  "runQuery": "Run Query",
+  "filters": "Filters",
+  "country": "Country",
+  "allCountries": "All Countries",
+  "sites": "Sites",
+  "allSites": "All Sites",
+  "customerTypes": "Customer Types",
+  "allCustomerTypes": "All Types",
+  "dateFrom": "From",
+  "dateTo": "To",
+  "results": "Results",
+  "chart": "Chart",
+  "table": "Table",
+  "barChart": "Bar Chart",
+  "lineChart": "Line Chart",
+  "exportCsv": "Export CSV",
+  "noMetricsSelected": "Choose a basis above, then select data products and click Run Query.",
+  "noData": "No data matches the current filters.",
+  "loading": "Running query...",
+  "category": {
+    "funnel": "Customer Funnel",
+    "customer": "Customer Base",
+    "financial": "Financial",
+    "consumption": "Consumption"
+  }
+}
