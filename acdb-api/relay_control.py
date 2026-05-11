@@ -306,13 +306,18 @@ def request_relay(
             "note": payload.note,
         }
 
+        command = 'disconnect' if payload.action == 'open' else 'connect'
+
         cur.execute(
             """
             INSERT INTO relay_commands
                 (cmd_id, thing_name, meter_id, account_number,
-                 action, reason, requested_by, ttl_seconds, status, payload)
+                 command, platform, action, reason, requested_by,
+                 ttl_seconds, status, payload)
             VALUES
-                (%s::uuid, %s, %s, %s, %s, %s, %s, %s, 'queued', %s::jsonb)
+                (%s::uuid, %s, %s, %s,
+                 %s, 'prototype', %s, %s, %s,
+                 %s, 'queued', %s::jsonb)
             RETURNING id
             """,
             (
@@ -320,6 +325,7 @@ def request_relay(
                 thing_name,
                 meter_id,
                 account_number,
+                command,
                 payload.action,
                 payload.reason,
                 f"user:{user.user_id}",
@@ -492,6 +498,20 @@ def maybe_auto_open_relay(conn, account_number: str, *, reason: str = "zero_bala
             logger.warning("auto_open_relay: no prototype meter for %s", account_number)
             return None
         meter_id = str(row[0])
+
+        # Safety override check — if the meter is forced off, skip auto-open
+        cur.execute(
+            "SELECT safety_override FROM meters WHERE meter_id = %s",
+            (meter_id,),
+        )
+        ov_row = cur.fetchone()
+        if ov_row and ov_row[0] == 'off':
+            logger.info(
+                "auto_open_relay: skipping %s (meter %s is in safety override mode)",
+                account_number, meter_id,
+            )
+            return None
+
         thing_name = f"OneMeter{int(meter_id):d}" if meter_id.isdigit() else meter_id
 
         # Debounce
@@ -517,8 +537,11 @@ def maybe_auto_open_relay(conn, account_number: str, *, reason: str = "zero_bala
             """
             INSERT INTO relay_commands
                 (cmd_id, thing_name, meter_id, account_number,
-                 action, reason, requested_by, ttl_seconds, status, payload)
-            VALUES (%s::uuid, %s, %s, %s, 'open', %s, %s, %s, 'queued', %s::jsonb)
+                 command, platform, action, reason, requested_by,
+                 ttl_seconds, status, payload)
+            VALUES (%s::uuid, %s, %s, %s,
+                    'disconnect', 'prototype', 'open', %s, %s,
+                    %s, 'queued', %s::jsonb)
             """,
             (
                 cmd_id,
