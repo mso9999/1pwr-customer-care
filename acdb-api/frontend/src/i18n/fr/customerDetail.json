@@ -44,5 +44,17 @@
   "createAgreement": "Créer l'accord",
   "agreementCreated": "Accord créé",
   "downloadContractEn": "Télécharger le contrat (EN)",
-  "downloadContractSo": "Télécharger le contrat (Sesotho)"
+  "downloadContractSo": "Télécharger le contrat (Sesotho)",
+  "paymentStatus": "Statut de paiement",
+  "inferredStatus": "Statut inféré",
+  "totalPaid": "Total payé",
+  "feeThreshold": "Seuil de frais",
+  "manualOverride": "Forçage manuel",
+  "setOverride": "Définir le forçage...",
+  "clearOverride": "Effacer",
+  "uploadProof": "Télécharger une preuve de paiement",
+  "status_not_paid": "Non payé",
+  "status_paid": "Payé",
+  "status_fully_paid": "Entièrement payé",
+  "by": "par"
 }

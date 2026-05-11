@@ -1,10 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ChangeEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   getRecord, updateRecord, deleteRecord, getCustomerContracts, decommissionCustomer,
   getFinancingProducts, createFinancingAgreement,
   type CommissionContract, type FinancingProduct,
+  getInferredPaymentStatus, setPaymentStatusOverride, clearPaymentStatusOverride,
+  uploadPaymentProof, listPaymentProofs, paymentProofDownloadUrl,
+  type InferredPaymentStatus, type PaymentProof,
 } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import SignatureCapture from '../components/SignatureCapture';
@@ -274,6 +277,11 @@ export default function CustomerDetailPage() {
   const [accountNumbers, setAccountNumbers] = useState<string[]>([]);
   const [decommissioning, setDecommissioning] = useState(false);
   const [showCreditWizard, setShowCreditWizard] = useState(false);
+  const [paymentStatus, setPaymentStatus] = useState<InferredPaymentStatus | null>(null);
+  const [proofs, setProofs] = useState<PaymentProof[]>([]);
+  const [selectedOverride, setSelectedOverride] = useState('');
+  const [overrideSaving, setOverrideSaving] = useState(false);
+  const [proofUploading, setProofUploading] = useState(false);
   const { canWrite, canWriteCustomers, isSuperadmin, user } = useAuth();
   const { t } = useTranslation(['customerDetail', 'common']);
   const navigate = useNavigate();
@@ -350,6 +358,61 @@ export default function CustomerDetailPage() {
         .catch(() => {});
     }
   }, [urlParam]);
+
+  // Fetch payment status and proofs when customer is loaded
+  useEffect(() => {
+    if (!pgId || isNaN(Number(pgId))) return;
+    const cid = Number(pgId);
+    getInferredPaymentStatus(cid).then(setPaymentStatus).catch(() => {});
+    listPaymentProofs(cid).then(({ proofs: p }) => setProofs(p)).catch(() => {});
+  }, [pgId]);
+
+  const refreshPaymentStatus = () => {
+    if (!pgId || isNaN(Number(pgId))) return;
+    const cid = Number(pgId);
+    getInferredPaymentStatus(cid).then(setPaymentStatus).catch(() => {});
+    listPaymentProofs(cid).then(({ proofs: p }) => setProofs(p)).catch(() => {});
+  };
+
+  const handleSetOverride = async () => {
+    if (!selectedOverride || !pgId) return;
+    setOverrideSaving(true);
+    try {
+      await setPaymentStatusOverride(
+        Number(pgId),
+        selectedOverride as 'not_paid' | 'paid' | 'fully_paid',
+      );
+      setSelectedOverride('');
+      refreshPaymentStatus();
+    } catch (e: any) {
+      setError(e.message);
+    }
+    setOverrideSaving(false);
+  };
+
+  const handleClearOverride = async () => {
+    if (!pgId) return;
+    try {
+      await clearPaymentStatusOverride(Number(pgId));
+      refreshPaymentStatus();
+    } catch (e: any) {
+      setError(e.message);
+    }
+  };
+
+  const handleProofUpload = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !pgId) return;
+    setProofUploading(true);
+    try {
+      await uploadPaymentProof(Number(pgId), file);
+      refreshPaymentStatus();
+    } catch (err: any) {
+      setError(err.message);
+    }
+    setProofUploading(false);
+    e.target.value = '';
+  };
 
   const recordId = pgId || urlParam || '';
 
@@ -540,6 +603,128 @@ export default function CustomerDetailPage() {
           ))}
         </div>
       </div>
+
+      {/* Payment Status section */}
+      {pgId && (
+        <div className="bg-white rounded-lg shadow p-4 sm:p-5">
+          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">
+            {t('customerDetail:paymentStatus')}
+          </h2>
+
+          {/* Loading placeholder */}
+          {!paymentStatus && !error && (
+            <p className="text-sm text-gray-400">{t('common:loading')}...</p>
+          )}
+
+          {/* Inferred status */}
+          {paymentStatus && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-gray-500">{t('customerDetail:inferredStatus')}</span>
+                <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${
+                  paymentStatus.inferred_status === 'fully_paid' ? 'bg-green-100 text-green-700' :
+                  paymentStatus.inferred_status === 'paid' ? 'bg-amber-100 text-amber-700' :
+                  'bg-red-100 text-red-700'
+                }`}>
+                  {t(`customerDetail:status_${paymentStatus.inferred_status}`)}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between text-xs text-gray-400">
+                <span>{t('customerDetail:totalPaid')}: M {paymentStatus.total_paid.toFixed(2)}</span>
+                <span>{t('customerDetail:feeThreshold')}: M {paymentStatus.fee_threshold.toFixed(2)}</span>
+              </div>
+
+              {/* Effective status (override wins) */}
+              {paymentStatus.has_override && (
+                <div className="flex items-center justify-between bg-amber-50 p-2 rounded">
+                  <span className="text-sm text-amber-800">
+                    {t('customerDetail:manualOverride')}:{' '}
+                    <strong>{t(`customerDetail:status_${paymentStatus.payment_status_override}`)}</strong>
+                  </span>
+                  <button
+                    onClick={handleClearOverride}
+                    className="text-xs text-red-600 hover:text-red-800"
+                  >
+                    {t('customerDetail:clearOverride')}
+                  </button>
+                </div>
+              )}
+
+              {/* Set override */}
+              {canWrite && (
+                <div className="flex items-center gap-2 pt-2 border-t">
+                  <select
+                    value={selectedOverride}
+                    onChange={e => setSelectedOverride(e.target.value)}
+                    className="px-2 py-1 border rounded text-sm bg-white"
+                  >
+                    <option value="">{t('customerDetail:setOverride')}...</option>
+                    <option value="not_paid">{t('customerDetail:status_not_paid')}</option>
+                    <option value="paid">{t('customerDetail:status_paid')}</option>
+                    <option value="fully_paid">{t('customerDetail:status_fully_paid')}</option>
+                  </select>
+                  <button
+                    onClick={handleSetOverride}
+                    disabled={!selectedOverride || overrideSaving}
+                    className="px-3 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    {overrideSaving ? t('common:saving') : t('common:apply')}
+                  </button>
+                </div>
+              )}
+
+              {/* Upload proof */}
+              {canWrite && (
+                <div className="pt-2 border-t">
+                  <label className="block text-xs font-medium text-gray-500 mb-1">
+                    {t('customerDetail:uploadProof')}
+                  </label>
+                  <input
+                    type="file"
+                    accept=".pdf,.png,.jpg,.jpeg"
+                    onChange={handleProofUpload}
+                    disabled={proofUploading}
+                    className="text-sm"
+                  />
+                  {proofUploading && (
+                    <span className="text-xs text-gray-400 ml-2">{t('common:uploading')}...</span>
+                  )}
+                </div>
+              )}
+
+              {/* Proofs list */}
+              {proofs.length > 0 && (
+                <div className="pt-1 space-y-1">
+                  {proofs.filter(p => p.file_name !== 'override_note').map(p => (
+                    <a
+                      key={p.id}
+                      href={paymentProofDownloadUrl(Number(pgId), p.id)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                      </svg>
+                      {p.file_name}
+                      <span className="text-xs text-gray-400">
+                        {p.uploaded_at ? new Date(p.uploaded_at).toLocaleDateString() : ''}
+                      </span>
+                    </a>
+                  ))}
+                  {/* Notes */}
+                  {proofs.filter(p => p.file_name === 'override_note').map(p => (
+                    <div key={p.id} className="text-xs text-gray-500 italic pl-6">
+                      {p.note} — {p.uploaded_at ? new Date(p.uploaded_at).toLocaleDateString() : ''}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {contracts.length > 0 && (
         <div className="bg-white rounded-lg shadow p-4 sm:p-5">
