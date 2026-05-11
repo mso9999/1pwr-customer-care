@@ -6,13 +6,14 @@ import {
   deleteRecord,
   decommissionMeter,
   getMeterHistory,
+  setMeterSafetyOverride,
   type PaginatedResponse,
   type MeterAssignment,
 } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import CountryPill from '../components/CountryPill';
 
-type ModalKind = 'delete' | 'decommission' | 'history' | null;
+type ModalKind = 'delete' | 'decommission' | 'history' | 'override' | null;
 interface Site { concession: string; country?: string | null }
 
 export default function MetersPage() {
@@ -40,6 +41,14 @@ export default function MetersPage() {
   const [historyMeterId, setHistoryMeterId] = useState('');
   const [historyData, setHistoryData] = useState<MeterAssignment[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+
+  // Safety override modal state
+  const [overrideMeterId, setOverrideMeterId] = useState('');
+  const [overrideTarget, setOverrideTarget] = useState<'auto' | 'off'>('off');
+  const [overrideReason, setOverrideReason] = useState('');
+  const [overrideNote, setOverrideNote] = useState('');
+  const [overrideStep, setOverrideStep] = useState<'form' | 'confirm'>('form');
+  const [overrideCountdown, setOverrideCountdown] = useState(0);
 
   useEffect(() => {
     fetch('/api/sites').then(r => r.json()).then(d => {
@@ -84,6 +93,50 @@ export default function MetersPage() {
       }
     }
   }, [filterCountry, filterSite, sites]);
+
+  // Safety override countdown timer
+  useEffect(() => {
+    if (overrideCountdown <= 0) {
+      if (overrideStep === 'confirm') {
+        setOverrideStep('form');
+        setOverrideCountdown(0);
+      }
+      return;
+    }
+    const timer = setTimeout(() => setOverrideCountdown(c => c - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [overrideCountdown, overrideStep]);
+
+  const executeOverride = async () => {
+    setModal(null);
+    setBusy(true);
+    try {
+      await setMeterSafetyOverride(overrideMeterId, {
+        state: overrideTarget,
+        reason: overrideReason || 'Manual safety override',
+        note: overrideNote || undefined,
+      });
+    } catch (err: any) {
+      alert(`Override failed: ${err.message || err}`);
+    }
+    setOverrideReason('');
+    setOverrideNote('');
+    setOverrideStep('form');
+    setOverrideCountdown(0);
+    setBusy(false);
+    fetchData();
+  };
+
+  const openOverride = (meterId: string, currentOverride: string | null) => {
+    const target = currentOverride === 'off' ? 'auto' : 'off';
+    setOverrideMeterId(meterId);
+    setOverrideTarget(target);
+    setOverrideReason('');
+    setOverrideNote('');
+    setOverrideStep('form');
+    setOverrideCountdown(0);
+    setModal('override');
+  };
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -435,6 +488,112 @@ export default function MetersPage() {
         </div>
       )}
 
+      {modal === 'override' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => { setModal(null); setOverrideCountdown(0); }}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full mx-4 p-6" onClick={e => e.stopPropagation()}>
+            {overrideStep === 'form' ? (
+              <>
+                <div className="flex items-center gap-3 mb-4">
+                  <div className={`w-10 h-10 rounded-full flex items-center justify-center ${overrideTarget === 'off' ? 'bg-red-100' : 'bg-green-100'}`}>
+                    <svg className={`w-5 h-5 ${overrideTarget === 'off' ? 'text-red-600' : 'text-green-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-semibold text-gray-800">
+                      {overrideTarget === 'off' ? 'Safety Override' : 'Restore Auto Mode'}
+                    </h3>
+                    <p className="text-sm text-gray-500 font-mono">{overrideMeterId}</p>
+                  </div>
+                </div>
+
+                <p className="text-sm text-gray-600 mb-4">
+                  {overrideTarget === 'off'
+                    ? 'This will force the relay OPEN regardless of credit balance. The customer will lose power. This action is audited.'
+                    : 'This will clear the safety override and return the meter to normal billing mode.'}
+                </p>
+
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Reason *</label>
+                  <input
+                    value={overrideReason}
+                    onChange={e => setOverrideReason(e.target.value)}
+                    placeholder="e.g. Emergency maintenance, fire risk, meter tampering"
+                    maxLength={200}
+                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                </div>
+
+                <div className="mb-6">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Note (optional)</label>
+                  <textarea
+                    value={overrideNote}
+                    onChange={e => setOverrideNote(e.target.value)}
+                    rows={2}
+                    placeholder="Additional context..."
+                    maxLength={500}
+                    className="w-full px-3 py-2 border rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                  />
+                </div>
+
+                <div className="flex gap-3">
+                  <button onClick={() => setModal(null)} className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-200 transition">Cancel</button>
+                  <button
+                    onClick={() => { setOverrideStep('confirm'); setOverrideCountdown(3); }}
+                    disabled={!overrideReason.trim()}
+                    className={`flex-1 py-2.5 text-white rounded-xl text-sm font-semibold transition disabled:opacity-50 ${
+                      overrideTarget === 'off' ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'
+                    }`}
+                  >
+                    {overrideTarget === 'off' ? 'Override (Safety OFF)' : 'Restore Auto'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-center mb-6">
+                  <div className={`w-16 h-16 rounded-full mx-auto mb-4 flex items-center justify-center ${overrideTarget === 'off' ? 'bg-red-100' : 'bg-amber-100'}`}>
+                    <svg className={`w-8 h-8 ${overrideTarget === 'off' ? 'text-red-600' : 'text-amber-600'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                    </svg>
+                  </div>
+                  <h3 className="text-lg font-bold text-gray-800 mb-2">Are you sure?</h3>
+                  <p className="text-sm text-gray-600">
+                    {overrideTarget === 'off'
+                      ? `This will cut power to this meter. The customer will lose service immediately.`
+                      : `This will restore normal billing for this meter.`}
+                  </p>
+                  <div className="mt-4">
+                    <span className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-gray-100 text-2xl font-bold text-gray-700">
+                      {overrideCountdown}
+                    </span>
+                    <p className="text-xs text-gray-400 mt-2">Click again within {overrideCountdown}s to confirm</p>
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => { setOverrideStep('form'); setOverrideCountdown(0); }}
+                    className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-200 transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={executeOverride}
+                    disabled={overrideCountdown <= 0}
+                    className={`flex-1 py-2.5 text-white rounded-xl text-sm font-semibold transition disabled:opacity-40 ${
+                      overrideTarget === 'off' ? 'bg-red-600 hover:bg-red-700' : 'bg-green-600 hover:bg-green-700'
+                    }`}
+                  >
+                    {overrideCountdown > 0 ? `Click again to confirm (${overrideCountdown}s)` : 'Expired'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {loading || busy ? (
         <div className="text-center py-8 text-gray-400">{busy ? t('meters:processing') : t('meters:loading')}</div>
       ) : !data || data.rows.length === 0 ? (
@@ -457,6 +616,7 @@ export default function MetersPage() {
                   <th className="px-4 py-3 text-left font-medium text-gray-600">{t('meters:colPlatform')}</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">{t('meters:colRole')}</th>
                   <th className="px-4 py-3 text-left font-medium text-gray-600">{t('meters:colStatus')}</th>
+                  {canWriteCustomers && <th className="px-4 py-3 text-left font-medium text-gray-600">Safety</th>}
                   <th className="px-4 py-3 w-10"></th>
                 </tr>
               </thead>
@@ -469,6 +629,7 @@ export default function MetersPage() {
                   const platform = String(row['platform'] || '');
                   const role = String(row['role'] || '');
                   const status = String(row['status'] || '');
+                  const safetyOverride = (String(row['safety_override'] || '') || null) as string | null;
                   const isSelected = selected.has(mid);
                   return (
                     <tr key={i} className={`hover:bg-gray-50 ${isSelected ? 'bg-blue-50' : ''}`}>
@@ -488,6 +649,21 @@ export default function MetersPage() {
                       <td className="px-4 py-2">{platformBadge(platform)}</td>
                       <td className="px-4 py-2">{roleBadge(role)}</td>
                       <td className="px-4 py-2">{statusBadge(status)}</td>
+                      {canWriteCustomers && (
+                        <td className="px-4 py-2">
+                          <button
+                            onClick={() => openOverride(mid, safetyOverride || null)}
+                            className={`px-2 py-1 text-xs rounded-full font-medium transition ${
+                              safetyOverride === 'off'
+                                ? 'bg-red-100 text-red-700 hover:bg-red-200'
+                                : 'bg-green-100 text-green-700 hover:bg-green-200'
+                            }`}
+                            title={safetyOverride === 'off' ? 'Safety override ON — Click to restore auto' : 'Auto (normal) — Click for safety override'}
+                          >
+                            {safetyOverride === 'off' ? 'OVERRIDE' : 'auto'}
+                          </button>
+                        </td>
+                      )}
                       <td className="px-4 py-2">
                         <button
                           onClick={() => openHistory(mid)}
@@ -520,6 +696,7 @@ export default function MetersPage() {
               const platform = String(row['platform'] || '');
               const role = String(row['role'] || '');
               const status = String(row['status'] || '');
+              const safetyOverride = (String(row['safety_override'] || '') || null) as string | null;
               const isSelected = selected.has(mid);
               return (
                 <div key={i} className={`bg-white rounded-lg shadow p-4 ${isSelected ? 'ring-2 ring-blue-400' : ''}`}>
@@ -535,6 +712,18 @@ export default function MetersPage() {
                             {platformBadge(platform)}
                             {roleBadge(role)}
                             {statusBadge(status)}
+                            {canWriteCustomers && (
+                              <button
+                                onClick={() => openOverride(mid, safetyOverride || null)}
+                                className={`px-2 py-0.5 text-xs rounded-full font-medium transition ${
+                                  safetyOverride === 'off'
+                                    ? 'bg-red-100 text-red-700 hover:bg-red-200'
+                                    : 'bg-green-100 text-green-700 hover:bg-green-200'
+                                }`}
+                              >
+                                {safetyOverride === 'off' ? 'OVERRIDE' : 'auto'}
+                              </button>
+                            )}
                           </div>
                         </div>
                         <div className="flex items-center gap-1 shrink-0 ml-2">

@@ -377,6 +377,38 @@ export async function getAccountMeterHistory(
   return request(`/meters/account/${encodeURIComponent(accountNumber)}/history`);
 }
 
+// Meter safety override
+export interface SafetyOverrideRequest {
+  state: 'auto' | 'off';
+  reason: string;
+  note?: string;
+}
+
+export interface SafetyOverrideResult {
+  status: 'ok' | 'noop';
+  meter_id: string;
+  state: string;
+  platform: string;
+  account_number: string;
+  relay_action?: {
+    platform: string;
+    success: boolean;
+    cmd_id?: string;
+    error?: string;
+    published?: boolean;
+  };
+}
+
+export async function setMeterSafetyOverride(
+  meterId: string,
+  body: SafetyOverrideRequest,
+): Promise<SafetyOverrideResult> {
+  return request(`/meters/${encodeURIComponent(meterId)}/override`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Customer self-service
 // ---------------------------------------------------------------------------
@@ -2500,6 +2532,55 @@ export async function updateCountryFees(
 }
 
 // ---------------------------------------------------------------------------
+// SMS outbound log (admin)
+// ---------------------------------------------------------------------------
+
+export interface SmsLogEntry {
+  id: number;
+  sent_at: string;
+  sms_type: string;
+  phone_raw: string;
+  phone_normalized: string;
+  message: string;
+  success: boolean;
+  error: string | null;
+  account_number: string | null;
+  trigger_ctx: string;
+  gateway_url: string;
+  cm_status: string | null;
+  cm_status_at: string | null;
+  cm_error_code: number | null;
+}
+
+export interface SmsLogResponse {
+  rows: SmsLogEntry[];
+  total: number;
+  page: number;
+  per_page: number;
+  pages: number;
+}
+
+export interface SmsLogParams {
+  page?: number;
+  per_page?: number;
+  sms_type?: string;
+  success?: boolean;
+  phone?: string;
+  account_number?: string;
+  date_from?: string;
+  date_to?: string;
+}
+
+export async function listSmsLog(params: SmsLogParams = {}): Promise<SmsLogResponse> {
+  const qs = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== '') qs.set(k, String(v));
+  });
+  const query = qs.toString();
+  return request(`/admin/sms-log${query ? '?' + query : ''}`);
+}
+
+// ---------------------------------------------------------------------------
 // Advances (connection / readyboard advance ledger)
 // ---------------------------------------------------------------------------
 
@@ -2626,4 +2707,155 @@ export async function writeoffAdvance(id: number, note?: string): Promise<{ id: 
 
 export function openAdvanceContract(id: number): void {
   openInNewTab(`/advances/${id}/contract`);
+}
+
+// ── Analytics Explorer ─────────────────────────────────────────────
+
+export interface AnalyticsMetricMeta {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  default_viz: 'bar' | 'line';
+  group_by_options: string[];
+  column_label: string;
+  value_format: 'integer' | 'decimal2' | 'currency' | 'percent';
+}
+
+export interface AnalyticsFiltersApplied {
+  country?: string;
+  sites?: string[];
+  customer_types?: string[];
+  date_from?: string;
+  date_to?: string;
+  group_by?: string;
+}
+
+export interface AnalyticsMetricData {
+  data: Array<Record<string, any>>;
+  column_label: string;
+  value_format: string;
+  name: string;
+}
+
+export interface AnalyticsSeriesPoint {
+  group: string;
+  value: number;
+}
+
+export interface AnalyticsSeries {
+  metric_id: string;
+  metric_name: string;
+  points: AnalyticsSeriesPoint[];
+}
+
+export interface AnalyticsQueryResponse {
+  metrics: Record<string, AnalyticsMetricData>;
+  series: AnalyticsSeries[] | null;
+  filters_applied: AnalyticsFiltersApplied;
+}
+
+export interface AnalyticsMetricsCatalog {
+  metrics: AnalyticsMetricMeta[];
+  categories: string[];
+  customer_types: string[];
+  group_by_options: { value: string; label: string }[];
+}
+
+export interface AnalyticsQueryRequest {
+  metrics: string[];
+  filters?: {
+    country?: string;
+    sites?: string[];
+    customer_types?: string[];
+    date_from?: string;
+    date_to?: string;
+  };
+  group_by?: string;
+  time_series?: boolean;
+}
+
+export async function getAnalyticsMetrics(): Promise<AnalyticsMetricsCatalog> {
+  return request('/analytics/metrics');
+}
+
+export async function runAnalyticsQuery(req: AnalyticsQueryRequest): Promise<AnalyticsQueryResponse> {
+  return request('/analytics/query', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
+}
+
+// ── Payment Status Override ──────────────────────────────────────────
+
+export interface PaymentStatusOverrideResponse {
+  payment_status_override: string | null;
+  payment_status_override_by?: string | null;
+  payment_status_override_at?: string | null;
+}
+
+export interface InferredPaymentStatus {
+  inferred_status: 'not_paid' | 'paid' | 'fully_paid';
+  total_paid: number;
+  fee_threshold: number;
+  effective_status: 'not_paid' | 'paid' | 'fully_paid';
+  has_override: boolean;
+  payment_status_override: string | null;
+}
+
+export interface PaymentProof {
+  id: number;
+  customer_id: number;
+  file_name: string;
+  content_type: string;
+  size_bytes: number;
+  uploaded_by: string | null;
+  uploaded_at: string | null;
+  note: string | null;
+}
+
+export async function getInferredPaymentStatus(
+  customerId: number,
+): Promise<InferredPaymentStatus> {
+  return request(`/payment-status/${customerId}/inferred`);
+}
+
+export async function setPaymentStatusOverride(
+  customerId: number,
+  status: 'not_paid' | 'paid' | 'fully_paid',
+  note?: string,
+): Promise<PaymentStatusOverrideResponse> {
+  return request(`/payment-status/${customerId}/override`, {
+    method: 'POST',
+    body: JSON.stringify({ status, note }),
+  });
+}
+
+export async function clearPaymentStatusOverride(
+  customerId: number,
+): Promise<PaymentStatusOverrideResponse> {
+  return request(`/payment-status/${customerId}/override`, {
+    method: 'DELETE',
+  });
+}
+
+export async function uploadPaymentProof(
+  customerId: number,
+  file: File,
+  note?: string,
+): Promise<PaymentProof> {
+  const form = new FormData();
+  form.append('file', file);
+  if (note) form.append('note', note);
+  return requestMultipart(`/payment-status/${customerId}/proof`, form);
+}
+
+export async function listPaymentProofs(
+  customerId: number,
+): Promise<{ proofs: PaymentProof[] }> {
+  return request(`/payment-status/${customerId}/proofs`);
+}
+
+export function paymentProofDownloadUrl(customerId: number, proofId: number): string {
+  return `${getApiBase()}/payment-status/${customerId}/proof/${proofId}/download`;
 }

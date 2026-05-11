@@ -131,6 +131,9 @@ def _normalize_customer(row_dict: Dict[str, Any]) -> Dict[str, Any]:
         "customer_position": _s("customer_position"),
         "date_connected": _s("date_service_connected"),
         "date_terminated": _s("date_service_terminated"),
+        "payment_status_override": _s("payment_status_override") or None,
+        "payment_status_override_by": _s("payment_status_override_by") or None,
+        "payment_status_override_at": _s("payment_status_override_at") or None,
     }
 
 
@@ -308,11 +311,15 @@ from gensite import router as gensite_router
 from app_bff import router as app_bff_router
 from billing_priority import router as billing_priority_router
 from relay_control import router as relay_control_router
+from meter_safety_override import router as meter_safety_override_router
 from odyssey_api import router as odyssey_api_router
 from programs import router as programs_router
 from coverage_audit import router as coverage_audit_router
 from advances import router as advances_router
 from country_fees import router as country_fees_router
+from sms_log import router as sms_log_router
+from analytics import router as analytics_router
+from payment_status import router as ps_router
 
 from db_auth import init_auth_db
 init_auth_db()
@@ -344,11 +351,15 @@ app.include_router(gensite_router)
 app.include_router(app_bff_router)
 app.include_router(billing_priority_router)
 app.include_router(relay_control_router)
+app.include_router(meter_safety_override_router)
 app.include_router(odyssey_api_router)
 app.include_router(programs_router)
 app.include_router(coverage_audit_router)
 app.include_router(advances_router)
 app.include_router(country_fees_router)
+app.include_router(sms_log_router)
+app.include_router(analytics_router)
+app.include_router(ps_router)
 ensure_meter_assignments_table()
 warm_stats_cache()
 
