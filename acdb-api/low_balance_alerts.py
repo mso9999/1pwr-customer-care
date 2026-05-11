@@ -111,7 +111,9 @@ def low_balance_tick(conn, *, dry_run: bool = False) -> dict[str, Any]:
             logger.info("dry-run: would SMS %s (%s)", account_number, phone)
             continue
 
-        ok = send_gateway_sms(phone, msg, sms_type="balance")
+        ok = send_gateway_sms(phone, msg, sms_type="balance",
+                              account_number=account_number,
+                              trigger="low_balance_alert")
         if ok:
             cur.execute(
                 "UPDATE accounts SET low_balance_alert_sent_at = NOW() "

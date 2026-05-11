@@ -231,7 +231,8 @@ def send_contract_sms(
         f"Hore u e bale u lokeloa ho e bula ka internet."
     )
 
-    return send_gateway_sms(phone_number, message, sms_type="welcome")
+    return send_gateway_sms(phone_number, message, sms_type="welcome",
+                            trigger="contract")
 
 
 # ---------------------------------------------------------------------------

@@ -53,7 +53,9 @@ def send_electricity_payment_receipt_sms(
                 f"{sym}{bal_curr:.2f} ({bal_kwh:.1f} kWh)."
             )
 
-        send_gateway_sms(digits, msg, sms_type="balance")
+        send_gateway_sms(digits, msg, sms_type="balance",
+                         account_number=account_number,
+                         trigger="payment_receipt")
     except Exception as e:
         logger.warning(
             "Payment receipt SMS failed for acct=%s: %s",
