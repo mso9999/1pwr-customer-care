@@ -39,7 +39,7 @@ from cc_bridge_notify import notify_cc_bridge
 from customer_api import get_connection
 from momo_bj import parse_momo_bn_sms, resolve_bn_momo_account
 from mpesa_sms import mpesa_receipt_in_use, parse_ls_sms_payment, resolve_sms_account
-from sms_payment_receipt import send_electricity_payment_receipt_sms
+from sms_payment_receipt import send_electricity_payment_receipt_sms, send_fee_payment_receipt_sms
 from sparkmeter_credit import credit_sparkmeter
 from advances import (
     apply_advance_payment,
@@ -784,9 +784,13 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
                                 receipt_key, fb_reason,
                                 (parsed.get("provider") or "mpesa"),
                             )
-                        # No SparkMeter credit, no Koios sync: fees do not credit
-                        # the meter -- they are reconciled separately on
-                        # /payment-verification by finance.
+                        background_tasks.add_task(
+                            send_fee_payment_receipt_sms,
+                            account,
+                            payer_phone,
+                            amount,
+                            category,
+                        )
                         continue
 
                 # ------------------------------------------------------------

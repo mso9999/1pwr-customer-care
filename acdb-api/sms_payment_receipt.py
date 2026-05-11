@@ -18,6 +18,51 @@ SMS_PAYMENT_RECEIPT_ENABLED = os.environ.get(
 ).lower() in ("1", "true", "yes")
 
 
+def send_fee_payment_receipt_sms(
+    account_number: str,
+    payer_phone_raw: str,
+    amount_paid_currency: float,
+    fee_category: str,
+) -> None:
+    """Background task: SMS payer after a connection or readyboard fee is recorded."""
+    if not SMS_PAYMENT_RECEIPT_ENABLED:
+        return
+    digits = "".join(c for c in str(payer_phone_raw) if c.isdigit())
+    if len(digits) < 8:
+        logger.debug(
+            "Fee receipt SMS skipped — no usable payer phone for %s",
+            account_number,
+        )
+        return
+    try:
+        sym = COUNTRY.currency_symbol
+        fee_label = (
+            "ho hokela" if fee_category == "connection_fee" else "readyboard"
+        ) if COUNTRY.code == "LS" else (
+            "connexion" if fee_category == "connection_fee" else "readyboard"
+        )
+
+        if COUNTRY.code == "BN":
+            msg = (
+                f"Paiement de {amount_paid_currency:,.0f} {sym} pour le compte "
+                f"{account_number} ({fee_label}) enregistré."
+            )
+        else:
+            msg = (
+                f"Patala ea {sym}{amount_paid_currency:.2f} bakeng sa ntlo ea "
+                f"{account_number} (tefo ea {fee_label}) e amohetsoe."
+            )
+
+        send_gateway_sms(digits, msg, sms_type="balance",
+                         account_number=account_number,
+                         trigger="fee_receipt")
+    except Exception as e:
+        logger.warning(
+            "Fee receipt SMS failed for acct=%s category=%s: %s",
+            account_number, fee_category, e,
+        )
+
+
 def send_electricity_payment_receipt_sms(
     account_number: str,
     payer_phone_raw: str,

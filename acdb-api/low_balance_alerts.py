@@ -78,7 +78,10 @@ def low_balance_tick(conn, *, dry_run: bool = False) -> dict[str, Any]:
 
     for account_number, sent_at, phone in rows:
         account_number = str(account_number).strip()
-        if not phone:
+        phone_digits = "".join(c for c in str(phone or "") if c.isdigit())
+        # Require at least 8 digits (local number) — filters out
+        # placeholder values like "0" and bare country codes like "266".
+        if len(phone_digits) < 8:
             stats["skipped_no_phone"] += 1
             continue
 
