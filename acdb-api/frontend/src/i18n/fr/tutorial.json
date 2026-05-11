@@ -10,7 +10,8 @@
     "onmSuperadmin": "superadmin, onm_team (et autres selon les cas)",
     "financeAll": "Tous les employés ; la finance pilote la vérification",
     "financeOps": "Finance et opérations (tarifs, financement, exports)",
-    "financeOnm": "superadmin, finance_team, onm_team (écriture) ; tous les employés (lecture)"
+    "financeOnm": "superadmin, finance_team, onm_team (écriture) ; tous les employés (lecture)",
+    "superadmin": "superadmin (configuration système et journaux)"
   },
   "workflows": {
     "orientation": {
@@ -84,6 +85,26 @@
         "Tables : explorateur SQL pour inspection avancée.",
         "Mutations : journal d’audit avec annulation lorsque c’est prévu.",
         "Synchronisation : état d’intégration uGridPlan et opérations récentes."
+      ]
+    },
+    "safetyOverride": {
+      "title": "Sécurité compteur — coupure d'urgence du relais (override)",
+      "description": "Comment forcer l'ouverture du relais d'un compteur en cas d'urgence, et comment rétablir la facturation normale ensuite.",
+      "steps": [
+        "Ouvrir le registre des compteurs et localiser le compteur concerné. La colonne Safety affiche un badge vert auto (normal) ou rouge OVERRIDE (coupure active).",
+        "Cliquer sur le badge de sécurité pour ouvrir la boîte de dialogue de confirmation en deux étapes. Sélectionner off (coupure de sécurité) et saisir un motif obligatoire — celui-ci est enregistré dans le journal d'audit. Les notes optionnelles sont également conservées.",
+        "Cliquer sur Confirmer, puis sur Confirmer à nouveau dans le délai de 3 secondes — ce double clic évite les coupures accidentelles qui priveraient un client de l'électricité qu'il a payée.",
+        "Pour rétablir la facturation normale, rouvrir la boîte de dialogue et rebasculer sur auto. Le relais ne se referme pas immédiatement ; la reconnexion est gérée par le cycle de facturation normal ou le prochain rechargement mobile du client."
+      ]
+    },
+    "smsLog": {
+      "title": "Journal SMS sortants et suivi de distribution",
+      "description": "Inspectez chaque SMS sortant et vérifiez si l'opérateur l'a réellement distribué.",
+      "steps": [
+        "Ouvrez le Journal SMS sous Système → Journal SMS. Chaque SMS sortant est automatiquement enregistré — type, téléphone, compte, corps du message et deux statuts de distribution.",
+        "Filtrez par type (balance / welcome / contract), succès/échec, téléphone, compte ou plage de dates pour cibler ce dont vous avez besoin.",
+        "La colonne Passerelle indique si l'hôte SMS a accepté la requête (vert Queued = succès ; rouge Failed = erreur). La colonne CM.com est la confirmation de distribution par l'opérateur — Accepted signifie que le message est arrivé au téléphone ; Rejected ou un autre statut signifie que l'opérateur l'a refusé ou n'a pas pu le distribuer.",
+        "Cliquez sur une ligne pour afficher le corps complet du message, l'URL brute de la passerelle, l'horodatage et le code d'erreur CM.com, ainsi que tout message d'erreur interne."
       ]
     }
   }

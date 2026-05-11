@@ -905,6 +905,33 @@ function MetersContent() {
           <li>Indicateurs de santé : en ligne (vert), obsolète (jaune), hors ligne (rouge).</li>
         </Ul>
 
+        <SubHead>Sécurité : forcer l'ouverture du relais (override)</SubHead>
+        <P>
+          En cas d'<Bold>urgence ou de sécurité</Bold> (risque d'incendie, maintenance d'urgence, suspicion de
+          fraude), l'équipe O&amp;M peut forcer l'ouverture du relais d'un compteur, coupant l'alimentation{' '}
+          <Bold>indépendamment du solde de crédit</Bold>. Cela empêche le système de facturation de refermer
+          automatiquement le relais.
+        </P>
+        <P>
+          Rôles autorisés : <Bold>superadmin</Bold> et <Bold>onm_team</Bold> uniquement.
+        </P>
+        <P>
+          La colonne <Bold>Safety</Bold> du registre des compteurs affiche un indicateur vert <Bold>auto</Bold>{' '}
+          (fonctionnement normal) ou rouge <Bold>OVERRIDE</Bold> (relais forcé ouvert).
+        </P>
+        <Ol>
+          <li>Cliquer sur l'indicateur <Bold>Safety</Bold> dans la ligne du compteur concerné.</li>
+          <li>Dans la fenêtre de confirmation, sélectionner <Bold>auto</Bold> (facturation normale) ou <Bold>off</Bold> (coupure de sécurité).</li>
+          <li>Saisir un <Bold>motif</Bold> obligatoire (1–200 caractères) — celui-ci est enregistré dans le journal d'audit.</li>
+          <li>Ajouter une note optionnelle (max 500 caractères).</li>
+          <li>Cliquer sur <Bold>Confirmer</Bold>, puis sur <Bold>Confirmer à nouveau</Bold> dans un délai de 3 secondes (double clic de sécurité).</li>
+          <li>Le relais s'ouvre immédiatement. Pour rétablir le mode normal, rebasculer sur <Bold>auto</Bold> — le relais ne se refermera qu'au prochain cycle de facturation ou rechargement client.</li>
+        </Ol>
+        <Warning>
+          Cette fonction <Bold>prive le client de l'électricité qu'il a payée</Bold>. Ne l'utiliser qu'en cas de
+          véritable urgence de sécurité, jamais pour des raisons administratives ou de recouvrement.
+        </Warning>
+
         <SubHead>Cycle de vie des compteurs</SubHead>
         <P>Les compteurs suivent un cycle de vie : <Code>actif</Code> → <Code>inactif</Code> → <Code>déclassé</Code> → <Code>maintenance</Code>. Tous les changements de statut sont enregistrés dans le journal d'audit.</P>
       </>
@@ -927,6 +954,33 @@ function MetersContent() {
         <li>Fleet-wide total deviation summary across all check meters.</li>
         <li>Meter health indicators: online (green), stale (yellow), offline (red).</li>
       </Ul>
+
+      <SubHead>Safety override — force relay open</SubHead>
+      <P>
+        In an <Bold>emergency or safety situation</Bold> (fire risk, urgent maintenance, tampering suspicion),
+        the O&amp;M team can force a meter&apos;s relay open, cutting power{' '}
+        <Bold>regardless of credit balance</Bold>. This prevents the billing engine from
+        automatically re-closing the relay.
+      </P>
+      <P>
+        Requires role: <Bold>superadmin</Bold> or <Bold>onm_team</Bold>.
+      </P>
+      <P>
+        The <Bold>Safety</Bold> column on the meter registry shows a green <Bold>auto</Bold> badge
+        (normal operation) or a red <Bold>OVERRIDE</Bold> badge (relay forced open).
+      </P>
+      <Ol>
+        <li>Click the <Bold>Safety</Bold> badge on the target meter&apos;s row.</li>
+        <li>In the confirmation dialog, select <Bold>auto</Bold> (normal billing) or <Bold>off</Bold> (safety cutoff).</li>
+        <li>Enter a required <Bold>reason</Bold> (1–200 characters) — this is recorded in the audit trail.</li>
+        <li>Optionally add a note (max 500 characters).</li>
+        <li>Click <Bold>Confirm</Bold>, then click <Bold>Confirm again</Bold> within 3 seconds (safety double-click).</li>
+        <li>The relay opens immediately. To restore normal mode, toggle back to <Bold>auto</Bold> — the relay will not re-close until the next billing cycle or customer top-up.</li>
+      </Ol>
+      <Warning>
+        This <Bold>deprives a prepaid customer of paid-for electricity</Bold>. Use only in genuine safety
+        emergencies — never for administrative or collection reasons.
+      </Warning>
 
       <SubHead>Meter Lifecycle</SubHead>
       <P>Meters follow a lifecycle: <Code>active</Code> → <Code>inactive</Code> → <Code>decommissioned</Code> → <Code>maintenance</Code>. All status changes are logged in the mutation audit trail.</P>

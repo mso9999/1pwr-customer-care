@@ -71,4 +71,18 @@ export const TUTORIAL_WORKFLOWS: TutorialWorkflowDef[] = [
     links: ['/accounts', '/tables', '/mutations', '/sync'],
     helpSectionIds: ['data-browsers', 'data-browsers', 'admin', 'admin'],
   },
+  {
+    id: 'safetyOverride',
+    i18nKey: 'workflows.safetyOverride',
+    rolesKey: 'roles.onmSuperadmin',
+    links: ['/meters', '/meters', null, null],
+    helpSectionIds: ['meters', 'meters', null, 'meters'],
+  },
+  {
+    id: 'smsLog',
+    i18nKey: 'workflows.smsLog',
+    rolesKey: 'roles.superadmin',
+    links: ['/admin/sms-log', null, null, null],
+    helpSectionIds: ['sms-log', null, null, 'sms-log'],
+  },
 ];

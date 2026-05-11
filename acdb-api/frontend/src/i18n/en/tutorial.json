@@ -10,7 +10,8 @@
     "onmSuperadmin": "superadmin, onm_team (plus others where noted)",
     "financeAll": "All employees; finance leads verification",
     "financeOps": "Finance and operations (tariffs, financing, exports)",
-    "financeOnm": "superadmin, finance_team, onm_team (write); all employees (view)"
+    "financeOnm": "superadmin, finance_team, onm_team (write); all employees (view)",
+    "superadmin": "superadmin (system configuration and logs)"
   },
   "workflows": {
     "orientation": {
@@ -84,6 +85,26 @@
         "Tables: SQL table browser for advanced inspection.",
         "Mutations: audit trail with revert where supported.",
         "Sync: uGridPlan integration status and recent operations."
+      ]
+    },
+    "safetyOverride": {
+      "title": "Meter safety override — emergency relay cutoff",
+      "description": "How to force a meter's relay open in an emergency, and how to restore normal billing afterward.",
+      "steps": [
+        "Open the Meter Registry and locate the target meter. The Safety column shows a green auto badge (normal) or red OVERRIDE badge (cutoff active).",
+        "Click the safety badge to open the two-step confirmation dialog. Select off (safety cutoff) and enter a mandatory reason — this is recorded in the audit log. Optional notes are saved alongside.",
+        "Click Confirm, then Confirm again within the 3-second countdown — this double-click prevents accidental cutoffs that would deprive a customer of paid-for electricity.",
+        "To restore normal billing, reopen the dialog and toggle back to auto. The relay will not immediately re-close; reconnection is handled by the normal billing cycle or the customer's next mobile-money top-up."
+      ]
+    },
+    "smsLog": {
+      "title": "SMS outbound log & delivery audit",
+      "description": "Inspect every outbound SMS and verify whether the carrier actually delivered it.",
+      "steps": [
+        "Open the SMS Log under System → SMS Log. Every outbound SMS is automatically recorded — type, phone, account, message body, and two delivery statuses.",
+        "Filter by SMS type (balance / welcome / contract), success/failure, phone, account, or date range to narrow down what you need.",
+        "The Gateway column tells you whether the SMS host accepted the request (green Queued = success; red Failed = error). The CM.com column is the carrier delivery confirmation — Accepted means it reached the handset; Rejected or another status means the carrier refused or could not deliver it.",
+        "Click any row to expand the full message body, raw gateway URL, CM.com status timestamp and error code, and any internal error message."
       ]
     }
   }
