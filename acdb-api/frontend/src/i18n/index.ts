@@ -34,6 +34,7 @@ import customerDashboardEn from './en/customerDashboard.json';
 import myProfileEn from './en/myProfile.json';
 import programsEn from './en/programs.json';
 import coverageEn from './en/coverage.json';
+import analyticsEn from './en/analytics.json';
 
 import commonFr from './fr/common.json';
 import loginFr from './fr/login.json';
@@ -68,6 +69,7 @@ import customerDashboardFr from './fr/customerDashboard.json';
 import myProfileFr from './fr/myProfile.json';
 import programsFr from './fr/programs.json';
 import coverageFr from './fr/coverage.json';
+import analyticsFr from './fr/analytics.json';
 
 const savedLang = localStorage.getItem('cc_lang');
 
@@ -111,6 +113,7 @@ i18n.use(initReactI18next).init({
       myProfile: myProfileEn,
       programs: programsEn,
       coverage: coverageEn,
+      analytics: analyticsEn,
     },
     fr: {
       common: commonFr,
@@ -146,6 +149,7 @@ i18n.use(initReactI18next).init({
       myProfile: myProfileFr,
       programs: programsFr,
       coverage: coverageFr,
+      analytics: analyticsFr,
     },
   },
 });

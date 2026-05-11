@@ -6,6 +6,8 @@
   "openMenu": "Open menu",
   "loading": "Loading...",
   "saving": "Saving...",
+  "uploading": "Uploading...",
+  "apply": "Apply",
   "deleting": "Deleting...",
   "restoring": "Restoring...",
   "exporting": "Exporting...",
@@ -70,6 +72,8 @@
     "roles": "Roles",
     "programs": "Programs",
     "coverage": "Coverage Audit",
+    "smsLog": "SMS Log",
+    "analytics": "Analytics Explorer",
     "myAccount": "My Account"
   },
   "pagination": {

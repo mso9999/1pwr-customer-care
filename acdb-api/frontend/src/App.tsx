@@ -40,6 +40,8 @@ import TicketsPage from './pages/TicketsPage';
 import GenSiteListPage from './pages/GenSiteListPage';
 import GenSitePage from './pages/GenSitePage';
 import CommissionSitePage from './pages/CommissionSitePage';
+import SMSLogPage from './pages/SMSLogPage';
+import AnalyticsPage from './pages/AnalyticsPage';
 
 function HomeRedirect() {
   const { user, loading } = useAuth();
@@ -74,6 +76,7 @@ export default function App() {
             <Route path="mutations" element={<ProtectedRoute requireEmployee><MutationsPage /></ProtectedRoute>} />
             <Route path="om-report" element={<ProtectedRoute requireEmployee><OMReportPage /></ProtectedRoute>} />
             <Route path="financial" element={<ProtectedRoute requireEmployee><FinancialPage /></ProtectedRoute>} />
+            <Route path="analytics" element={<ProtectedRoute requireEmployee><AnalyticsPage /></ProtectedRoute>} />
             <Route path="sync" element={<ProtectedRoute requireEmployee><SyncPage /></ProtectedRoute>} />
             <Route path="commission" element={<ProtectedRoute requireEmployee requireRole={['superadmin', 'onm_team']}><CommissionCustomerPage /></ProtectedRoute>} />
             <Route path="tariffs" element={<ProtectedRoute requireEmployee><TariffManagementPage /></ProtectedRoute>} />
@@ -97,6 +100,7 @@ export default function App() {
             <Route path="admin/roles" element={<ProtectedRoute requireEmployee requireRole={['superadmin']}><AdminRolesPage /></ProtectedRoute>} />
             <Route path="admin/programs" element={<ProtectedRoute requireEmployee requireRole={['superadmin']}><ProgramsPage /></ProtectedRoute>} />
             <Route path="admin/coverage" element={<ProtectedRoute requireEmployee requireRole={['superadmin']}><CoverageAuditPage /></ProtectedRoute>} />
+            <Route path="admin/sms-log" element={<ProtectedRoute requireEmployee requireRole={['superadmin']}><SMSLogPage /></ProtectedRoute>} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -6,6 +6,8 @@
   "openMenu": "Ouvrir le menu",
   "loading": "Chargement...",
   "saving": "Enregistrement...",
+  "uploading": "Téléchargement...",
+  "apply": "Appliquer",
   "deleting": "Suppression...",
   "restoring": "Restauration...",
   "exporting": "Exportation...",
@@ -70,6 +72,8 @@
     "roles": "Rôles",
     "programs": "Programmes",
     "coverage": "Audit de couverture",
+    "smsLog": "Journal SMS",
+    "analytics": "Explorateur Analytique",
     "myAccount": "Mon compte"
   },
   "pagination": {

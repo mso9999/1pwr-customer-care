@@ -33,6 +33,7 @@ const EMPLOYEE_NAV: NavSectionDef[] = [
       { to: '/billing-priority', labelKey: 'nav.billingPriority', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z', accent: true },
       { to: '/tickets', labelKey: 'nav.maintenanceLog', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4', accent: true },
       { to: '/gensite', labelKey: 'nav.gensite', icon: 'M13 10V3L4 14h7v7l9-11h-7z', accent: true },
+      { to: '/analytics', labelKey: 'nav.analytics', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z', accent: true },
     ],
   },
   {
@@ -68,6 +69,7 @@ const EMPLOYEE_NAV: NavSectionDef[] = [
       { to: '/admin/roles', labelKey: 'nav.roles', icon: 'M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z', superadminOnly: true },
       { to: '/admin/programs', labelKey: 'nav.programs', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', superadminOnly: true },
       { to: '/admin/coverage', labelKey: 'nav.coverage', icon: 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z', superadminOnly: true },
+      { to: '/admin/sms-log', labelKey: 'nav.smsLog', icon: 'M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z', superadminOnly: true },
     ],
   },
 ];
