@@ -1,7 +1,7 @@
 """
 SMA Sunny Portal adapter — covers the 7 PIH health centres in Lesotho.
 
-Backend: https://www.sunnyportal.com  (web UI, no public REST API)
+Backend: https://ennexos.sunnyportal.com  (web UI, no public REST API)
 
 Plan: session-based HTML/XHR scrape. Sunny Portal logs in via form POST, then
 renders plant dashboards that call an internal JSON backend for tile data.
@@ -51,12 +51,12 @@ class SMAAdapter(InverterAdapter):
                 plain_fields=["username", "site_id_on_vendor", "base_url"],
                 secret_fields=["secret"],
                 extra_fields=[],
-                docs_url="https://www.sunnyportal.com",
+                docs_url="https://ennexos.sunnyportal.com",
                 notes=(
                     "Session-scrape adapter. 'username' is the Sunny Portal "
-                    "email, 'secret' the portal password. 'site_id_on_vendor' "
-                    "is the Sunny Portal plant OID. Implementation pending "
-                    "Phase 2."
+                    "email (onm-team@1pwrafrica.com), 'secret' the portal password. "
+                    "'site_id_on_vendor' is the Sunny Portal plant OID. "
+                    "Implementation pending Phase 2."
                 ),
             ),
         ]

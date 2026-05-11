@@ -25,6 +25,7 @@ from .base import (
     VendorDescriptor,
     VerifyResult,
 )
+from .alphaess import AlphaESSAdapter
 from .victron import VictronAdapter
 from .solarman import SolarmanAdapter
 from .sinosoar import SinosoarAdapter
@@ -36,6 +37,7 @@ REGISTRY: Dict[str, InverterAdapter] = {
     "solarman": SolarmanAdapter(),     # same adapter, accessible under both names
     "sinosoar": SinosoarAdapter(),
     "sma":      SMAAdapter(),
+    "alphaess": AlphaESSAdapter(),
 }
 
 __all__ = [
