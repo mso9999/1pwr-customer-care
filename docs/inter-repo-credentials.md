@@ -22,13 +22,27 @@
 
 ---
 
+## Infrastructure instances (EC2 / af-south-1)
+
+All production servers run in **AWS af-south-1** (Cape Town), account `758201218523`, unless noted otherwise.
+
+| Service | EC2 Name | Instance ID | Public IP | SSH |
+|---------|----------|-------------|-----------|-----|
+| **CC + 1PDB** (`cc.1pwrafrica.com`) | `EOL` | `i-04291e12e64de36d7` | `13.245.142.186` (Elastic) | `ubuntu@13.245.142.186` key `EOver.pem` port 22 |
+| **uGridPlan** (`ugp.1pwrafrica.com`) | `uGridPLAN` | af-south-1 | `15.240.40.213` | `ugridplan@15.240.40.213` port 2222 |
+| **Firmware CI runner** (`1meter-build-host`) | staging EC2 | af-south-1 | `13.247.190.132` | `ubuntu@13.247.190.132` port 2222 |
+
+*Resolve the current public IP with:* `aws ec2 describe-instances --region af-south-1 --filters "Name=instance-state-name,Values=running" --query 'Reservations[*].Instances[*].[Tags[?Key==\`Name\`].Value|[0],PublicIpAddress]' --output table`
+
+---
+
 ## Cross-cutting
 
 | Topic | Where |
 |-------|--------|
-| **AWS account (CC backups, etc.)** | `758201218523` referenced from backup bucket naming in 1PWR CC `CONTEXT.md` — use org IAM / SSO, not long-lived keys in repos. |
-| **SSH (CC / shared EC2)** | Human Mac: **`/Users/mattmso/Dropbox/AI Projects/secrets/EOver.pem`**. Resolve hostname with **AWS CLI** (`aws ec2 describe-instances` — see `CONTEXT.md`) or GitHub **`EC2_LINUX_HOST`**. CI: **`EC2_SSH_KEY`**. Do not rely on old IPs in stray docs. |
-| **PostgreSQL (`1PDB`)** | Production `DATABASE_URL` values are on the CC host (`/opt/1pdb/.env`, `/opt/1pdb-bn/.env`) and in 1PDB’s `config/credentials.example.env` template for local/dev. |
+| **AWS account** | `758201218523` — use org IAM / SSO, not long-lived keys in repos. |
+| **SSH (CC / shared EC2)** | Human Mac: **`/Users/mattmso/Dropbox/AI Projects/secrets/EOver.pem`**. Resolve hostname with **AWS CLI** or GitHub **`EC2_LINUX_HOST`** secret. CI: **`EC2_SSH_KEY`**. Do not rely on old IPs in stray docs. |
+| **PostgreSQL (`1PDB`)** | Production `DATABASE_URL` on CC host (`/opt/1pdb/.env` Lesotho, `/opt/1pdb-bn/.env` Benin) and in 1PDB `config/credentials.example.env` for local/dev. |
 
 ---
 
@@ -38,7 +52,7 @@
 |------|-----------|--------|
 | **GitHub Actions** | Repo → *Settings → Secrets and variables → Actions* | `EC2_SSH_KEY`, `EC2_LINUX_HOST` — see `.github/workflows/deploy.yml`. |
 | **Production API env** | `/opt/1pdb/.env` (Lesotho), `/opt/1pdb-bn/.env` (Benin) | `DATABASE_URL`, Koios keys, optional `DATABASE_URL_BN`, bridge URLs, `IOT_INGEST_KEY` (must match Lambda), **`SMS_SERVER_URL`** (outbound customer SMS via gateway PHP), **`SMS_PAYMENT_RECEIPT_ENABLED`** (default on — post-payment balance SMS from `/api/sms/incoming`; set `0` to disable), **`LOW_BALANCE_ALERTS_ENABLED`** for the scheduled low-balance job, etc. Owner `cc_api`. |
-| **Portal artifacts** | `/opt/cc-portal/frontend/`, `/opt/cc-portal/backend/` | Deployed from CI; `.env` never rsync’d from git. |
+| **Portal artifacts** | `/opt/cc-portal/frontend/`, `/opt/cc-portal/backend/` | Deployed from CI; `.env` never rsync'd from git. |
 | **Caddy** | `/etc/caddy/Caddyfile`, TLS/ACME | No DB passwords. |
 | **WhatsApp bridge** | PM2 on CC host | `CC_BRIDGE_SECRET`, `CC_API`, per-country `CC_BRIDGE_NOTIFY_*` — see `docs/whatsapp-customer-care.md`. |
 | **Firebase** | Server-only | `firebase-service-account.json` excluded from deploy rsync; must exist on host if used. |
@@ -98,8 +112,13 @@
 
 | Kind | Location | Notes |
 |------|-----------|--------|
-| **AWS IoT** | Per-device certs, IoT policy | Provisioned outside repo; see repo `Docs/` and `aws_documentation/`. |
-| **WiFi / NVS** | On-device | Developer provisioning flows; not committed. |
+| **AWS IoT** | Per-device certs, IoT policy | Provisioned outside repo; see repo `Docs/` and `aws_documentation/`. MQTT endpoint: `a3p95svnbmzyit-ats.iot.us-east-1.amazonaws.com` (us-east-1). |
+| **WiFi / NVS** | On-device NVS flash | Developer provisioning flows; not committed. `sdkconfig.defaults` has the build-time AP SSID/password. |
+| **OTA S3 bucket** | `s3://1pwr-ota-firmware/` (us-east-1) | Signed firmware binaries at `firmware-releases/v<X.Y.Z>/<ThingName>/`. Versioning enabled; S3 `VersionId` required when creating AWS IoT OTA jobs. |
+| **OTA code signing** | AWS Signer profile **`1PWR_OTA_ESP32_v2`** | ECDSA-P256 signing profile; used in `aws iot create-ota-update` `codeSigning.startSigningJobParameter`. |
+| **OTA IAM role** | `arn:aws:iam::758201218523:role/1pwr-ota-service-role` | Passed as `--role-arn` to `aws iot create-ota-update`; grants IoT the right to read S3 + invoke Signer. |
+| **CI build runner** | GitHub Actions self-hosted **`1meter-build-host`** | Linux/X64, registered at `onepowerLS/onepwr-aws-mesh` → *Settings → Actions → Runners*. Runs on EC2 `13.247.190.132` port 2222 (ubuntu), af-south-1. Build artifacts at `/opt/1meter-firmware/per-device-builds/`. Runner service: `sudo systemctl restart actions.runner.*`. |
+| **GitHub Actions secrets** | Repo → *Settings → Secrets* | `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` — needed for `publish_to_s3=true` builds. Currently misconfigured on EC2 runner (IAM); use `publish_to_s3=false` + manual S3 upload until fixed. |
 
 ---
 
@@ -109,7 +128,7 @@
 |------|-----------|--------|
 | **GitHub Actions** | *Secrets* | `EC2_SSH_KEY`, `EC2_HOST` (prod, SSH **port 2222**), `EC2_STAGING_HOST`, `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`, `DROPBOX_REFRESH_TOKEN` (Dropbox import workflow). |
 | **Server env** | `/opt/ugridplan/.env`, `/opt/ugridplan/app/.env`, `web/adapter/.env` | Flask/FastAPI secrets, `OM_PORTAL_API_KEY` for O&M portal trust — see `deploy/README.md`. |
-| **SSH** | Port `2222` on uGridPlan EC2 | Workflows use `ssh -p 2222`; differs from CC’s port 22. |
+| **SSH** | Port `2222` on uGridPlan EC2 | Workflows use `ssh -p 2222`; differs from CC's port 22. |
 
 ---
 
@@ -119,7 +138,7 @@
 |------|-----------|--------|
 | **GitHub Actions** | `EC2_SSH_KEY`, `EC2_LINUX_HOST` | Same CC host as portal deploy; see `.github/workflows/deploy.yml`. |
 | **Cross-host** | `UGP_EC2_SSH_KEY` | Used in `server-setup.yml` to configure trust between CC host and uGridPlan host. |
-| **Runtime trust** | `OM_PORTAL_API_KEY` | Must match in **Caddy** `/etc/caddy/caddy.env` and **uGridPlan** `/opt/ugridplan/app/web/adapter/.env` (or paths in that repo’s deploy docs). |
+| **Runtime trust** | `OM_PORTAL_API_KEY` | Must match in **Caddy** `/etc/caddy/caddy.env` and **uGridPlan** `/opt/ugridplan/app/web/adapter/.env` (or paths in that repo's deploy docs). |
 
 ---
 
@@ -130,5 +149,7 @@
 | 1PWR CC | `docs/credentials-and-secrets.md` — CC-focused quick reference |
 | 1PWR CC | `docs/whatsapp-customer-care.md` — bridge env vars and PM2 |
 | om-portal | `CADDY_CONFIG.md`, `README.md` — OM API key wiring |
+| onepwr-aws-mesh | `Docs/SOP-1meter-ota-setup.md` — step-by-step OTA job creation |
+| onepwr-aws-mesh | `Docs/build/CI.md` — CI build workflow guide |
 
 **Maintainers:** When you introduce a new secret class (new country DB, new provider, new GitHub secret name), update **this file in every repo copy** and the index table above.
