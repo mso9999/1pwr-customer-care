@@ -140,34 +140,41 @@ def _build_query(q: CohortQuery, *, count_only: bool) -> Tuple[str, list]:
     ct_expanded = _expand_customer_types(f.customer_types)
     statuses = [s for s in (f.statuses or []) if s in COHORT_STATUSES]
 
-    params: list = list(sites)
     site_placeholders = ",".join(["%s"] * len(sites))
 
     ct_clause = ""
+    ct_params: list = []
     if ct_expanded:
         ph = ",".join(["%s"] * len(ct_expanded))
         ct_clause = f"AND UPPER(TRIM(c.customer_type)) IN ({ph})"
-        params.extend(ct_expanded)
+        ct_params = list(ct_expanded)
 
     search_clause = ""
+    search_params: list = []
     if f.search and f.search.strip():
         s = f"%{f.search.strip()}%"
         search_clause = (
             "AND (c.first_name ILIKE %s OR c.last_name ILIKE %s "
             "OR c.phone ILIKE %s OR a.account_number ILIKE %s)"
         )
-        params.extend([s, s, s, s])
-
-    # The cohort_status CASE classifies each customer into exactly one bucket.
-    # `payment_status_override` is respected for paid/fully_paid/not_paid.
-    # Threshold value follows.
-    params.append(fee_threshold)
-    params.append(fee_threshold)
+        search_params = [s, s, s, s]
 
     status_clause = ""
     if statuses:
         ph = ",".join(["%s"] * len(statuses))
         status_clause = f"AND cohort_status IN ({ph})"
+
+    # Build params in *exact SQL placeholder order*:
+    #   1-2. fee_threshold (two %s inside the CTE's CASE expression)
+    #   3+.  sites      (WHERE c.community IN (...))
+    #   ...  ct_clause  (AND UPPER(TRIM(c.customer_type)) IN (...))
+    #   ...  search     (AND ... ILIKE ...)
+    #   ...  status_clause (outer WHERE cohort_status IN (...))
+    #   last LIMIT, OFFSET — appended by the page-select branch below.
+    params: list = [fee_threshold, fee_threshold]
+    params.extend(sites)
+    params.extend(ct_params)
+    params.extend(search_params)
 
     base_cte = f"""
         WITH paid_totals AS (

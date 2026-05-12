@@ -80,6 +80,42 @@ class TestQueryBuilder(unittest.TestCase):
         # Site placeholders + 2x threshold + page_size + offset
         self.assertGreaterEqual(len(params), 4)
 
+    def test_param_count_matches_placeholder_count(self):
+        """Regression for the 500 caused by param/placeholder misalignment.
+
+        The number of ``%s`` placeholders in the assembled SQL must equal the
+        number of params we pass to ``cursor.execute``.  We exercise all
+        optional clauses (sites, customer types, search, statuses) at once.
+        """
+        q = CohortQuery(
+            filters=CohortFilters(
+                country="LS",
+                customer_types=["HH", "SME"],
+                statuses=["not_paid", "fully_paid_connected"],
+                search="Mok",
+            ),
+            page=2,
+            page_size=25,
+        )
+        sql, params = _build_query(q, count_only=False)
+        self.assertEqual(sql.count("%s"), len(params))
+
+        count_sql, count_params = _build_query(q, count_only=True)
+        self.assertEqual(count_sql.count("%s"), len(count_params))
+
+    def test_threshold_params_come_first(self):
+        """The two fee_threshold %s appear inside the CTE SELECT before any
+        sites/customer_type/search placeholders, so they must be at the head
+        of the params tuple."""
+        q = CohortQuery(filters=CohortFilters(country="LS"))
+        _, params = _build_query(q, count_only=False)
+        # First two params are numeric (the threshold), not a site code.
+        self.assertIsInstance(params[0], (int, float))
+        self.assertIsInstance(params[1], (int, float))
+        self.assertEqual(params[0], params[1])
+        # Third param is a site code (string).
+        self.assertIsInstance(params[2], str)
+
     def test_status_filter_adds_in_clause(self):
         q = CohortQuery(
             filters=CohortFilters(country="LS", statuses=["not_paid", "fully_paid_connected"]),
