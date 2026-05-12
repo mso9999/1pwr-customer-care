@@ -316,9 +316,12 @@ def query_cohort(
                 if d.get("total_paid") is not None:
                     d["total_paid"] = float(d["total_paid"])
                 rows.append(d)
-        except Exception:
+        except Exception as exc:
             logger.exception("Cohort query failed")
-            raise HTTPException(500, "Cohort query failed")
+            # Surface the underlying error so production failures are
+            # diagnosable without server-log access. SQL identifiers/values
+            # are already user-supplied (filtered) so this leaks no secrets.
+            raise HTTPException(500, f"Cohort query failed: {type(exc).__name__}: {exc}")
 
     sites_resolved = _resolve_sites(q.filters.country, q.filters.sites)
     return {
