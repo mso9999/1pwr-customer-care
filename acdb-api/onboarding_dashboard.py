@@ -23,7 +23,7 @@ def onboarding_summary(
     site_filter = ""
     params: list = []
     if site and site.upper() != "ALL":
-        site_filter = "AND m.community = %s"
+        site_filter = "AND c.community = %s"
         params.append(site.upper())
 
     with get_connection() as conn:
@@ -66,7 +66,7 @@ def onboarding_monthly(
             site_filter = ""
             params: list = [year]
             if site != "ALL":
-                site_filter = "AND m.community = %s"
+                site_filter = "AND c.community = %s"
                 params.append(site)
             cur.execute(
                 f"""

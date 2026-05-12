@@ -1009,7 +1009,10 @@ function ReportsContent() {
         <P>Analyses de revenus et ARPU incluant les revenus mensuels par site, les tendances ARPU, la répartition par type de paiement et les comparaisons de croissance des revenus.</P>
 
         <SubHead>Pipeline d'intégration (<PageLink to="/pipeline">/pipeline</PageLink>)</SubHead>
-        <P>Visualisation en entonnoir montrant la progression des clients à travers les étapes de mise en service. Comprend les pourcentages de déperdition, le filtrage par site, des cartes récapitulatives (total inscrits, entièrement mis en service, taux de conversion) et un tableau détaillé.</P>
+        <P>Visualisation en entonnoir montrant la progression des clients à travers les étapes de mise en service. Comprend les pourcentages de déperdition, le filtrage par site, des cartes récapitulatives (total inscrits, entièrement mis en service, taux de conversion), un tableau détaillé, une liste par étape avec export CSV et des mises à jour groupées des étapes. Les mises à jour par client se font sur la fiche client (section Intégration) et via <PageLink to="/payment-verification">Vérification des paiements</PageLink>.</P>
+
+        <SubHead>Tableau de bord d'intégration (<PageLink to="/onboarding-dashboard">/onboarding-dashboard</PageLink>)</SubHead>
+        <P>Remplace les feuilles Totals / Progress / Monthly du classeur Dropbox : totaux par site (inscrits, raccordés, en attente, compteurs installés, mis en service) et commissions mensuelles par site.</P>
 
         <SubHead>Cohorte de clients (<PageLink to="/customer-cohort">/customer-cohort</PageLink>)</SubHead>
         <P>Liste détaillée des clients individuels derrière les agrégats de l'entonnoir. Filtrer par pays, sites, types de client, statut de paiement (non payé, partiellement payé connecté/non connecté, entièrement payé connecté/non connecté, résilié) et rechercher par nom, téléphone ou compte. Les colonnes sont triables ; chaque ligne renvoie vers <PageLink to="/customer-data">Données client</PageLink> et le détail du client. Exporter en CSV pour suivi hors ligne ou listes de relance.</P>
@@ -1034,7 +1037,10 @@ function ReportsContent() {
       <P>Revenue and ARPU analytics including monthly revenue by site, ARPU trends, payment type breakdown, and revenue growth comparisons.</P>
 
       <SubHead>Onboarding Pipeline (<PageLink to="/pipeline">/pipeline</PageLink>)</SubHead>
-      <P>A funnel visualization showing customer progress through commissioning stages. Includes drop-off percentages, site filtering, summary cards (total registered, fully commissioned, conversion rate), and a detailed table.</P>
+      <P>A funnel visualization showing customer progress through commissioning stages. Includes drop-off percentages, site filtering, summary cards (total registered, fully commissioned, conversion rate), a detailed table, per-stage drill-down with CSV export, and bulk step updates. Per-customer edits live on the customer detail page (Onboarding section) and via <PageLink to="/payment-verification">Payment verification</PageLink>.</P>
+
+      <SubHead>Onboarding dashboard (<PageLink to="/onboarding-dashboard">/onboarding-dashboard</PageLink>)</SubHead>
+      <P>Replaces the Dropbox workbook Totals / Progress / Monthly sheets: per-site rollups (registered, connected, pending, meter installed, commissioned) and monthly commissioning counts by site.</P>
 
       <SubHead>Customer Cohort (<PageLink to="/customer-cohort">/customer-cohort</PageLink>)</SubHead>
       <P>Drill-down list of the individual customers behind the funnel aggregates. Filter by country, sites, customer types, payment status (not paid, partially paid connected/not connected, fully paid connected/not connected, terminated), and search by name, phone, or account. Columns are sortable; each row links into <PageLink to="/customer-data">Customer Data</PageLink> and the customer detail page. Export to CSV for offline follow-up or call-list generation.</P>

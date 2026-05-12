@@ -4,9 +4,11 @@ import { useTranslation } from 'react-i18next';
 import {
   getOnboardingPipeline,
   listOnboardingPipelineAccounts,
+  bulkUpdateCommissioningStatus,
   type PipelineStage,
   type OnboardingPipelineAccount,
 } from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
 
 const STAGE_LABELS: Record<string, string> = {
   registered: 'Registered',
@@ -43,6 +45,7 @@ const STAGE_COLORS = [
 
 export default function PipelinePage() {
   const { t } = useTranslation(['pipeline', 'common']);
+  const { canWrite } = useAuth();
   const [funnel, setFunnel] = useState<PipelineStage[]>([]);
   const [sites, setSites] = useState<string[]>([]);
   const [site, setSite] = useState('');
@@ -50,6 +53,8 @@ export default function PipelinePage() {
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
   const [stageAccounts, setStageAccounts] = useState<OnboardingPipelineAccount[]>([]);
   const [stageLoading, setStageLoading] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkSaving, setBulkSaving] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -74,6 +79,7 @@ export default function PipelinePage() {
         limit: 1000,
       });
       setStageAccounts(res.accounts);
+      setSelectedIds(new Set());
     } finally {
       setStageLoading(false);
     }
@@ -98,6 +104,36 @@ export default function PipelinePage() {
     link.download = `pipeline-${selectedStage || 'stage'}.csv`;
     link.click();
     URL.revokeObjectURL(url);
+  };
+
+  const toggleSelected = (legacyId: number | null) => {
+    if (legacyId == null) return;
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(legacyId)) next.delete(legacyId);
+      else next.add(legacyId);
+      return next;
+    });
+  };
+
+  const markSelectedComplete = async () => {
+    if (!selectedStage || selectedStage === 'registered' || selectedIds.size === 0) return;
+    setBulkSaving(true);
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      await bulkUpdateCommissioningStatus(
+        [...selectedIds].map(customer_id => ({
+          customer_id,
+          step: selectedStage,
+          value: true,
+          date: today,
+        })),
+      );
+      await load();
+      await loadStageAccounts(selectedStage);
+    } finally {
+      setBulkSaving(false);
+    }
   };
 
   const maxCount = funnel.length > 0 ? Math.max(...funnel.map(s => s.count), 1) : 1;
@@ -224,14 +260,26 @@ export default function PipelinePage() {
                     defaultValue: STAGE_LABELS[selectedStage] ?? selectedStage,
                   })}
                 </h2>
-                <button
-                  type="button"
-                  onClick={exportStageCsv}
-                  disabled={!stageAccounts.length}
-                  className="text-sm px-3 py-1.5 border rounded-lg hover:bg-gray-50 disabled:opacity-50"
-                >
-                  Export CSV
-                </button>
+                <div className="flex items-center gap-2">
+                  {canWrite && selectedStage !== 'registered' && (
+                    <button
+                      type="button"
+                      onClick={markSelectedComplete}
+                      disabled={bulkSaving || selectedIds.size === 0}
+                      className="text-sm px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
+                    >
+                      {bulkSaving ? t('common:saving') : 'Mark selected complete'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={exportStageCsv}
+                    disabled={!stageAccounts.length}
+                    className="text-sm px-3 py-1.5 border rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    Export CSV
+                  </button>
+                </div>
               </div>
               {stageLoading ? (
                 <p className="px-4 py-6 text-sm text-gray-400">{t('common:loading')}...</p>
@@ -239,6 +287,7 @@ export default function PipelinePage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 text-left text-gray-500 text-xs">
+                      {canWrite && selectedStage !== 'registered' && <th className="px-4 py-3 w-10" />}
                       <th className="px-4 py-3">Account</th>
                       <th className="px-4 py-3">Name</th>
                       <th className="px-4 py-3">Site</th>
@@ -248,6 +297,16 @@ export default function PipelinePage() {
                   <tbody>
                     {stageAccounts.map(row => (
                       <tr key={row.account_number} className="border-t border-gray-100">
+                        {canWrite && selectedStage !== 'registered' && (
+                          <td className="px-4 py-3">
+                            <input
+                              type="checkbox"
+                              checked={row.customer_id_legacy != null && selectedIds.has(row.customer_id_legacy)}
+                              disabled={row.customer_id_legacy == null}
+                              onChange={() => toggleSelected(row.customer_id_legacy)}
+                            />
+                          </td>
+                        )}
                         <td className="px-4 py-3 font-mono">
                           <Link
                             to={`/customers/${row.customer_id}`}

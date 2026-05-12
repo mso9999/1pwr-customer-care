@@ -2045,6 +2045,7 @@ export async function patchOnboardingCustomerStatus(
 export interface OnboardingPipelineAccount {
   account_number: string;
   customer_id: number;
+  customer_id_legacy: number | null;
   first_name: string | null;
   last_name: string | null;
   community: string | null;
@@ -2091,6 +2092,18 @@ export async function getOnboardingMonthlyDashboard(year?: number): Promise<{
 }> {
   const qs = year != null ? `?year=${year}` : '';
   return request(`/onboarding/dashboard/monthly${qs}`);
+}
+
+export async function bulkUpdateCommissioningStatus(updates: {
+  customer_id: number;
+  step: string;
+  value: boolean;
+  date?: string;
+}[]): Promise<{ updated: number; errors: { customer_id: number; error: string }[]; total_requested: number }> {
+  return request('/commission/bulk-status', {
+    method: 'POST',
+    body: JSON.stringify({ updates }),
+  });
 }
 
 // ---------------------------------------------------------------------------

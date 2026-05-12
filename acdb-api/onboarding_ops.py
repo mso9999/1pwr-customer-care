@@ -173,7 +173,8 @@ def list_pipeline_accounts(
             params.append(site.upper())
         cur.execute(
             f"""
-            SELECT a.account_number, c.id AS customer_id, c.first_name, c.last_name, c.community,
+            SELECT a.account_number, c.id AS customer_id, c.customer_id_legacy,
+                   c.first_name, c.last_name, c.community,
                    c.connection_fee_paid, c.readyboard_fee_paid, c.customer_commissioned
             FROM customers c
             JOIN accounts a ON a.customer_id = c.id
