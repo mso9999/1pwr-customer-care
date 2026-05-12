@@ -391,6 +391,19 @@ def _store_proof_urls(cur, customer_id: int, urls: list[str], *, apply: bool) ->
         )
 
 
+def _table_has_column(cur, table: str, column: str) -> bool:
+    cur.execute(
+        """
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = %s AND column_name = %s
+        LIMIT 1
+        """,
+        (table, column),
+    )
+    return cur.fetchone() is not None
+
+
 def apply_record(
     conn,
     record: dict[str, Any],
@@ -468,35 +481,39 @@ def apply_record(
                 (customer_id,),
             )
 
-    cur.execute(
-        """
-        UPDATE customers
-        SET house_wiring_test_passed = COALESCE(%s, house_wiring_test_passed),
-            house_wiring_test_date = COALESCE(%s, house_wiring_test_date),
-            onboarding_import_tag = %s,
-            updated_at = NOW()
-        WHERE id = %s
-        """,
-        (
+    sets = ["onboarding_import_tag = %s", "updated_at = NOW()"]
+    params: list[Any] = [IMPORT_TAG, customer_id]
+    if _table_has_column(cur, "customers", "house_wiring_test_passed"):
+        sets.insert(0, "house_wiring_test_date = COALESCE(%s, house_wiring_test_date)")
+        sets.insert(0, "house_wiring_test_passed = COALESCE(%s, house_wiring_test_passed)")
+        params = [
             record.get("house_wiring_test_passed"),
             record.get("house_wiring_test_date"),
             IMPORT_TAG,
             customer_id,
-        ),
+        ]
+    cur.execute(
+        f"UPDATE customers SET {', '.join(sets)} WHERE id = %s",
+        params,
     )
-    if record.get("survey_id"):
+    if record.get("survey_id") and _table_has_column(cur, "accounts", "survey_id"):
         cur.execute(
             "UPDATE accounts SET survey_id = COALESCE(%s, survey_id) WHERE account_number = %s",
             (str(record["survey_id"])[:64], account),
         )
     if record.get("meter_serial"):
-        cur.execute(
-            """
-            UPDATE meters SET meter_serial = COALESCE(%s, meter_serial)
-            WHERE account_number = %s
-            """,
-            (str(record["meter_serial"])[:64], account),
+        meter_col = "meter_id" if _table_has_column(cur, "meters", "meter_id") else (
+            "meter_serial" if _table_has_column(cur, "meters", "meter_serial") else None
         )
+        if meter_col:
+            cur.execute(
+                f"""
+                UPDATE meters SET {meter_col} = %s
+                WHERE account_number = %s
+                  AND ({meter_col} IS NULL OR {meter_col} = '')
+                """,
+                (str(record["meter_serial"])[:64], account),
+            )
     _store_proof_urls(cur, customer_id, record.get("proof_urls", []), apply=apply)
 
     after = _customer_snapshot(cur, account) or snapshot
