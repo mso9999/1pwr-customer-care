@@ -14,8 +14,10 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
 
-ROOT = Path(__file__).resolve().parents[2]
-ACDB_API = ROOT / "acdb-api"
+ROOT = Path(__file__).resolve().parents[2] if len(Path(__file__).resolve().parents) > 2 else Path("/")
+ACDB_API = Path(os.environ.get("ACDB_API", "/opt/cc-portal/backend"))
+if not (ACDB_API / "customer_api.py").exists():
+    ACDB_API = ROOT / "acdb-api"
 if str(ACDB_API) not in sys.path:
     sys.path.insert(0, str(ACDB_API))
 

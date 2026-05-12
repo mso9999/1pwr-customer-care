@@ -8,8 +8,10 @@ import os
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[2]
-ACDB_API = ROOT / "acdb-api"
+ROOT = Path(__file__).resolve().parents[2] if len(Path(__file__).resolve().parents) > 2 else Path("/")
+ACDB_API = Path(os.environ.get("ACDB_API", "/opt/cc-portal/backend"))
+if not (ACDB_API / "onboarding_derive.py").exists():
+    ACDB_API = ROOT / "acdb-api"
 if str(ACDB_API) not in sys.path:
     sys.path.insert(0, str(ACDB_API))
 
