@@ -2,7 +2,7 @@
 set -euo pipefail
 
 BASE="/home/ubuntu/onboarding-recon"
-DATA_DIR="${BASE}/data/mobile-money-records"
+DATA_DIR="${MERCHANT_ROOT:-/home/ubuntu/mm-backfill-data/mobile-money-records}"
 WAIT_LOG="${BASE}/logs/wait_sync.log"
 MIN_FILES="${MIN_MERCHANT_FILES:-500}"
 

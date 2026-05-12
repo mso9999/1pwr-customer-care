@@ -2,7 +2,7 @@
 set -euo pipefail
 
 BASE="/home/ubuntu/onboarding-recon"
-DATA_DIR="${BASE}/data/mobile-money-records"
+DATA_DIR="${MERCHANT_ROOT:-/home/ubuntu/mm-backfill-data/mobile-money-records}"
 LOG_DIR="${BASE}/logs"
 SCRIPT_DIR="${BASE}/scripts"
 WORKBOOK="${BASE}/data/onboarding_workbook.xlsx"
@@ -41,8 +41,13 @@ if [[ -f "${PID_FILE}" ]] && kill -0 "$(cat "${PID_FILE}")" 2>/dev/null; then
 fi
 
 set -a
-# shellcheck disable=SC1091
-source /opt/1pdb/.env
+if [[ -r /opt/1pdb/.env ]]; then
+  # shellcheck disable=SC1091
+  source /opt/1pdb/.env
+else
+  DATABASE_URL="$(sudo grep -m1 '^DATABASE_URL=' /opt/1pdb/.env | cut -d= -f2- | tr -d '"')"
+  export DATABASE_URL
+fi
 set +a
 export PYTHONPATH=/opt/cc-portal/backend
 export ACDB_API=/opt/cc-portal/backend
