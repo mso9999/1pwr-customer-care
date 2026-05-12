@@ -5,6 +5,7 @@ python-jose[cryptography]
 passlib[bcrypt]
 bcrypt
 openpyxl
+python-calamine
 requests
 firebase-admin
 xhtml2pdf

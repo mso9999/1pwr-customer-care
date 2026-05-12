@@ -337,3 +337,97 @@ def record_fee_transaction(
         txn_id, account_number, payment_category, amount_currency,
     )
     return txn_id, prev_balance
+
+
+def record_historical_payment_transaction(
+    conn,
+    account_number: str,
+    meter_id: str,
+    amount_currency: float,
+    rate: float,
+    source: str = "portal",
+    timestamp: datetime | None = None,
+    payment_reference: str | None = None,
+    extra_columns: dict | None = None,
+) -> tuple[int, float]:
+    """Insert a payment row for audit/history without crediting kWh balance."""
+    cur = conn.cursor()
+    ts = timestamp or datetime.now(timezone.utc)
+    prev_balance, _ = get_balance_kwh(conn, account_number)
+
+    base_cols = [
+        "account_number", "meter_id", "transaction_date",
+        "transaction_amount", "rate_used", "kwh_value",
+        "is_payment", "current_balance", "source",
+        "payment_reference",
+    ]
+    base_vals = [
+        account_number, meter_id, ts,
+        amount_currency, rate, None,
+        True, prev_balance, source,
+        payment_reference,
+    ]
+
+    extra = extra_columns or {}
+    cols = base_cols + list(extra.keys())
+    vals = base_vals + list(extra.values())
+
+    placeholders = ", ".join(["%s"] * len(vals))
+    sql = (
+        f"INSERT INTO transactions ({', '.join(cols)}) "
+        f"VALUES ({placeholders}) RETURNING id"
+    )
+    cur.execute(sql, vals)
+    txn_id = int(cur.fetchone()[0])
+    logger.info(
+        "Historical payment txn=%d acct=%s M%.2f (no kWh credit, bal=%.4f kWh)",
+        txn_id, account_number, amount_currency, prev_balance,
+    )
+    return txn_id, prev_balance
+
+
+def record_historical_payment_transaction(
+    conn,
+    account_number: str,
+    meter_id: str,
+    amount_currency: float,
+    rate: float,
+    source: str = "portal",
+    timestamp: datetime | None = None,
+    payment_reference: str | None = None,
+    extra_columns: dict | None = None,
+) -> tuple[int, float]:
+    """Insert a payment row for audit/history without crediting kWh balance."""
+    cur = conn.cursor()
+    ts = timestamp or datetime.now(timezone.utc)
+    prev_balance, _ = get_balance_kwh(conn, account_number)
+
+    base_cols = [
+        "account_number", "meter_id", "transaction_date",
+        "transaction_amount", "rate_used", "kwh_value",
+        "is_payment", "current_balance", "source",
+        "payment_reference",
+    ]
+    base_vals = [
+        account_number, meter_id, ts,
+        amount_currency, rate, None,
+        True, prev_balance, source,
+        payment_reference,
+    ]
+
+    extra = extra_columns or {}
+    cols = base_cols + list(extra.keys())
+    vals = base_vals + list(extra.values())
+
+    placeholders = ", ".join(["%s"] * len(vals))
+    sql = (
+        f"INSERT INTO transactions ({', '.join(cols)}) "
+        f"VALUES ({placeholders}) RETURNING id"
+    )
+    cur.execute(sql, vals)
+    txn_id = int(cur.fetchone()[0])
+    logger.info(
+        "Historical payment txn=%d acct=%s M%.2f (no kWh credit, bal=%.4f kWh)",
+        txn_id, account_number, amount_currency, prev_balance,
+    )
+    return txn_id, prev_balance

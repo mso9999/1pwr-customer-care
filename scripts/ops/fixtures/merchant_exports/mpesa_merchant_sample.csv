@@ -1,0 +1,6 @@
+Receipt No,Completion Time,Details,Transaction Status,Paid in,Withdrawn,Balance,Reason Type,Other Party Info
+QAB1CD2EF3,2025-03-15 10:22:00,Customer Pay Bill Online 0252SHG connection,Completed,501.00,0.00,12500.00,Customer Pay Bill,26658881234 - John Doe
+QAB4GH5IJ6,2025-03-16 14:05:00,Customer Pay Bill Online 0253SHG,Completed,50.00,0.00,12550.00,Customer Pay Bill,26659990001 - Jane
+QAB7KL8MN9,2025-03-17 09:11:00,Pay Bill via USSD,Completed,499.00,0.00,13049.00,Customer Pay Bill,26657776666
+QAB0OP1QR2,2025-03-18 16:40:00,Business Payment from 26658889999,Completed,0.00,2000.00,11049.00,Business Payment,26658889999 - Agent
+QAB3ST4UV5,2025-03-19 11:30:00,Customer Pay Bill Online 0045MAK,Completed,100.00,0.00,11149.00,Customer Pay Bill,26650112233 - Payer

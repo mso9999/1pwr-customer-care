@@ -43,6 +43,8 @@ SC_BASE = os.environ.get(
 TC_EMAIL = os.environ.get("THUNDERCLOUD_USERNAME", "makhoalinyane@1pwrafrica.com")
 TC_PASS = os.environ.get("THUNDERCLOUD_PASSWORD", "00001111")
 COMMUNITY = "MAK"
+RECONCILE_ONLY = os.environ.get("TC_IMPORT_RECONCILE_ONLY", "").lower() in ("1", "true", "yes")
+CUTOVER_AFTER = os.environ.get("LS_SMP_CUTOVER_AT", "")
 
 
 def sc_login(session):
@@ -99,11 +101,37 @@ def fetch_transactions(session, cutoff_dt, page_size=100, max_pages=200):
     return all_txns
 
 
+def _parse_cutover_after(value: str | None) -> datetime | None:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        dt = datetime.strptime(raw[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def main():
     parser = argparse.ArgumentParser(description="Import MAK transactions from ThunderCloud API")
     parser.add_argument("--days", type=int, default=7, help="Import transactions from last N days")
     parser.add_argument("--dry-run", action="store_true", help="Preview only, no DB writes")
+    parser.add_argument(
+        "--reconcile-only",
+        action="store_true",
+        help="Report TC credits that would be inserted; do not write 1PDB rows",
+    )
+    parser.add_argument(
+        "--cutover-after",
+        default=None,
+        help="ISO date/time: on/after this instant, never insert (reconcile-only)",
+    )
     args = parser.parse_args()
+
+    reconcile_only = args.reconcile_only or RECONCILE_ONLY
+    cutover_after = _parse_cutover_after(args.cutover_after or CUTOVER_AFTER)
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=args.days)
     log.info("=" * 60)
@@ -171,6 +199,28 @@ def main():
     log.info("Credit transactions in range: %d", len(records))
     if not records:
         log.info("Nothing to import.")
+        return
+
+    if cutover_after:
+        post_cutover = [r for r in records if r["transaction_date"] >= cutover_after]
+        if post_cutover:
+            log.warning(
+                "Post-cutover TC credits detected: %d on/after %s (reconcile-only)",
+                len(post_cutover),
+                cutover_after.isoformat(),
+            )
+        records = [r for r in records if r["transaction_date"] < cutover_after]
+
+    if reconcile_only:
+        log.info("RECONCILE ONLY — would insert %d historical TC credit rows", len(records))
+        for r in records[:10]:
+            log.info(
+                "  %s %s M%.2f %s",
+                r["account_number"],
+                r["transaction_date"],
+                r["transaction_amount"],
+                (r["external_id"] or "")[:20],
+            )
         return
 
     if args.dry_run:
