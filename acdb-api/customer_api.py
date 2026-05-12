@@ -321,6 +321,8 @@ from sms_log import router as sms_log_router
 from analytics import router as analytics_router
 from customer_cohort import router as customer_cohort_router
 from payment_status import router as ps_router
+from onboarding_ops import router as onboarding_router
+from onboarding_dashboard import router as onboarding_dashboard_router
 
 from db_auth import init_auth_db
 init_auth_db()
@@ -362,6 +364,8 @@ app.include_router(sms_log_router)
 app.include_router(analytics_router)
 app.include_router(customer_cohort_router)
 app.include_router(ps_router)
+app.include_router(onboarding_router)
+app.include_router(onboarding_dashboard_router)
 ensure_meter_assignments_table()
 warm_stats_cache()
 

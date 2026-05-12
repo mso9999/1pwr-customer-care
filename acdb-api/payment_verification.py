@@ -86,9 +86,15 @@ def verify_payments(body: VerificationAction, user: CurrentUser = Depends(requir
             UPDATE payment_verifications
             SET status = %s, verified_by = %s, verified_at = NOW(), note = COALESCE(%s, note)
             WHERE id = ANY(%s) AND status = 'pending'
-            RETURNING id
+            RETURNING id, account_number
         """, (new_status, user.user_id, body.note, body.ids))
-        updated = [r[0] for r in cur.fetchall()]
+        rows = cur.fetchall()
+        updated = [r[0] for r in rows]
+        if new_status == "verified":
+            from onboarding_derive import derive_payment_steps_for_accounts
+
+            accounts = sorted({r[1] for r in rows if r[1]})
+            derive_payment_steps_for_accounts(conn, accounts)
         conn.commit()
 
     return {"updated": len(updated), "ids": updated, "status": new_status}

@@ -11,6 +11,7 @@ import {
 } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import SignatureCapture from '../components/SignatureCapture';
+import OnboardingStepsPanel from '../components/OnboardingStepsPanel';
 
 const GENDER_OPTIONS = ['', 'Male', 'Female'];
 
@@ -723,6 +724,12 @@ export default function CustomerDetailPage() {
               )}
             </div>
           )}
+        </div>
+      )}
+
+      {accountNumber && (
+        <div className="mt-4">
+          <OnboardingStepsPanel accountNumber={accountNumber} canWrite={canWrite} />
         </div>
       )}
 

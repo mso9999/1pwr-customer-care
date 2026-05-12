@@ -1,6 +1,12 @@
 import { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { getOnboardingPipeline, type PipelineStage } from '../lib/api';
+import {
+  getOnboardingPipeline,
+  listOnboardingPipelineAccounts,
+  type PipelineStage,
+  type OnboardingPipelineAccount,
+} from '../lib/api';
 
 const STAGE_LABELS: Record<string, string> = {
   registered: 'Registered',
@@ -41,6 +47,9 @@ export default function PipelinePage() {
   const [sites, setSites] = useState<string[]>([]);
   const [site, setSite] = useState('');
   const [loading, setLoading] = useState(true);
+  const [selectedStage, setSelectedStage] = useState<string | null>(null);
+  const [stageAccounts, setStageAccounts] = useState<OnboardingPipelineAccount[]>([]);
+  const [stageLoading, setStageLoading] = useState(false);
 
   const load = async () => {
     setLoading(true);
@@ -54,6 +63,42 @@ export default function PipelinePage() {
   };
 
   useEffect(() => { load(); }, [site]);
+
+  const loadStageAccounts = async (stage: string) => {
+    setSelectedStage(stage);
+    setStageLoading(true);
+    try {
+      const res = await listOnboardingPipelineAccounts({
+        stage,
+        site: site || undefined,
+        limit: 1000,
+      });
+      setStageAccounts(res.accounts);
+    } finally {
+      setStageLoading(false);
+    }
+  };
+
+  const exportStageCsv = () => {
+    if (!stageAccounts.length) return;
+    const header = ['account_number', 'first_name', 'last_name', 'community', 'customer_commissioned'];
+    const lines = [
+      header.join(','),
+      ...stageAccounts.map(row =>
+        header.map(key => {
+          const value = row[key as keyof OnboardingPipelineAccount];
+          return JSON.stringify(value ?? '');
+        }).join(','),
+      ),
+    ];
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `pipeline-${selectedStage || 'stage'}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   const maxCount = funnel.length > 0 ? Math.max(...funnel.map(s => s.count), 1) : 1;
 
@@ -155,7 +200,11 @@ export default function PipelinePage() {
                   const prev = i > 0 ? funnel[i - 1].count : stage.count;
                   const dropoff = prev > 0 ? prev - stage.count : 0;
                   return (
-                    <tr key={stage.stage} className="border-t border-gray-100">
+                    <tr
+                      key={stage.stage}
+                      className="border-t border-gray-100 cursor-pointer hover:bg-gray-50"
+                      onClick={() => loadStageAccounts(stage.stage)}
+                    >
                       <td className="px-4 py-3 font-medium">{t(STAGE_I18N_KEYS[stage.stage] ?? stage.stage, { defaultValue: STAGE_LABELS[stage.stage] ?? stage.stage })}</td>
                       <td className="px-4 py-3 text-right font-bold">{stage.count}</td>
                       <td className="px-4 py-3 text-right text-gray-600">{pctOfReg}%</td>
@@ -166,6 +215,57 @@ export default function PipelinePage() {
               </tbody>
             </table>
           </div>
+
+          {selectedStage && (
+            <div className="bg-white rounded-xl border overflow-hidden">
+              <div className="flex items-center justify-between px-4 py-3 border-b">
+                <h2 className="text-sm font-semibold text-gray-600">
+                  {t(STAGE_I18N_KEYS[selectedStage] ?? selectedStage, {
+                    defaultValue: STAGE_LABELS[selectedStage] ?? selectedStage,
+                  })}
+                </h2>
+                <button
+                  type="button"
+                  onClick={exportStageCsv}
+                  disabled={!stageAccounts.length}
+                  className="text-sm px-3 py-1.5 border rounded-lg hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Export CSV
+                </button>
+              </div>
+              {stageLoading ? (
+                <p className="px-4 py-6 text-sm text-gray-400">{t('common:loading')}...</p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 text-left text-gray-500 text-xs">
+                      <th className="px-4 py-3">Account</th>
+                      <th className="px-4 py-3">Name</th>
+                      <th className="px-4 py-3">Site</th>
+                      <th className="px-4 py-3 text-right">Commissioned</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stageAccounts.map(row => (
+                      <tr key={row.account_number} className="border-t border-gray-100">
+                        <td className="px-4 py-3 font-mono">
+                          <Link
+                            to={`/customers/${row.customer_id}`}
+                            className="text-blue-600 hover:underline"
+                          >
+                            {row.account_number}
+                          </Link>
+                        </td>
+                        <td className="px-4 py-3">{[row.first_name, row.last_name].filter(Boolean).join(' ')}</td>
+                        <td className="px-4 py-3">{row.community || '—'}</td>
+                        <td className="px-4 py-3 text-right">{row.customer_commissioned ? 'Y' : 'N'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

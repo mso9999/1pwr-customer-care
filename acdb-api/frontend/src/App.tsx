@@ -34,6 +34,7 @@ import AdvancesPage from './pages/AdvancesPage';
 import RecordPaymentPage from './pages/RecordPaymentPage';
 import PaymentVerificationPage from './pages/PaymentVerificationPage';
 import PipelinePage from './pages/PipelinePage';
+import OnboardingDashboardPage from './pages/OnboardingDashboardPage';
 import HelpPage from './pages/HelpPage';
 import TutorialPage from './pages/TutorialPage';
 import TicketsPage from './pages/TicketsPage';
@@ -89,6 +90,7 @@ export default function App() {
             <Route path="record-payment" element={<ProtectedRoute requireEmployee><RecordPaymentPage /></ProtectedRoute>} />
             <Route path="payment-verification" element={<ProtectedRoute requireEmployee><PaymentVerificationPage /></ProtectedRoute>} />
             <Route path="pipeline" element={<ProtectedRoute requireEmployee><PipelinePage /></ProtectedRoute>} />
+            <Route path="onboarding-dashboard" element={<ProtectedRoute requireEmployee><OnboardingDashboardPage /></ProtectedRoute>} />
             <Route path="tickets" element={<ProtectedRoute requireEmployee><TicketsPage /></ProtectedRoute>} />
             <Route path="gensite" element={<ProtectedRoute requireEmployee><GenSiteListPage /></ProtectedRoute>} />
             <Route path="gensite/commission" element={<ProtectedRoute requireEmployee requireRole={['superadmin', 'onm_team']}><CommissionSitePage /></ProtectedRoute>} />

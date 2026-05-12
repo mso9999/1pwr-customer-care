@@ -1995,6 +1995,104 @@ export async function getOnboardingPipeline(site?: string): Promise<PipelineResp
   return request(`/om-report/pipeline${qs}`);
 }
 
+export interface OnboardingStepState {
+  value: boolean;
+  date: string | null;
+}
+
+export interface OnboardingCustomerStatus {
+  account_number: string;
+  customer_id: number;
+  community: string | null;
+  steps: Record<string, OnboardingStepState>;
+  house_wiring_test_passed: boolean | null;
+  house_wiring_test_date: string | null;
+  ciu_payment_date: string | null;
+  voltage_test_passed: boolean | null;
+  voltage_test_date: string | null;
+  meter_autostate_test_passed: boolean | null;
+  meter_autostate_test_date: string | null;
+  survey_id: string | null;
+  meter_serial: string | null;
+  onboarding_import_tag: string | null;
+  notes: string | null;
+}
+
+export async function getOnboardingCustomerStatus(accountNumber: string): Promise<OnboardingCustomerStatus> {
+  return request(`/onboarding/customer/${encodeURIComponent(accountNumber)}`);
+}
+
+export async function patchOnboardingCustomerStatus(
+  accountNumber: string,
+  body: {
+    steps?: { step: string; value: boolean; date?: string | null }[];
+    house_wiring_test_passed?: boolean;
+    house_wiring_test_date?: string | null;
+    ciu_payment_date?: string | null;
+    voltage_test_passed?: boolean;
+    voltage_test_date?: string | null;
+    meter_autostate_test_passed?: boolean;
+    meter_autostate_test_date?: string | null;
+    notes?: string;
+  },
+): Promise<OnboardingCustomerStatus> {
+  return request(`/onboarding/customer/${encodeURIComponent(accountNumber)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+export interface OnboardingPipelineAccount {
+  account_number: string;
+  customer_id: number;
+  first_name: string | null;
+  last_name: string | null;
+  community: string | null;
+  connection_fee_paid: boolean;
+  readyboard_fee_paid: boolean;
+  customer_commissioned: boolean;
+}
+
+export async function listOnboardingPipelineAccounts(params: {
+  stage: string;
+  site?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ accounts: OnboardingPipelineAccount[]; stage: string; site?: string }> {
+  const qs = new URLSearchParams({ stage: params.stage });
+  if (params.site) qs.set('site', params.site);
+  if (params.limit != null) qs.set('limit', String(params.limit));
+  if (params.offset != null) qs.set('offset', String(params.offset));
+  return request(`/onboarding/pipeline/accounts?${qs.toString()}`);
+}
+
+export interface OnboardingDashboardSummary {
+  site: string;
+  registered: number;
+  connected: number;
+  pending: number;
+  meter_installed: number;
+  commissioned: number;
+}
+
+export async function getOnboardingDashboardSummary(site?: string): Promise<OnboardingDashboardSummary> {
+  const qs = site ? `?site=${encodeURIComponent(site)}` : '';
+  return request(`/onboarding/dashboard/summary${qs}`);
+}
+
+export interface OnboardingMonthlySite {
+  site: string;
+  months: { month: string; commissioned: number }[];
+}
+
+export async function getOnboardingMonthlyDashboard(year?: number): Promise<{
+  year: number;
+  sites: OnboardingMonthlySite[];
+}> {
+  const qs = year != null ? `?year=${year}` : '';
+  return request(`/onboarding/dashboard/monthly${qs}`);
+}
+
 // ---------------------------------------------------------------------------
 // Record Manual Payment
 // ---------------------------------------------------------------------------

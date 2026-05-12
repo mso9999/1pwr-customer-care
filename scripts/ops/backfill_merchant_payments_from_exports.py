@@ -397,6 +397,12 @@ def _insert_payment(
             conn, txn_id, payment.account_number, category, payment.amount,
         )
         _auto_verify_fee(conn, txn_id, note)
+        try:
+            from onboarding_derive import derive_payment_steps_for_accounts
+
+            derive_payment_steps_for_accounts(conn, [payment.account_number])
+        except Exception as exc:
+            logger.warning("Onboarding derive failed for %s: %s", payment.account_number, exc)
     else:
         txn_id, _ = record_historical_payment_transaction(
             conn,
@@ -526,7 +532,7 @@ def validate_after_apply(conn) -> dict[str, int]:
         WHERE t.source = %s AND pv.status = 'verified' AND pv.verified_by = %s
           AND t.source_table IS NOT NULL AND t.source_table LIKE %s
         """,
-        (SOURCE, VERIFIED_BY, "%#row%"),
+        (SOURCE, VERIFIED_BY, "mm:%"),
     )
     verified_fees = int(cur.fetchone()[0])
     return {"merchant_export_transactions": txn_count, "auto_verified_fees": verified_fees}
