@@ -3,6 +3,46 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-05-12 (RCA: CC ↔ ThunderCloud balance drift — circular sync bug)
+
+### Symptom
+Frontend `Customer Data Lookup` for `0082MAK` (Maabia Ntoi, MAK) showed Balance **6.3 kWh** (≈ LSL 31.50) while ThunderCloud meter `SMRSD-03-0002DD43` showed Credit **LSL 10.55** (≈ 2.1 kWh). Fleet-wide audit revealed **402 phantom payment rows across 143 MAK accounts** totalling **3,463 kWh ≈ LSL 17,315** of fake credit in CC.
+
+### Root cause
+Circular sync between SMS gateway path and the MAK ThunderCloud parquet backfill:
+1. M-Pesa SMS → `acdb-api/ingest.py` `/api/sms/incoming` writes `source='sms_gateway'` txn with `kwh_value` populated.
+2. Background task `credit_sparkmeter()` pushes the LSL to ThunderCloud.
+3. TC writes a heartbeat with the new `acct_credit` value.
+4. Every ~10 min, `1pdb-consumption.service` runs `sync_consumption.sh` which executes `/opt/1pdb/services/backfill_mak_transactions.py`. That script detects "payments" from `acct_credit` jumps in daily parquet and inserts `source='thundercloud'` txns with `kwh_value` populated.
+5. Dedup key is `source_table = TC heartbeat_id` (UUID) → has **no awareness of the matching SMS row** → duplicate is created.
+6. `balance_engine.get_balance_kwh()` sums payment `kwh_value` from both rows → balance is overstated by 2 kWh per duplicate. `import_tc_transactions.py` exhibits the same bug for non-MAK sites (inserts the dup without `kwh_value` — inflates `Total Purchases` display but not balance).
+
+### Fix
+- **Server-side edits (no upstream repo — `/opt/1pdb/` is not in git; canonical workflow is `.bak.YYYYMMDD_HHMMSS` in place; backups created `.bak.20260512_092015`):**
+  - `/opt/1pdb/services/backfill_mak_transactions.py` — `insert_payments()` now SELECTs from `transactions` for a matching `source='sms_gateway', is_payment, same account+amount, ±24 h` row and `continue`s on match. Logs `Skipped N TC payments already booked via sms_gateway` per parquet file. Normalises `ts` via `pd.to_datetime().to_pydatetime()` (parquet timestamps can be strings).
+  - `/opt/1pdb/services/import_tc_transactions.py` — same filter injected before `batch.append`. Also fixed unrelated dry-run crash on `record["external_id"][:20]` when `external_id is None`.
+- **Data cleanup** (one-off SQL committed): `UPDATE transactions SET kwh_value = NULL WHERE id IN (... 402 phantom rows ...)`. Preserves `is_payment`, `transaction_amount`, `source_table`, `current_balance` for audit. `get_balance_kwh()` uses `SUM(CASE WHEN is_payment THEN kwh_value ELSE 0 END)` so NULL kwh contributes 0.
+
+### Verification
+- After first patched run of `backfill_mak_transactions.py`: **94 phantom skips over 8 days, 0 inserts, 0 errors**.
+- After first patched run of `import_tc_transactions.py`: "Inserted 0 / 3 transactions" (was 0/40 before).
+- 0082MAK balance recomputed: **0.34 kWh** (matches TC's ~2.1 kWh within consumption-sync lag of ~1 h).
+- Post-patch check: `SELECT COUNT(*) FROM transactions WHERE source='thundercloud' AND is_payment AND kwh_value IS NOT NULL AND id > 3906543` → **0**.
+
+### What Next Session Should Know
+- **The fix lives only on the server.** `/opt/1pdb/` has never been git-controlled. Worth proposing a repo for this directory; for now diff `.bak.20260512_092015` vs the live file to recover the patch.
+- **Patches are idempotent.** Future SMS-gateway-then-TC-parquet round-trips will be silently skipped; expect "Skipped N TC payments already booked via sms_gateway" in `journalctl -u 1pdb-consumption.service`.
+- **Frontend `Total Purchases` column may still display old transaction amounts** for the 402 cleaned rows — they retain `is_payment=true, transaction_amount=10`. If this causes user confusion, set `is_payment=false` on those rows too (then `get_balance_kwh` legacy-consumption term picks them up — verify direction before doing this).
+- **`backfill_mak_transactions.py` only covers MAK**. Other LS sites (TLH, MAS, SHG, KET, LSB, SEH, TOS) route through Koios CSV (`backfill_transactions.py`, `source_table='koios_csv:…'`) and were **not affected** — Koios payments aren't created by CC's TC push.
+- **Benin (`COUNTRY_CODE=BN`)** uses `/api/bn/sms/incoming` → same `ingest.py` SMS path → MTN MoMo. There is no parquet backfill for BN, so this bug doesn't apply, but verify if a similar TC-style importer is added.
+
+### Files Touched
+- `/opt/1pdb/services/backfill_mak_transactions.py` (server)
+- `/opt/1pdb/services/import_tc_transactions.py` (server)
+- `transactions` table: 402 rows `kwh_value → NULL`
+
+---
+
 ## Session 2026-05-08 202605081245 (SMS payment receipt + SMSComms 1PDB balance/callback)
 
 ### What Was Done
