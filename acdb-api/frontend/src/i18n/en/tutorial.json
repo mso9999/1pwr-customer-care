@@ -65,7 +65,8 @@
         "O&M Report: quarterly customer, consumption, and sales analytics.",
         "Financial: ARPU trends, revenue by site, portfolio views.",
         "Check Meters: compare primary vs check-meter signals where deployed.",
-        "Maintenance Log: ticket context linked to field work."
+        "Maintenance Log: ticket context linked to field work.",
+        "Customer Cohort: drill-down list of the individual customers behind the funnel — filter by site, customer type and payment status (not paid / partially paid / fully paid / terminated), sort, search by name or phone, and export to CSV for follow-up or call lists."
       ]
     },
     "commerce": {

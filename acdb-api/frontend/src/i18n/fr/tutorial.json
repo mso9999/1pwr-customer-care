@@ -65,7 +65,8 @@
         "Rapport O&M : analyses trimestrielles clients, consommation et ventes.",
         "Finances : ARPU, revenus par site, vues portefeuille.",
         "Compteurs de contrôle : comparer principal et contrôle lorsque déployé.",
-        "Journal de maintenance : contexte des tickets liés au terrain."
+        "Journal de maintenance : contexte des tickets liés au terrain.",
+        "Cohorte de clients : liste détaillée des clients individuels derrière l'entonnoir — filtrer par site, type de client et statut de paiement (non payé / partiellement payé / entièrement payé / résilié), trier, rechercher par nom ou téléphone, et exporter en CSV pour suivi ou listes de relance."
       ]
     },
     "commerce": {

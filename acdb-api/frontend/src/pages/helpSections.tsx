@@ -1010,6 +1010,9 @@ function ReportsContent() {
 
         <SubHead>Pipeline d'intégration (<PageLink to="/pipeline">/pipeline</PageLink>)</SubHead>
         <P>Visualisation en entonnoir montrant la progression des clients à travers les étapes de mise en service. Comprend les pourcentages de déperdition, le filtrage par site, des cartes récapitulatives (total inscrits, entièrement mis en service, taux de conversion) et un tableau détaillé.</P>
+
+        <SubHead>Cohorte de clients (<PageLink to="/customer-cohort">/customer-cohort</PageLink>)</SubHead>
+        <P>Liste détaillée des clients individuels derrière les agrégats de l'entonnoir. Filtrer par pays, sites, types de client, statut de paiement (non payé, partiellement payé connecté/non connecté, entièrement payé connecté/non connecté, résilié) et rechercher par nom, téléphone ou compte. Les colonnes sont triables ; chaque ligne renvoie vers <PageLink to="/customer-data">Données client</PageLink> et le détail du client. Exporter en CSV pour suivi hors ligne ou listes de relance.</P>
       </>
     );
   }
@@ -1032,6 +1035,9 @@ function ReportsContent() {
 
       <SubHead>Onboarding Pipeline (<PageLink to="/pipeline">/pipeline</PageLink>)</SubHead>
       <P>A funnel visualization showing customer progress through commissioning stages. Includes drop-off percentages, site filtering, summary cards (total registered, fully commissioned, conversion rate), and a detailed table.</P>
+
+      <SubHead>Customer Cohort (<PageLink to="/customer-cohort">/customer-cohort</PageLink>)</SubHead>
+      <P>Drill-down list of the individual customers behind the funnel aggregates. Filter by country, sites, customer types, payment status (not paid, partially paid connected/not connected, fully paid connected/not connected, terminated), and search by name, phone, or account. Columns are sortable; each row links into <PageLink to="/customer-data">Customer Data</PageLink> and the customer detail page. Export to CSV for offline follow-up or call-list generation.</P>
     </>
   );
 }
