@@ -1,0 +1,41 @@
+{
+  "title": "Cohorte de clients",
+  "subtitle": "Liste des clients par site, type et statut de paiement.",
+  "country": "Pays",
+  "sites": "Sites",
+  "allSites": "Tous les sites",
+  "customerTypes": "Types de client",
+  "allTypes": "Tous les types",
+  "paymentStatus": "Statut de paiement",
+  "anyStatus": "Tous les statuts",
+  "search": "Rechercher",
+  "searchPlaceholder": "Nom, téléphone, compte...",
+  "go": "OK",
+  "loading": "Chargement des clients...",
+  "queryFailed": "Échec de la requête.",
+  "foundCount": "{{count}} client(s) trouvé(s)",
+  "threshold": "Seuil de paiement complet",
+  "exportCsv": "Exporter CSV",
+  "noResults": "Aucun client ne correspond aux filtres.",
+  "prev": "Précédent",
+  "next": "Suivant",
+  "overrideHint": "Statut défini manuellement",
+  "col": {
+    "site": "Site",
+    "account": "Compte",
+    "name": "Nom",
+    "phone": "Téléphone",
+    "type": "Type",
+    "status": "Statut",
+    "totalPaid": "Total payé",
+    "connected": "Connecté le"
+  },
+  "status": {
+    "not_paid": "Non payé",
+    "partially_paid_not_connected": "Partiellement payé – Non connecté",
+    "partially_paid_connected": "Partiellement payé – Connecté",
+    "fully_paid_not_connected": "Entièrement payé – Non connecté",
+    "fully_paid_connected": "Entièrement payé – Connecté",
+    "terminated": "Résilié"
+  }
+}

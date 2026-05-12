@@ -74,6 +74,7 @@
     "coverage": "Coverage Audit",
     "smsLog": "SMS Log",
     "analytics": "Analytics Explorer",
+    "customerCohort": "Customer Cohort",
     "myAccount": "My Account"
   },
   "pagination": {

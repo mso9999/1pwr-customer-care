@@ -2786,6 +2786,89 @@ export async function runAnalyticsQuery(req: AnalyticsQueryRequest): Promise<Ana
   });
 }
 
+// ── Customer Cohort ──────────────────────────────────────────────────
+
+export type CohortStatus =
+  | 'not_paid'
+  | 'partially_paid_not_connected'
+  | 'partially_paid_connected'
+  | 'fully_paid_not_connected'
+  | 'fully_paid_connected'
+  | 'terminated';
+
+export interface CohortRow {
+  customer_id: number;
+  account_number: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  phone: string | null;
+  site: string;
+  customer_type: string;
+  date_service_connected: string | null;
+  date_service_terminated: string | null;
+  payment_status_override: string | null;
+  total_paid: number;
+  cohort_status: CohortStatus;
+}
+
+export interface CohortQueryRequest {
+  filters?: {
+    country?: string;
+    sites?: string[];
+    customer_types?: string[];
+    statuses?: CohortStatus[];
+    search?: string;
+  };
+  sort_by?:
+    | 'site'
+    | 'account_number'
+    | 'name'
+    | 'phone'
+    | 'customer_type'
+    | 'total_paid'
+    | 'date_connected'
+    | 'cohort_status';
+  sort_dir?: 'asc' | 'desc';
+  page?: number;
+  page_size?: number;
+}
+
+export interface CohortQueryResponse {
+  rows: CohortRow[];
+  total: number;
+  page: number;
+  page_size: number;
+  filters_applied: {
+    country: string | null;
+    sites: string[];
+    customer_types: string[] | null;
+    statuses: string[] | null;
+    search: string | null;
+    sort_by: string;
+    sort_dir: string;
+    fee_threshold: number;
+  };
+}
+
+export interface CohortStatusesCatalog {
+  statuses: CohortStatus[];
+  customer_types: string[];
+  sort_columns: string[];
+}
+
+export async function getCustomerCohortStatuses(): Promise<CohortStatusesCatalog> {
+  return request('/customer-cohort/statuses');
+}
+
+export async function queryCustomerCohort(
+  req: CohortQueryRequest,
+): Promise<CohortQueryResponse> {
+  return request('/customer-cohort/query', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
+}
+
 // ── Payment Status Override ──────────────────────────────────────────
 
 export interface PaymentStatusOverrideResponse {

@@ -1,0 +1,41 @@
+{
+  "title": "Customer Cohort",
+  "subtitle": "List individual customers grouped by site, customer type and payment status.",
+  "country": "Country",
+  "sites": "Sites",
+  "allSites": "All Sites",
+  "customerTypes": "Customer Types",
+  "allTypes": "All Types",
+  "paymentStatus": "Payment Status",
+  "anyStatus": "Any Status",
+  "search": "Search",
+  "searchPlaceholder": "Name, phone, account...",
+  "go": "Go",
+  "loading": "Loading customers...",
+  "queryFailed": "Query failed.",
+  "foundCount": "{{count}} customer(s) found",
+  "threshold": "Full-payment threshold",
+  "exportCsv": "Export CSV",
+  "noResults": "No customers match the current filters.",
+  "prev": "Previous",
+  "next": "Next",
+  "overrideHint": "Status set by manual override",
+  "col": {
+    "site": "Site",
+    "account": "Account",
+    "name": "Name",
+    "phone": "Phone",
+    "type": "Type",
+    "status": "Status",
+    "totalPaid": "Total Paid",
+    "connected": "Connected"
+  },
+  "status": {
+    "not_paid": "Not Paid",
+    "partially_paid_not_connected": "Partially Paid – Not Connected",
+    "partially_paid_connected": "Partially Paid – Connected",
+    "fully_paid_not_connected": "Fully Paid – Not Connected",
+    "fully_paid_connected": "Fully Paid – Connected",
+    "terminated": "Terminated"
+  }
+}

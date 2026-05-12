@@ -74,6 +74,7 @@
     "coverage": "Audit de couverture",
     "smsLog": "Journal SMS",
     "analytics": "Explorateur Analytique",
+    "customerCohort": "Cohorte de clients",
     "myAccount": "Mon compte"
   },
   "pagination": {

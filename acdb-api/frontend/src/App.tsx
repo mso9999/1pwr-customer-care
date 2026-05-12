@@ -42,6 +42,7 @@ import GenSitePage from './pages/GenSitePage';
 import CommissionSitePage from './pages/CommissionSitePage';
 import SMSLogPage from './pages/SMSLogPage';
 import AnalyticsPage from './pages/AnalyticsPage';
+import CustomerCohortPage from './pages/CustomerCohortPage';
 
 function HomeRedirect() {
   const { user, loading } = useAuth();
@@ -77,6 +78,7 @@ export default function App() {
             <Route path="om-report" element={<ProtectedRoute requireEmployee><OMReportPage /></ProtectedRoute>} />
             <Route path="financial" element={<ProtectedRoute requireEmployee><FinancialPage /></ProtectedRoute>} />
             <Route path="analytics" element={<ProtectedRoute requireEmployee><AnalyticsPage /></ProtectedRoute>} />
+            <Route path="customer-cohort" element={<ProtectedRoute requireEmployee><CustomerCohortPage /></ProtectedRoute>} />
             <Route path="sync" element={<ProtectedRoute requireEmployee><SyncPage /></ProtectedRoute>} />
             <Route path="commission" element={<ProtectedRoute requireEmployee requireRole={['superadmin', 'onm_team']}><CommissionCustomerPage /></ProtectedRoute>} />
             <Route path="tariffs" element={<ProtectedRoute requireEmployee><TariffManagementPage /></ProtectedRoute>} />
