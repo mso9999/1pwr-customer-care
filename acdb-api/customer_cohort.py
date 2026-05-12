@@ -47,8 +47,12 @@ COHORT_STATUSES: List[str] = [
 
 
 # Whitelisted sort columns to prevent injection.  Map UI column id → SQL.
+# NOTE: these names refer to columns of the ``cohort`` CTE (see _build_query),
+# not the underlying tables.  In particular ``c.community`` is aliased as
+# ``site`` inside the CTE, so the sort key must be ``site`` — referencing
+# ``community`` here triggers a Postgres UndefinedColumn error at runtime.
 _SORT_COLS: Dict[str, str] = {
-    "site":               "community",
+    "site":               "site",
     "account_number":     "account_number",
     "name":               "last_name, first_name",
     "phone":              "phone",
@@ -316,12 +320,9 @@ def query_cohort(
                 if d.get("total_paid") is not None:
                     d["total_paid"] = float(d["total_paid"])
                 rows.append(d)
-        except Exception as exc:
+        except Exception:
             logger.exception("Cohort query failed")
-            # Surface the underlying error so production failures are
-            # diagnosable without server-log access. SQL identifiers/values
-            # are already user-supplied (filtered) so this leaks no secrets.
-            raise HTTPException(500, f"Cohort query failed: {type(exc).__name__}: {exc}")
+            raise HTTPException(500, "Cohort query failed")
 
     sites_resolved = _resolve_sites(q.filters.country, q.filters.sites)
     return {

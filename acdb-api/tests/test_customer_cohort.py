@@ -180,6 +180,41 @@ class TestQueryBuilder(unittest.TestCase):
         sql, _ = _build_query(q, count_only=False)
         self.assertIn("ORDER BY total_paid DESC", sql)
 
+    def test_every_sort_key_references_cohort_cte_column(self):
+        """Regression for the 500 caused by ``ORDER BY community`` — the
+        outer SELECT runs against the ``cohort`` CTE, whose projection
+        renames ``c.community`` to ``site``.  Every value in ``_SORT_COLS``
+        must therefore be an identifier present in the CTE's SELECT list.
+        """
+        import re
+        from customer_cohort import _SORT_COLS
+
+        # Columns emitted by the cohort CTE (kept in sync with _build_query).
+        cohort_cte_columns = {
+            "customer_id",
+            "first_name",
+            "last_name",
+            "phone",
+            "site",
+            "customer_type",
+            "date_service_connected",
+            "date_service_terminated",
+            "payment_status_override",
+            "account_number",
+            "total_paid",
+            "cohort_status",
+        }
+        for ui_key, sql_expr in _SORT_COLS.items():
+            for ident in re.split(r"[,\s]+", sql_expr.strip()):
+                if not ident:
+                    continue
+                self.assertIn(
+                    ident,
+                    cohort_cte_columns,
+                    f"sort key {ui_key!r} → {sql_expr!r} references "
+                    f"unknown CTE column {ident!r}",
+                )
+
 
 class TestFeeThreshold(unittest.TestCase):
     def test_ls_threshold_positive(self):
