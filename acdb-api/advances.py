@@ -24,7 +24,7 @@ Endpoints (all under /api/advances):
 
 Helper exported for payment ingestion paths:
     apply_advance_payment(conn, advance_id, amount, source_txn_id, created_by)
-        → new_outstanding
+        → (new_outstanding, amount_applied)
 """
 
 from __future__ import annotations
@@ -51,13 +51,19 @@ from pydantic import BaseModel, Field
 
 from contract_gen import CONTRACTS_DIR
 from country_config import COUNTRY
-from customer_api import get_connection
 from fee_debt import total_fee_debt_for_advance_block
 from middleware import require_employee
 from models import CCRole, CurrentUser
 from mutations import try_log_mutation
 
 logger = logging.getLogger("cc-api.advances")
+
+
+def _get_connection():
+    """Late-bind to avoid import cycle (customer_api → payments → advances)."""
+    from customer_api import get_connection
+
+    return get_connection()
 
 router = APIRouter(prefix="/api/advances", tags=["advances"])
 
@@ -289,15 +295,15 @@ def apply_advance_payment(
     amount: float,
     source_transaction_id: Optional[int] = None,
     created_by: Optional[str] = None,
-) -> float:
+) -> tuple[float, float]:
     """Decrement an advance's outstanding balance and write a ledger row.
 
-    Returns the new outstanding balance. Marks the advance ``paid_off`` once
+    Returns ``(new_outstanding, amount_applied)``. Marks the advance ``paid_off`` once
     outstanding hits zero. Does NOT commit -- the caller (payments.py /
     ingest.py) commits after the full transaction body succeeds.
     """
     if amount <= 0:
-        return 0.0
+        return (0.0, 0.0)
 
     cur = conn.cursor()
     cur.execute(
@@ -306,7 +312,7 @@ def apply_advance_payment(
     )
     row = cur.fetchone()
     if not row:
-        return 0.0
+        return (0.0, 0.0)
 
     outstanding = float(row[0])
     repay = round(min(amount, outstanding), 2)
@@ -343,7 +349,7 @@ def apply_advance_payment(
             (new_outstanding, advance_id),
         )
 
-    return new_outstanding
+    return (new_outstanding, repay)
 
 
 # ---------------------------------------------------------------------------
@@ -409,7 +415,7 @@ def list_advances(
     where_count = ("WHERE " + " AND ".join(clauses_count)) if clauses_count else ""
 
     select_cols = ", ".join(f"aa.{c}" for c in _ADVANCE_COLS)
-    with get_connection() as conn:
+    with _get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
             f"""
@@ -438,7 +444,7 @@ def list_advances(
 
 @router.get("/{advance_id}")
 def get_advance(advance_id: int, user: CurrentUser = Depends(require_employee)):
-    with get_connection() as conn:
+    with _get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
             f"""
@@ -509,7 +515,7 @@ async def create_advance(
             detail=f"advance_type must be one of {sorted(_ALLOWED_TYPES)}",
         )
 
-    with get_connection() as conn:
+    with _get_connection() as conn:
         cur = conn.cursor()
 
         cur.execute(
@@ -558,7 +564,7 @@ async def create_advance(
     )
 
     try:
-        with get_connection() as conn:
+        with _get_connection() as conn:
             cur = conn.cursor()
 
             cur.execute(
@@ -656,7 +662,7 @@ def patch_advance(
         params.append(v)
     params.append(advance_id)
 
-    with get_connection() as conn:
+    with _get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
             f"SELECT {_ADVANCE_COL_SQL} FROM account_advances WHERE id = %s",
@@ -706,7 +712,7 @@ async def replace_contract(
 ):
     _require_admin(user)
 
-    with get_connection() as conn:
+    with _get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
             "SELECT account_number, advance_type, contract_path FROM account_advances WHERE id = %s",
@@ -725,7 +731,7 @@ async def replace_contract(
 
     archived = _archive_existing_contract(current_path)
 
-    with get_connection() as conn:
+    with _get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
             """
@@ -790,7 +796,7 @@ def download_contract(
     user: CurrentUser = Depends(require_employee),
 ):
     """Authenticated download of the signed contract for an advance."""
-    with get_connection() as conn:
+    with _get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
             "SELECT contract_path, contract_filename, contract_content_type "
@@ -818,7 +824,7 @@ def writeoff_advance(
     user: CurrentUser = Depends(require_employee),
 ):
     _require_admin(user)
-    with get_connection() as conn:
+    with _get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
             "SELECT outstanding, status FROM account_advances WHERE id = %s FOR UPDATE",

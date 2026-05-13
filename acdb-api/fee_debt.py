@@ -134,6 +134,44 @@ def compute_fee_then_advance_split(
     }
 
 
+def apply_remainder_to_fee_debt(
+    conn,
+    customer_id: int,
+    amount: float,
+) -> tuple[float, float, float]:
+    """Apply ``amount`` to connection then readyboard fee debt (current DB balances).
+
+    Uses ``FOR UPDATE`` on the customer row. Returns
+    ``(applied_connection, applied_readyboard, unallocated)`` where unallocated is
+    cash that could not be booked to fee debt (no remaining debt).
+    """
+    if amount <= 0:
+        return (0.0, 0.0, 0.0)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT fee_debt_connection_remaining, fee_debt_readyboard_remaining
+          FROM customers
+         WHERE id = %s
+         FOR UPDATE
+        """,
+        (customer_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return (0.0, 0.0, round(float(amount), 2))
+    conn_rem = float(row[0] or 0)
+    rb_rem = float(row[1] or 0)
+    amt = round(float(amount), 2)
+    to_conn = round(min(amt, max(0.0, conn_rem)), 2)
+    rest = round(amt - to_conn, 2)
+    to_rb = round(min(rest, max(0.0, rb_rem)), 2)
+    if to_conn > 0 or to_rb > 0:
+        apply_fee_debt_reduction(conn, customer_id, to_conn, to_rb)
+    unalloc = round(amt - to_conn - to_rb, 2)
+    return (to_conn, to_rb, unalloc)
+
+
 def apply_fee_debt_reduction(
     conn,
     customer_id: int,

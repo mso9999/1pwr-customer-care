@@ -6,6 +6,7 @@ Provides:
   - GET   /api/meters/account/{account}      — list meters + roles for an account
   - PATCH /api/meters/{meter_id}/role        — change meter role (primary/check/backup)
   - POST  /api/sms/incoming                  — mirrored SMS (LS: M-Pesa + EcoCash → 1PDB then Koios; BN: MoMo when COUNTRY_CODE=BN)
+  - POST  /api/sms/incoming-contract-fees    — contracts-only mirror: fee debt + advance only (no kWh / SparkMeter)
   - POST  /api/bn/sms/incoming               — same handler (public URL for Benin gateway behind /api/bn)
 
 Meter roles:
@@ -50,6 +51,7 @@ from fee_classifier import classify_payment
 from fee_debt import (
     apply_fee_debt_reduction,
     apply_fee_payment_category_to_debt,
+    apply_remainder_to_fee_debt,
     compute_fee_then_advance_split,
     fetch_fee_debts,
     get_customer_id_for_account,
@@ -622,7 +624,34 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
     ``/api/bn/sms/incoming`` is an alias for operators routing ``smsbn.1pwrafrica.com`` behind ``/api/bn``.
     """
     raw_body = await request.body()
+    return _sms_incoming_process_raw(
+        raw_body, background_tasks, contract_fee_gateway=False,
+    )
 
+
+@router.post("/api/sms/incoming-contract-fees")
+async def sms_incoming_contract_fees(
+    request: Request, background_tasks: BackgroundTasks,
+):
+    """Contracts-only SMS mirror: fee debt + advance repayment only (no kWh / SparkMeter).
+
+    Unlike ``/api/sms/incoming``, this path does **not** route by exact connection/readyboard
+    fee SMS amounts toward ``record_fee_transaction`` / verification. All amounts use the
+    fee-debt allocator (50%% cap) then advance repayment on the remainder, then any leftover
+    cash against remaining fee debt — never electricity or SparkMeter credit.
+    """
+    raw_body = await request.body()
+    return _sms_incoming_process_raw(
+        raw_body, background_tasks, contract_fee_gateway=True,
+    )
+
+
+def _sms_incoming_process_raw(
+    raw_body: bytes,
+    background_tasks: BackgroundTasks,
+    *,
+    contract_fee_gateway: bool,
+) -> dict:
     try:
         payload = json.loads(raw_body)
     except (json.JSONDecodeError, ValueError):
@@ -734,75 +763,76 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
 
                 payer_phone = "".join(c for c in str(phone) if c.isdigit()) or str(phone)
 
-                # ------------------------------------------------------------
-                # Classify by amount: connection / readyboard fee or kWh top-up.
-                # ------------------------------------------------------------
-                classification = classify_payment(conn, account, amount)
-                category = classification["category"]
+                if not contract_fee_gateway:
+                    # ------------------------------------------------------------
+                    # Classify by amount: connection / readyboard fee or kWh top-up.
+                    # ------------------------------------------------------------
+                    classification = classify_payment(conn, account, amount)
+                    category = classification["category"]
 
-                if category in ("connection_fee", "readyboard_fee"):
-                    _fee_ok = False
-                    try:
-                        txn_db_id, _ = record_fee_transaction(
-                            conn, account, "",
-                            amount_currency=amount,
-                            payment_category=category,
-                            source="sms_gateway",
-                            timestamp=ts,
-                            payment_reference=receipt_key or None,
-                            extra_columns={
-                                "sms_payer_phone": payer_phone,
-                                "sms_remark_raw": remark_stored or None,
-                                "sms_allocation": allocation,
-                            },
-                        )
-                        create_verification_entry(
-                            conn, txn_db_id, account, category, amount,
-                        )
-                        apply_fee_payment_category_to_debt(conn, account, category, amount)
-                        conn.commit()
-                        _fee_ok = True
-                    except psycopg2.IntegrityError:
-                        conn.rollback()
-                        logger.info("SMS skipped duplicate payment ref %s", receipt_key)
-                        continue
-                    except Exception as fee_exc:
-                        conn.rollback()
-                        err_low = str(fee_exc).lower()
-                        if "does not exist" in err_low:
-                            logger.warning(
-                                "Fee branch failed (migration 019 pending?) — "
-                                "falling through to electricity path: %s", fee_exc,
+                    if category in ("connection_fee", "readyboard_fee"):
+                        _fee_ok = False
+                        try:
+                            txn_db_id, _ = record_fee_transaction(
+                                conn, account, "",
+                                amount_currency=amount,
+                                payment_category=category,
+                                source="sms_gateway",
+                                timestamp=ts,
+                                payment_reference=receipt_key or None,
+                                extra_columns={
+                                    "sms_payer_phone": payer_phone,
+                                    "sms_remark_raw": remark_stored or None,
+                                    "sms_allocation": allocation,
+                                },
                             )
-                            category = "electricity"
-                        else:
-                            raise
-                    if _fee_ok:
-                        _update_sms_inbound(conn, sms_log_id, "fee", transaction_id=txn_db_id)
-                        conn.commit()
-                        logger.info(
-                            "SMS fee payment: txn=%d acct=%s category=%s amount=%.2f from %s receipt=%s",
-                            txn_db_id, account, category, amount, phone, receipt_key,
-                        )
-                        if allocation == "phone_fallback":
+                            create_verification_entry(
+                                conn, txn_db_id, account, category, amount,
+                            )
+                            apply_fee_payment_category_to_debt(conn, account, category, amount)
+                            conn.commit()
+                            _fee_ok = True
+                        except psycopg2.IntegrityError:
+                            conn.rollback()
+                            logger.info("SMS skipped duplicate payment ref %s", receipt_key)
+                            continue
+                        except Exception as fee_exc:
+                            conn.rollback()
+                            err_low = str(fee_exc).lower()
+                            if "does not exist" in err_low:
+                                logger.warning(
+                                    "Fee branch failed (migration 019 pending?) — "
+                                    "falling through to electricity path: %s", fee_exc,
+                                )
+                                category = "electricity"
+                            else:
+                                raise
+                        if _fee_ok:
+                            _update_sms_inbound(conn, sms_log_id, "fee", transaction_id=txn_db_id)
+                            conn.commit()
+                            logger.info(
+                                "SMS fee payment: txn=%d acct=%s category=%s amount=%.2f from %s receipt=%s",
+                                txn_db_id, account, category, amount, phone, receipt_key,
+                            )
+                            if allocation == "phone_fallback":
+                                background_tasks.add_task(
+                                    _notify_sms_phone_fallback,
+                                    account, amount, phone,
+                                    remark_stored or "",
+                                    receipt_key, fb_reason,
+                                    (parsed.get("provider") or "mpesa"),
+                                )
                             background_tasks.add_task(
-                                _notify_sms_phone_fallback,
-                                account, amount, phone,
-                                remark_stored or "",
-                                receipt_key, fb_reason,
-                                (parsed.get("provider") or "mpesa"),
+                                send_fee_payment_receipt_sms,
+                                account,
+                                payer_phone,
+                                amount,
+                                category,
                             )
-                        background_tasks.add_task(
-                            send_fee_payment_receipt_sms,
-                            account,
-                            payer_phone,
-                            amount,
-                            category,
-                        )
-                        continue
+                            continue
 
                 # ------------------------------------------------------------
-                # Electricity payment: fee debt (50% cap) then advance split.
+                # Electricity (default gateway) or fee+advance only (contracts gateway).
                 # ------------------------------------------------------------
                 cust_id = get_customer_id_for_account(conn, account)
                 if cust_id is None:
@@ -816,65 +846,28 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
 
                 advance = get_active_advance(conn, account)
                 pack = compute_fee_then_advance_split(amount, fee_debts, advance)
-                advance_portion = pack["advance_portion"]
-                electricity_portion = pack["electricity_portion"]
-                fee_rep = pack["fee_repayment_portion"]
-                kwh = round(electricity_portion / rate, 4) if rate > 0 else 0.0
+                if contract_fee_gateway:
+                    rem = round(
+                        pack["advance_portion"] + pack["electricity_portion"], 2,
+                    )
+                    fee_rep = pack["fee_repayment_portion"]
+                    prev_balance, _ = get_balance_kwh(conn, account)
+                    new_balance = prev_balance
+                    kwh = 0.0
+                    adv_id_ins = pack.get("advance_id")
 
-                # ``current_balance`` is a per-row kWh snapshot (matches
-                # ``balance_engine.record_payment_kwh``). It is denormalised --
-                # the canonical balance is computed by ``get_balance_kwh()``
-                # from full history -- but we keep this column consistent in
-                # kWh so downstream displays don't mix units.
-                # (RCA: docs/ops/2026-05-07-current-balance-unit-rca.md)
-                prev_balance, _ = get_balance_kwh(conn, account)
-                new_balance = round(prev_balance + kwh, 4)
-
-                try:
-                    cur.execute("""
-                        INSERT INTO transactions
-                            (account_number, meter_id, transaction_date,
-                             transaction_amount, rate_used, kwh_value,
-                             is_payment, current_balance, source,
-                             payment_reference, sms_payer_phone, sms_remark_raw, sms_allocation,
-                             payment_category, advance_portion, electricity_portion, advance_id,
-                             fee_repayment_portion)
-                        VALUES (%s, '', %s, %s, %s, %s, true, %s, 'sms_gateway',
-                                %s, %s, %s, %s,
-                                'electricity', %s, %s, %s, %s)
-                        RETURNING id
-                    """, (
-                        account, ts, amount, rate, kwh, new_balance,
-                        receipt_key or None,
-                        payer_phone,
-                        remark_stored or None,
-                        allocation,
-                        advance_portion, electricity_portion, pack["advance_id"],
-                        fee_rep,
-                    ))
-                except psycopg2.IntegrityError:
-                    conn.rollback()
-                    logger.info("SMS skipped duplicate payment ref %s", receipt_key)
-                    continue
-                except Exception as e:
-                    err = str(e).lower()
-                    conn.rollback()
-                    if (
-                        "payment_category" in err or "advance_portion" in err
-                        or "advance_id" in err or "electricity_portion" in err
-                        or "fee_repayment_portion" in err
-                    ) and "does not exist" in err:
-                        # Migration 019 not yet applied — fall back to legacy
-                        # SMS-meta INSERT (still the SMS-aware one, just
-                        # without the advance/category columns).
+                    try:
                         cur.execute("""
                             INSERT INTO transactions
                                 (account_number, meter_id, transaction_date,
                                  transaction_amount, rate_used, kwh_value,
                                  is_payment, current_balance, source,
-                                 payment_reference, sms_payer_phone, sms_remark_raw, sms_allocation)
-                            VALUES (%s, '', %s, %s, %s, %s, true, %s, 'sms_gateway',
-                                    %s, %s, %s, %s)
+                                 payment_reference, sms_payer_phone, sms_remark_raw, sms_allocation,
+                                 payment_category, advance_portion, electricity_portion, advance_id,
+                                 fee_repayment_portion)
+                            VALUES (%s, '', %s, %s, %s, %s, true, %s, 'sms_gateway_contract',
+                                    %s, %s, %s, %s,
+                                    'fee_advance_sms', 0, 0, %s, %s)
                             RETURNING id
                         """, (
                             account, ts, amount, rate, kwh, new_balance,
@@ -882,113 +875,360 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
                             payer_phone,
                             remark_stored or None,
                             allocation,
+                            adv_id_ins,
+                            fee_rep,
                         ))
-                    elif (
-                        "sms_payer_phone" in err
-                        or "sms_remark_raw" in err
-                        or "sms_allocation" in err
-                    ) and "does not exist" in err:
+                    except psycopg2.IntegrityError as exc:
+                        conn.rollback()
+                        if getattr(exc, "pgcode", None) == "23505":
+                            logger.info("SMS skipped duplicate payment ref %s", receipt_key)
+                            continue
+                        if getattr(exc, "pgcode", None) == "23514":
+                            cur.execute("""
+                                INSERT INTO transactions
+                                    (account_number, meter_id, transaction_date,
+                                     transaction_amount, rate_used, kwh_value,
+                                     is_payment, current_balance, source,
+                                     payment_reference, sms_payer_phone, sms_remark_raw, sms_allocation,
+                                     payment_category, advance_portion, electricity_portion, advance_id,
+                                     fee_repayment_portion)
+                                VALUES (%s, '', %s, %s, %s, %s, true, %s, 'sms_gateway_contract',
+                                        %s, %s, %s, %s,
+                                        'uncategorized', 0, 0, %s, %s)
+                                RETURNING id
+                            """, (
+                                account, ts, amount, rate, kwh, new_balance,
+                                receipt_key or None,
+                                payer_phone,
+                                remark_stored or None,
+                                allocation,
+                                adv_id_ins,
+                                fee_rep,
+                            ))
+                        else:
+                            raise
+                    except Exception as e:
+                        err = str(e).lower()
+                        conn.rollback()
+                        if (
+                            "payment_category" in err or "advance_portion" in err
+                            or "advance_id" in err or "electricity_portion" in err
+                            or "fee_repayment_portion" in err
+                        ) and "does not exist" in err:
+                            cur.execute("""
+                                INSERT INTO transactions
+                                    (account_number, meter_id, transaction_date,
+                                     transaction_amount, rate_used, kwh_value,
+                                     is_payment, current_balance, source,
+                                     payment_reference, sms_payer_phone, sms_remark_raw, sms_allocation)
+                                VALUES (%s, '', %s, %s, %s, %s, true, %s, 'sms_gateway_contract',
+                                        %s, %s, %s, %s)
+                                RETURNING id
+                            """, (
+                                account, ts, amount, rate, kwh, new_balance,
+                                receipt_key or None,
+                                payer_phone,
+                                remark_stored or None,
+                                allocation,
+                            ))
+                        elif (
+                            "sms_payer_phone" in err
+                            or "sms_remark_raw" in err
+                            or "sms_allocation" in err
+                        ) and "does not exist" in err:
+                            cur.execute("""
+                                INSERT INTO transactions
+                                    (account_number, meter_id, transaction_date,
+                                     transaction_amount, rate_used, kwh_value,
+                                     is_payment, current_balance, source,
+                                     payment_reference)
+                                VALUES (%s, '', %s, %s, %s, %s, true, %s, 'sms_gateway_contract', %s)
+                                RETURNING id
+                            """, (
+                                account, ts, amount, rate, kwh, new_balance,
+                                receipt_key or None,
+                            ))
+                        elif "payment_reference" in err and "does not exist" in err:
+                            cur.execute("""
+                                INSERT INTO transactions
+                                    (account_number, meter_id, transaction_date,
+                                     transaction_amount, rate_used, kwh_value,
+                                     is_payment, current_balance, source)
+                                VALUES (%s, '', %s, %s, %s, %s, true, %s, 'sms_gateway_contract')
+                                RETURNING id
+                            """, (account, ts, amount, rate, kwh, new_balance))
+                        else:
+                            raise
+                    txn_db_id = cur.fetchone()[0]
+
+                    if cust_id is not None and (
+                        pack["fee_to_connection"] > 0 or pack["fee_to_readyboard"] > 0
+                    ):
+                        apply_fee_debt_reduction(
+                            conn, cust_id,
+                            pack["fee_to_connection"], pack["fee_to_readyboard"],
+                        )
+                        maybe_sync_commissioning_flags_from_fee_debt(conn, cust_id)
+
+                    applied_adv = 0.0
+                    if pack.get("advance_id") and rem > 0:
+                        _, applied_adv = apply_advance_payment(
+                            conn, pack["advance_id"], rem,
+                            source_transaction_id=txn_db_id,
+                            created_by="sms_gateway_contract",
+                        )
+                    left = round(rem - applied_adv, 2)
+                    ex_c = 0.0
+                    ex_r = 0.0
+                    unalloc = 0.0
+                    if cust_id is not None and left > 0:
+                        ex_c, ex_r, unalloc = apply_remainder_to_fee_debt(conn, cust_id, left)
+                        if ex_c > 0 or ex_r > 0:
+                            maybe_sync_commissioning_flags_from_fee_debt(conn, cust_id)
+                    fee_rep_total = round(fee_rep + ex_c + ex_r, 2)
+                    if unalloc > 0.01:
+                        logger.error(
+                            "SMS contract gateway: %.2f %s could not be allocated "
+                            "(fee debt + advance exhausted) acct=%s txn=%s",
+                            unalloc, COUNTRY.currency, account, txn_db_id,
+                        )
+                    cur.execute(
+                        """
+                        UPDATE transactions
+                           SET fee_repayment_portion = %s,
+                               advance_portion = %s
+                         WHERE id = %s
+                        """,
+                        (fee_rep_total, applied_adv, txn_db_id),
+                    )
+
+                    conn.commit()
+
+                    log_outcome = (
+                        "contract_unallocated" if unalloc > 0.01 else "contract_fee_advance"
+                    )
+                    _update_sms_inbound(conn, sms_log_id, log_outcome, transaction_id=txn_db_id)
+                    conn.commit()
+
+                    background_tasks.add_task(
+                        send_electricity_payment_receipt_sms,
+                        account,
+                        payer_phone,
+                        amount,
+                    )
+
+                    if COUNTRY.code == "BN":
+                        logger.info(
+                            "SMS contract gateway (MoMo): txn=%d acct=%s alloc=%s %.0f %s "
+                            "advance_applied=%.2f fee_debt_total=%.2f unalloc=%.2f",
+                            txn_db_id, account, allocation, amount, COUNTRY.currency,
+                            applied_adv, fee_rep_total, unalloc,
+                        )
+                    else:
+                        prov = (parsed.get("provider") or "mpesa").lower()
+                        logger.info(
+                            "SMS contract gateway (%s): txn=%d acct=%s alloc=%s M%.2f "
+                            "advance_applied=%.2f fee_debt_total=%.2f unalloc=%.2f",
+                            prov,
+                            txn_db_id, account, allocation, amount,
+                            applied_adv, fee_rep_total, unalloc,
+                        )
+
+                    if allocation == "phone_fallback":
+                        background_tasks.add_task(
+                            _notify_sms_phone_fallback,
+                            account,
+                            amount,
+                            phone,
+                            remark_stored or "",
+                            receipt_key,
+                            fb_reason,
+                            (parsed.get("provider") or "mpesa"),
+                        )
+
+                    cur.execute(
+                        "SELECT community FROM meters "
+                        "WHERE account_number = %s AND platform = 'sparkmeter' LIMIT 1",
+                        (account,),
+                    )
+                    comm_row = cur.fetchone()
+                    if comm_row and comm_row[0]:
+                        background_tasks.add_task(sync_consumption_for_site, comm_row[0])
+
+                else:
+                    advance_portion = pack["advance_portion"]
+                    electricity_portion = pack["electricity_portion"]
+                    fee_rep = pack["fee_repayment_portion"]
+                    kwh = round(electricity_portion / rate, 4) if rate > 0 else 0.0
+
+                    # ``current_balance`` is a per-row kWh snapshot (matches
+                    # ``balance_engine.record_payment_kwh``). It is denormalised --
+                    # the canonical balance is computed by ``get_balance_kwh()``
+                    # from full history -- but we keep this column consistent in
+                    # kWh so downstream displays don't mix units.
+                    # (RCA: docs/ops/2026-05-07-current-balance-unit-rca.md)
+                    prev_balance, _ = get_balance_kwh(conn, account)
+                    new_balance = round(prev_balance + kwh, 4)
+
+                    try:
                         cur.execute("""
                             INSERT INTO transactions
                                 (account_number, meter_id, transaction_date,
                                  transaction_amount, rate_used, kwh_value,
                                  is_payment, current_balance, source,
-                                 payment_reference)
-                            VALUES (%s, '', %s, %s, %s, %s, true, %s, 'sms_gateway', %s)
+                                 payment_reference, sms_payer_phone, sms_remark_raw, sms_allocation,
+                                 payment_category, advance_portion, electricity_portion, advance_id,
+                                 fee_repayment_portion)
+                            VALUES (%s, '', %s, %s, %s, %s, true, %s, 'sms_gateway',
+                                    %s, %s, %s, %s,
+                                    'electricity', %s, %s, %s, %s)
                             RETURNING id
                         """, (
                             account, ts, amount, rate, kwh, new_balance,
                             receipt_key or None,
+                            payer_phone,
+                            remark_stored or None,
+                            allocation,
+                            advance_portion, electricity_portion, pack["advance_id"],
+                            fee_rep,
                         ))
-                    elif "payment_reference" in err and "does not exist" in err:
-                        cur.execute("""
-                            INSERT INTO transactions
-                                (account_number, meter_id, transaction_date,
-                                 transaction_amount, rate_used, kwh_value,
-                                 is_payment, current_balance, source)
-                            VALUES (%s, '', %s, %s, %s, %s, true, %s, 'sms_gateway')
-                            RETURNING id
-                        """, (account, ts, amount, rate, kwh, new_balance))
-                    else:
-                        raise
-                txn_db_id = cur.fetchone()[0]
+                    except psycopg2.IntegrityError:
+                        conn.rollback()
+                        logger.info("SMS skipped duplicate payment ref %s", receipt_key)
+                        continue
+                    except Exception as e:
+                        err = str(e).lower()
+                        conn.rollback()
+                        if (
+                            "payment_category" in err or "advance_portion" in err
+                            or "advance_id" in err or "electricity_portion" in err
+                            or "fee_repayment_portion" in err
+                        ) and "does not exist" in err:
+                            # Migration 019 not yet applied — fall back to legacy
+                            # SMS-meta INSERT (still the SMS-aware one, just
+                            # without the advance/category columns).
+                            cur.execute("""
+                                INSERT INTO transactions
+                                    (account_number, meter_id, transaction_date,
+                                     transaction_amount, rate_used, kwh_value,
+                                     is_payment, current_balance, source,
+                                     payment_reference, sms_payer_phone, sms_remark_raw, sms_allocation)
+                                VALUES (%s, '', %s, %s, %s, %s, true, %s, 'sms_gateway',
+                                        %s, %s, %s, %s)
+                                RETURNING id
+                            """, (
+                                account, ts, amount, rate, kwh, new_balance,
+                                receipt_key or None,
+                                payer_phone,
+                                remark_stored or None,
+                                allocation,
+                            ))
+                        elif (
+                            "sms_payer_phone" in err
+                            or "sms_remark_raw" in err
+                            or "sms_allocation" in err
+                        ) and "does not exist" in err:
+                            cur.execute("""
+                                INSERT INTO transactions
+                                    (account_number, meter_id, transaction_date,
+                                     transaction_amount, rate_used, kwh_value,
+                                     is_payment, current_balance, source,
+                                     payment_reference)
+                                VALUES (%s, '', %s, %s, %s, %s, true, %s, 'sms_gateway', %s)
+                                RETURNING id
+                            """, (
+                                account, ts, amount, rate, kwh, new_balance,
+                                receipt_key or None,
+                            ))
+                        elif "payment_reference" in err and "does not exist" in err:
+                            cur.execute("""
+                                INSERT INTO transactions
+                                    (account_number, meter_id, transaction_date,
+                                     transaction_amount, rate_used, kwh_value,
+                                     is_payment, current_balance, source)
+                                VALUES (%s, '', %s, %s, %s, %s, true, %s, 'sms_gateway')
+                                RETURNING id
+                            """, (account, ts, amount, rate, kwh, new_balance))
+                        else:
+                            raise
+                    txn_db_id = cur.fetchone()[0]
 
-                if cust_id is not None and (
-                    pack["fee_to_connection"] > 0 or pack["fee_to_readyboard"] > 0
-                ):
-                    apply_fee_debt_reduction(
-                        conn, cust_id,
-                        pack["fee_to_connection"], pack["fee_to_readyboard"],
-                    )
-                    maybe_sync_commissioning_flags_from_fee_debt(conn, cust_id)
+                    if cust_id is not None and (
+                        pack["fee_to_connection"] > 0 or pack["fee_to_readyboard"] > 0
+                    ):
+                        apply_fee_debt_reduction(
+                            conn, cust_id,
+                            pack["fee_to_connection"], pack["fee_to_readyboard"],
+                        )
+                        maybe_sync_commissioning_flags_from_fee_debt(conn, cust_id)
 
-                if advance and advance_portion > 0:
-                    apply_advance_payment(
-                        conn, pack["advance_id"], advance_portion,
-                        source_transaction_id=txn_db_id,
-                        created_by="sms_gateway",
-                    )
+                    if advance and advance_portion > 0:
+                        apply_advance_payment(
+                            conn, pack["advance_id"], advance_portion,
+                            source_transaction_id=txn_db_id,
+                            created_by="sms_gateway",
+                        )
 
-                conn.commit()
+                    conn.commit()
 
-                _update_sms_inbound(conn, sms_log_id, "electricity", transaction_id=txn_db_id)
-                conn.commit()
+                    _update_sms_inbound(conn, sms_log_id, "electricity", transaction_id=txn_db_id)
+                    conn.commit()
 
-                background_tasks.add_task(
-                    send_electricity_payment_receipt_sms,
-                    account,
-                    payer_phone,
-                    amount,
-                )
-
-                if COUNTRY.code == "BN":
-                    logger.info(
-                        "SMS payment (MoMo): txn=%d acct=%s alloc=%s %.0f %s from %s ref=%s receipt=%s "
-                        "elec=%.2f advance=%.2f fee_debt=%.2f",
-                        txn_db_id, account, allocation, amount, COUNTRY.currency,
-                        phone, reference, receipt_key,
-                        electricity_portion, advance_portion, fee_rep,
-                    )
-                else:
-                    prov = (parsed.get("provider") or "mpesa").lower()
-                    logger.info(
-                        "SMS payment (%s): txn=%d acct=%s alloc=%s M%.2f from %s ref=%s receipt=%s "
-                        "elec=%.2f advance=%.2f fee_debt=%.2f",
-                        prov,
-                        txn_db_id, account, allocation, amount, phone, reference,
-                        receipt_key, electricity_portion, advance_portion,
-                        fee_rep,
-                    )
-
-                if allocation == "phone_fallback":
                     background_tasks.add_task(
-                        _notify_sms_phone_fallback,
+                        send_electricity_payment_receipt_sms,
                         account,
+                        payer_phone,
                         amount,
-                        phone,
-                        remark_stored or "",
-                        receipt_key,
-                        fb_reason,
-                        (parsed.get("provider") or "mpesa"),
                     )
 
-                if SMS_INGEST_PUSH_SPARKMETER and electricity_portion > 0:
-                    background_tasks.add_task(
-                        _sms_ingest_credit_sm,
-                        account,
-                        electricity_portion,
-                        txn_db_id,
-                        receipt_key or "",
-                    )
+                    if COUNTRY.code == "BN":
+                        logger.info(
+                            "SMS payment (MoMo): txn=%d acct=%s alloc=%s %.0f %s from %s ref=%s receipt=%s "
+                            "elec=%.2f advance=%.2f fee_debt=%.2f",
+                            txn_db_id, account, allocation, amount, COUNTRY.currency,
+                            phone, reference, receipt_key,
+                            electricity_portion, advance_portion, fee_rep,
+                        )
+                    else:
+                        prov = (parsed.get("provider") or "mpesa").lower()
+                        logger.info(
+                            "SMS payment (%s): txn=%d acct=%s alloc=%s M%.2f from %s ref=%s receipt=%s "
+                            "elec=%.2f advance=%.2f fee_debt=%.2f",
+                            prov,
+                            txn_db_id, account, allocation, amount, phone, reference,
+                            receipt_key, electricity_portion, advance_portion,
+                            fee_rep,
+                        )
 
-                cur.execute(
-                    "SELECT community FROM meters "
-                    "WHERE account_number = %s AND platform = 'sparkmeter' LIMIT 1",
-                    (account,),
-                )
-                comm_row = cur.fetchone()
-                if comm_row and comm_row[0]:
-                    background_tasks.add_task(sync_consumption_for_site, comm_row[0])
+                    if allocation == "phone_fallback":
+                        background_tasks.add_task(
+                            _notify_sms_phone_fallback,
+                            account,
+                            amount,
+                            phone,
+                            remark_stored or "",
+                            receipt_key,
+                            fb_reason,
+                            (parsed.get("provider") or "mpesa"),
+                        )
+
+                    if SMS_INGEST_PUSH_SPARKMETER and electricity_portion > 0:
+                        background_tasks.add_task(
+                            _sms_ingest_credit_sm,
+                            account,
+                            electricity_portion,
+                            txn_db_id,
+                            receipt_key or "",
+                        )
+
+                    cur.execute(
+                        "SELECT community FROM meters "
+                        "WHERE account_number = %s AND platform = 'sparkmeter' LIMIT 1",
+                        (account,),
+                    )
+                    comm_row = cur.fetchone()
+                    if comm_row and comm_row[0]:
+                        background_tasks.add_task(sync_consumption_for_site, comm_row[0])
 
         except Exception as e:
             logger.error("SMS payment processing failed (forwarded OK): %s", e)
