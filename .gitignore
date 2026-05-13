@@ -23,3 +23,11 @@ docs/ops/*.docx
 # LaTeX build artifacts (e.g. 1meter-1pdb-white-paper.tex)
 docs/ops/*.aux
 docs/ops/*.out
+# Local AI assistant state
+.claude/
+
+# Firmware drops at repo root (do not commit)
+/1meter-fw-*.zip
+
+# Avoid committing finance / export spreadsheets
+/docs/*.xlsx

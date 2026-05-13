@@ -8,6 +8,15 @@ metrics in `METRIC_CATALOG`, derived from `payment_status_override` and
 the sum of `transactions.transaction_amount` where `is_payment = true`,
 compared to the country's connection + readyboard fee threshold.
 
+Row payment breakdown (same customer / all time as ``total_paid``):
+``payments_connection_fee`` / ``payments_readyboard_fee`` sum explicit
+``payment_category`` fee rows. ``payments_fee_repayment_via_electricity``
+sums ``fee_repayment_portion`` on ``payment_category = 'electricity'`` rows
+(allocation is connection debt first then readyboard in the allocator; the
+per-row split is not stored). ``payments_electricity`` is the kWh-purchase
+slice (``electricity_portion`` with legacy fallback). Advance and financing
+repayments remain in ``total_paid`` but are not shown in these four buckets.
+
 Endpoint: POST /api/customer-cohort/query
 
 No raw SQL from the request body — every filter is parameterised, sort
@@ -184,7 +193,31 @@ def _build_query(q: CohortQuery, *, count_only: bool) -> Tuple[str, list]:
         WITH paid_totals AS (
             SELECT a.customer_id,
                    COALESCE(SUM(CASE WHEN t.is_payment AND t.transaction_amount > 0
-                                     THEN t.transaction_amount ELSE 0 END), 0) AS total_paid
+                                     THEN t.transaction_amount ELSE 0 END), 0) AS total_paid,
+                   COALESCE(SUM(CASE WHEN t.is_payment AND t.transaction_amount > 0
+                                       AND t.payment_category = 'connection_fee'
+                                     THEN t.transaction_amount ELSE 0 END), 0)
+                       AS payments_connection_fee,
+                   COALESCE(SUM(CASE WHEN t.is_payment AND t.transaction_amount > 0
+                                       AND t.payment_category = 'readyboard_fee'
+                                     THEN t.transaction_amount ELSE 0 END), 0)
+                       AS payments_readyboard_fee,
+                   COALESCE(SUM(CASE WHEN t.is_payment AND t.transaction_amount > 0
+                                       AND t.payment_category IN ('electricity', 'uncategorized')
+                                     THEN COALESCE(t.fee_repayment_portion, 0) ELSE 0 END), 0)
+                       AS payments_fee_repayment_via_electricity,
+                   COALESCE(SUM(CASE WHEN t.is_payment AND t.transaction_amount > 0
+                                       AND t.payment_category IN ('electricity', 'uncategorized')
+                                     THEN GREATEST(0::numeric,
+                                         COALESCE(t.electricity_portion,
+                                             t.transaction_amount
+                                             - COALESCE(t.fee_repayment_portion, 0)
+                                             - COALESCE(t.advance_portion, 0)
+                                             - COALESCE(t.financing_portion, 0)))
+                                     WHEN t.is_payment AND t.transaction_amount > 0
+                                       AND t.payment_category IS NULL
+                                     THEN t.transaction_amount
+                                     ELSE 0 END), 0) AS payments_electricity
             FROM accounts a
             LEFT JOIN transactions t ON t.account_number = a.account_number
             GROUP BY a.customer_id
@@ -202,6 +235,11 @@ def _build_query(q: CohortQuery, *, count_only: bool) -> Tuple[str, list]:
                 c.payment_status_override,
                 a.account_number,
                 COALESCE(pt.total_paid, 0)::numeric AS total_paid,
+                COALESCE(pt.payments_connection_fee, 0)::numeric AS payments_connection_fee,
+                COALESCE(pt.payments_readyboard_fee, 0)::numeric AS payments_readyboard_fee,
+                COALESCE(pt.payments_fee_repayment_via_electricity, 0)::numeric
+                    AS payments_fee_repayment_via_electricity,
+                COALESCE(pt.payments_electricity, 0)::numeric AS payments_electricity,
                 CASE
                     WHEN c.date_service_terminated IS NOT NULL THEN 'terminated'
                     WHEN COALESCE(pt.total_paid, 0) <= 0
@@ -244,7 +282,10 @@ def _build_query(q: CohortQuery, *, count_only: bool) -> Tuple[str, list]:
     sql = base_cte + f"""
         SELECT customer_id, first_name, last_name, phone, site, customer_type,
                date_service_connected, date_service_terminated,
-               payment_status_override, account_number, total_paid, cohort_status
+               payment_status_override, account_number, total_paid,
+               payments_connection_fee, payments_readyboard_fee,
+               payments_fee_repayment_via_electricity, payments_electricity,
+               cohort_status
         FROM cohort
         WHERE 1=1 {status_clause}
         ORDER BY {sort_col} {sort_dir} NULLS LAST, customer_id ASC
@@ -319,6 +360,14 @@ def query_cohort(
                     d["date_service_terminated"] = d["date_service_terminated"].isoformat()
                 if d.get("total_paid") is not None:
                     d["total_paid"] = float(d["total_paid"])
+                for k in (
+                    "payments_connection_fee",
+                    "payments_readyboard_fee",
+                    "payments_fee_repayment_via_electricity",
+                    "payments_electricity",
+                ):
+                    if d.get(k) is not None:
+                        d[k] = float(d[k])
                 rows.append(d)
         except Exception:
             logger.exception("Cohort query failed")

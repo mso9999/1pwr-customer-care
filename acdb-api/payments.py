@@ -26,10 +26,17 @@ from balance_engine import get_balance_kwh, record_payment_kwh, record_fee_trans
 from financing import compute_financing_split, apply_financing_payment
 from advances import (
     apply_advance_payment,
-    compute_advance_split,
     get_active_advance,
 )
 from fee_classifier import classify_payment
+from fee_debt import (
+    apply_fee_debt_reduction,
+    apply_fee_payment_category_to_debt,
+    compute_fee_then_advance_split,
+    fetch_fee_debts,
+    get_customer_id_for_account,
+    maybe_sync_commissioning_flags_from_fee_debt,
+)
 from payment_verification import create_verification_entry
 from middleware import require_employee
 from models import CurrentUser
@@ -185,6 +192,9 @@ def payment_webhook(
                     create_verification_entry(
                         conn, txn_id, payload.account_number, category, payload.amount,
                     )
+                    apply_fee_payment_category_to_debt(
+                        conn, payload.account_number, category, payload.amount,
+                    )
                     conn.commit()
                     return {
                         "status": "ok",
@@ -212,26 +222,47 @@ def payment_webhook(
                     else:
                         raise
 
+            cust_id = get_customer_id_for_account(conn, payload.account_number)
+            if cust_id is None:
+                fee_debts = {
+                    "fee_debt_connection_remaining": 0.0,
+                    "fee_debt_readyboard_remaining": 0.0,
+                    "acquires_1pwr_readyboard": False,
+                }
+            else:
+                fee_debts = fetch_fee_debts(conn, cust_id, for_update=True)
+
             advance = get_active_advance(conn, payload.account_number)
-            adv_split = compute_advance_split(advance, payload.amount)
+            pack = compute_fee_then_advance_split(payload.amount, fee_debts, advance)
 
             fin_split = compute_financing_split(
-                conn, payload.account_number, adv_split["electricity_portion"],
+                conn, payload.account_number, pack["electricity_portion"],
             )
             elec_amount = fin_split["electricity_portion"]
-            advance_portion = adv_split["advance_portion"]
+            advance_portion = pack["advance_portion"]
             financing_portion = fin_split["debt_portion"]
+            fee_rep = pack["fee_repayment_portion"]
 
             txn_id, kwh_vended, new_balance_kwh = record_payment_kwh(
                 conn, payload.account_number, meter_id,
                 amount_currency=elec_amount, rate=rate,
                 source="sms_gateway", timestamp=ts,
                 payment_reference=ext_ref,
+                ledger_amount_currency=payload.amount,
             )
+
+            if cust_id is not None and (
+                pack["fee_to_connection"] > 0 or pack["fee_to_readyboard"] > 0
+            ):
+                apply_fee_debt_reduction(
+                    conn, cust_id,
+                    pack["fee_to_connection"], pack["fee_to_readyboard"],
+                )
+                maybe_sync_commissioning_flags_from_fee_debt(conn, cust_id)
 
             if advance and advance_portion > 0:
                 apply_advance_payment(
-                    conn, adv_split["advance_id"], advance_portion,
+                    conn, pack["advance_id"], advance_portion,
                     source_transaction_id=txn_id,
                     created_by="sms_gateway",
                 )
@@ -250,11 +281,12 @@ def payment_webhook(
                        financing_portion   = %s,
                        advance_portion     = %s,
                        advance_id          = %s,
-                       electricity_portion = %s
+                       electricity_portion = %s,
+                       fee_repayment_portion = %s
                  WHERE id = %s
                 """,
                 (financing_portion, advance_portion,
-                 adv_split["advance_id"], elec_amount, txn_id),
+                 pack["advance_id"], elec_amount, fee_rep, txn_id),
             )
             conn.commit()
 
@@ -283,7 +315,7 @@ def payment_webhook(
             }
             if advance:
                 result["advance"] = {
-                    "advance_id": adv_split["advance_id"],
+                    "advance_id": pack["advance_id"],
                     "advance_portion": advance_portion,
                     "electricity_portion": elec_amount + financing_portion,
                     "advance_type": advance["advance_type"],
@@ -355,6 +387,9 @@ def record_manual_payment(
                     create_verification_entry(
                         conn, txn_id, payload.account_number, category, payload.amount,
                     )
+                    apply_fee_payment_category_to_debt(
+                        conn, payload.account_number, category, payload.amount,
+                    )
                     try_log_mutation(
                         user, "create", "transactions", str(txn_id),
                         new_values={
@@ -400,19 +435,34 @@ def record_manual_payment(
                     else:
                         raise
 
+            cust_id = get_customer_id_for_account(conn, payload.account_number)
+            if cust_id is None:
+                fee_debts = {
+                    "fee_debt_connection_remaining": 0.0,
+                    "fee_debt_readyboard_remaining": 0.0,
+                    "acquires_1pwr_readyboard": False,
+                }
+            else:
+                fee_debts = fetch_fee_debts(conn, cust_id, for_update=True)
+
             advance = get_active_advance(conn, payload.account_number)
-            adv_split = compute_advance_split(advance, payload.amount)
+            pack = compute_fee_then_advance_split(payload.amount, fee_debts, advance)
 
             fin_split = compute_financing_split(
-                conn, payload.account_number, adv_split["electricity_portion"],
+                conn, payload.account_number, pack["electricity_portion"],
             )
             elec_amount = fin_split["electricity_portion"]
-            advance_portion = adv_split["advance_portion"]
+            advance_portion = pack["advance_portion"]
             financing_portion = fin_split["debt_portion"]
+            fee_rep = pack["fee_repayment_portion"]
 
             kwh_override = (
                 payload.kwh
-                if (advance is None and not fin_split["has_financing"])
+                if (
+                    advance is None
+                    and not fin_split["has_financing"]
+                    and fee_rep <= 0
+                )
                 else None
             )
             txn_id, kwh_vended, new_balance_kwh = record_payment_kwh(
@@ -421,11 +471,21 @@ def record_manual_payment(
                 kwh_override=kwh_override,
                 source="portal",
                 payment_reference=pref,
+                ledger_amount_currency=payload.amount,
             )
+
+            if cust_id is not None and (
+                pack["fee_to_connection"] > 0 or pack["fee_to_readyboard"] > 0
+            ):
+                apply_fee_debt_reduction(
+                    conn, cust_id,
+                    pack["fee_to_connection"], pack["fee_to_readyboard"],
+                )
+                maybe_sync_commissioning_flags_from_fee_debt(conn, cust_id)
 
             if advance and advance_portion > 0:
                 apply_advance_payment(
-                    conn, adv_split["advance_id"], advance_portion,
+                    conn, pack["advance_id"], advance_portion,
                     source_transaction_id=txn_id,
                     created_by=user.user_id,
                 )
@@ -444,11 +504,12 @@ def record_manual_payment(
                        financing_portion   = %s,
                        advance_portion     = %s,
                        advance_id          = %s,
-                       electricity_portion = %s
+                       electricity_portion = %s,
+                       fee_repayment_portion = %s
                  WHERE id = %s
                 """,
                 (financing_portion, advance_portion,
-                 adv_split["advance_id"], elec_amount, txn_id),
+                 pack["advance_id"], elec_amount, fee_rep, txn_id),
             )
 
             new_values = {
@@ -457,8 +518,9 @@ def record_manual_payment(
                 "amount_submitted": payload.amount,
                 "amount_electricity": elec_amount,
                 "advance_portion": advance_portion,
-                "advance_id": adv_split["advance_id"],
+                "advance_id": pack["advance_id"],
                 "financing_portion": financing_portion,
+                "fee_repayment_portion": fee_rep,
                 "kwh_vended": kwh_vended,
                 "meter_id": meter_id,
                 "source": "portal",
@@ -506,7 +568,7 @@ def record_manual_payment(
             }
             if advance:
                 result["advance"] = {
-                    "advance_id": adv_split["advance_id"],
+                    "advance_id": pack["advance_id"],
                     "advance_portion": advance_portion,
                     "electricity_portion": elec_amount + financing_portion,
                     "advance_type": advance["advance_type"],

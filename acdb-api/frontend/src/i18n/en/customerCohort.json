@@ -27,8 +27,17 @@
     "phone": "Phone",
     "type": "Type",
     "status": "Status",
+    "connectionFee": "Conn. fee",
+    "readyboardFee": "Readyboard",
+    "feeRepaymentViaElectricity": "Fee via elec.",
+    "electricityKwh": "Electricity (kWh)",
     "totalPaid": "Total Paid",
-    "connected": "Connected"
+    "connected": "Connected",
+    "connectionFeeHint": "Payments recorded as connection fee (explicit category only).",
+    "readyboardFeeHint": "Payments recorded as readyboard fee (explicit category only).",
+    "feeRepaymentViaElectricityHint": "Part of electricity-classified payments applied to connection+readyboard debt (50% cap; connection bucket first, then readyboard). Not split per transaction—see fee debt model.",
+    "electricityKwhHint": "Currency applied to kWh purchase (electricity_portion). Does not include advance or financing repayments; those remain in Total paid only.",
+    "totalPaidHint": "Sum of all payment rows. May exceed the four columns to the left because advance and financing repayments are not broken out here."
   },
   "status": {
     "not_paid": "Not Paid",

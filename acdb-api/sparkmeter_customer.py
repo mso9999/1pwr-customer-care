@@ -245,6 +245,149 @@ def _tc_create_customer(
     )
 
 
+def attach_koios_meter(
+    account_number: str,
+    meter_serial: str,
+    customer_uuid: Optional[str] = None,
+) -> CustomerSyncResult:
+    """Assign a physical meter to a Koios v1 customer (Nova / LS + BN sites).
+
+    Resolves SparkMeter ``customer_id`` via ``GET /api/v1/customers?code=`` when
+    ``customer_uuid`` is not supplied.
+
+    **422 validation:** log/inspect the JSON body (often ``detail`` or ``errors[]``)
+    against the live Koios Swagger ``Meter`` model before changing the PUT payload.
+
+    TODO: Koios OpenAPI ``Meter`` JSON uses field names we infer as ``serial``;
+    if live API returns 422, try ``serial_number`` or cross-check Swagger.
+    """
+    site = _extract_site(account_number)
+    if site in THUNDERCLOUD_SITES:
+        return CustomerSyncResult(
+            success=True, platform="none", skipped=True,
+            error="Not a Koios site",
+        )
+    if site not in KOIOS_SERVICE_AREAS:
+        return CustomerSyncResult(
+            success=True, platform="none", skipped=True,
+            error="No Koios mapping for site",
+        )
+
+    uid = (customer_uuid or "").strip()
+    if not uid:
+        row = lookup_sparkmeter_customer(account_number)
+        if not row:
+            return CustomerSyncResult(
+                success=False, platform="koios",
+                error="Customer not found in Koios — create customer first",
+            )
+        uid = str(row.get("id") or "").strip()
+    if not uid:
+        return CustomerSyncResult(
+            success=False, platform="koios",
+            error="Koios customer record missing id",
+        )
+
+    body = {"serial": str(meter_serial).strip()}
+    url = f"{KOIOS_BASE}/api/v1/customers/{uid}/meter"
+    try:
+        r = requests.put(
+            url,
+            json=body,
+            headers=_koios_headers(site),
+            timeout=API_TIMEOUT,
+        )
+    except Exception as e:
+        logger.error("Koios meter attach PUT failed for %s: %s", account_number, e)
+        return CustomerSyncResult(success=False, platform="koios", error=str(e))
+
+    if r.status_code in (200, 201, 204):
+        logger.info("Koios meter attach OK: acct=%s meter=%s", account_number, meter_serial)
+        return CustomerSyncResult(
+            success=True, platform="koios", sm_customer_id=str(uid),
+        )
+    if r.status_code == 409:
+        logger.info(
+            "Koios meter attach HTTP 409 for %s (idempotent): %s",
+            account_number,
+            (r.text or "")[:300],
+        )
+        return CustomerSyncResult(
+            success=True, platform="koios", sm_customer_id=str(uid),
+        )
+    try:
+        err_body = r.json()
+        errors = err_body.get("errors", [])
+        err_msg = errors[0].get("title", str(errors)) if errors else err_body.get("detail", r.text)
+    except Exception:
+        err_msg = r.text or f"HTTP {r.status_code}"
+    logger.warning("Koios meter attach failed for %s: %s", account_number, err_msg)
+    return CustomerSyncResult(success=False, platform="koios", error=str(err_msg))
+
+
+def sync_sparkmeter_customer_and_meter(
+    account_number: str,
+    name: str,
+    meter_serial: Optional[str],
+    phone: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Ensure upstream SparkMeter has customer + meter when serial is known.
+
+    ThunderCloud: always POST ``/api/v0/customer/`` when ``meter_serial`` is set
+    (do not skip solely because a 1PDB row exists).
+
+    Koios: create customer if missing, then PUT ``/api/v1/customers/{id}/meter``.
+    """
+    out: Dict[str, Any] = {"account_number": account_number, "platform": None}
+    if not meter_serial or not str(meter_serial).strip():
+        out["skipped"] = True
+        out["note"] = "No meter serial — deferred"
+        return out
+
+    site = _extract_site(account_number)
+    serial = str(meter_serial).strip()
+
+    if site in THUNDERCLOUD_SITES:
+        tc = _tc_create_customer(account_number, name, serial)
+        out["platform"] = "thundercloud"
+        out["customer"] = {
+            "success": tc.success,
+            "skipped": tc.skipped,
+            "error": tc.error,
+            "sm_customer_id": tc.sm_customer_id,
+        }
+        return out
+
+    if site in KOIOS_SERVICE_AREAS:
+        out["platform"] = "koios"
+        existing = lookup_sparkmeter_customer(account_number)
+        if existing:
+            out["customer"] = {"already_exists": True, "sm_customer_id": str(existing.get("id", ""))}
+            uid = str(existing.get("id") or "")
+        else:
+            cr = _koios_create_customer(account_number, name, site, phone)
+            out["customer"] = {
+                "success": cr.success,
+                "error": cr.error,
+                "sm_customer_id": cr.sm_customer_id,
+            }
+            if not cr.success or not cr.sm_customer_id:
+                return out
+            uid = str(cr.sm_customer_id)
+
+        att = attach_koios_meter(account_number, serial, customer_uuid=uid)
+        out["meter_attach"] = {
+            "success": att.success,
+            "skipped": att.skipped,
+            "error": att.error,
+        }
+        return out
+
+    out["skipped"] = True
+    out["note"] = f"Site {site!r} has no SparkMeter platform in CC config"
+    return out
+
+
 def sync_thundercloud_customer_name(
     account_number: str,
     first_name: Optional[str],

@@ -27,8 +27,17 @@
     "phone": "Téléphone",
     "type": "Type",
     "status": "Statut",
+    "connectionFee": "Frais raccord.",
+    "readyboardFee": "Readyboard",
+    "feeRepaymentViaElectricity": "Frais via élec.",
+    "electricityKwh": "Électricité (kWh)",
     "totalPaid": "Total payé",
-    "connected": "Connecté le"
+    "connected": "Connecté le",
+    "connectionFeeHint": "Paiements enregistrés comme frais de raccordement (catégorie explicite seulement).",
+    "readyboardFeeHint": "Paiements enregistrés comme frais readyboard (catégorie explicite seulement).",
+    "feeRepaymentViaElectricityHint": "Partie des paiements « électricité » affectée à la dette frais (plafond 50 % ; d’abord raccordement, puis readyboard). Pas ventilée par transaction.",
+    "electricityKwhHint": "Montant appliqué à l’achat de kWh (electricity_portion). N’inclut pas les remboursements d’avance ou de financement ; ils restent dans le total seulement.",
+    "totalPaidHint": "Somme de toutes les lignes de paiement. Peut dépasser les quatre colonnes précédentes (avance et financement non ventilés ici)."
   },
   "status": {
     "not_paid": "Non payé",

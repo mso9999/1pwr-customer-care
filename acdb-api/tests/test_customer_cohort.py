@@ -75,6 +75,8 @@ class TestQueryBuilder(unittest.TestCase):
         sql, params = _build_query(q, count_only=False)
         # WITH ... cohort ... + paginated SELECT
         self.assertIn("WITH paid_totals AS", sql)
+        self.assertIn("payments_connection_fee", sql)
+        self.assertIn("payments_fee_repayment_via_electricity", sql)
         self.assertIn("cohort_status", sql)
         self.assertIn("LIMIT %s OFFSET %s", sql)
         # Site placeholders + 2x threshold + page_size + offset
@@ -202,6 +204,10 @@ class TestQueryBuilder(unittest.TestCase):
             "payment_status_override",
             "account_number",
             "total_paid",
+            "payments_connection_fee",
+            "payments_readyboard_fee",
+            "payments_fee_repayment_via_electricity",
+            "payments_electricity",
             "cohort_status",
         }
         for ui_key, sql_expr in _SORT_COLS.items():

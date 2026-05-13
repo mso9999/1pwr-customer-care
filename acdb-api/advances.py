@@ -52,6 +52,7 @@ from pydantic import BaseModel, Field
 from contract_gen import CONTRACTS_DIR
 from country_config import COUNTRY
 from customer_api import get_connection
+from fee_debt import total_fee_debt_for_advance_block
 from middleware import require_employee
 from models import CCRole, CurrentUser
 from mutations import try_log_mutation
@@ -508,6 +509,48 @@ async def create_advance(
             detail=f"advance_type must be one of {sorted(_ALLOWED_TYPES)}",
         )
 
+    with get_connection() as conn:
+        cur = conn.cursor()
+
+        cur.execute(
+            "SELECT 1 FROM accounts WHERE account_number = %s LIMIT 1",
+            (account_number,),
+        )
+        if cur.fetchone() is None:
+            raise HTTPException(404, f"Unknown account {account_number}")
+
+        cur.execute(
+            """
+            SELECT id FROM account_advances
+            WHERE account_number = %s
+              AND advance_type = %s::advance_type_enum
+              AND status = 'active'
+            LIMIT 1
+            """,
+            (account_number, advance_type),
+        )
+        if cur.fetchone():
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"An active {advance_type} advance already exists for "
+                    f"account {account_number}; pay it off or write it off "
+                    f"before creating another."
+                ),
+            )
+
+        debt = total_fee_debt_for_advance_block(conn, account_number)
+        if debt > 0.005:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Cannot create an advance while onboarding fee debt remains "
+                    f"({debt:.2f} {COUNTRY.currency} outstanding). Pay down connection "
+                    "and readyboard fee debt first (via classified fee payments or "
+                    "the electricity-path fee split)."
+                ),
+            )
+
     contract_meta = await _persist_contract(
         contract,
         account_number=account_number,
@@ -517,33 +560,6 @@ async def create_advance(
     try:
         with get_connection() as conn:
             cur = conn.cursor()
-
-            cur.execute(
-                "SELECT 1 FROM accounts WHERE account_number = %s LIMIT 1",
-                (account_number,),
-            )
-            if cur.fetchone() is None:
-                raise HTTPException(404, f"Unknown account {account_number}")
-
-            cur.execute(
-                """
-                SELECT id FROM account_advances
-                WHERE account_number = %s
-                  AND advance_type = %s::advance_type_enum
-                  AND status = 'active'
-                LIMIT 1
-                """,
-                (account_number, advance_type),
-            )
-            if cur.fetchone():
-                raise HTTPException(
-                    status_code=409,
-                    detail=(
-                        f"An active {advance_type} advance already exists for "
-                        f"account {account_number}; pay it off or write it off "
-                        f"before creating another."
-                    ),
-                )
 
             cur.execute(
                 """

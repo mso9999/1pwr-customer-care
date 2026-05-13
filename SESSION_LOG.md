@@ -3,6 +3,43 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-05-13 202605131200 (Cohort payment breakdown)
+
+### What Was Done
+- **`customer_cohort.py`** / **`POST /api/customer-cohort/query`**: `paid_totals` now exposes `payments_connection_fee`, `payments_readyboard_fee`, `payments_fee_repayment_via_electricity`, `payments_electricity` (plus unchanged `total_paid` / status logic). Requires `transactions.fee_repayment_portion` (migration **029**).
+- **`CustomerCohortPage.tsx`**, **`api.ts` (`CohortRow`)**, **`en`/`fr` `customerCohort.json`**: table columns + CSV + header tooltips; **`test_customer_cohort.py`**: CTE column set + SQL smoke assertions.
+
+### What Next Session Should Know
+- Cohort “electricity” column is the kWh-purchase slice (`electricity_portion`); fee debt cleared inside electricity-classified payments is a separate column; advance/financing repayments are only in **Total paid** (documented in tooltips).
+
+## Session 2026-05-13 202605132315 (Operator paid-customers XLSX + fee debt align)
+
+### What Was Done
+- **`scripts/ops/backfill_operator_paid_customers_xlsx.py`**: Parse MAS/MAK/SEH-style paid-customer workbooks (reuse header/column logic from `inspect_operator_paid_customers_xlsx.py`); dedup vs `payment_verifications` (verified), `transactions.payment_reference`, `sms_inbound_log`, fuzzy fee slot; apply via `record_fee_transaction` (no kWh credit), auto-verify PV, `apply_fee_payment_category_to_debt`, onboarding derive/fee-trace clear. SparkMeter not called. `DATABASE_URL` + `PYTHONPATH=acdb-api` for DB modes.
+- **`scripts/ops/backfill_operator_fee_debt_align.py`**: `--from-db` proposes `customers.fee_debt_*` from system/country fees minus **verified** `payment_verifications` sums; `--fee-debt-csv` for explicit remaining debt; **no** `transactions` updates.
+- **`acdb-api/tests/test_operator_paid_xlsx_backfill.py`**: Parser/helper smoke tests.
+
+### What Next Session Should Know
+- Default CLI is dry-run (omit `--apply`). Run `python3 -m py_compile` on both scripts before deploy.
+- `--from-db` fee-debt alignment can disagree with electricity-path fee repayments; prefer CSV when in doubt.
+
+## Session 2026-05-13 202605132200 (Fee debt split + SM meter sync)
+
+### What Was Done
+- **Migration `029_customer_fee_debt.sql`**: `customers.fee_debt_*`, `acquires_1pwr_readyboard`; `transactions.fee_repayment_portion` + COMMENTs.
+- **`fee_debt.py`**: allocator `compute_fee_then_advance_split`, debt helpers, `maybe_sync_commissioning_flags_from_fee_debt` gated by **`ONBOARDING_FEE_DEBT_ZERO_SETS_PAID`** (default true), advance gate helper `total_fee_debt_for_advance_block`.
+- **`ingest.py` / `payments.py`**: electricity paths run fee split then advance then financing (payments); persist `fee_repayment_portion`; fee-classified paths decrement debt + sync.
+- **`advances.py`**: `create_advance` rejects when fee debt > epsilon; pre-flight validation before contract upload.
+- **`registration.py`** + **`NewCustomerWizard.tsx`** + **`api.ts`**: `acquires_1pwr_readyboard`; seed fee debt from `get_country_fees` (bulk import seeds connection debt only).
+- **`sparkmeter_customer.py`**: `attach_koios_meter` (PUT `/api/v1/customers/{id}/meter`, body `serial` — TODO in code if 422); `sync_sparkmeter_customer_and_meter` for TC re-POST when serial known + Koios create+attach. **`meter_lifecycle.py`**, **`commission.py`** call sync after assign / post-commission.
+- **`balance_engine.record_payment_kwh`**: optional `ledger_amount_currency` for full payment on row while kWh from electricity slice.
+- **`CONTEXT.md`**: Koios meter endpoint note.
+- **`tests/test_fee_debt.py`**: allocator unit tests (run with env that has FastAPI/pytest).
+
+### What Next Session Should Know
+- Apply **`029_customer_fee_debt.sql`** on deploy before relying on registration fee seed or new transaction column.
+- Env: **`ONBOARDING_FEE_DEBT_ZERO_SETS_PAID`** (optional, default on).
+
 ## Session 2026-05-13 202605131800 (Fee trace in 1PDB + CC UI)
 
 ### What Was Done

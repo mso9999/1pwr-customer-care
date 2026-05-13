@@ -258,7 +258,10 @@ export default function CustomerCohortPage() {
     if (!result || result.rows.length === 0) return;
     const header = [
       'site', 'account_number', 'name', 'phone', 'customer_type',
-      'cohort_status', 'total_paid', 'date_service_connected',
+      'cohort_status',
+      'payments_connection_fee', 'payments_readyboard_fee',
+      'payments_fee_repayment_via_electricity', 'payments_electricity',
+      'total_paid', 'date_service_connected',
       'date_service_terminated', 'payment_status_override', 'customer_id',
     ];
     const escape = (v: any) => {
@@ -275,6 +278,10 @@ export default function CustomerCohortPage() {
         r.phone || '',
         r.customer_type,
         r.cohort_status,
+        r.payments_connection_fee,
+        r.payments_readyboard_fee,
+        r.payments_fee_repayment_via_electricity,
+        r.payments_electricity,
         r.total_paid,
         r.date_service_connected || '',
         r.date_service_terminated || '',
@@ -410,7 +417,19 @@ export default function CustomerCohortPage() {
                 <th className="px-3 py-2 font-medium cursor-pointer select-none" onClick={() => handleSort('cohort_status')}>
                   {t('col.status')}{sortIcon('cohort_status')}
                 </th>
-                <th className="px-3 py-2 font-medium text-right cursor-pointer select-none" onClick={() => handleSort('total_paid')}>
+                <th className="px-3 py-2 font-medium text-right" title={t('col.connectionFeeHint')}>
+                  {t('col.connectionFee')}
+                </th>
+                <th className="px-3 py-2 font-medium text-right" title={t('col.readyboardFeeHint')}>
+                  {t('col.readyboardFee')}
+                </th>
+                <th className="px-3 py-2 font-medium text-right" title={t('col.feeRepaymentViaElectricityHint')}>
+                  {t('col.feeRepaymentViaElectricity')}
+                </th>
+                <th className="px-3 py-2 font-medium text-right" title={t('col.electricityKwhHint')}>
+                  {t('col.electricityKwh')}
+                </th>
+                <th className="px-3 py-2 font-medium text-right cursor-pointer select-none" onClick={() => handleSort('total_paid')} title={t('col.totalPaidHint')}>
                   {t('col.totalPaid')}{sortIcon('total_paid')}
                 </th>
                 <th className="px-3 py-2 font-medium cursor-pointer select-none" onClick={() => handleSort('date_connected')}>
@@ -462,6 +481,18 @@ export default function CustomerCohortPage() {
                     )}
                   </td>
                   <td className="px-3 py-2 text-right font-mono tabular-nums text-gray-700 whitespace-nowrap">
+                    {fmtNum(r.payments_connection_fee)}
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono tabular-nums text-gray-700 whitespace-nowrap">
+                    {fmtNum(r.payments_readyboard_fee)}
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono tabular-nums text-gray-700 whitespace-nowrap">
+                    {fmtNum(r.payments_fee_repayment_via_electricity)}
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono tabular-nums text-gray-700 whitespace-nowrap">
+                    {fmtNum(r.payments_electricity)}
+                  </td>
+                  <td className="px-3 py-2 text-right font-mono tabular-nums text-gray-700 whitespace-nowrap">
                     {fmtNum(r.total_paid)}
                   </td>
                   <td className="px-3 py-2 text-gray-600 whitespace-nowrap">
@@ -471,7 +502,7 @@ export default function CustomerCohortPage() {
               ))}
               {result && result.rows.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={8} className="text-center py-12 text-gray-400">
+                  <td colSpan={12} className="text-center py-12 text-gray-400">
                     {t('noResults')}
                   </td>
                 </tr>

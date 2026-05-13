@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
 from country_config import COUNTRY
+from country_fees import get_country_fees
 from middleware import require_employee, require_role
 from models import CurrentUser
 from mutations import log_mutation, try_log_mutation
@@ -75,6 +76,7 @@ class CustomerCreateRequest(BaseModel):
     gps_lon: Optional[float] = None
     date_service_connected: Optional[str] = None
     meter_id: Optional[str] = None
+    acquires_1pwr_readyboard: bool = False
 
 
 class BulkImportResult(BaseModel):
@@ -192,6 +194,24 @@ def register_customer(
             row = cursor.fetchone()
             customer_pg_id = row[0]
             customer_legacy_id = row[1]
+
+            fees = get_country_fees(conn)
+            conn_fee_amt = float(fees["connection_fee_amount"])
+            rb_fee_amt = (
+                float(fees["readyboard_fee_amount"])
+                if req.acquires_1pwr_readyboard
+                else 0.0
+            )
+            cursor.execute(
+                """
+                UPDATE customers
+                   SET acquires_1pwr_readyboard = %s,
+                       fee_debt_connection_remaining = %s,
+                       fee_debt_readyboard_remaining = %s
+                 WHERE id = %s
+                """,
+                (bool(req.acquires_1pwr_readyboard), conn_fee_amt, rb_fee_amt, customer_pg_id),
+            )
 
             # Extract sequence number from account number
             seq = int(account_number[:4])
@@ -410,6 +430,18 @@ async def bulk_import_customers(
                 customer_pg_row = cursor.fetchone()
                 customer_pg_id = customer_pg_row[0]
                 customer_legacy_id = customer_pg_row[1]
+
+                fees = get_country_fees(conn)
+                cursor.execute(
+                    """
+                    UPDATE customers
+                       SET acquires_1pwr_readyboard = false,
+                           fee_debt_connection_remaining = %s,
+                           fee_debt_readyboard_remaining = 0
+                     WHERE id = %s
+                    """,
+                    (float(fees["connection_fee_amount"]), customer_pg_id),
+                )
 
                 cursor.execute("""
                     INSERT INTO accounts (

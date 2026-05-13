@@ -975,6 +975,7 @@ export interface CustomerRegistrationRequest {
   gps_lon?: string;
   date_service_connected?: string;
   meter_id?: string;
+  acquires_1pwr_readyboard?: boolean;
 }
 
 export interface CustomerRegistrationResult {
@@ -2975,6 +2976,17 @@ export interface CohortRow {
   date_service_terminated: string | null;
   payment_status_override: string | null;
   total_paid: number;
+  /** Sum of ``payment_category = connection_fee`` payment rows. */
+  payments_connection_fee: number;
+  /** Sum of ``payment_category = readyboard_fee`` payment rows. */
+  payments_readyboard_fee: number;
+  /**
+   * Portion of electricity-classified payments applied to fee debt (50% cap
+   * allocator; connection bucket first, then readyboard — not split per row).
+   */
+  payments_fee_repayment_via_electricity: number;
+  /** kWh purchase slice: ``electricity_portion`` with legacy fallback. */
+  payments_electricity: number;
   cohort_status: CohortStatus;
 }
 

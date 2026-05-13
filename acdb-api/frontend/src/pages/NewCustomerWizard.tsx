@@ -10,7 +10,7 @@ import { listSites, listUGPConnections, registerCustomerRecord, type CustomerReg
 interface FieldDef {
   key: string;
   label: string;
-  type?: 'text' | 'tel' | 'date' | 'select' | 'gps' | 'ugp_picker';
+  type?: 'text' | 'tel' | 'date' | 'select' | 'gps' | 'ugp_picker' | 'checkbox';
   placeholder?: string;
   required?: boolean;
   options?: string[];
@@ -51,6 +51,11 @@ const steps: { title: string; description: string; fields: FieldDef[] }[] = [
     fields: [
       { key: 'customer_type', label: 'Customer Type', type: 'select', options: CUSTOMER_TYPES, required: true },
       { key: 'date_service_connected', label: 'Date Connected', type: 'date' },
+      {
+        key: 'acquires_1pwr_readyboard',
+        label: 'Customer will receive a 1PWR readyboard (readyboard fee applies)',
+        type: 'checkbox',
+      },
     ],
   },
 ];
@@ -459,6 +464,7 @@ export default function NewCustomerWizard() {
         gps_lat: form['gps_lat']?.trim() || undefined,
         gps_lon: form['gps_lon']?.trim() || undefined,
         date_service_connected: form['date_service_connected']?.trim() || undefined,
+        acquires_1pwr_readyboard: form['acquires_1pwr_readyboard'] === '1',
       });
       setCreatedCustomer(result);
     } catch (e: any) {
@@ -475,6 +481,20 @@ export default function NewCustomerWizard() {
   const renderField = (f: FieldDef) => {
     const label = fieldLabelKey[f.key] ? t(fieldLabelKey[f.key]) : f.label;
     const placeholder = fieldPlaceholderKey[f.key] ? t(fieldPlaceholderKey[f.key]) : f.placeholder;
+
+    if (f.type === 'checkbox') {
+      return (
+        <label key={f.key} className="flex items-start gap-3 col-span-2 cursor-pointer">
+          <input
+            type="checkbox"
+            className="mt-1 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            checked={form[f.key] === '1'}
+            onChange={e => set(f.key, e.target.checked ? '1' : '')}
+          />
+          <span className="text-sm text-gray-700 leading-snug">{label}</span>
+        </label>
+      );
+    }
 
     if (f.type === 'ugp_picker') {
       return (

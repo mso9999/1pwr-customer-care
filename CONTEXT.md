@@ -345,6 +345,7 @@ Benin runs two sites: **GBO** (Gbowélé) and **SAM** (Samondji), both using Spa
 - `GET /payments?external_id=X` — idempotency lookup
 - `POST /payments/{id}/reverse` — reverse a payment
 - `GET /customers?code=X` — customer lookup by account number
+- `PUT /api/v1/customers/{customer_id}/meter` — replace meter assignment; `PATCH` same path for partial updates (Koios v1 **Meter** schema — CC uses JSON `{"serial": "<meter_serial>"}` in `sparkmeter_customer.attach_koios_meter`; confirm field names against live Swagger if Koios returns 422)
 - Auth: `X-API-KEY` + `X-API-SECRET` headers. Country-specific keys in `.env`
 
 **Koios v2 (data)**: `https://www.sparkmeter.cloud/api/v2/`

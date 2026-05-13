@@ -43,11 +43,18 @@ from sms_payment_receipt import send_electricity_payment_receipt_sms, send_fee_p
 from sparkmeter_credit import credit_sparkmeter
 from advances import (
     apply_advance_payment,
-    compute_advance_split,
     get_active_advance,
 )
 from balance_engine import get_balance_kwh, record_fee_transaction
 from fee_classifier import classify_payment
+from fee_debt import (
+    apply_fee_debt_reduction,
+    apply_fee_payment_category_to_debt,
+    compute_fee_then_advance_split,
+    fetch_fee_debts,
+    get_customer_id_for_account,
+    maybe_sync_commissioning_flags_from_fee_debt,
+)
 from payment_verification import create_verification_entry
 
 logger = logging.getLogger("cc-api.ingest")
@@ -752,6 +759,7 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
                         create_verification_entry(
                             conn, txn_db_id, account, category, amount,
                         )
+                        apply_fee_payment_category_to_debt(conn, account, category, amount)
                         conn.commit()
                         _fee_ok = True
                     except psycopg2.IntegrityError:
@@ -794,12 +802,23 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
                         continue
 
                 # ------------------------------------------------------------
-                # Electricity payment: maybe split toward an active advance.
+                # Electricity payment: fee debt (50% cap) then advance split.
                 # ------------------------------------------------------------
+                cust_id = get_customer_id_for_account(conn, account)
+                if cust_id is None:
+                    fee_debts = {
+                        "fee_debt_connection_remaining": 0.0,
+                        "fee_debt_readyboard_remaining": 0.0,
+                        "acquires_1pwr_readyboard": False,
+                    }
+                else:
+                    fee_debts = fetch_fee_debts(conn, cust_id, for_update=True)
+
                 advance = get_active_advance(conn, account)
-                adv_split = compute_advance_split(advance, amount)
-                advance_portion = adv_split["advance_portion"]
-                electricity_portion = adv_split["electricity_portion"]
+                pack = compute_fee_then_advance_split(amount, fee_debts, advance)
+                advance_portion = pack["advance_portion"]
+                electricity_portion = pack["electricity_portion"]
+                fee_rep = pack["fee_repayment_portion"]
                 kwh = round(electricity_portion / rate, 4) if rate > 0 else 0.0
 
                 # ``current_balance`` is a per-row kWh snapshot (matches
@@ -818,10 +837,11 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
                              transaction_amount, rate_used, kwh_value,
                              is_payment, current_balance, source,
                              payment_reference, sms_payer_phone, sms_remark_raw, sms_allocation,
-                             payment_category, advance_portion, electricity_portion, advance_id)
+                             payment_category, advance_portion, electricity_portion, advance_id,
+                             fee_repayment_portion)
                         VALUES (%s, '', %s, %s, %s, %s, true, %s, 'sms_gateway',
                                 %s, %s, %s, %s,
-                                'electricity', %s, %s, %s)
+                                'electricity', %s, %s, %s, %s)
                         RETURNING id
                     """, (
                         account, ts, amount, rate, kwh, new_balance,
@@ -829,7 +849,8 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
                         payer_phone,
                         remark_stored or None,
                         allocation,
-                        advance_portion, electricity_portion, adv_split["advance_id"],
+                        advance_portion, electricity_portion, pack["advance_id"],
+                        fee_rep,
                     ))
                 except psycopg2.IntegrityError:
                     conn.rollback()
@@ -841,6 +862,7 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
                     if (
                         "payment_category" in err or "advance_portion" in err
                         or "advance_id" in err or "electricity_portion" in err
+                        or "fee_repayment_portion" in err
                     ) and "does not exist" in err:
                         # Migration 019 not yet applied — fall back to legacy
                         # SMS-meta INSERT (still the SMS-aware one, just
@@ -891,9 +913,18 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
                         raise
                 txn_db_id = cur.fetchone()[0]
 
+                if cust_id is not None and (
+                    pack["fee_to_connection"] > 0 or pack["fee_to_readyboard"] > 0
+                ):
+                    apply_fee_debt_reduction(
+                        conn, cust_id,
+                        pack["fee_to_connection"], pack["fee_to_readyboard"],
+                    )
+                    maybe_sync_commissioning_flags_from_fee_debt(conn, cust_id)
+
                 if advance and advance_portion > 0:
                     apply_advance_payment(
-                        conn, adv_split["advance_id"], advance_portion,
+                        conn, pack["advance_id"], advance_portion,
                         source_transaction_id=txn_db_id,
                         created_by="sms_gateway",
                     )
@@ -912,18 +943,21 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
 
                 if COUNTRY.code == "BN":
                     logger.info(
-                        "SMS payment (MoMo): txn=%d acct=%s alloc=%s %.0f %s from %s ref=%s receipt=%s elec=%.2f advance=%.2f",
+                        "SMS payment (MoMo): txn=%d acct=%s alloc=%s %.0f %s from %s ref=%s receipt=%s "
+                        "elec=%.2f advance=%.2f fee_debt=%.2f",
                         txn_db_id, account, allocation, amount, COUNTRY.currency,
                         phone, reference, receipt_key,
-                        electricity_portion, advance_portion,
+                        electricity_portion, advance_portion, fee_rep,
                     )
                 else:
                     prov = (parsed.get("provider") or "mpesa").lower()
                     logger.info(
-                        "SMS payment (%s): txn=%d acct=%s alloc=%s M%.2f from %s ref=%s receipt=%s elec=%.2f advance=%.2f",
+                        "SMS payment (%s): txn=%d acct=%s alloc=%s M%.2f from %s ref=%s receipt=%s "
+                        "elec=%.2f advance=%.2f fee_debt=%.2f",
                         prov,
                         txn_db_id, account, allocation, amount, phone, reference,
                         receipt_key, electricity_portion, advance_portion,
+                        fee_rep,
                     )
 
                 if allocation == "phone_fallback":

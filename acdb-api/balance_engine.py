@@ -212,11 +212,16 @@ def record_payment_kwh(
     source: str = "portal",
     timestamp: datetime | None = None,
     payment_reference: str | None = None,
+    ledger_amount_currency: float | None = None,
 ) -> tuple[int, float, float]:
     """Record a payment and return (txn_id, kwh_vended, new_balance_kwh).
 
     Computes the current balance from full history, adds the new
     payment's kWh, and stores the snapshot in current_balance.
+
+    ``amount_currency`` drives kWh credit (electricity slice after splits).
+    When ``ledger_amount_currency`` is set, ``transaction_amount`` stores that
+    value (full customer payment) while kWh still derives from ``amount_currency``.
 
     ``current_balance`` is a per-row, kWh-denominated snapshot. It is
     *denormalised* and never read by ``get_balance_kwh()`` -- the canonical
@@ -237,6 +242,12 @@ def record_payment_kwh(
     prev_balance, _ = get_balance_kwh(conn, account_number)
     new_balance = round(prev_balance + kwh_vended, 4)
 
+    txn_amount = (
+        float(ledger_amount_currency)
+        if ledger_amount_currency is not None
+        else float(amount_currency)
+    )
+
     cur.execute("""
         INSERT INTO transactions
             (account_number, meter_id, transaction_date,
@@ -246,7 +257,7 @@ def record_payment_kwh(
         RETURNING id
     """, (
         account_number, meter_id, ts,
-        amount_currency, rate, kwh_vended,
+        txn_amount, rate, kwh_vended,
         new_balance, source, payment_reference,
     ))
     txn_id = cur.fetchone()[0]

@@ -408,6 +408,38 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
         "so_filename": result["so_filename"],
         "sms_sent": sms_sent,
     }
+    acct_for_sm = resolved_acct or req.account_number
+    try:
+        from sparkmeter_customer import sync_sparkmeter_customer_and_meter
+
+        meter_serial: Optional[str] = None
+        with _get_connection() as smc:
+            curm = smc.cursor()
+            curm.execute(
+                """
+                SELECT meter_id FROM meters
+                 WHERE account_number = %s AND status = 'active'
+                 ORDER BY updated_at DESC NULLS LAST
+                 LIMIT 1
+                """,
+                (acct_for_sm,),
+            )
+            mr = curm.fetchone()
+            if mr and mr[0]:
+                meter_serial = str(mr[0]).strip() or None
+        response["sm_sync"] = sync_sparkmeter_customer_and_meter(
+            acct_for_sm,
+            f"{first_name} {last_name}".strip(),
+            meter_serial,
+            phone=None,
+        )
+    except Exception as exc:
+        logger.warning(
+            "SparkMeter post-commission sync failed for %s: %s",
+            acct_for_sm,
+            exc,
+        )
+        response["sm_sync"] = {"error": str(exc)}
     if ugp_sync_result:
         response["ugp_sync"] = {
             "updated": ugp_sync_result.get("ugp_updated", False),
