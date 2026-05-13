@@ -3,6 +3,40 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-05-13 202605131800 (Fee trace in 1PDB + CC UI)
+
+### What Was Done
+- **Backfill**: `scripts/ops/backfill_fee_trace_categories.py` — dry-run counts / `--apply` sets `listed_paid_missing_record` where `*_fee_paid` is true, trace category still null, and no verified `payment_verifications` row for that fee type (uses `DATABASE_URL`).
+- **Frontend**: `FEE_TRACE_CATEGORIES`, `getFeeTraceQueue`, `patchOnboardingFeeTrace`; extended `OnboardingCustomerStatus`; **`/fee-trace-review`** page (queue + pagination + site datalist from pipeline); nav (en/fr); **Onboarding** panel on customer detail — fee trace categories, notes, Save (syncs after step saves).
+- **API compat**: `onboarding_ops.patch_fee_trace` uses `model_dump` / `dict` for Pydantic v1/v2.
+
+### What Next Session Should Know
+- Deploy then on host: apply migration **`028_fee_trace_categories.sql`** if not already; run backfill **without** `--apply` first, then `--apply`.
+- Queue is **`GET /api/onboarding/fee-trace-queue`**; edits **`PATCH /api/onboarding/customer/{account}/fee-trace`**. Verified fee payments clear `listed_paid_missing_record` via `onboarding_fee_trace.clear_listed_missing_if_fee_verified`.
+
+## Session 2026-05-12 202605121907 (SMP 1PDB–SparkMeter cutover)
+
+### What Was Done
+- Added SMP cutover ops: `preflight_smp_cutover.py`, `rca_ls_balance_drift.py`, `repair_historical_payment_credits.py`, `cutover_ls_balances.py`, hardened `audit_ls_balances.py`, and `docs/ops/smp-1pdb-cutover.md`.
+- Ran production cutover on CC host: tagged `balance_seed` rows (`smp_cutover_2026-05-12:*`, plus `_adj` for three residual accounts); post-cutover `audit_ls_balances.py --check` clean within 0.5 kWh.
+- Enabled `cc-ls-balance-audit.timer`, set `LS_SMP_CUTOVER_AT` / `TC_IMPORT_RECONCILE_ONLY` on host, and pushed tooling to `main` (auto-deploy cc.1pwrafrica.com).
+
+### What Next Session Should Know
+- Finance sign-off CSV: `/home/ubuntu/smp_cutover_signoff.csv`; RCA: `/home/ubuntu/rca_ls_smp_all.csv`.
+- Merchant `mm:%` rows remain audit-only (13,191 rows, 0 with `kwh_value`).
+- Historical payment repair dry-run found 13,189 candidates; not applied before cutover (seeds used instead).
+
+## Session 2026-05-12 202605121504 (Merchant mobile-money export backfill)
+
+### What Was Done
+- Added `acdb-api/merchant_export_parser.py` to walk finance export trees, map M-Pesa/EcoCash headers, filter withdrawals/debits, and resolve accounts with the same Remark-first / phone-fallback rules as SMS ingest.
+- Added `scripts/ops/backfill_merchant_payments_from_exports.py` for dry-run/apply backfill into 1PDB as `source=merchant_export`, with receipt + fuzzy dedup, fee classification, auto-verified historical fee rows, and no SparkMeter credit on electricity inserts.
+- Added fixture CSVs under `scripts/ops/fixtures/merchant_exports/` plus unit tests in `acdb-api/tests/test_merchant_export_parser.py` and `acdb-api/tests/test_merchant_backfill.py`.
+
+### What Next Session Should Know
+- Dropbox finance export files on the Mac were still 0-byte placeholders at implementation time; run against fully synced exports or copy samples into the fixture folder before production apply.
+- Production apply requires `DATABASE_URL` on the CC/1PDB host: `PYTHONPATH=acdb-api python3 scripts/ops/backfill_merchant_payments_from_exports.py --root "<mobile money records>" --dry-run --report-csv /tmp/mm-backfill.csv` then `--apply` after finance sign-off.
+
 ## Session 2026-05-12 (RCA: CC ↔ ThunderCloud balance drift — circular sync bug)
 
 ### Symptom

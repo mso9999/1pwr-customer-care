@@ -62,6 +62,8 @@
     "recordPayment": "Enregistrer paiement",
     "verifyPayments": "Vérifier paiements",
     "pipeline": "Pipeline",
+    "onboardingDashboard": "Tableau d'intégration",
+    "feeTraceReview": "File suivi des frais",
     "system": "Système",
     "tables": "Tables",
     "export": "Exporter",

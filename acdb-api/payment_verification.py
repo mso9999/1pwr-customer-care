@@ -92,9 +92,11 @@ def verify_payments(body: VerificationAction, user: CurrentUser = Depends(requir
         updated = [r[0] for r in rows]
         if new_status == "verified":
             from onboarding_derive import derive_payment_steps_for_accounts
+            from onboarding_fee_trace import clear_listed_missing_if_fee_verified
 
             accounts = sorted({r[1] for r in rows if r[1]})
             derive_payment_steps_for_accounts(conn, accounts)
+            clear_listed_missing_if_fee_verified(conn, accounts)
         conn.commit()
 
     return {"updated": len(updated), "ids": updated, "status": new_status}

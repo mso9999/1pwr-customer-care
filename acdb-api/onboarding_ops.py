@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 from commission import COMMISSIONING_STEPS
 from customer_api import get_connection
 from middleware import require_employee, CurrentUser
+from onboarding_fee_trace import FEE_TRACE_CATEGORIES
 
 logger = logging.getLogger("cc-api.onboarding")
 
@@ -26,6 +27,13 @@ class OnboardingStepUpdate(BaseModel):
     step: str
     value: bool
     date: Optional[str] = None
+
+
+class FeeTracePatchRequest(BaseModel):
+    connection_fee_trace_category: Optional[str] = None
+    readyboard_fee_trace_category: Optional[str] = None
+    connection_fee_trace_note: Optional[str] = None
+    readyboard_fee_trace_note: Optional[str] = None
 
 
 class OnboardingPatchRequest(BaseModel):
@@ -101,7 +109,123 @@ def get_onboarding_status(
             "meter_serial": payload.get("meter_serial"),
             "onboarding_import_tag": payload.get("onboarding_import_tag"),
             "notes": payload.get("notes"),
+            "connection_fee_trace_category": payload.get("connection_fee_trace_category"),
+            "readyboard_fee_trace_category": payload.get("readyboard_fee_trace_category"),
+            "connection_fee_trace_note": payload.get("connection_fee_trace_note"),
+            "readyboard_fee_trace_note": payload.get("readyboard_fee_trace_note"),
+            "fee_trace_updated_at": payload.get("fee_trace_updated_at"),
+            "fee_trace_updated_by": payload.get("fee_trace_updated_by"),
         }
+
+
+def _normalize_trace_category(value: Optional[str]) -> Optional[str]:
+    if value is None or str(value).strip() == "":
+        return None
+    v = str(value).strip()
+    if v not in FEE_TRACE_CATEGORIES:
+        raise HTTPException(400, f"Invalid fee trace category: {v}")
+    return v
+
+
+@router.get("/fee-trace-queue")
+def fee_trace_queue(
+    category: str = Query("listed_paid_missing_record"),
+    site: Optional[str] = Query(None),
+    limit: int = Query(100, le=500),
+    offset: int = Query(0, ge=0),
+    user: CurrentUser = Depends(require_employee),
+):
+    if category not in FEE_TRACE_CATEGORIES:
+        raise HTTPException(400, "Invalid category filter")
+    site_clause = ""
+    params: list[Any] = [category, category]
+    if site:
+        site_clause = "AND c.community = %s"
+        params.append(site.upper())
+    params.extend([limit, offset])
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"""
+            SELECT DISTINCT ON (c.id)
+                   a.account_number, c.id AS customer_id, c.customer_id_legacy,
+                   c.first_name, c.last_name, c.community,
+                   c.connection_fee_trace_category, c.readyboard_fee_trace_category,
+                   c.connection_fee_trace_note, c.readyboard_fee_trace_note
+            FROM customers c
+            JOIN accounts a ON a.customer_id = c.id
+            WHERE (
+                c.connection_fee_trace_category = %s
+                OR c.readyboard_fee_trace_category = %s
+            ) {site_clause}
+            ORDER BY c.id, a.account_number
+            LIMIT %s OFFSET %s
+            """,
+            params,
+        )
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        cur.execute(
+            f"""
+            SELECT COUNT(DISTINCT c.id) FROM customers c
+            JOIN accounts a ON a.customer_id = c.id
+            WHERE (
+                c.connection_fee_trace_category = %s
+                OR c.readyboard_fee_trace_category = %s
+            ) {site_clause}
+            """,
+            [category, category] + ([site.upper()] if site else []),
+        )
+        total = int(cur.fetchone()[0] or 0)
+    return {"category": category, "rows": rows, "total": total, "site": site}
+
+
+@router.patch("/customer/{account_number}/fee-trace")
+def patch_fee_trace(
+    account_number: str,
+    body: FeeTracePatchRequest,
+    user: CurrentUser = Depends(require_employee),
+):
+    account_number = account_number.strip().upper()
+    if not ACCOUNT_RE.match(account_number):
+        raise HTTPException(400, "Invalid account number")
+    updates = body.model_dump(exclude_unset=True) if hasattr(body, "model_dump") else body.dict(exclude_unset=True)
+    if not updates:
+        raise HTTPException(400, "No fee trace fields to update")
+    with get_connection() as conn:
+        cur = conn.cursor()
+        customer = _customer_for_account(cur, account_number)
+        sets: list[str] = [
+            "updated_at = NOW()",
+            "updated_by = %s",
+            "fee_trace_updated_at = NOW()",
+            "fee_trace_updated_by = %s",
+        ]
+        params: list[Any] = [user.user_id, user.user_id]
+
+        for key in ("connection_fee_trace_category", "readyboard_fee_trace_category"):
+            if key not in updates:
+                continue
+            val = updates[key]
+            if val is None or (isinstance(val, str) and not str(val).strip()):
+                sets.append(f"{key} = NULL")
+            else:
+                cat = _normalize_trace_category(str(val))
+                sets.append(f"{key} = %s")
+                params.append(cat)
+        for key in ("connection_fee_trace_note", "readyboard_fee_trace_note"):
+            if key not in updates:
+                continue
+            sets.append(f"{key} = %s")
+            params.append(updates[key])
+
+        params.append(customer["id"])
+        cur.execute(
+            f"UPDATE customers SET {', '.join(sets)} WHERE id = %s",
+            params,
+        )
+        conn.commit()
+    return get_onboarding_status(account_number, user)
 
 
 @router.patch("/customer/{account_number}")

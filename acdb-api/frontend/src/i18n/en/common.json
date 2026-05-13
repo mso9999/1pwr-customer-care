@@ -63,6 +63,7 @@
     "verifyPayments": "Verify Payments",
     "pipeline": "Pipeline",
     "onboardingDashboard": "Onboarding dashboard",
+    "feeTraceReview": "Fee trace queue",
     "system": "System",
     "tables": "Tables",
     "export": "Export",

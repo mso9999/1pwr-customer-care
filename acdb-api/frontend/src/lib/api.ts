@@ -2000,6 +2000,13 @@ export interface OnboardingStepState {
   date: string | null;
 }
 
+export const FEE_TRACE_CATEGORIES = [
+  'listed_paid_missing_record',
+  'resolved_reference_linked',
+  'waived_not_required',
+  'investigating',
+] as const;
+
 export interface OnboardingCustomerStatus {
   account_number: string;
   customer_id: number;
@@ -2016,10 +2023,59 @@ export interface OnboardingCustomerStatus {
   meter_serial: string | null;
   onboarding_import_tag: string | null;
   notes: string | null;
+  connection_fee_trace_category: string | null;
+  readyboard_fee_trace_category: string | null;
+  connection_fee_trace_note: string | null;
+  readyboard_fee_trace_note: string | null;
+  fee_trace_updated_at: string | null;
+  fee_trace_updated_by: string | null;
 }
 
 export async function getOnboardingCustomerStatus(accountNumber: string): Promise<OnboardingCustomerStatus> {
   return request(`/onboarding/customer/${encodeURIComponent(accountNumber)}`);
+}
+
+export interface FeeTraceQueueRow {
+  account_number: string;
+  customer_id: number;
+  customer_id_legacy: number | null;
+  first_name: string | null;
+  last_name: string | null;
+  community: string | null;
+  connection_fee_trace_category: string | null;
+  readyboard_fee_trace_category: string | null;
+  connection_fee_trace_note: string | null;
+  readyboard_fee_trace_note: string | null;
+}
+
+export async function getFeeTraceQueue(params: {
+  category?: string;
+  site?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{ category: string; rows: FeeTraceQueueRow[]; total: number; site?: string }> {
+  const qs = new URLSearchParams();
+  if (params.category) qs.set('category', params.category);
+  if (params.site) qs.set('site', params.site);
+  if (params.limit != null) qs.set('limit', String(params.limit));
+  if (params.offset != null) qs.set('offset', String(params.offset));
+  const q = qs.toString();
+  return request(`/onboarding/fee-trace-queue${q ? `?${q}` : ''}`);
+}
+
+export async function patchOnboardingFeeTrace(
+  accountNumber: string,
+  body: {
+    connection_fee_trace_category?: string | null;
+    readyboard_fee_trace_category?: string | null;
+    connection_fee_trace_note?: string | null;
+    readyboard_fee_trace_note?: string | null;
+  },
+): Promise<OnboardingCustomerStatus> {
+  return request(`/onboarding/customer/${encodeURIComponent(accountNumber)}/fee-trace`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
 }
 
 export async function patchOnboardingCustomerStatus(
