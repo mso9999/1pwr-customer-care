@@ -17,11 +17,10 @@ import re
 from datetime import date
 from os.path import join
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 from urllib.parse import quote
 import jinja2
 import requests
-from xhtml2pdf import pisa
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +36,20 @@ MEDIA_DIR = os.path.join(_THIS_DIR, "media")
 # Jinja2 environment – loads from the templates/ directory
 _loader = jinja2.FileSystemLoader(searchpath=TEMPLATES_DIR)
 _env = jinja2.Environment(loader=_loader)
-TEMPLATE_EN = _env.get_template("template_en.html")
-TEMPLATE_SO = _env.get_template("template_so.html")
+
+# Lazy-load commission HTML templates so a missing/broken template directory
+# cannot prevent the entire FastAPI app (including /api/config, /api/health)
+# from importing. PDF generation still fails fast if templates are absent.
+_cached_commission_en: Optional[jinja2.Template] = None
+_cached_commission_so: Optional[jinja2.Template] = None
+
+
+def _commission_contract_templates() -> Tuple[jinja2.Template, jinja2.Template]:
+    global _cached_commission_en, _cached_commission_so
+    if _cached_commission_en is None:
+        _cached_commission_en = _env.get_template("template_en.html")
+        _cached_commission_so = _env.get_template("template_so.html")
+    return _cached_commission_en, _cached_commission_so
 
 # ---------------------------------------------------------------------------
 # Environment config
@@ -127,8 +138,9 @@ def generate_contract(
     }
 
     # Render HTML from templates
-    html_en = TEMPLATE_EN.render(json_data=data)
-    html_so = TEMPLATE_SO.render(json_data=data)
+    tmpl_en, tmpl_so = _commission_contract_templates()
+    html_en = tmpl_en.render(json_data=data)
+    html_so = tmpl_so.render(json_data=data)
 
     # Filenames
     safe_last = _safe_name(last_name)
@@ -158,7 +170,17 @@ def generate_contract(
 
 
 def _html_to_pdf(html_source: str, output_path: str) -> bool:
-    """Convert HTML string to PDF file using xhtml2pdf."""
+    """Convert HTML string to PDF file using xhtml2pdf.
+
+    Import xhtml2pdf lazily so a missing/broken native stack (e.g. pycairo)
+    cannot prevent the entire FastAPI app from loading; commission/financing
+    routers import this module at startup.
+    """
+    try:
+        from xhtml2pdf import pisa
+    except ImportError as exc:
+        logger.error("xhtml2pdf import failed (PDF generation unavailable): %s", exc)
+        return False
     with open(output_path, "w+b") as f:
         status = pisa.CreatePDF(src=html_source, dest=f)
     if status.err:
