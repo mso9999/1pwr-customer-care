@@ -3,6 +3,14 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-05-13 202605132400 (502: lazy xhtml2pdf import)
+
+### What Was Done
+- **`contract_gen.py`**: Removed top-level `from xhtml2pdf import pisa`; import inside `_html_to_pdf` only. `commission` / `financing` / `advances` import `contract_gen` at app load — a broken `xhtml2pdf` (or missing native deps) previously prevented **any** route from binding → Caddy **502** on `/api/config`, login, etc.
+
+### What Next Session Should Know
+- If PDF generation fails at runtime, check `journalctl` for `xhtml2pdf import failed`. Host still needs a working `xhtml2pdf` wheel for commissioning PDFs; this fix restores API availability when import alone was the failure mode.
+
 ## Session 2026-05-13 202605131200 (Cohort payment breakdown)
 
 ### What Was Done
