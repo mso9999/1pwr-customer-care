@@ -151,7 +151,7 @@ function LowBalanceKwhCard() {
   const canEdit = !!user?.role && FEE_ADMIN_ROLES.has(user.role as string);
   const [fees, setFees] = useState<CountryFees | null>(null);
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ warn: 10, clear: 20 });
+  const [draft, setDraft] = useState({ warn: 10, clear: 20, maxPerDay: 2 });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -163,6 +163,7 @@ function LowBalanceKwhCard() {
       setDraft({
         warn: data.low_balance_kwh_threshold,
         clear: data.low_balance_kwh_clear,
+        maxPerDay: data.low_balance_alert_max_per_day,
       });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -178,6 +179,7 @@ function LowBalanceKwhCard() {
       await updateCountryFees({
         low_balance_kwh_threshold: draft.warn,
         low_balance_kwh_clear: draft.clear,
+        low_balance_alert_max_per_day: draft.maxPerDay,
       });
       setSuccess(t('tariff:lowBalance.saved'));
       setTimeout(() => setSuccess(''), 4000);
@@ -233,6 +235,12 @@ function LowBalanceKwhCard() {
               {fees.low_balance_kwh_clear.toFixed(1)} <span className="text-base text-gray-400">kWh</span>
             </div>
           </div>
+          <div className="col-span-2">
+            <span className="text-xs text-gray-400 uppercase tracking-wide">{t('tariff:lowBalance.maxPerDay')}</span>
+            <div className="mt-1 text-2xl font-bold text-gray-800 tabular-nums">
+              {fees.low_balance_alert_max_per_day}
+            </div>
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-4">
@@ -258,6 +266,18 @@ function LowBalanceKwhCard() {
               className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none"
             />
           </label>
+          <label className="block col-span-2">
+            <span className="text-xs text-gray-500 uppercase tracking-wide">{t('tariff:lowBalance.maxPerDay')}</span>
+            <input
+              type="number"
+              step="1"
+              min="1"
+              max="50"
+              value={draft.maxPerDay}
+              onChange={e => setDraft({ ...draft, maxPerDay: Number(e.target.value) })}
+              className="mt-1 w-full max-w-xs px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none"
+            />
+          </label>
           <div className="col-span-2 flex justify-end gap-3 pt-1">
             <button
               type="button"
@@ -266,6 +286,7 @@ function LowBalanceKwhCard() {
                 setDraft({
                   warn: fees.low_balance_kwh_threshold,
                   clear: fees.low_balance_kwh_clear,
+                  maxPerDay: fees.low_balance_alert_max_per_day,
                 });
               }}
               className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
@@ -275,7 +296,7 @@ function LowBalanceKwhCard() {
             <button
               type="button"
               onClick={handleSave}
-              disabled={saving || draft.clear <= draft.warn}
+              disabled={saving || draft.clear <= draft.warn || draft.maxPerDay < 1}
               className="px-5 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50"
             >
               {saving ? t('tariff:modal.saving') : t('tariff:modal.save')}
@@ -285,6 +306,148 @@ function LowBalanceKwhCard() {
       )}
 
       <p className="text-xs text-gray-400 mt-3">{t('tariff:lowBalance.help')}</p>
+    </div>
+  );
+}
+
+function SmsGatewayBalanceRateCard() {
+  const { t } = useTranslation(['tariff']);
+  const { user } = useAuth();
+  const canEdit = !!user?.role && FEE_ADMIN_ROLES.has(user.role as string);
+  const [fees, setFees] = useState<CountryFees | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({ perHour: 1, perDay: 3 });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  const reload = useCallback(async () => {
+    try {
+      const data = await getCountryFees();
+      setFees(data);
+      setDraft({
+        perHour: data.sms_balance_reply_max_per_hour,
+        perDay: data.sms_balance_reply_max_per_day,
+      });
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  useEffect(() => { reload(); }, [reload]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      await updateCountryFees({
+        sms_balance_reply_max_per_hour: draft.perHour,
+        sms_balance_reply_max_per_day: draft.perDay,
+      });
+      setSuccess(t('tariff:smsGateway.saved'));
+      setTimeout(() => setSuccess(''), 4000);
+      setEditing(false);
+      reload();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!fees) return null;
+
+  return (
+    <div className="bg-white rounded-xl border p-5">
+      <div className="flex items-center justify-between mb-3">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
+            {t('tariff:smsGateway.title')}
+          </h2>
+          <p className="text-xs text-gray-400 mt-0.5">{t('tariff:smsGateway.subtitle')}</p>
+        </div>
+        {canEdit && !editing && (
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition"
+          >
+            {t('tariff:smsGateway.edit')}
+          </button>
+        )}
+      </div>
+
+      {success && (
+        <div className="mb-3 p-2 bg-green-50 border border-green-200 rounded-lg text-green-700 text-xs">{success}</div>
+      )}
+      {error && (
+        <div className="mb-3 p-2 bg-red-50 border border-red-200 rounded-lg text-red-700 text-xs">{error}</div>
+      )}
+
+      {!editing ? (
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <span className="text-xs text-gray-400 uppercase tracking-wide">{t('tariff:smsGateway.perHour')}</span>
+            <div className="mt-1 text-2xl font-bold text-gray-800 tabular-nums">{fees.sms_balance_reply_max_per_hour}</div>
+          </div>
+          <div>
+            <span className="text-xs text-gray-400 uppercase tracking-wide">{t('tariff:smsGateway.perDay')}</span>
+            <div className="mt-1 text-2xl font-bold text-gray-800 tabular-nums">{fees.sms_balance_reply_max_per_day}</div>
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-4">
+          <label className="block">
+            <span className="text-xs text-gray-500 uppercase tracking-wide">{t('tariff:smsGateway.perHour')}</span>
+            <input
+              type="number"
+              step="1"
+              min="1"
+              max="500"
+              value={draft.perHour}
+              onChange={e => setDraft({ ...draft, perHour: Number(e.target.value) })}
+              className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none"
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs text-gray-500 uppercase tracking-wide">{t('tariff:smsGateway.perDay')}</span>
+            <input
+              type="number"
+              step="1"
+              min="1"
+              max="5000"
+              value={draft.perDay}
+              onChange={e => setDraft({ ...draft, perDay: Number(e.target.value) })}
+              className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none"
+            />
+          </label>
+          <div className="col-span-2 flex justify-end gap-3 pt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setEditing(false);
+                setDraft({
+                  perHour: fees.sms_balance_reply_max_per_hour,
+                  perDay: fees.sms_balance_reply_max_per_day,
+                });
+              }}
+              className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
+            >
+              {t('tariff:modal.cancel')}
+            </button>
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving || draft.perHour < 1 || draft.perDay < 1}
+              className="px-5 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              {saving ? t('tariff:modal.saving') : t('tariff:modal.save')}
+            </button>
+          </div>
+        </div>
+      )}
+
+      <p className="text-xs text-gray-400 mt-3">{t('tariff:smsGateway.help')}</p>
     </div>
   );
 }
@@ -634,6 +797,8 @@ export default function TariffManagementPage() {
       <CountryFeesCard />
 
       <LowBalanceKwhCard />
+
+      <SmsGatewayBalanceRateCard />
 
       <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
         {([['overrides', t('tariff:tabs.overrides')], ['history', t('tariff:tabs.history')]] as const).map(([key, label]) => (

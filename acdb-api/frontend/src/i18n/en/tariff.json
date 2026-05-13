@@ -26,7 +26,17 @@
     "saved": "Low balance thresholds updated.",
     "warn": "Warn at or below (kWh)",
     "clear": "Clear alert after above (kWh)",
-    "help": "When remaining balance falls to the warn level, customers receive one SMS until they top up past the clear level. Values apply only to this country (switch country at login to edit elsewhere)."
+    "maxPerDay": "Max alerts per local day",
+    "help": "When remaining balance falls to the warn level, customers may receive low-balance SMS up to the max-per-day count (per local calendar day in this country’s timezone). Counters reset when balance rises above the clear level. Balance callback limits are configured separately below."
+  },
+  "smsGateway": {
+    "title": "SMS gateway — balance callbacks",
+    "subtitle": "Limits on GET /api/payments/gateway/balance/{account} and …/balances-by-phone (M-Pesa / PHP mirror). Uses this country’s timezone for the daily cap.",
+    "edit": "Edit",
+    "saved": "SMS gateway limits updated.",
+    "perHour": "Max lookups per hour (per account or per phone)",
+    "perDay": "Max lookups per local day",
+    "help": "When exceeded, the API returns HTTP 429 so the gateway can back off. Defaults: 1/hour, 3/day."
   },
   "tabs": {
     "overrides": "Rate Overrides",

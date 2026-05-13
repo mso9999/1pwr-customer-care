@@ -26,7 +26,17 @@
     "saved": "Seuils solde bas mis à jour.",
     "warn": "Alerter à partir de (kWh)",
     "clear": "Réinitialiser l’alerte au-dessus de (kWh)",
-    "help": "Lorsque le solde atteint le seuil d’alerte, un SMS est envoyé jusqu’à ce que le client recharge au-delà du seuil de réinitialisation. Les valeurs concernent uniquement ce pays (changez de pays à la connexion pour modifier l’autre)."
+    "maxPerDay": "Max d’alertes par jour local",
+    "help": "Lorsque le solde atteint le seuil d’alerte, jusqu’au maximum par jour calendaire local (fuseau du pays) peuvent être envoyés. Les compteurs se réinitialisent quand le solde dépasse le seuil « clear ». Les limites des callbacks solde sont réglées ci-dessous."
+  },
+  "smsGateway": {
+    "title": "Passerelle SMS — callbacks solde",
+    "subtitle": "Limites sur GET …/gateway/balance/{compte} et …/balances-by-phone (M-Pesa / miroir PHP). Le plafond journalier utilise le fuseau horaire du pays.",
+    "edit": "Modifier",
+    "saved": "Limites passerelle SMS mises à jour.",
+    "perHour": "Max requêtes par heure (par compte ou par téléphone)",
+    "perDay": "Max requêtes par jour local",
+    "help": "Au-delà, l’API renvoie HTTP 429 pour que la passerelle temporise. Défauts : 1/h, 3/j."
   },
   "tabs": {
     "overrides": "Surcharges tarifaires",

@@ -6,17 +6,22 @@ Legacy SMSComms ``customer_info.json`` / SparkMeter snapshot logic is replaced b
 - Thresholds in ``system_config`` (editable by O&M under Tariff → country fees card):
   ``low_balance_kwh_threshold``, ``low_balance_kwh_clear`` — resolved via
   ``country_fees.get_low_balance_thresholds()`` (per-country defaults in ``country_config``).
-- Per-account state: ``accounts.low_balance_alert_sent_at``
+- Max alerts per local calendar day: ``low_balance_alert_max_per_day`` (default 2),
+  ``country_fees.get_sms_rate_limit_settings()``.
+- Per-account state: ``accounts.low_balance_alert_sent_at``,
+  ``low_balance_alerts_local_date``, ``low_balance_alerts_sent_today``.
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from balance_engine import get_balance_kwh
 from country_config import COUNTRY
-from country_fees import get_low_balance_thresholds
+from country_fees import get_low_balance_thresholds, get_sms_rate_limit_settings
 from customer_api import get_connection
 from sms_outbound import send_gateway_sms
 
@@ -44,6 +49,10 @@ def low_balance_tick(conn, *, dry_run: bool = False) -> dict[str, Any]:
 
     cur = conn.cursor()
     warn_kwh, clear_kwh = get_low_balance_thresholds(conn)
+    limits = get_sms_rate_limit_settings(conn)
+    max_per_day = int(limits["low_balance_alert_max_per_day"])
+    tz = ZoneInfo(COUNTRY.timezone)
+    today_local = datetime.now(tz).date()
 
     cur.execute(
         """
@@ -53,7 +62,9 @@ def low_balance_tick(conn, *, dry_run: bool = False) -> dict[str, Any]:
                    NULLIF(TRIM(c.cell_phone_1), ''),
                    NULLIF(TRIM(c.phone), ''),
                    NULLIF(TRIM(c.cell_phone_2), '')
-               ) AS phone
+               ) AS phone,
+               a.low_balance_alerts_local_date,
+               COALESCE(a.low_balance_alerts_sent_today, 0) AS sent_today
         FROM accounts a
         JOIN customers c ON c.id = a.customer_id
         WHERE EXISTS (
@@ -67,20 +78,25 @@ def low_balance_tick(conn, *, dry_run: bool = False) -> dict[str, Any]:
     stats: dict[str, Any] = {
         "warn_kwh": warn_kwh,
         "clear_kwh": clear_kwh,
+        "low_balance_alert_max_per_day": max_per_day,
         "accounts_seen": len(rows),
         "cleared": 0,
         "sent": 0,
         "would_send": 0,
         "skipped_no_phone": 0,
-        "skipped_already_warned": 0,
+        "skipped_daily_cap": 0,
         "dry_run": dry_run,
     }
 
-    for account_number, sent_at, phone in rows:
+    for (
+        account_number,
+        sent_at,
+        phone,
+        alerts_local_date,
+        sent_today_db,
+    ) in rows:
         account_number = str(account_number).strip()
         phone_digits = "".join(c for c in str(phone or "") if c.isdigit())
-        # Require at least 8 digits (local number) — filters out
-        # placeholder values like "0" and bare country codes like "266".
         if len(phone_digits) < 8:
             stats["skipped_no_phone"] += 1
             continue
@@ -90,11 +106,16 @@ def low_balance_tick(conn, *, dry_run: bool = False) -> dict[str, Any]:
         bal_currency = bal_kwh * rate
 
         if bal_kwh >= clear_kwh:
-            if sent_at is not None:
+            if sent_at is not None or alerts_local_date is not None or (sent_today_db or 0) > 0:
                 if not dry_run:
                     cur.execute(
-                        "UPDATE accounts SET low_balance_alert_sent_at = NULL "
-                        "WHERE account_number = %s",
+                        """
+                        UPDATE accounts SET
+                            low_balance_alert_sent_at = NULL,
+                            low_balance_alerts_local_date = NULL,
+                            low_balance_alerts_sent_today = 0
+                        WHERE account_number = %s
+                        """,
                         (account_number,),
                     )
                     conn.commit()
@@ -104,8 +125,13 @@ def low_balance_tick(conn, *, dry_run: bool = False) -> dict[str, Any]:
         if bal_kwh > warn_kwh:
             continue
 
-        if sent_at is not None:
-            stats["skipped_already_warned"] += 1
+        if alerts_local_date is None or alerts_local_date != today_local:
+            effective_sent_today = 0
+        else:
+            effective_sent_today = int(sent_today_db or 0)
+
+        if effective_sent_today >= max_per_day:
+            stats["skipped_daily_cap"] += 1
             continue
 
         msg = format_alert_message(account_number, bal_kwh, round(bal_currency, 2))
@@ -114,18 +140,28 @@ def low_balance_tick(conn, *, dry_run: bool = False) -> dict[str, Any]:
             logger.info("dry-run: would SMS %s (%s)", account_number, phone)
             continue
 
-        ok = send_gateway_sms(phone, msg, sms_type="balance",
-                              account_number=account_number,
-                              trigger="low_balance_alert")
+        ok = send_gateway_sms(
+            phone_digits,
+            msg,
+            sms_type="balance",
+            account_number=account_number,
+            trigger="low_balance_alert",
+        )
         if ok:
+            new_count = effective_sent_today + 1
             cur.execute(
-                "UPDATE accounts SET low_balance_alert_sent_at = NOW() "
-                "WHERE account_number = %s",
-                (account_number,),
+                """
+                UPDATE accounts SET
+                    low_balance_alert_sent_at = NOW(),
+                    low_balance_alerts_local_date = %s,
+                    low_balance_alerts_sent_today = %s
+                WHERE account_number = %s
+                """,
+                (today_local, new_count, account_number),
             )
             conn.commit()
             stats["sent"] += 1
         else:
-            logger.warning("SMS send failed for %s — not marking sent_at", account_number)
+            logger.warning("SMS send failed for %s — not updating counters", account_number)
 
     return stats

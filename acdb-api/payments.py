@@ -41,6 +41,12 @@ from payment_verification import create_verification_entry
 from middleware import require_employee
 from models import CurrentUser
 from mutations import try_log_mutation
+from sms_gateway_balance_rate import (
+    balance_gateway_rate_key_for_account,
+    balance_gateway_rate_key_for_phone,
+    enforce_balance_gateway_rate_limit,
+    record_balance_gateway_request,
+)
 
 logger = logging.getLogger("cc-api.payments")
 
@@ -712,9 +718,21 @@ def get_balance_for_sms_gateway(
 
     Use from **SMSComms** / gateway PHP when sending balance SMS so customer-facing
     text matches Customer Care (1PDB), not Koios/ThunderCloud snapshots.
+
+    Rate-limited per account (rolling hour + local calendar day); see
+    ``system_config`` keys ``sms_balance_reply_max_per_hour`` /
+    ``sms_balance_reply_max_per_day`` (defaults 1 / 3).
     """
+    rate_key = balance_gateway_rate_key_for_account(account_number)
     try:
-        return _balance_payload(account_number)
+        with get_connection() as conn:
+            enforce_balance_gateway_rate_limit(conn, rate_key)
+            payload = _balance_payload_for_conn(conn, account_number)
+            record_balance_gateway_request(conn, rate_key)
+            conn.commit()
+        return payload
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Gateway balance query failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -734,18 +752,28 @@ def get_balances_by_phone_for_sms_gateway(
     Use instead of ThunderCloud ``getCustomersByPhoneNumber`` when ``receive.php`` drops
     a callback file containing only the sender phone (see SMSComms ``processed_callback_files``).
     Response mirrors multiple-household cases: one SMS per account or a concatenated message in PHP.
+
+    Rate-limited per normalized handset (same keys as ``/gateway/balance/{account}`` policy).
     """
+    rate_key = balance_gateway_rate_key_for_phone(phone)
     try:
         with get_connection() as conn:
+            enforce_balance_gateway_rate_limit(conn, rate_key)
             accounts = _account_numbers_for_phone(conn, phone)
             if not accounts:
+                record_balance_gateway_request(conn, rate_key)
+                conn.commit()
                 return {
                     "phone": phone,
                     "accounts": [],
                     "error": "no_customer",
                 }
             balances = [_balance_payload_for_conn(conn, acct) for acct in accounts]
+            record_balance_gateway_request(conn, rate_key)
+            conn.commit()
             return {"phone": phone, "accounts": balances, "count": len(balances)}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Gateway balances-by-phone failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))

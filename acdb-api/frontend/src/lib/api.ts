@@ -2676,6 +2676,12 @@ export interface CountryFees {
   low_balance_kwh_threshold: number;
   /** Reset “already warned” after balance rises above this kWh. */
   low_balance_kwh_clear: number;
+  /** Max GET /api/payments/gateway/balance* per account (or per phone) per rolling hour. */
+  sms_balance_reply_max_per_hour: number;
+  /** Max same per local calendar day (country timezone). */
+  sms_balance_reply_max_per_day: number;
+  /** Max low-balance SMS per account per local calendar day. */
+  low_balance_alert_max_per_day: number;
   currency: string;
   currency_symbol: string;
   country_code: string;
@@ -2689,7 +2695,13 @@ export async function updateCountryFees(
   payload: Partial<
     Pick<
       CountryFees,
-      'connection_fee_amount' | 'readyboard_fee_amount' | 'low_balance_kwh_threshold' | 'low_balance_kwh_clear'
+      | 'connection_fee_amount'
+      | 'readyboard_fee_amount'
+      | 'low_balance_kwh_threshold'
+      | 'low_balance_kwh_clear'
+      | 'sms_balance_reply_max_per_hour'
+      | 'sms_balance_reply_max_per_day'
+      | 'low_balance_alert_max_per_day'
     >
   >
 ): Promise<CountryFees> {
