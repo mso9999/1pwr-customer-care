@@ -363,7 +363,19 @@ def compute_financing_split(conn, account_number: str, amount: float) -> Dict[st
             LIMIT 1
         """, (account_number,))
     except psycopg2.Error as exc:
-        if getattr(exc, "pgcode", None) == "42P01":
+        err = (getattr(exc, "pgerror", None) or str(exc) or "").lower().replace("\u2019", "'")
+        undefined = (
+            getattr(exc, "pgcode", None) == "42P01"
+            or (
+                "financing_agreements" in err
+                and (
+                    "does not exist" in err
+                    or "undefined_table" in err
+                    or "n'existe pas" in err
+                )
+            )
+        )
+        if undefined:
             logger.info(
                 "financing_agreements not present (%s) — skipping financing split for %s",
                 str(exc).strip(),
