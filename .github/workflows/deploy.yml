@@ -30,15 +30,28 @@ jobs:
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -T 30 -H ${{ secrets.EC2_LINUX_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+          # Keep long deploy steps (migrations, pip) from dying with "Broken pipe" when
+          # the TCP session is idle behind NAT / load balancers (GitHub runner → EC2).
+          cat >> ~/.ssh/config <<EOF
+          Host cc-deploy-ec2
+            HostName ${{ secrets.EC2_LINUX_HOST }}
+            User ubuntu
+            IdentityFile ~/.ssh/deploy_key
+            StrictHostKeyChecking accept-new
+            ServerAliveInterval 15
+            ServerAliveCountMax 240
+            TCPKeepAlive yes
+            ConnectTimeout 30
+          EOF
 
       - name: Deploy frontend to Linux EC2
         run: |
-          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_LINUX_HOST }} "sudo rm -rf /opt/cc-portal/frontend/*"
+          ssh cc-deploy-ec2 "sudo rm -rf /opt/cc-portal/frontend/*"
           rsync -avz --delete \
-            -e "ssh -i ~/.ssh/deploy_key" \
+            -e "ssh -F ~/.ssh/config cc-deploy-ec2" \
             acdb-api/frontend/dist/ \
-            ubuntu@${{ secrets.EC2_LINUX_HOST }}:/tmp/cc-frontend/
-          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_LINUX_HOST }} \
+            cc-deploy-ec2:/tmp/cc-frontend/
+          ssh cc-deploy-ec2 \
             "sudo cp -r /tmp/cc-frontend/* /opt/cc-portal/frontend/ && sudo chown -R root:root /opt/cc-portal/frontend/ && rm -rf /tmp/cc-frontend"
           echo "Frontend deployed to Linux EC2"
 
@@ -64,6 +77,17 @@ jobs:
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -T 30 -H ${{ secrets.EC2_LINUX_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
+          cat >> ~/.ssh/config <<EOF
+          Host cc-deploy-ec2
+            HostName ${{ secrets.EC2_LINUX_HOST }}
+            User ubuntu
+            IdentityFile ~/.ssh/deploy_key
+            StrictHostKeyChecking accept-new
+            ServerAliveInterval 15
+            ServerAliveCountMax 240
+            TCPKeepAlive yes
+            ConnectTimeout 30
+          EOF
 
       # Install the HR Portal credentials as a systemd drop-in for both API
       # services. Previously the backend called /api/employees/lookup with no
@@ -85,11 +109,11 @@ jobs:
           Environment="HR_PORTAL_URL=$HR_PORTAL_URL"
           Environment="HR_PORTAL_API_KEY=$HR_PORTAL_API_KEY"
           EOF
-          scp -i ~/.ssh/deploy_key /tmp/hr-api.conf \
-            ubuntu@${{ secrets.EC2_LINUX_HOST }}:/tmp/hr-api.conf
+          scp -F ~/.ssh/config /tmp/hr-api.conf \
+            cc-deploy-ec2:/tmp/hr-api.conf
           # Iterate over services that exist on this host. ZM (1pdb-api-zm) is
           # optional — only install the drop-in if the unit is present.
-          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_LINUX_HOST }} '
+          ssh -F ~/.ssh/config cc-deploy-ec2 '
             set -e
             for svc in 1pdb-api 1pdb-api-bn 1pdb-api-zm; do
               if systemctl list-unit-files | grep -q "^${svc}\.service"; then
@@ -121,13 +145,13 @@ jobs:
             --exclude='firebase-service-account.json' \
             --exclude='*.pyc' \
             --exclude='*.ldb' \
-            -e "ssh -i ~/.ssh/deploy_key" \
+            -e "ssh -F ~/.ssh/config cc-deploy-ec2" \
             acdb-api/ \
-            ubuntu@${{ secrets.EC2_LINUX_HOST }}:/tmp/cc-backend/
+            cc-deploy-ec2:/tmp/cc-backend/
 
           # Move to final location and set permissions
           # Script is POSIX sh (no `local`) so it works if SSH uses /bin/sh (dash).
-          ssh -i ~/.ssh/deploy_key ubuntu@${{ secrets.EC2_LINUX_HOST }} << 'DEPLOY_SCRIPT'
+          ssh -F ~/.ssh/config cc-deploy-ec2 << 'DEPLOY_SCRIPT'
             sudo rsync -a /tmp/cc-backend/ /opt/cc-portal/backend/
             sudo chown -R cc_api:cc_api /opt/cc-portal/backend/
             rm -rf /tmp/cc-backend
