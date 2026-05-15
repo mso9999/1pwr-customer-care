@@ -1,9 +1,12 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { recordManualPayment, type RecordPaymentResult } from '../lib/api';
+import { useCountry } from '../contexts/CountryContext';
 
 export default function RecordPaymentPage() {
   const { t } = useTranslation(['recordPayment', 'common']);
+  const { country, config } = useCountry();
+  const isBn = country === 'BN';
   const [form, setForm] = useState({
     account_number: '',
     amount: '',
@@ -26,7 +29,11 @@ export default function RecordPaymentPage() {
       return;
     }
     if (!form.payment_reference.trim()) {
-      setError(t('recordPayment:validation.paymentRefRequired'));
+      setError(
+        isBn
+          ? t('recordPayment:validation.paymentRefRequiredMomo')
+          : t('recordPayment:validation.paymentRefRequired'),
+      );
       return;
     }
     setSubmitting(true);
@@ -70,12 +77,18 @@ export default function RecordPaymentPage() {
         </label>
 
         <label className="block">
-          <span className="text-sm font-medium text-gray-700">{t('recordPayment:fields.paymentReference')}</span>
+          <span className="text-sm font-medium text-gray-700">
+            {isBn ? t('recordPayment:fields.paymentReferenceMomo') : t('recordPayment:fields.paymentReference')}
+          </span>
           <input
             type="text"
             value={form.payment_reference}
             onChange={e => setForm({ ...form, payment_reference: e.target.value })}
-            placeholder={t('recordPayment:fields.paymentReferencePlaceholder')}
+            placeholder={
+              isBn
+                ? t('recordPayment:fields.paymentReferencePlaceholderMomo')
+                : t('recordPayment:fields.paymentReferencePlaceholder')
+            }
             className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none font-mono"
             required
             autoComplete="off"
@@ -84,7 +97,9 @@ export default function RecordPaymentPage() {
         </label>
 
         <label className="block">
-          <span className="text-sm font-medium text-gray-700">{t('recordPayment:fields.amount')}</span>
+          <span className="text-sm font-medium text-gray-700">
+            {isBn ? t('recordPayment:fields.amountCfa') : t('recordPayment:fields.amount')}
+          </span>
           <input
             type="number"
             step="0.01"
@@ -139,7 +154,11 @@ export default function RecordPaymentPage() {
             </div>
             <div>
               <span className="text-gray-500">{t('recordPayment:success.amount')}</span>
-              <p className="font-medium">M {result.amount?.toFixed(2)}</p>
+              <p className="font-medium">
+                {isBn
+                  ? `${config?.currency_symbol || 'CFA'} ${result.amount != null ? Number(result.amount).toLocaleString('fr-BJ', { maximumFractionDigits: 0 }) : ''}`
+                  : `M ${result.amount?.toFixed(2)}`}
+              </p>
             </div>
             <div>
               <span className="text-gray-500">{t('recordPayment:success.kwhVended')}</span>
@@ -153,11 +172,19 @@ export default function RecordPaymentPage() {
               <>
                 <div>
                   <span className="text-gray-500">{t('recordPayment:success.electricityPortion')}</span>
-                  <p className="font-medium text-blue-700">M {result.financing.electricity_portion?.toFixed(2)}</p>
+                  <p className="font-medium text-blue-700">
+                    {isBn
+                      ? `${config?.currency_symbol || 'CFA'} ${result.financing.electricity_portion?.toFixed(0)}`
+                      : `M ${result.financing.electricity_portion?.toFixed(2)}`}
+                  </p>
                 </div>
                 <div>
                   <span className="text-gray-500">{t('recordPayment:success.debtPortion')}</span>
-                  <p className="font-medium text-amber-700">M {result.financing.debt_portion?.toFixed(2)}</p>
+                  <p className="font-medium text-amber-700">
+                    {isBn
+                      ? `${config?.currency_symbol || 'CFA'} ${result.financing.debt_portion?.toFixed(0)}`
+                      : `M ${result.financing.debt_portion?.toFixed(2)}`}
+                  </p>
                 </div>
               </>
             )}

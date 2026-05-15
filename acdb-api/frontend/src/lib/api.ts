@@ -1007,9 +1007,12 @@ export interface UGPConnection {
 }
 
 export async function listUGPConnections(site: string) {
-  return request<{ site: string; count: number; connections: UGPConnection[] }>(
-    `/sync/connections?site=${encodeURIComponent(site)}`,
-  );
+  return request<{
+    site: string;
+    ugp_registry_key?: string;
+    count: number;
+    connections: UGPConnection[];
+  }>(`/sync/connections?site=${encodeURIComponent(site)}`);
 }
 
 export interface SplitConnectionRequest {

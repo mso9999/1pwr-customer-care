@@ -18,6 +18,7 @@ import json
 import logging
 import math
 import os
+import re
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -1445,6 +1446,57 @@ def upsert_site_project(
 # Auto-discover projects from uGridPLAN
 # ---------------------------------------------------------------------------
 
+def _ugp_discover_match_site(
+    candidate_lower: str,
+    name_to_code: dict[str, str],
+    site_abbrev: dict[str, str],
+) -> Optional[str]:
+    """Map a uGrid project ``code`` or ``name`` string to a CC ``site_code``.
+
+    Naïve substring rules used to mis-map uGrid codes like ``sin`` onto Lesotho
+    site **TOS** because ``"sin"`` is a substring of the full name ``"tosing"``.
+    Short alphabetic tokens (≤4 letters) must match with token boundaries; longer
+    names may still use substring containment.
+    """
+    if not candidate_lower:
+        return None
+
+    up = candidate_lower.strip().upper()
+    if up in site_abbrev:
+        return up
+
+    if candidate_lower in name_to_code:
+        return name_to_code[candidate_lower]
+
+    def _short_alpha(s: str) -> bool:
+        s = s.strip()
+        return 1 <= len(s) <= 4 and s.isalpha()
+
+    def _token_match(needle: str, haystack: str) -> bool:
+        if not needle or not haystack:
+            return False
+        pat = r"(?<![A-Za-z0-9])" + re.escape(needle) + r"(?![A-Za-z0-9])"
+        return bool(re.search(pat, haystack, flags=re.IGNORECASE))
+
+    for known_name, code in name_to_code.items():
+        if not known_name:
+            continue
+        if known_name in candidate_lower:
+            if _short_alpha(known_name):
+                if not _token_match(known_name, candidate_lower):
+                    continue
+            return code
+        if _short_alpha(candidate_lower):
+            if known_name.startswith(candidate_lower):
+                return code
+            if _token_match(candidate_lower, known_name):
+                return code
+        elif candidate_lower in known_name:
+            return code
+
+    return None
+
+
 @router.post("/discover")
 def discover_projects(user: CurrentUser = Depends(require_employee)):
     """
@@ -1476,23 +1528,10 @@ def discover_projects(user: CurrentUser = Depends(require_employee)):
         proj_code = proj.get("code", "")
         proj_portfolio = proj.get("portfolio", "")
 
-        # Try to match project name/code to a site code
         site_code = None
         for candidate in [proj_code, proj_name]:
-            candidate_lower = candidate.lower().strip()
-            # Direct match on code (e.g. "MAK")
-            if candidate_lower.upper() in SITE_ABBREV:
-                site_code = candidate_lower.upper()
-                break
-            # Match on full name (e.g. "Ha Makebe")
-            if candidate_lower in name_to_code:
-                site_code = name_to_code[candidate_lower]
-                break
-            # Partial match: check if any known name is contained in the project name
-            for known_name, code in name_to_code.items():
-                if known_name in candidate_lower or candidate_lower in known_name:
-                    site_code = code
-                    break
+            candidate_lower = (candidate or "").lower().strip()
+            site_code = _ugp_discover_match_site(candidate_lower, name_to_code, SITE_ABBREV)
             if site_code:
                 break
 
@@ -1556,11 +1595,40 @@ def list_connections(
         )
 
     project_name = row["project_id"]
+    loaded_registry_key = str(project_name).strip()
 
     try:
         client = _get_ugp_client()
-        session_id = _load_project_for_site(client, project_name)
+        session_id = _load_project_for_site(client, loaded_registry_key)
         raw = client.get_connections(session_id)
+    except RuntimeError as first_err:
+        # Recover from bad cc_site_projects rows (e.g. discover substring bug:
+        # uGrid code "sin" was stored for TOS because "sin" ⊂ "tosing").
+        alt = site.upper()
+        if alt and alt != loaded_registry_key.upper():
+            try:
+                client = _get_ugp_client()
+                session_id = _load_project_for_site(client, alt)
+                raw = client.get_connections(session_id)
+                loaded_registry_key = alt
+                logger.warning(
+                    "uGridPLAN connections: site %s stored project_id %r failed (%s); "
+                    "loaded registry key %r instead",
+                    site.upper(),
+                    project_name,
+                    first_err,
+                    alt,
+                )
+            except Exception as second_err:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"uGridPLAN fetch failed: {first_err}",
+                ) from second_err
+        else:
+            raise HTTPException(
+                status_code=502,
+                detail=f"uGridPLAN fetch failed: {first_err}",
+            ) from first_err
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"uGridPLAN fetch failed: {e}")
 
@@ -1625,6 +1693,7 @@ def list_connections(
 
     return {
         "site": site.upper(),
+        "ugp_registry_key": loaded_registry_key,
         "count": len(connections),
         "connections": connections,
     }

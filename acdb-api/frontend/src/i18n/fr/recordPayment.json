@@ -3,9 +3,12 @@
   "fields": {
     "accountNumber": "Numéro de compte",
     "paymentReference": "Reçu M-Pesa / ID de transaction",
+    "paymentReferenceMomo": "Reçu MTN MoMo / ID de transaction",
     "paymentReferencePlaceholder": "ex. 08D4LT8BWS57",
+    "paymentReferencePlaceholderMomo": "ex. référence MoMo (SMS de confirmation)",
     "paymentReferenceHint": "Obligatoire. Un même reçu ne peut pas être utilisé deux fois — évite les doubles crédits.",
     "amount": "Montant (M)",
+    "amountCfa": "Montant (CFA)",
     "debtHint": "Le chiffre des unités 1 ou 9 indique un paiement dédié à la dette.",
     "meterId": "ID compteur (facultatif)",
     "note": "Note (facultatif)"
@@ -26,6 +29,7 @@
   "validation": {
     "accountRequired": "Le numéro de compte est requis",
     "paymentRefRequired": "Le reçu M-Pesa / ID de transaction est requis",
+    "paymentRefRequiredMomo": "Le reçu MTN MoMo / ID de transaction est requis",
     "amountRequired": "Le montant est requis",
     "amountPositive": "Le montant doit être positif"
   },

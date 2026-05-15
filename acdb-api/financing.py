@@ -23,6 +23,7 @@ from contract_gen import (
 
 import jinja2
 import os
+import psycopg2
 
 logger = logging.getLogger("cc-api.financing")
 
@@ -347,15 +348,35 @@ def compute_financing_split(conn, account_number: str, amount: float) -> Dict[st
         electricity_portion: float (amount for electricity/SM credit)
         agreement_id: int or None
         is_dedicated_payment: bool (True if amount ends in 1 or 9)
+
+    If ``financing_agreements`` is not deployed on this database (e.g. Benin
+    ``onepower_bj``), returns ``has_financing=False`` so payment recording still
+    works — all amount goes to electricity portion for split callers.
     """
     cur = conn.cursor()
-    cur.execute("""
-        SELECT id, outstanding_balance, repayment_fraction
-        FROM financing_agreements
-        WHERE account_number = %s AND status = 'active'
-        ORDER BY created_at ASC
-        LIMIT 1
-    """, (account_number,))
+    try:
+        cur.execute("""
+            SELECT id, outstanding_balance, repayment_fraction
+            FROM financing_agreements
+            WHERE account_number = %s AND status = 'active'
+            ORDER BY created_at ASC
+            LIMIT 1
+        """, (account_number,))
+    except psycopg2.Error as exc:
+        if getattr(exc, "pgcode", None) == "42P01":
+            logger.info(
+                "financing_agreements not present (%s) — skipping financing split for %s",
+                str(exc).strip(),
+                account_number,
+            )
+            return {
+                "has_financing": False,
+                "debt_portion": 0.0,
+                "electricity_portion": amount,
+                "agreement_id": None,
+                "is_dedicated_payment": False,
+            }
+        raise
     row = cur.fetchone()
 
     if not row:

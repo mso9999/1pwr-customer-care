@@ -76,28 +76,39 @@ function UGPConnectionPicker({ sites, onSelect, onClose }: UGPPickerProps) {
   const { t } = useTranslation(['newCustomer', 'common']);
   const [site, setSite] = useState('');
   const [connections, setConnections] = useState<UGPConnection[]>([]);
+  const [ugpRegistryKey, setUgpRegistryKey] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
 
   useEffect(() => {
-    if (!site) { setConnections([]); return; }
+    if (!site) { setConnections([]); setUgpRegistryKey(''); return; }
     setLoading(true);
     setError('');
     listUGPConnections(site)
-      .then(d => setConnections(d.connections || []))
+      .then(d => {
+        setConnections(d.connections || []);
+        setUgpRegistryKey(d.ugp_registry_key || '');
+      })
       .catch(e => setError(e.message || 'Failed to load connections'))
       .finally(() => setLoading(false));
   }, [site]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return connections;
-    const q = search.toLowerCase();
+    const q = search.toLowerCase().trim();
+    const qShort = q.length <= 4 && /^[a-z0-9]+$/i.test(q);
+    const tokenMatch = (field: string) => {
+      const f = field.toLowerCase();
+      if (!qShort) return f.includes(q);
+      const re = new RegExp(`(^|[^a-z0-9])${q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^a-z0-9]|$)`, 'i');
+      return re.test(f);
+    };
     return connections.filter(c =>
-      c.survey_id.toLowerCase().includes(q) ||
-      c.customer_type.toLowerCase().includes(q) ||
-      c.customer_code.toLowerCase().includes(q) ||
-      c.status.toLowerCase().includes(q)
+      tokenMatch(c.survey_id) ||
+      tokenMatch(c.customer_type) ||
+      tokenMatch(c.customer_code) ||
+      tokenMatch(c.status)
     );
   }, [connections, search]);
 
@@ -178,6 +189,12 @@ function UGPConnectionPicker({ sites, onSelect, onClose }: UGPPickerProps) {
             <option value="">{t('newCustomer:ugp.selectSite')}</option>
             {sites.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
+
+          {ugpRegistryKey && !error && (
+            <p className="mt-1.5 text-xs text-gray-500">
+              uGrid registry key: <span className="font-mono text-gray-700">{ugpRegistryKey}</span>
+            </p>
+          )}
 
           {connections.length > 0 && (
             <input
