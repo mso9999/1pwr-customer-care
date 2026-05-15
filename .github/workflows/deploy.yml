@@ -166,13 +166,34 @@ jobs:
             # Do NOT run 001–009 here: legacy ops are one-time DBA/ops.
             # Use postgres OS user + local DB name: cc_api is not table owner (ALTER fails).
             MIG_DIR=/opt/cc-portal/backend/migrations
+            ensure_migration_log() {
+              _db="$1"
+              sudo -u postgres psql -d "$_db" -v ON_ERROR_STOP=1 <<'SQL'
+            CREATE TABLE IF NOT EXISTS cc_schema_migrations (
+              filename TEXT PRIMARY KEY,
+              applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+            );
+            SQL
+            }
             apply_incremental() {
               _db="$1"
+              ensure_migration_log "$_db"
               INCR=$(find "$MIG_DIR" -maxdepth 1 -name '0[1-9][0-9]_*.sql' -type f | sort -V)
               for f in $INCR; do
                 [ -f "$f" ] || continue
-                echo "Applying $(basename "$f") to database $_db..."
-                sudo -u postgres psql -d "$_db" -v ON_ERROR_STOP=1 -f "$f" || exit 1
+                base=$(basename "$f")
+                if sudo -u postgres psql -d "$_db" -tAc \
+                  "SELECT 1 FROM cc_schema_migrations WHERE filename = '$base'" | grep -q 1; then
+                  echo "Skipping $base on $_db (already recorded in cc_schema_migrations)"
+                  continue
+                fi
+                echo "Applying $base to database $_db..."
+                # Fail fast if ALTER TABLE is blocked (012 hung ~2h and SSH died with broken pipe).
+                sudo -u postgres psql -d "$_db" -v ON_ERROR_STOP=1 \
+                  -c "SET lock_timeout = '120s';" \
+                  -f "$f" || exit 1
+                sudo -u postgres psql -d "$_db" -v ON_ERROR_STOP=1 \
+                  -c "INSERT INTO cc_schema_migrations (filename) VALUES ('$base')"
               done
             }
             apply_incremental onepower_cc
