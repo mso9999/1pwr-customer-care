@@ -32,23 +32,24 @@ jobs:
           ssh-keyscan -T 30 -H ${{ secrets.EC2_LINUX_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
           # Keep long deploy steps (migrations, pip) from dying with "Broken pipe" when
           # the TCP session is idle behind NAT / load balancers (GitHub runner → EC2).
-          cat >> ~/.ssh/config <<EOF
-          Host cc-deploy-ec2
-            HostName ${{ secrets.EC2_LINUX_HOST }}
-            User ubuntu
-            IdentityFile ~/.ssh/deploy_key
-            StrictHostKeyChecking accept-new
-            ServerAliveInterval 15
-            ServerAliveCountMax 240
-            TCPKeepAlive yes
-            ConnectTimeout 30
-          EOF
+          # (Tilde is not expanded inside double quotes — use $HOME for rsync -e "ssh -F …".)
+          {
+            echo 'Host cc-deploy-ec2'
+            echo "  HostName ${{ secrets.EC2_LINUX_HOST }}"
+            echo '  User ubuntu'
+            echo "  IdentityFile $HOME/.ssh/deploy_key"
+            echo '  StrictHostKeyChecking accept-new'
+            echo '  ServerAliveInterval 15'
+            echo '  ServerAliveCountMax 240'
+            echo '  TCPKeepAlive yes'
+            echo '  ConnectTimeout 30'
+          } >> ~/.ssh/config
 
       - name: Deploy frontend to Linux EC2
         run: |
           ssh cc-deploy-ec2 "sudo rm -rf /opt/cc-portal/frontend/*"
           rsync -avz --delete \
-            -e "ssh -F ~/.ssh/config cc-deploy-ec2" \
+            -e "ssh -F $HOME/.ssh/config cc-deploy-ec2" \
             acdb-api/frontend/dist/ \
             cc-deploy-ec2:/tmp/cc-frontend/
           ssh cc-deploy-ec2 \
@@ -77,17 +78,17 @@ jobs:
           echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -T 30 -H ${{ secrets.EC2_LINUX_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
-          cat >> ~/.ssh/config <<EOF
-          Host cc-deploy-ec2
-            HostName ${{ secrets.EC2_LINUX_HOST }}
-            User ubuntu
-            IdentityFile ~/.ssh/deploy_key
-            StrictHostKeyChecking accept-new
-            ServerAliveInterval 15
-            ServerAliveCountMax 240
-            TCPKeepAlive yes
-            ConnectTimeout 30
-          EOF
+          {
+            echo 'Host cc-deploy-ec2'
+            echo "  HostName ${{ secrets.EC2_LINUX_HOST }}"
+            echo '  User ubuntu'
+            echo "  IdentityFile $HOME/.ssh/deploy_key"
+            echo '  StrictHostKeyChecking accept-new'
+            echo '  ServerAliveInterval 15'
+            echo '  ServerAliveCountMax 240'
+            echo '  TCPKeepAlive yes'
+            echo '  ConnectTimeout 30'
+          } >> ~/.ssh/config
 
       # Install the HR Portal credentials as a systemd drop-in for both API
       # services. Previously the backend called /api/employees/lookup with no
@@ -104,16 +105,16 @@ jobs:
             echo "SKIP: HR_PORTAL_API_KEY not set in GH secrets — backend lookup_employee() will fail"
             exit 0
           fi
-          cat > /tmp/hr-api.conf <<EOF
-          [Service]
-          Environment="HR_PORTAL_URL=$HR_PORTAL_URL"
-          Environment="HR_PORTAL_API_KEY=$HR_PORTAL_API_KEY"
-          EOF
-          scp -F ~/.ssh/config /tmp/hr-api.conf \
+          {
+            echo '[Service]'
+            echo "Environment=\"HR_PORTAL_URL=$HR_PORTAL_URL\""
+            echo "Environment=\"HR_PORTAL_API_KEY=$HR_PORTAL_API_KEY\""
+          } > /tmp/hr-api.conf
+          scp -F "$HOME/.ssh/config" /tmp/hr-api.conf \
             cc-deploy-ec2:/tmp/hr-api.conf
           # Iterate over services that exist on this host. ZM (1pdb-api-zm) is
           # optional — only install the drop-in if the unit is present.
-          ssh -F ~/.ssh/config cc-deploy-ec2 '
+          ssh -F "$HOME/.ssh/config" cc-deploy-ec2 '
             set -e
             for svc in 1pdb-api 1pdb-api-bn 1pdb-api-zm; do
               if systemctl list-unit-files | grep -q "^${svc}\.service"; then
@@ -145,13 +146,13 @@ jobs:
             --exclude='firebase-service-account.json' \
             --exclude='*.pyc' \
             --exclude='*.ldb' \
-            -e "ssh -F ~/.ssh/config cc-deploy-ec2" \
+            -e "ssh -F $HOME/.ssh/config cc-deploy-ec2" \
             acdb-api/ \
             cc-deploy-ec2:/tmp/cc-backend/
 
           # Move to final location and set permissions
           # Script is POSIX sh (no `local`) so it works if SSH uses /bin/sh (dash).
-          ssh -F ~/.ssh/config cc-deploy-ec2 << 'DEPLOY_SCRIPT'
+          ssh -F "$HOME/.ssh/config" cc-deploy-ec2 << 'DEPLOY_SCRIPT'
             sudo rsync -a /tmp/cc-backend/ /opt/cc-portal/backend/
             sudo chown -R cc_api:cc_api /opt/cc-portal/backend/
             rm -rf /tmp/cc-backend
@@ -168,12 +169,8 @@ jobs:
             MIG_DIR=/opt/cc-portal/backend/migrations
             ensure_migration_log() {
               _db="$1"
-              sudo -u postgres psql -d "$_db" -v ON_ERROR_STOP=1 <<'SQL'
-            CREATE TABLE IF NOT EXISTS cc_schema_migrations (
-              filename TEXT PRIMARY KEY,
-              applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-            );
-            SQL
+              sudo -u postgres psql -d "$_db" -v ON_ERROR_STOP=1 -c \
+                "CREATE TABLE IF NOT EXISTS cc_schema_migrations (filename TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now());"
             }
             apply_incremental() {
               _db="$1"
