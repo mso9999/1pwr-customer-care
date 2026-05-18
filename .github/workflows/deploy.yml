@@ -190,6 +190,8 @@ jobs:
                 "INSERT INTO cc_schema_migrations (filename) SELECT '011_backfill_customer_commissioned_from_service_date.sql' WHERE EXISTS (SELECT 1 FROM cc_schema_migrations WHERE filename = '010_customers_commissioning_contract_flags.sql') ON CONFLICT (filename) DO NOTHING;"
               sudo -u postgres psql -d "$_db" -v ON_ERROR_STOP=1 -c \
                 "INSERT INTO cc_schema_migrations (filename) SELECT '012_prototype_meter_firmware_version.sql' WHERE EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'prototype_meter_state' AND column_name = 'firmware_version') ON CONFLICT (filename) DO NOTHING;"
+              sudo -u postgres psql -d "$_db" -v ON_ERROR_STOP=1 -c \
+                "INSERT INTO cc_schema_migrations (filename) SELECT '015_billing_meter_priority.sql' WHERE EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'accounts' AND column_name = 'billing_meter_priority') ON CONFLICT (filename) DO NOTHING;"
             }
             apply_incremental() {
               _db="$1"
@@ -206,16 +208,35 @@ jobs:
                 fi
                 echo "Applying $base to database $_db..."
                 # Fail fast if ALTER TABLE is blocked (012 hung ~2h and SSH died with broken pipe).
-                sudo -u postgres psql -d "$_db" -v ON_ERROR_STOP=1 \
+                if ! sudo -u postgres psql -d "$_db" -v ON_ERROR_STOP=1 \
                   -c "SET lock_timeout = '120s';" \
-                  -f "$f" || exit 1
+                  -f "$f"; then
+                  return 1
+                fi
                 sudo -u postgres psql -d "$_db" -v ON_ERROR_STOP=1 \
                   -c "INSERT INTO cc_schema_migrations (filename) VALUES ('$base')"
               done
+              return 0
             }
-            apply_incremental onepower_cc
+            restart_api_services() {
+              for svc in 1pdb-api 1pdb-api-bn 1pdb-api-zm; do
+                if systemctl list-unit-files | grep -q "^${svc}\.service"; then
+                  sudo systemctl restart "$svc"
+                  echo "Restarted ${svc}"
+                else
+                  echo "Skipping ${svc} restart (unit not present)"
+                fi
+              done
+            }
+
+            # Restart with new code before migrations so a migration lock does not
+            # leave production on stale Python while files on disk are updated.
+            restart_api_services
+
+            MIG_FAILED=0
+            apply_incremental onepower_cc || MIG_FAILED=1
             if sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='onepower_bj'" 2>/dev/null | grep -q 1; then
-              apply_incremental onepower_bj
+              apply_incremental onepower_bj || MIG_FAILED=1
             else
               echo "Skipping onepower_bj (database not present on this host)"
             fi
@@ -223,20 +244,14 @@ jobs:
             # docs/sop-add-new-country.md). Apply migrations only if the DB
             # exists; the unit / Caddy route are stood up by ops separately.
             if sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='onepower_zm'" 2>/dev/null | grep -q 1; then
-              apply_incremental onepower_zm
+              apply_incremental onepower_zm || MIG_FAILED=1
             else
               echo "Skipping onepower_zm (database not present on this host)"
             fi
-
-            # Restart API services that exist on this host (LS :8100, BN :8101, optional ZM :8102).
-            for svc in 1pdb-api 1pdb-api-bn 1pdb-api-zm; do
-              if systemctl list-unit-files | grep -q "^${svc}\.service"; then
-                sudo systemctl restart "$svc"
-                echo "Restarted ${svc}"
-              else
-                echo "Skipping ${svc} restart (unit not present)"
-              fi
-            done
+            if [ "$MIG_FAILED" -ne 0 ]; then
+              echo "WARNING: one or more migrations failed (APIs already restarted)"
+              exit 1
+            fi
 
             # Install SMS gateway reconciliation timer (runs every 15 min).
             SYSD=/opt/cc-portal/backend/systemd
