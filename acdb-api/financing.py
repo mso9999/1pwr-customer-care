@@ -29,6 +29,26 @@ logger = logging.getLogger("cc-api.financing")
 
 router = APIRouter(prefix="/api/financing", tags=["financing"])
 
+
+def _financing_tables_exist(cursor) -> bool:
+    """True when asset-financing schema is deployed (Lesotho); Benin may omit it."""
+    cursor.execute(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.tables "
+        "WHERE table_schema = 'public' AND table_name = 'financing_agreements')"
+    )
+    row = cursor.fetchone()
+    return bool(row and row[0])
+
+
+def _no_financing_split(amount: float) -> Dict[str, Any]:
+    return {
+        "has_financing": False,
+        "debt_portion": 0.0,
+        "electricity_portion": amount,
+        "agreement_id": None,
+        "is_dedicated_payment": False,
+    }
+
 _loader = jinja2.FileSystemLoader(searchpath=TEMPLATES_DIR)
 _env = jinja2.Environment(loader=_loader)
 
@@ -354,41 +374,20 @@ def compute_financing_split(conn, account_number: str, amount: float) -> Dict[st
     works — all amount goes to electricity portion for split callers.
     """
     cur = conn.cursor()
-    try:
-        cur.execute("""
-            SELECT id, outstanding_balance, repayment_fraction
-            FROM financing_agreements
-            WHERE account_number = %s AND status = 'active'
-            ORDER BY created_at ASC
-            LIMIT 1
-        """, (account_number,))
-    except psycopg2.Error as exc:
-        err = (getattr(exc, "pgerror", None) or str(exc) or "").lower().replace("\u2019", "'")
-        undefined = (
-            getattr(exc, "pgcode", None) == "42P01"
-            or (
-                "financing_agreements" in err
-                and (
-                    "does not exist" in err
-                    or "undefined_table" in err
-                    or "n'existe pas" in err
-                )
-            )
+    if not _financing_tables_exist(cur):
+        logger.debug(
+            "financing_agreements not deployed — all of payment to electricity for %s",
+            account_number,
         )
-        if undefined:
-            logger.info(
-                "financing_agreements not present (%s) — skipping financing split for %s",
-                str(exc).strip(),
-                account_number,
-            )
-            return {
-                "has_financing": False,
-                "debt_portion": 0.0,
-                "electricity_portion": amount,
-                "agreement_id": None,
-                "is_dedicated_payment": False,
-            }
-        raise
+        return _no_financing_split(amount)
+
+    cur.execute("""
+        SELECT id, outstanding_balance, repayment_fraction
+        FROM financing_agreements
+        WHERE account_number = %s AND status = 'active'
+        ORDER BY created_at ASC
+        LIMIT 1
+    """, (account_number,))
     row = cur.fetchone()
 
     if not row:

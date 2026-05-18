@@ -109,6 +109,16 @@ def _column_exists(cursor, table_name: str, column_name: str) -> bool:
     return bool(row and row[0])
 
 
+def _matview_exists(cursor, matview_name: str) -> bool:
+    cursor.execute(
+        "SELECT EXISTS (SELECT 1 FROM pg_matviews "
+        "WHERE schemaname = 'public' AND matviewname = %s)",
+        (matview_name,),
+    )
+    row = cursor.fetchone()
+    return bool(row and row[0])
+
+
 def _row_to_dict(cursor, row) -> Dict[str, Any]:
     columns = [desc[0] for desc in cursor.description]
     return {col: val for col, val in zip(columns, row)}
@@ -281,6 +291,31 @@ def customer_record_completeness(user: CurrentUser = Depends(require_employee)):
                 "data_as_of": None,
                 "record_source": "hourly_consumption",
                 "note": "The hourly_consumption table is unavailable in this environment.",
+            }
+
+        if not _matview_exists(cursor, "mv_hourly_account_summary"):
+            return {
+                "rows": [],
+                "totals": empty_totals,
+                "data_as_of": None,
+                "record_source": "hourly_consumption",
+                "note": (
+                    "Hourly record completeness is not configured for this country database "
+                    "(mv_hourly_account_summary missing). Lesotho uses migration 007; Benin can "
+                    "enable it after REFRESH via scripts/ops/refresh_hourly_summary.sh."
+                ),
+            }
+
+        if not _table_exists(cursor, "monthly_transactions"):
+            return {
+                "rows": [],
+                "totals": empty_totals,
+                "data_as_of": None,
+                "record_source": "hourly_consumption",
+                "note": (
+                    "monthly_transactions is unavailable; customer-record completeness "
+                    "requires commissioning windows from that table."
+                ),
             }
 
         has_customer_type = _column_exists(cursor, "customers", "customer_type")
