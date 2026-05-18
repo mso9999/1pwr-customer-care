@@ -184,31 +184,12 @@ jobs:
               _db="$1"
               # Avoid re-running 010–012 when schema already matches (prevents lock_timeout
               # on every deploy after cc_schema_migrations was introduced).
-              sudo -u postgres psql -d "$_db" -v ON_ERROR_STOP=1 <<'EOSQL'
-            INSERT INTO cc_schema_migrations (filename)
-            SELECT '010_customers_commissioning_contract_flags.sql'
-            WHERE EXISTS (
-              SELECT 1 FROM information_schema.columns
-              WHERE table_schema = 'public' AND table_name = 'customers'
-                AND column_name = 'customer_commissioned'
-            )
-            ON CONFLICT (filename) DO NOTHING;
-            INSERT INTO cc_schema_migrations (filename)
-            SELECT '011_backfill_customer_commissioned_from_service_date.sql'
-            WHERE EXISTS (
-              SELECT 1 FROM cc_schema_migrations
-              WHERE filename = '010_customers_commissioning_contract_flags.sql'
-            )
-            ON CONFLICT (filename) DO NOTHING;
-            INSERT INTO cc_schema_migrations (filename)
-            SELECT '012_prototype_meter_firmware_version.sql'
-            WHERE EXISTS (
-              SELECT 1 FROM information_schema.columns
-              WHERE table_schema = 'public' AND table_name = 'prototype_meter_state'
-                AND column_name = 'firmware_version'
-            )
-            ON CONFLICT (filename) DO NOTHING;
-            EOSQL
+              sudo -u postgres psql -d "$_db" -v ON_ERROR_STOP=1 -c \
+                "INSERT INTO cc_schema_migrations (filename) SELECT '010_customers_commissioning_contract_flags.sql' WHERE EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'customers' AND column_name = 'customer_commissioned') ON CONFLICT (filename) DO NOTHING;"
+              sudo -u postgres psql -d "$_db" -v ON_ERROR_STOP=1 -c \
+                "INSERT INTO cc_schema_migrations (filename) SELECT '011_backfill_customer_commissioned_from_service_date.sql' WHERE EXISTS (SELECT 1 FROM cc_schema_migrations WHERE filename = '010_customers_commissioning_contract_flags.sql') ON CONFLICT (filename) DO NOTHING;"
+              sudo -u postgres psql -d "$_db" -v ON_ERROR_STOP=1 -c \
+                "INSERT INTO cc_schema_migrations (filename) SELECT '012_prototype_meter_firmware_version.sql' WHERE EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'prototype_meter_state' AND column_name = 'firmware_version') ON CONFLICT (filename) DO NOTHING;"
             }
             apply_incremental() {
               _db="$1"
