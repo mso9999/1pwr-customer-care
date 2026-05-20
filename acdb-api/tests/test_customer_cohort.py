@@ -112,18 +112,16 @@ class TestQueryBuilder(unittest.TestCase):
         count_sql, count_params = _build_query(q, count_only=True)
         self.assertEqual(count_sql.count("%s"), len(count_params))
 
-    def test_threshold_params_come_first(self):
-        """The two fee_threshold %s appear inside the CTE SELECT before any
-        sites/customer_type/search placeholders, so they must be at the head
-        of the params tuple."""
+    def test_threshold_params_follow_scoped_filters(self):
+        """After scoped-CTE refactor, site/type/search placeholders precede the
+        two fee_threshold %s inside the cohort CASE expression."""
         q = CohortQuery(filters=CohortFilters(country="LS"))
+        sites = _resolve_sites("LS", None)
         _, params = _build_query(q, count_only=False)
-        # First two params are numeric (the threshold), not a site code.
-        self.assertIsInstance(params[0], (int, float))
-        self.assertIsInstance(params[1], (int, float))
-        self.assertEqual(params[0], params[1])
-        # Third param is a site code (string).
-        self.assertIsInstance(params[2], str)
+        n_sites = len(sites)
+        self.assertIsInstance(params[0], str)
+        self.assertEqual(params[n_sites], params[n_sites + 1])
+        self.assertIsInstance(params[n_sites], (int, float))
 
     def test_status_filter_adds_in_clause(self):
         q = CohortQuery(

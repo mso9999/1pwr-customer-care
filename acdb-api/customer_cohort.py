@@ -486,16 +486,13 @@ def _build_query(
         status_clause = f"AND cohort_status IN ({ph})"
 
     # Build params in *exact SQL placeholder order*:
-    #   1-2. fee_threshold (two %s inside the CTE's CASE expression)
-    #   3+.  sites      (WHERE c.community IN (...))
-    #   ...  ct_clause  (AND UPPER(TRIM(c.customer_type)) IN (...))
-    #   ...  search     (AND ... ILIKE ...)
-    #   ...  status_clause (outer WHERE cohort_status IN (...))
-    #   last LIMIT, OFFSET — appended by the page-select branch below.
-    params: list = [fee_threshold, fee_threshold]
-    params.extend(sites)
+    #   scoped CTE: sites, customer types, search
+    #   cohort CTE: fee_threshold (two %s in CASE cohort_status)
+    #   outer SELECT: statuses, LIMIT/OFFSET
+    params: list = list(sites)
     params.extend(ct_params)
     params.extend(search_params)
+    params.extend([fee_threshold, fee_threshold])
 
     if extended_cohort:
         if cursor is None:
