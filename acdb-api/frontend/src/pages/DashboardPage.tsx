@@ -75,7 +75,15 @@ export default function DashboardPage() {
         statsMap.set(s.site, s);
       }
 
-      const merged: SiteRow[] = (sitesResp.sites || []).map(s => {
+      const selectedCountry = (country || '').toUpperCase();
+      const showAllCountries = !selectedCountry || selectedCountry === 'ALL';
+
+      const countryAwareSites = (sitesResp.sites || []).filter((s) => {
+        if (showAllCountries) return true;
+        return (s.country || '').toUpperCase() === selectedCountry;
+      });
+
+      const merged: SiteRow[] = countryAwareSites.map(s => {
         const stat = statsMap.get(s.concession);
         return {
           concession: s.concession,

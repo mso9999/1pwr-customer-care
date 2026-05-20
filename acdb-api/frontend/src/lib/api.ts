@@ -943,7 +943,10 @@ export async function downloadProgramConnections(code: string, milestone?: strin
 // ---------------------------------------------------------------------------
 
 export async function listSites() {
-  return request<{ sites: { concession: string; customer_count: number }[]; total_sites: number }>('/sites');
+  return request<{
+    sites: { concession: string; customer_count: number; country?: string | null }[];
+    total_sites: number;
+  }>('/sites');
 }
 
 export interface NextAccountPreview {
