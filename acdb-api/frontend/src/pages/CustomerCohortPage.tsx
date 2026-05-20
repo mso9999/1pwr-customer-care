@@ -165,10 +165,9 @@ function MultiSelect({
 
 export default function CustomerCohortPage() {
   const { t } = useTranslation(['customerCohort', 'common']);
-  const { country, config } = useCountry();
+  const { country, setCountry, config } = useCountry();
 
   // Filter state
-  const [filterCountry, setFilterCountry] = useState(country);
   const [filterSites, setFilterSites] = useState<string[]>([]);
   const [filterTypes, setFilterTypes] = useState<string[]>([]);
   const [filterStatuses, setFilterStatuses] = useState<string[]>([]);
@@ -186,12 +185,11 @@ export default function CustomerCohortPage() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    setFilterCountry(country);
     setFilterSites([]);
   }, [country]);
 
   // Reset to page 1 when filters change
-  useEffect(() => { setPage(1); }, [filterCountry, filterSites, filterTypes, filterStatuses, search]);
+  useEffect(() => { setPage(1); }, [country, filterSites, filterTypes, filterStatuses, search]);
 
   const runQuery = useCallback(async () => {
     setLoading(true);
@@ -199,7 +197,7 @@ export default function CustomerCohortPage() {
     try {
       const res = await queryCustomerCohort({
         filters: {
-          country: filterCountry || undefined,
+          country: country || undefined,
           sites: filterSites.length ? filterSites : undefined,
           customer_types: filterTypes.length ? filterTypes : undefined,
           statuses: filterStatuses.length ? (filterStatuses as CohortStatus[]) : undefined,
@@ -217,7 +215,7 @@ export default function CustomerCohortPage() {
     } finally {
       setLoading(false);
     }
-  }, [filterCountry, filterSites, filterTypes, filterStatuses, search, sortBy, sortDir, page, t]);
+  }, [country, filterSites, filterTypes, filterStatuses, search, sortBy, sortDir, page, t]);
 
   useEffect(() => { void runQuery(); }, [runQuery]);
 
@@ -312,8 +310,8 @@ export default function CustomerCohortPage() {
             <span className="text-xs text-gray-500">{t('country')}</span>
             <select
               className="mt-1 block w-full rounded border-gray-300 text-sm"
-              value={filterCountry}
-              onChange={(e) => { setFilterCountry(e.target.value); setFilterSites([]); }}
+              value={country}
+              onChange={(e) => { setCountry(e.target.value); setFilterSites([]); }}
             >
               <option value="LS">Lesotho</option>
               <option value="BN">Benin</option>

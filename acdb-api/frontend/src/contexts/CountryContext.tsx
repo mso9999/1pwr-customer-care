@@ -92,6 +92,7 @@ export function CountryProvider({ children }: { children: ReactNode }) {
   // ── Fetch country config from CC backend when country changes ──
   useEffect(() => {
     setLoading(true);
+    setConfig(null);
     fetch(`${apiBase}/config`)
       .then((r) => r.json())
       .then((data: CountryConfig) => {
