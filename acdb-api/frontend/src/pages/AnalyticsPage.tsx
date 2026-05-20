@@ -1,6 +1,6 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useCountry } from '../contexts/CountryContext';
+import { useCountry, COUNTRY_ROUTES, type CountryConfig } from '../contexts/CountryContext';
 import {
   getAnalyticsMetrics,
   runAnalyticsQuery,
@@ -184,6 +184,7 @@ export default function AnalyticsPage() {
   const [filterCountry, setFilterCountry] = useState(country);
   const [filterSites, setFilterSites] = useState<string[]>([]);
   const [filterCustomerTypes, setFilterCustomerTypes] = useState<string[]>([]);
+  const [countrySites, setCountrySites] = useState<Record<string, Record<string, string>>>({});
   const [filterDateFrom, setFilterDateFrom] = useState('2020-01-01');
   const [filterDateTo, setFilterDateTo] = useState(
     new Date().toISOString().slice(0, 10),
@@ -202,6 +203,35 @@ export default function AnalyticsPage() {
   useEffect(() => {
     setFilterCountry(country);
   }, [country]);
+
+  // Keep a local cache of site maps by country code so the site picker
+  // follows the analytics filter country (not just the global app country).
+  useEffect(() => {
+    if (!config?.sites || !country) return;
+    setCountrySites((prev) => ({ ...prev, [country]: config.sites }));
+  }, [country, config]);
+
+  useEffect(() => {
+    if (!filterCountry) return;
+    if (countrySites[filterCountry]) return;
+
+    const routeBase = COUNTRY_ROUTES[filterCountry] || '/api';
+    const token = localStorage.getItem('cc_token') || '';
+    const headers: Record<string, string> = token
+      ? { Authorization: `Bearer ${token}` }
+      : {};
+
+    fetch(`${routeBase}/config`, { headers })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json() as Promise<CountryConfig>;
+      })
+      .then((cfg) => {
+        if (!cfg?.sites) return;
+        setCountrySites((prev) => ({ ...prev, [filterCountry]: cfg.sites }));
+      })
+      .catch(() => {});
+  }, [filterCountry, countrySites]);
 
   // Metric selection
   const [selectedMetrics, setSelectedMetrics] = useState<Set<string>>(new Set());
@@ -313,9 +343,9 @@ export default function AnalyticsPage() {
 
   // Site / type options
   const siteOptions = useMemo(() => {
-    if (!config?.sites) return [];
-    return Object.entries(config.sites).map(([code, name]) => ({ code, label: `${code} — ${name}` }));
-  }, [config]);
+    const sitesForCountry = countrySites[filterCountry] || {};
+    return Object.entries(sitesForCountry).map(([code, name]) => ({ code, label: `${code} — ${name}` }));
+  }, [countrySites, filterCountry]);
 
   const customerTypeOptions = useMemo(() => {
     return (catalog?.customer_types || []).map((ct) => ({ code: ct, label: ct }));
