@@ -238,6 +238,85 @@ def _resolve_fee_threshold(country: Optional[str]) -> float:
     return 1.0
 
 
+def _column_exists(cursor, table_name: str, column_name: str) -> bool:
+    cursor.execute(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns "
+        "WHERE table_schema = 'public' AND table_name = %s AND column_name = %s)",
+        (table_name, column_name),
+    )
+    row = cursor.fetchone()
+    return bool(row and row[0])
+
+
+def _cohort_core_select() -> str:
+    """Projection for paginated list UI (must match outer SELECT and sort keys)."""
+    return """
+                c.id AS customer_id,
+                c.first_name,
+                c.last_name,
+                c.phone,
+                c.community AS site,
+                COALESCE(NULLIF(UPPER(TRIM(c.customer_type)), ''), 'UNKNOWN') AS customer_type,
+                c.date_service_connected,
+                c.date_service_terminated,
+                c.payment_status_override,
+                a.account_number,
+                COALESCE(pt.total_paid, 0)::numeric AS total_paid,
+                COALESCE(pt.payments_connection_fee, 0)::numeric AS payments_connection_fee,
+                COALESCE(pt.payments_readyboard_fee, 0)::numeric AS payments_readyboard_fee,
+                COALESCE(pt.payments_fee_repayment_via_electricity, 0)::numeric
+                    AS payments_fee_repayment_via_electricity,
+                COALESCE(pt.payments_electricity, 0)::numeric AS payments_electricity,
+                CASE
+                    WHEN c.date_service_terminated IS NOT NULL THEN 'terminated'
+                    WHEN COALESCE(pt.total_paid, 0) <= 0
+                         OR c.payment_status_override = 'not_paid'
+                        THEN 'not_paid'
+                    WHEN (c.payment_status_override = 'fully_paid'
+                          OR COALESCE(pt.total_paid, 0) >= %s)
+                         AND c.date_service_connected IS NOT NULL
+                        THEN 'fully_paid_connected'
+                    WHEN (c.payment_status_override = 'fully_paid'
+                          OR COALESCE(pt.total_paid, 0) >= %s)
+                         AND c.date_service_connected IS NULL
+                        THEN 'fully_paid_not_connected'
+                    WHEN c.date_service_connected IS NOT NULL
+                        THEN 'partially_paid_connected'
+                    ELSE 'partially_paid_not_connected'
+                END AS cohort_status"""
+
+
+# (table, column, sql expression, NULL fallback type) for CSV export only.
+_COHORT_EXPORT_EXTRA: List[Tuple[str, str, str, str]] = [
+    ("customers", "middle_name", "c.middle_name", "text"),
+    ("customers", "gender", "c.gender", "text"),
+    ("customers", "gps_lat", "c.gps_lat", "double precision"),
+    ("customers", "gps_lon", "c.gps_lon", "double precision"),
+    ("customers", "plot_number", "c.plot_number", "text"),
+    ("customers", "national_id", "c.national_id", "text"),
+    ("customers", "cell_phone_1", "c.cell_phone_1", "text"),
+    ("customers", "cell_phone_2", "c.cell_phone_2", "text"),
+    ("customers", "email", "c.email", "text"),
+    ("customers", "customer_id_legacy", "c.customer_id_legacy", "text"),
+    ("customers", "customer_commissioned", "c.customer_commissioned", "boolean"),
+    ("customers", "customer_commissioned_date", "c.customer_commissioned_date", "date"),
+    ("customers", "contract_signed", "c.contract_signed", "boolean"),
+    ("customers", "contract_signed_date", "c.contract_signed_date", "date"),
+    ("accounts", "survey_id", "a.survey_id", "text"),
+]
+
+
+def _cohort_extended_select(cursor) -> str:
+    """Export cohort projection: core columns plus optional attrs (NULL if missing)."""
+    parts = [_cohort_core_select().strip()]
+    for table, col, expr, null_type in _COHORT_EXPORT_EXTRA:
+        if _column_exists(cursor, table, col):
+            parts.append(expr)
+        else:
+            parts.append(f"NULL::{null_type} AS {col}")
+    return ",\n                ".join(parts)
+
+
 def _expand_customer_types(types: Optional[List[str]]) -> List[str]:
     """Same HH → HH1/2/3 expansion as analytics.py."""
     if not types:
@@ -252,8 +331,15 @@ def _expand_customer_types(types: Optional[List[str]]) -> List[str]:
     return out
 
 
-def _build_query(q: CohortQuery, *, count_only: bool) -> Tuple[str, list]:
-    """Return ``(sql, params)`` for either the page select or its count."""
+def _build_query(
+    q: CohortQuery,
+    *,
+    count_only: bool,
+    cursor=None,
+    extended_cohort: bool = False,
+    export_columns: Optional[List[str]] = None,
+) -> Tuple[str, list]:
+    """Return ``(sql, params)`` for count, paginated list, or CSV export."""
     f = q.filters
     sites = _resolve_sites(f.country, f.sites)
     fee_threshold = _resolve_fee_threshold(f.country)
@@ -296,6 +382,13 @@ def _build_query(q: CohortQuery, *, count_only: bool) -> Tuple[str, list]:
     params.extend(ct_params)
     params.extend(search_params)
 
+    if extended_cohort:
+        if cursor is None:
+            raise ValueError("extended_cohort requires a database cursor")
+        cohort_body = _cohort_extended_select(cursor)
+    else:
+        cohort_body = _cohort_core_select().strip()
+
     base_cte = f"""
         WITH paid_totals AS (
             SELECT a.customer_id,
@@ -331,54 +424,7 @@ def _build_query(q: CohortQuery, *, count_only: bool) -> Tuple[str, list]:
         ),
         cohort AS (
             SELECT
-                c.id AS customer_id,
-                c.first_name,
-                c.middle_name,
-                c.last_name,
-                c.phone,
-                c.community AS site,
-                COALESCE(NULLIF(UPPER(TRIM(c.customer_type)), ''), 'UNKNOWN') AS customer_type,
-                c.date_service_connected,
-                c.date_service_terminated,
-                c.payment_status_override,
-                c.gender,
-                c.gps_lat,
-                c.gps_lon,
-                c.plot_number,
-                c.national_id,
-                c.cell_phone_1,
-                c.cell_phone_2,
-                c.email,
-                c.customer_id_legacy,
-                c.customer_commissioned,
-                c.customer_commissioned_date,
-                c.contract_signed,
-                c.contract_signed_date,
-                a.account_number,
-                a.survey_id,
-                COALESCE(pt.total_paid, 0)::numeric AS total_paid,
-                COALESCE(pt.payments_connection_fee, 0)::numeric AS payments_connection_fee,
-                COALESCE(pt.payments_readyboard_fee, 0)::numeric AS payments_readyboard_fee,
-                COALESCE(pt.payments_fee_repayment_via_electricity, 0)::numeric
-                    AS payments_fee_repayment_via_electricity,
-                COALESCE(pt.payments_electricity, 0)::numeric AS payments_electricity,
-                CASE
-                    WHEN c.date_service_terminated IS NOT NULL THEN 'terminated'
-                    WHEN COALESCE(pt.total_paid, 0) <= 0
-                         OR c.payment_status_override = 'not_paid'
-                        THEN 'not_paid'
-                    WHEN (c.payment_status_override = 'fully_paid'
-                          OR COALESCE(pt.total_paid, 0) >= %s)
-                         AND c.date_service_connected IS NOT NULL
-                        THEN 'fully_paid_connected'
-                    WHEN (c.payment_status_override = 'fully_paid'
-                          OR COALESCE(pt.total_paid, 0) >= %s)
-                         AND c.date_service_connected IS NULL
-                        THEN 'fully_paid_not_connected'
-                    WHEN c.date_service_connected IS NOT NULL
-                        THEN 'partially_paid_connected'
-                    ELSE 'partially_paid_not_connected'
-                END AS cohort_status
+                {cohort_body}
             FROM customers c
             LEFT JOIN accounts a ON a.customer_id = c.id
             LEFT JOIN paid_totals pt ON pt.customer_id = c.id
@@ -394,9 +440,23 @@ def _build_query(q: CohortQuery, *, count_only: bool) -> Tuple[str, list]:
             params.extend(statuses)
         return sql, params
 
-    # Sort
     sort_col = _SORT_COLS.get(q.sort_by, _SORT_COLS["site"])
     sort_dir = "DESC" if (q.sort_dir or "").lower() == "desc" else "ASC"
+
+    if export_columns:
+        select_parts = [_EXPORT_SELECT[c]["sql"] for c in export_columns]
+        sql = base_cte + f"""
+        SELECT {", ".join(select_parts)}
+        FROM cohort
+        WHERE 1=1 {status_clause}
+        ORDER BY {sort_col} {sort_dir} NULLS LAST, customer_id ASC
+        LIMIT %s
+    """
+        if statuses:
+            params.extend(statuses)
+        params.append(EXPORT_MAX_ROWS)
+        return sql, params
+
     page = max(1, int(q.page or 1))
     page_size = max(1, min(500, int(q.page_size or 50)))
     offset = (page - 1) * page_size
@@ -420,38 +480,22 @@ def _build_query(q: CohortQuery, *, count_only: bool) -> Tuple[str, list]:
     return sql, params
 
 
-def _build_export_query(q: CohortExportRequest, columns: List[str]) -> Tuple[str, list]:
+def _build_export_query(
+    q: CohortExportRequest, columns: List[str], cursor,
+) -> Tuple[str, list]:
     """All matching rows (capped at EXPORT_MAX_ROWS) with selected export columns."""
     base = CohortQuery(
         filters=q.filters,
         sort_by=q.sort_by,
         sort_dir=q.sort_dir,
-        page=1,
-        page_size=EXPORT_MAX_ROWS,
     )
-    sql, params = _build_query(base, count_only=False)
-    # Replace paginated SELECT with dynamic export projection (same params).
-    select_parts = [_EXPORT_SELECT[c]["sql"] for c in columns]
-    sort_col = _SORT_COLS.get(q.sort_by, _SORT_COLS["site"])
-    sort_dir = "DESC" if (q.sort_dir or "").lower() == "desc" else "ASC"
-    f = q.filters
-    statuses = [s for s in (f.statuses or []) if s in COHORT_STATUSES]
-    status_clause = ""
-    if statuses:
-        ph = ",".join(["%s"] * len(statuses))
-        status_clause = f"AND cohort_status IN ({ph})"
-    # Drop trailing LIMIT/OFFSET (last two params).
-    if len(params) >= 2:
-        params = params[:-2]
-    export_sql = sql.rsplit("SELECT", 1)[0]
-    export_sql += (
-        f"SELECT {', '.join(select_parts)} FROM cohort "
-        f"WHERE 1=1 {status_clause} "
-        f"ORDER BY {sort_col} {sort_dir} NULLS LAST, customer_id ASC "
-        f"LIMIT %s"
+    return _build_query(
+        base,
+        count_only=False,
+        cursor=cursor,
+        extended_cohort=True,
+        export_columns=columns,
     )
-    params.append(EXPORT_MAX_ROWS)
-    return export_sql, params
 
 
 def _format_cohort_row(d: Dict[str, Any]) -> Dict[str, Any]:
@@ -543,9 +587,10 @@ def query_cohort(
             cur.execute(sql, tuple(params))
             for r in cur.fetchall():
                 rows.append(_format_cohort_row(_row_to_dict(cur, r)))
-        except Exception:
+        except Exception as exc:
             logger.exception("Cohort query failed")
-            raise HTTPException(500, "Cohort query failed")
+            detail = getattr(exc, "pgerror", None) or str(exc)
+            raise HTTPException(500, f"Cohort query failed: {detail}")
 
     sites_resolved = _resolve_sites(q.filters.country, q.filters.sites)
     return {
@@ -579,7 +624,6 @@ def export_cohort(
     if not columns:
         raise HTTPException(400, "No export columns selected")
 
-    sql, params = _build_export_query(body, columns)
     count_q = CohortQuery(filters=body.filters, sort_by=body.sort_by, sort_dir=body.sort_dir)
     count_sql, count_params = _build_query(count_q, count_only=True)
 
@@ -595,12 +639,14 @@ def export_cohort(
             total = int(cur.fetchone()[0] or 0)
             truncated = total > EXPORT_MAX_ROWS
 
+            sql, params = _build_export_query(body, columns, cur)
             cur.execute(sql, tuple(params))
             for r in cur.fetchall():
                 rows.append(_format_cohort_row(_row_to_dict(cur, r)))
-        except Exception:
+        except Exception as exc:
             logger.exception("Cohort export failed")
-            raise HTTPException(500, "Cohort export failed")
+            detail = getattr(exc, "pgerror", None) or str(exc)
+            raise HTTPException(500, f"Cohort export failed: {detail}")
 
     return {
         "rows": rows,

@@ -238,16 +238,30 @@ class TestExportColumns(unittest.TestCase):
         self.assertNotIn("not_a_column", cols)
 
     def test_export_sql_includes_extra_attributes(self):
+        class _MockCursor:
+            def execute(self, *_args, **_kwargs):
+                pass
+
+            def fetchone(self):
+                return (True,)
+
         body = CohortExportRequest(
             filters=CohortFilters(country="LS"),
             columns=["gender", "gps_lat", "gps_lon"],
         )
         cols = _resolve_export_columns(body.columns)
-        sql, params = _build_export_query(body, cols)
+        sql, params = _build_export_query(body, cols, _MockCursor())
         self.assertIn("gender", sql)
         self.assertIn("gps_lat", sql)
+        self.assertNotIn("c.middle_name", sql.split("cohort AS")[0])
         self.assertIn("LIMIT %s", sql)
         self.assertEqual(params[-1], 50_000)
+
+    def test_list_query_omits_optional_export_columns(self):
+        q = CohortQuery(filters=CohortFilters(country="LS"))
+        sql, _ = _build_query(q, count_only=False)
+        self.assertNotIn("c.middle_name", sql)
+        self.assertNotIn("c.gender", sql)
 
 
 class TestFeeThreshold(unittest.TestCase):
