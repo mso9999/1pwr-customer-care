@@ -12,6 +12,7 @@ import {
   type InferredPaymentStatus, type PaymentProof,
 } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
+import { useCountry } from '../contexts/CountryContext';
 import SignatureCapture from '../components/SignatureCapture';
 import OnboardingStepsPanel from '../components/OnboardingStepsPanel';
 
@@ -289,6 +290,7 @@ export default function CustomerDetailPage() {
   const [selectedCohortOverride, setSelectedCohortOverride] = useState('');
   const [cohortOverrideSaving, setCohortOverrideSaving] = useState(false);
   const { canWrite, canWriteCustomers, isSuperadmin, user } = useAuth();
+  const { config } = useCountry();
   const { t } = useTranslation(['customerDetail', 'customerCohort', 'common']);
   const navigate = useNavigate();
 
@@ -509,6 +511,12 @@ export default function CustomerDetailPage() {
 
   const fields = Object.keys(record);
   const displayTitle = accountNumber || urlParam || '';
+  const siteCode = String(
+    record['community']
+      ?? displayTitle.match(/[A-Za-z]{2,4}$/)?.[0]
+      ?? '',
+  ).toUpperCase();
+  const siteName = (siteCode && config?.sites?.[siteCode]) ? config.sites[siteCode] : '';
   const connectedVal = record['date_service_connected'];
   const terminatedVal = record['date_service_terminated'];
   const commissionedField = record['customer_commissioned'];
@@ -521,7 +529,16 @@ export default function CustomerDetailPage() {
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
         <div className="flex items-center gap-3 min-w-0">
-          <h1 className="text-xl sm:text-2xl font-bold text-gray-800 truncate">{t('customerDetail:title', { id: displayTitle })}</h1>
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold text-gray-800 truncate">
+              {t('customerDetail:title', { id: displayTitle })}
+            </h1>
+            {siteCode && (
+              <p className="text-xs text-gray-500 mt-0.5 truncate">
+                {siteName ? `${siteCode} — ${siteName}` : siteCode}
+              </p>
+            )}
+          </div>
           {isTerminated && (
             <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-medium rounded-full shrink-0">{t('common:terminated')}</span>
           )}

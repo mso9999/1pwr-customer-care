@@ -470,6 +470,7 @@ METRIC_CATALOG: Dict[str, Dict[str, Any]] = {
 # ---------------------------------------------------------------------------
 
 _CUSTOMER_TYPES = [
+    "HH",
     "HH1", "HH2", "HH3", "SME", "CHU", "SCH", "HC",
     "GOV", "COM", "IND", "SCP", "REL", "AGR", "CLI", "PUE",
     "HCF", "OTH",
@@ -524,18 +525,22 @@ def _build_query(metric_id: str, filters: Dict[str, Any], group_by: str) -> Tupl
     ct_clause = ""
     ct_params: list = []
     if ctypes:
-        # Expand "HH" → HH1, HH2, HH3 (same as om_report._matches_customer_type)
+        # Expand household aliases both ways.
+        # Some countries still store legacy "HH", while others use HH1/HH2/HH3.
         expanded: List[str] = []
         for ct in ctypes:
             ct_upper = ct.upper().strip()
             if ct_upper == "HH":
-                expanded.extend(["HH1", "HH2", "HH3"])
+                expanded.extend(["HH", "HH1", "HH2", "HH3"])
+            elif ct_upper in ("HH1", "HH2", "HH3"):
+                expanded.extend([ct_upper, "HH"])
             else:
                 expanded.append(ct_upper)
         if expanded:
-            ph = ",".join(["%s"] * len(expanded))
+            deduped: List[str] = list(dict.fromkeys(expanded))
+            ph = ",".join(["%s"] * len(deduped))
             ct_clause = f"AND UPPER(TRIM(c.customer_type)) IN ({ph})"
-            ct_params = expanded
+            ct_params = deduped
 
     # --- date range ---
     # Snapshot metrics (funnel, customer counts) don't use date filters in their
