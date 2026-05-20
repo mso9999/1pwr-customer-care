@@ -394,7 +394,12 @@ def country_config_endpoint():
 @app.get("/api/health")
 def health():
     """Health check including DB connectivity."""
-    status = {"status": "ok", "database": "postgresql", "timestamp": datetime.now().isoformat()}
+    status = {
+        "status": "ok",
+        "database": "postgresql",
+        "timestamp": datetime.now().isoformat(),
+        "version": app.version,
+    }
 
     try:
         with get_connection() as conn:

@@ -272,13 +272,12 @@ export default function AnalyticsPage() {
     setLoading(true);
     setError('');
     try {
-      const res = await runAnalyticsQuery({
+      const requestPayload = {
         metrics: Array.from(selectedMetrics),
         filters: {
           country: filterCountry || undefined,
           sites: filterSites.length > 0 ? filterSites : undefined,
           customer_types: filterCustomerTypes.length > 0 ? filterCustomerTypes : undefined,
-          // Only send dates for time-series basis
           ...(basis === 'time' ? {
             date_from: filterDateFrom,
             date_to: filterDateTo,
@@ -286,7 +285,21 @@ export default function AnalyticsPage() {
         },
         group_by: groupBy,
         time_series: true,
+      };
+      console.info('[Analytics] Query request', requestPayload);
+
+      const res = await runAnalyticsQuery({
+        ...requestPayload,
       });
+
+      if (res.metric_errors && Object.keys(res.metric_errors).length > 0) {
+        console.error('[Analytics] Metric query errors', res.metric_errors);
+        setError(`Some selected metrics failed to run: ${Object.keys(res.metric_errors).join(', ')}`);
+      } else {
+        console.info('[Analytics] Query response rows', Object.fromEntries(
+          Object.entries(res.metrics || {}).map(([mid, m]) => [mid, m.data?.length ?? 0]),
+        ));
+      }
       setResult(res);
     } catch (e: any) {
       setError(e.message || 'Query failed');

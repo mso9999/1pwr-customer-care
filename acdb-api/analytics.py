@@ -421,7 +421,7 @@ METRIC_CATALOG: Dict[str, Dict[str, Any]] = {
         "group_source": "consumption",
         "sql_template": """
             SELECT {group_col} AS group_key,
-                   ROUND(COALESCE(SUM(mc.kwh), 0), 2) AS value
+                   ROUND(COALESCE(SUM(mc.kwh), 0)::numeric, 2) AS value
             FROM monthly_consumption mc
             JOIN accounts a ON a.account_number = mc.account_number
             JOIN customers c ON c.id = a.customer_id
@@ -446,10 +446,10 @@ METRIC_CATALOG: Dict[str, Dict[str, Any]] = {
         "group_source": "consumption",
         "sql_template": """
             SELECT {group_col} AS group_key,
-                   ROUND(COALESCE(SUM(mc.kwh), 0), 2) AS total_kwh,
+                   ROUND(COALESCE(SUM(mc.kwh), 0)::numeric, 2) AS total_kwh,
                    COUNT(DISTINCT a.account_number) AS cust_count,
                    CASE WHEN COUNT(DISTINCT a.account_number) > 0
-                     THEN ROUND(SUM(mc.kwh) / (COUNT(DISTINCT a.account_number) * 30.4375), 4)
+                     THEN ROUND((SUM(mc.kwh) / (COUNT(DISTINCT a.account_number) * 30.4375))::numeric, 4)
                      ELSE 0 END AS value
             FROM monthly_consumption mc
             JOIN accounts a ON a.account_number = mc.account_number
@@ -737,6 +737,7 @@ def run_analytics_query(
 
     # Execute each metric
     results: Dict[str, Dict[str, Any]] = {}
+    metric_errors: Dict[str, str] = {}
     series_data: List[Dict[str, Any]] = []
 
     with get_connection() as conn:
@@ -750,7 +751,10 @@ def run_analytics_query(
             except Exception as exc:
                 logger.exception("Metric %s query failed", mid)
                 metric_data = []
-                # Continue with other metrics — don't fail the whole request
+                # Continue with other metrics — don't fail the whole request.
+                # Surface the per-metric failure so UI can distinguish
+                # "no matching rows" from "query execution failed".
+                metric_errors[mid] = str(exc)
 
             metric = METRIC_CATALOG[mid]
             results[mid] = {
@@ -773,6 +777,7 @@ def run_analytics_query(
     response = {
         "metrics": results,
         "series": series_data if req.time_series else None,
+        "metric_errors": metric_errors,
         "filters_applied": {
             "country": filters.get("country"),
             "sites": filters.get("_resolved_sites"),

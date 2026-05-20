@@ -2599,7 +2599,17 @@ export async function openUgpTicketForAlarm(
 }
 
 // Health is at root level, not under /api
-export async function getHealth() {
+export interface HealthResponse {
+  status: string;
+  database?: string;
+  timestamp?: string;
+  version?: string;
+  customer_count?: number;
+  tables?: string[];
+  error?: string;
+}
+
+export async function getHealth(): Promise<HealthResponse> {
   const res = await fetch('/health');
   return res.json();
 }
@@ -2935,6 +2945,7 @@ export interface AnalyticsSeries {
 export interface AnalyticsQueryResponse {
   metrics: Record<string, AnalyticsMetricData>;
   series: AnalyticsSeries[] | null;
+  metric_errors?: Record<string, string>;
   filters_applied: AnalyticsFiltersApplied;
 }
 
