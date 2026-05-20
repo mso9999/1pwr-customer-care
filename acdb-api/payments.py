@@ -21,7 +21,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, 
 from pydantic import BaseModel, Field
 
 from customer_api import get_connection
-from sparkmeter_credit import credit_sparkmeter, CreditResult
+from sm_credit_retry import credit_sm_with_retry, process_due_sm_credit_retries
 from balance_engine import get_balance_kwh, record_payment_kwh, record_fee_transaction
 from financing import compute_financing_split, apply_financing_payment
 from advances import (
@@ -609,24 +609,24 @@ def _credit_sm_sync(
     account_number: str, amount: float, memo: str, external_id: str,
 ) -> dict:
     """Credit SM synchronously and return a summary dict for the API response."""
-    result = credit_sparkmeter(account_number, amount, memo, external_id)
-    summary = {
-        "success": result.success,
-        "platform": result.platform,
-    }
-    if result.sm_transaction_id:
-        summary["sm_transaction_id"] = result.sm_transaction_id
-    if result.error:
-        summary["error"] = result.error
-    if not result.success:
+    summary = credit_sm_with_retry(
+        account_number=account_number,
+        amount=amount,
+        memo=memo,
+        external_id=external_id,
+    )
+    if not summary.get("success"):
         logger.warning(
             "SM credit failed for %s M%.2f: %s",
-            account_number, amount, result.error,
+            account_number, amount, summary.get("error"),
         )
     else:
         logger.info(
             "SM credit OK for %s M%.2f → %s txn %s",
-            account_number, amount, result.platform, result.sm_transaction_id,
+            account_number,
+            amount,
+            summary.get("platform"),
+            summary.get("sm_transaction_id"),
         )
     return summary
 
@@ -642,7 +642,34 @@ def _credit_sm_and_log(
 def sm_credit_status():
     """Diagnostic: show which SM crediting platforms are configured."""
     from sparkmeter_credit import is_configured
-    return is_configured()
+    cfg = is_configured()
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT status, COUNT(*)
+            FROM sm_credit_retry_queue
+            GROUP BY status
+            """
+        )
+        counts = {str(r[0]): int(r[1]) for r in cur.fetchall()}
+    cfg["retry_queue"] = {
+        "pending": counts.get("pending", 0),
+        "retrying": counts.get("retrying", 0),
+        "done": counts.get("done", 0),
+        "failed": counts.get("failed", 0),
+    }
+    return cfg
+
+
+@router.post("/sm-credit-retry/process")
+def process_sm_credit_retries(
+    limit: int = Query(50, ge=1, le=500),
+    user: CurrentUser = Depends(require_employee),
+):
+    """Manual/ops trigger to process queued SM credit retries."""
+    result = process_due_sm_credit_retries(limit=limit)
+    return {"ok": True, "result": result}
 
 
 def _normalize_phone_digits(phone: str) -> str:

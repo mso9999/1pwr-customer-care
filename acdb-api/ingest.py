@@ -41,7 +41,7 @@ from customer_api import get_connection
 from momo_bj import parse_momo_bn_sms, resolve_bn_momo_account
 from mpesa_sms import mpesa_receipt_in_use, parse_ls_sms_payment, resolve_sms_account
 from sms_payment_receipt import send_electricity_payment_receipt_sms, send_fee_payment_receipt_sms
-from sparkmeter_credit import credit_sparkmeter
+from sm_credit_retry import credit_sm_with_retry
 from advances import (
     apply_advance_payment,
     get_active_advance,
@@ -569,28 +569,27 @@ def _sms_ingest_credit_sm(
     """Background: credit Koios/ThunderCloud after SMS payment is in 1PDB."""
     memo = f"sms_incoming ref={mpesa_receipt or '?'} txn={txn_id}"
     try:
-        result = credit_sparkmeter(
+        result = credit_sm_with_retry(
             account_number=account_number,
             amount=amount,
             memo=memo,
             external_id=str(txn_id),
+            replay_due_limit=2,
         )
     except Exception as e:
-        logger.error(
-            "SMS path SM credit raised for %s txn=%s: %s",
-            account_number, txn_id, e,
-        )
+        logger.error("SMS path SM credit raised for %s txn=%s: %s", account_number, txn_id, e)
         return
-    if result.success:
+
+    if result.get("success"):
         sym = COUNTRY.currency_symbol
         logger.info(
             "SMS path SM credit OK for %s %s%.2f → %s",
-            account_number, sym, amount, result.platform,
+            account_number, sym, amount, result.get("platform"),
         )
     else:
         logger.warning(
-            "SMS path SM credit failed for %s (txn=%s): %s",
-            account_number, txn_id, result.error,
+            "SMS path SM credit failed for %s (txn=%s): %s (queued=%s)",
+            account_number, txn_id, result.get("error"), result.get("queued_retry"),
         )
 
 
