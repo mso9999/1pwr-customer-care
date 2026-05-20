@@ -6,8 +6,12 @@
   "allSites": "All Sites",
   "customerTypes": "Customer Types",
   "allTypes": "All Types",
-  "paymentStatus": "Payment Status",
-  "anyStatus": "Any Status",
+  "paymentStatus": "Payment status (funnel)",
+  "anyPaymentStatus": "Any payment status",
+  "connectionStatus": "Connection status",
+  "anyConnectionStatus": "Any connection",
+  "contractStatus": "Contract status",
+  "anyContractStatus": "Any contract",
   "search": "Search",
   "searchPlaceholder": "Name, phone, account...",
   "go": "Go",
@@ -85,6 +89,15 @@
     "feeRepaymentViaElectricityHint": "Part of electricity-classified payments applied to connection+readyboard debt (50% cap; connection bucket first, then readyboard). Not split per transaction—see fee debt model.",
     "electricityKwhHint": "Currency applied to kWh purchase (electricity_portion). Does not include advance or financing repayments; those remain in Total paid only.",
     "totalPaidHint": "Sum of all payment rows. May exceed the four columns to the left because advance and financing repayments are not broken out here."
+  },
+  "connection": {
+    "not_connected": "Not connected",
+    "connected": "Connected",
+    "terminated": "Service terminated"
+  },
+  "contract": {
+    "signed": "Contract signed",
+    "not_signed": "Contract not signed"
   },
   "status": {
     "not_paid": "Not Paid",

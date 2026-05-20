@@ -54,6 +54,20 @@ COHORT_STATUSES: List[str] = [
     "terminated",                     # date_service_terminated IS NOT NULL
 ]
 
+# Independent customer filters (applied before cohort_status is computed).
+CONNECTION_STATUSES: List[str] = [
+    "not_connected",   # no date_service_connected, not terminated
+    "connected",       # has date_service_connected, not terminated
+    "terminated",      # date_service_terminated set
+]
+
+CONTRACT_STATUSES: List[str] = [
+    "signed",
+    "not_signed",
+]
+
+QUERY_STATEMENT_TIMEOUT_MS = 90_000
+
 
 # Whitelisted sort columns to prevent injection.  Map UI column id → SQL.
 # NOTE: these names refer to columns of the ``cohort`` CTE (see _build_query),
@@ -89,7 +103,9 @@ class CohortFilters(BaseModel):
     country: Optional[str] = None
     sites: Optional[List[str]] = None
     customer_types: Optional[List[str]] = None
-    statuses: Optional[List[str]] = None
+    statuses: Optional[List[str]] = None  # payment funnel (cohort_status)
+    connection_statuses: Optional[List[str]] = None
+    contract_statuses: Optional[List[str]] = None
     search: Optional[str] = None  # name / phone / account fragment
 
 
@@ -317,6 +333,105 @@ def _cohort_extended_select(cursor) -> str:
     return ",\n                ".join(parts)
 
 
+def _connection_filter_clause(statuses: Optional[List[str]]) -> str:
+    """SQL AND-clause on ``customers c`` (empty when unfiltered)."""
+    if not statuses:
+        return ""
+    valid = [s for s in statuses if s in CONNECTION_STATUSES]
+    if not valid:
+        return ""
+    parts: List[str] = []
+    for s in valid:
+        if s == "not_connected":
+            parts.append(
+                "(c.date_service_connected IS NULL AND c.date_service_terminated IS NULL)"
+            )
+        elif s == "connected":
+            parts.append(
+                "(c.date_service_connected IS NOT NULL AND c.date_service_terminated IS NULL)"
+            )
+        elif s == "terminated":
+            parts.append("(c.date_service_terminated IS NOT NULL)")
+    return f" AND ({' OR '.join(parts)})"
+
+
+def _contract_filter_clause(cursor, statuses: Optional[List[str]]) -> str:
+    """SQL AND-clause on ``customers c``; no-op when ``contract_signed`` missing."""
+    if not statuses:
+        return ""
+    valid = [s for s in statuses if s in CONTRACT_STATUSES]
+    if not valid:
+        return ""
+    if cursor is not None and not _column_exists(cursor, "customers", "contract_signed"):
+        return ""
+    parts: List[str] = []
+    for s in valid:
+        if s == "signed":
+            parts.append("c.contract_signed IS TRUE")
+        else:
+            parts.append("(c.contract_signed IS NOT TRUE)")
+    return f" AND ({' OR '.join(parts)})"
+
+
+def _txn_ref(cursor, column: str) -> str:
+    """Qualified transaction column, or NULL literal if migration not applied."""
+    if cursor is None or _column_exists(cursor, "transactions", column):
+        return f"t.{column}"
+    return "NULL"
+
+
+def _paid_totals_cte(cursor) -> str:
+    """Aggregate payments only for customers in the scoped CTE (site-filtered)."""
+    fee_rep = _txn_ref(cursor, "fee_repayment_portion")
+    adv = _txn_ref(cursor, "advance_portion")
+    fin = _txn_ref(cursor, "financing_portion")
+    elec = _txn_ref(cursor, "electricity_portion")
+    return f"""
+        scoped AS (
+            SELECT DISTINCT c.id AS customer_id
+            FROM customers c
+            LEFT JOIN accounts a ON a.customer_id = c.id
+            WHERE c.community IN ({{site_placeholders}})
+              {{ct_clause}}
+              {{search_clause}}
+              {{connection_clause}}
+              {{contract_clause}}
+        ),
+        paid_totals AS (
+            SELECT sc.customer_id,
+                   COALESCE(SUM(CASE WHEN t.is_payment AND t.transaction_amount > 0
+                                     THEN t.transaction_amount ELSE 0 END), 0) AS total_paid,
+                   COALESCE(SUM(CASE WHEN t.is_payment AND t.transaction_amount > 0
+                                       AND t.payment_category = 'connection_fee'
+                                     THEN t.transaction_amount ELSE 0 END), 0)
+                       AS payments_connection_fee,
+                   COALESCE(SUM(CASE WHEN t.is_payment AND t.transaction_amount > 0
+                                       AND t.payment_category = 'readyboard_fee'
+                                     THEN t.transaction_amount ELSE 0 END), 0)
+                       AS payments_readyboard_fee,
+                   COALESCE(SUM(CASE WHEN t.is_payment AND t.transaction_amount > 0
+                                       AND t.payment_category IN ('electricity', 'uncategorized')
+                                     THEN COALESCE({fee_rep}, 0) ELSE 0 END), 0)
+                       AS payments_fee_repayment_via_electricity,
+                   COALESCE(SUM(CASE WHEN t.is_payment AND t.transaction_amount > 0
+                                       AND t.payment_category IN ('electricity', 'uncategorized')
+                                     THEN GREATEST(0::numeric,
+                                         COALESCE({elec},
+                                             t.transaction_amount
+                                             - COALESCE({fee_rep}, 0)
+                                             - COALESCE({adv}, 0)
+                                             - COALESCE({fin}, 0)))
+                                     WHEN t.is_payment AND t.transaction_amount > 0
+                                       AND t.payment_category IS NULL
+                                     THEN t.transaction_amount
+                                     ELSE 0 END), 0) AS payments_electricity
+            FROM scoped sc
+            INNER JOIN accounts a ON a.customer_id = sc.customer_id
+            LEFT JOIN transactions t ON t.account_number = a.account_number
+            GROUP BY sc.customer_id
+        )"""
+
+
 def _expand_customer_types(types: Optional[List[str]]) -> List[str]:
     """Same HH → HH1/2/3 expansion as analytics.py."""
     if not types:
@@ -389,48 +504,26 @@ def _build_query(
     else:
         cohort_body = _cohort_core_select().strip()
 
+    connection_clause = _connection_filter_clause(f.connection_statuses)
+    contract_clause = _contract_filter_clause(cursor, f.contract_statuses)
+
+    paid_block = _paid_totals_cte(cursor).format(
+        site_placeholders=site_placeholders,
+        ct_clause=ct_clause,
+        search_clause=search_clause,
+        connection_clause=connection_clause,
+        contract_clause=contract_clause,
+    )
+
     base_cte = f"""
-        WITH paid_totals AS (
-            SELECT a.customer_id,
-                   COALESCE(SUM(CASE WHEN t.is_payment AND t.transaction_amount > 0
-                                     THEN t.transaction_amount ELSE 0 END), 0) AS total_paid,
-                   COALESCE(SUM(CASE WHEN t.is_payment AND t.transaction_amount > 0
-                                       AND t.payment_category = 'connection_fee'
-                                     THEN t.transaction_amount ELSE 0 END), 0)
-                       AS payments_connection_fee,
-                   COALESCE(SUM(CASE WHEN t.is_payment AND t.transaction_amount > 0
-                                       AND t.payment_category = 'readyboard_fee'
-                                     THEN t.transaction_amount ELSE 0 END), 0)
-                       AS payments_readyboard_fee,
-                   COALESCE(SUM(CASE WHEN t.is_payment AND t.transaction_amount > 0
-                                       AND t.payment_category IN ('electricity', 'uncategorized')
-                                     THEN COALESCE(t.fee_repayment_portion, 0) ELSE 0 END), 0)
-                       AS payments_fee_repayment_via_electricity,
-                   COALESCE(SUM(CASE WHEN t.is_payment AND t.transaction_amount > 0
-                                       AND t.payment_category IN ('electricity', 'uncategorized')
-                                     THEN GREATEST(0::numeric,
-                                         COALESCE(t.electricity_portion,
-                                             t.transaction_amount
-                                             - COALESCE(t.fee_repayment_portion, 0)
-                                             - COALESCE(t.advance_portion, 0)
-                                             - COALESCE(t.financing_portion, 0)))
-                                     WHEN t.is_payment AND t.transaction_amount > 0
-                                       AND t.payment_category IS NULL
-                                     THEN t.transaction_amount
-                                     ELSE 0 END), 0) AS payments_electricity
-            FROM accounts a
-            LEFT JOIN transactions t ON t.account_number = a.account_number
-            GROUP BY a.customer_id
-        ),
+        WITH {paid_block},
         cohort AS (
             SELECT
                 {cohort_body}
-            FROM customers c
+            FROM scoped sc
+            INNER JOIN customers c ON c.id = sc.customer_id
             LEFT JOIN accounts a ON a.customer_id = c.id
-            LEFT JOIN paid_totals pt ON pt.customer_id = c.id
-            WHERE c.community IN ({site_placeholders})
-              {ct_clause}
-              {search_clause}
+            LEFT JOIN paid_totals pt ON pt.customer_id = sc.customer_id
         )
     """
 
@@ -532,6 +625,26 @@ def _row_to_dict(cursor, row) -> Dict[str, Any]:
     return dict(zip(cols, row))
 
 
+def _set_query_timeout(cursor) -> None:
+    cursor.execute(
+        "SET statement_timeout = %s",
+        (str(QUERY_STATEMENT_TIMEOUT_MS),),
+    )
+
+
+def _cohort_http_error(exc: Exception, *, action: str) -> HTTPException:
+    """Map Postgres errors to HTTP status (504 on statement timeout)."""
+    pgcode = getattr(exc, "pgcode", None)
+    msg = (getattr(exc, "pgerror", None) or str(exc) or "").lower()
+    if pgcode == "57014" or "statement timeout" in msg or "canceling statement" in msg:
+        return HTTPException(
+            504,
+            f"Cohort {action} timed out — select fewer sites or add filters and try again.",
+        )
+    detail = getattr(exc, "pgerror", None) or str(exc)
+    return HTTPException(500, f"Cohort {action} failed: {detail}")
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -539,9 +652,11 @@ def _row_to_dict(cursor, row) -> Dict[str, Any]:
 
 @router.get("/statuses")
 def list_statuses(user: CurrentUser = Depends(require_employee)):
-    """Return the canonical list of cohort_status values."""
+    """Return filter vocabularies and export column catalog."""
     return {
         "statuses": COHORT_STATUSES,
+        "connection_statuses": CONNECTION_STATUSES,
+        "contract_statuses": CONTRACT_STATUSES,
         "customer_types": _CUSTOMER_TYPES,
         "sort_columns": list(_SORT_COLS.keys()),
         "export_columns": _export_column_catalog(),
@@ -569,9 +684,6 @@ def query_cohort(
     if q.sort_by not in _SORT_COLS:
         raise HTTPException(400, f"sort_by must be one of {list(_SORT_COLS.keys())}")
 
-    sql, params = _build_query(q, count_only=False)
-    count_sql, count_params = _build_query(q, count_only=True)
-
     # Lazy import keeps the unit test suite (which builds queries but never
     # executes them) free of the full DB / FastAPI app stack.
     from customer_api import get_connection  # noqa: WPS433
@@ -581,16 +693,21 @@ def query_cohort(
     with get_connection() as conn:
         cur = conn.cursor()
         try:
+            _set_query_timeout(cur)
+            count_sql, count_params = _build_query(q, count_only=True, cursor=cur)
+            sql, params = _build_query(q, count_only=False, cursor=cur)
+
             cur.execute(count_sql, tuple(count_params))
             total = int(cur.fetchone()[0] or 0)
 
             cur.execute(sql, tuple(params))
             for r in cur.fetchall():
                 rows.append(_format_cohort_row(_row_to_dict(cur, r)))
+        except HTTPException:
+            raise
         except Exception as exc:
             logger.exception("Cohort query failed")
-            detail = getattr(exc, "pgerror", None) or str(exc)
-            raise HTTPException(500, f"Cohort query failed: {detail}")
+            raise _cohort_http_error(exc, action="query") from exc
 
     sites_resolved = _resolve_sites(q.filters.country, q.filters.sites)
     return {
@@ -603,6 +720,8 @@ def query_cohort(
             "sites": sites_resolved,
             "customer_types": q.filters.customer_types,
             "statuses": q.filters.statuses,
+            "connection_statuses": q.filters.connection_statuses,
+            "contract_statuses": q.filters.contract_statuses,
             "search": q.filters.search,
             "sort_by": q.sort_by,
             "sort_dir": q.sort_dir,
@@ -625,7 +744,6 @@ def export_cohort(
         raise HTTPException(400, "No export columns selected")
 
     count_q = CohortQuery(filters=body.filters, sort_by=body.sort_by, sort_dir=body.sort_dir)
-    count_sql, count_params = _build_query(count_q, count_only=True)
 
     from customer_api import get_connection  # noqa: WPS433
 
@@ -635,6 +753,8 @@ def export_cohort(
     with get_connection() as conn:
         cur = conn.cursor()
         try:
+            _set_query_timeout(cur)
+            count_sql, count_params = _build_query(count_q, count_only=True, cursor=cur)
             cur.execute(count_sql, tuple(count_params))
             total = int(cur.fetchone()[0] or 0)
             truncated = total > EXPORT_MAX_ROWS
@@ -643,10 +763,11 @@ def export_cohort(
             cur.execute(sql, tuple(params))
             for r in cur.fetchall():
                 rows.append(_format_cohort_row(_row_to_dict(cur, r)))
+        except HTTPException:
+            raise
         except Exception as exc:
             logger.exception("Cohort export failed")
-            detail = getattr(exc, "pgerror", None) or str(exc)
-            raise HTTPException(500, f"Cohort export failed: {detail}")
+            raise _cohort_http_error(exc, action="export") from exc
 
     return {
         "rows": rows,

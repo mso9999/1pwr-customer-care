@@ -16,6 +16,8 @@ sys.path.insert(0, os.path.dirname(HERE))
 
 from customer_cohort import (  # noqa: E402
     COHORT_STATUSES,
+    CONNECTION_STATUSES,
+    CONTRACT_STATUSES,
     CohortExportRequest,
     CohortFilters,
     CohortQuery,
@@ -77,7 +79,9 @@ class TestQueryBuilder(unittest.TestCase):
         q = CohortQuery(filters=CohortFilters(country="LS"))
         sql, params = _build_query(q, count_only=False)
         # WITH ... cohort ... + paginated SELECT
-        self.assertIn("WITH paid_totals AS", sql)
+        self.assertIn("scoped AS", sql)
+        self.assertIn("paid_totals AS", sql)
+        self.assertIn("FROM scoped sc", sql)
         self.assertIn("payments_connection_fee", sql)
         self.assertIn("payments_fee_repayment_via_electricity", sql)
         self.assertIn("cohort_status", sql)
@@ -152,6 +156,38 @@ class TestQueryBuilder(unittest.TestCase):
         self.assertIn("first_name ILIKE", sql)
         self.assertIn("%Mok%", params)
 
+    def test_connection_filter_in_scoped_cte(self):
+        q = CohortQuery(
+            filters=CohortFilters(
+                country="LS",
+                connection_statuses=["connected", "not_connected"],
+            ),
+        )
+        sql, _ = _build_query(q, count_only=False)
+        self.assertIn("date_service_connected IS NOT NULL", sql)
+        self.assertIn("date_service_connected IS NULL", sql)
+
+    def test_contract_filter_when_unsigned(self):
+        q = CohortQuery(
+            filters=CohortFilters(country="LS", contract_statuses=["not_signed"]),
+        )
+        sql, _ = _build_query(q, count_only=False)
+        self.assertIn("contract_signed IS NOT TRUE", sql)
+
+    def test_invalid_connection_and_contract_dropped(self):
+        q = CohortQuery(
+            filters=CohortFilters(
+                country="LS",
+                connection_statuses=["connected", "bogus"],
+                contract_statuses=["signed", "drop-table"],
+            ),
+        )
+        sql, _ = _build_query(q, count_only=False)
+        self.assertIn("date_service_connected IS NOT NULL", sql)
+        self.assertNotIn("bogus", sql)
+        self.assertIn("contract_signed IS TRUE", sql)
+        self.assertNotIn("drop-table", sql)
+
     def test_count_query_does_not_paginate(self):
         q = CohortQuery(filters=CohortFilters(country="LS"))
         sql, _ = _build_query(q, count_only=True)
@@ -223,6 +259,14 @@ class TestQueryBuilder(unittest.TestCase):
                     f"sort key {ui_key!r} → {sql_expr!r} references "
                     f"unknown CTE column {ident!r}",
                 )
+
+
+class TestFilterTaxonomies(unittest.TestCase):
+    def test_connection_statuses(self):
+        self.assertEqual(CONNECTION_STATUSES, ["not_connected", "connected", "terminated"])
+
+    def test_contract_statuses(self):
+        self.assertEqual(CONTRACT_STATUSES, ["signed", "not_signed"])
 
 
 class TestExportColumns(unittest.TestCase):

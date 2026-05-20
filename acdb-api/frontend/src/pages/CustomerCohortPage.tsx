@@ -8,6 +8,8 @@ import {
   queryCustomerCohort,
   type CohortExportColumn,
   type CohortQueryResponse,
+  type CohortConnectionStatus,
+  type CohortContractStatus,
   type CohortStatus,
 } from '../lib/api';
 
@@ -19,6 +21,14 @@ const ALL_STATUSES: CohortStatus[] = [
   'fully_paid_connected',
   'terminated',
 ];
+
+const ALL_CONNECTION: CohortConnectionStatus[] = [
+  'not_connected',
+  'connected',
+  'terminated',
+];
+
+const ALL_CONTRACT: CohortContractStatus[] = ['signed', 'not_signed'];
 
 const CUSTOMER_TYPES = [
   'HH1', 'HH2', 'HH3', 'SME', 'CHU', 'SCH', 'HC',
@@ -327,6 +337,8 @@ export default function CustomerCohortPage() {
   const [filterSites, setFilterSites] = useState<string[]>([]);
   const [filterTypes, setFilterTypes] = useState<string[]>([]);
   const [filterStatuses, setFilterStatuses] = useState<string[]>([]);
+  const [filterConnection, setFilterConnection] = useState<string[]>([]);
+  const [filterContract, setFilterContract] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
 
@@ -352,7 +364,9 @@ export default function CustomerCohortPage() {
   }, [country]);
 
   // Reset to page 1 when filters change
-  useEffect(() => { setPage(1); }, [country, filterSites, filterTypes, filterStatuses, search]);
+  useEffect(() => {
+    setPage(1);
+  }, [country, filterSites, filterTypes, filterStatuses, filterConnection, filterContract, search]);
 
   const runQuery = useCallback(async () => {
     setLoading(true);
@@ -364,6 +378,12 @@ export default function CustomerCohortPage() {
           sites: filterSites.length ? filterSites : undefined,
           customer_types: filterTypes.length ? filterTypes : undefined,
           statuses: filterStatuses.length ? (filterStatuses as CohortStatus[]) : undefined,
+          connection_statuses: filterConnection.length
+            ? (filterConnection as CohortConnectionStatus[])
+            : undefined,
+          contract_statuses: filterContract.length
+            ? (filterContract as CohortContractStatus[])
+            : undefined,
           search: search.trim() || undefined,
         },
         sort_by: sortBy,
@@ -378,7 +398,19 @@ export default function CustomerCohortPage() {
     } finally {
       setLoading(false);
     }
-  }, [country, filterSites, filterTypes, filterStatuses, search, sortBy, sortDir, page, t]);
+  }, [
+    country,
+    filterSites,
+    filterTypes,
+    filterStatuses,
+    filterConnection,
+    filterContract,
+    search,
+    sortBy,
+    sortDir,
+    page,
+    t,
+  ]);
 
   useEffect(() => { void runQuery(); }, [runQuery]);
 
@@ -415,6 +447,16 @@ export default function CustomerCohortPage() {
 
   const statusOptions = useMemo(
     () => ALL_STATUSES.map((s) => ({ code: s, label: t(`status.${s}`) })),
+    [t],
+  );
+
+  const connectionOptions = useMemo(
+    () => ALL_CONNECTION.map((s) => ({ code: s, label: t(`connection.${s}`) })),
+    [t],
+  );
+
+  const contractOptions = useMemo(
+    () => ALL_CONTRACT.map((s) => ({ code: s, label: t(`contract.${s}`) })),
     [t],
   );
 
@@ -458,6 +500,12 @@ export default function CustomerCohortPage() {
           sites: filterSites.length ? filterSites : undefined,
           customer_types: filterTypes.length ? filterTypes : undefined,
           statuses: filterStatuses.length ? (filterStatuses as CohortStatus[]) : undefined,
+          connection_statuses: filterConnection.length
+            ? (filterConnection as CohortConnectionStatus[])
+            : undefined,
+          contract_statuses: filterContract.length
+            ? (filterContract as CohortContractStatus[])
+            : undefined,
           search: search.trim() || undefined,
         },
         sort_by: sortBy,
@@ -503,7 +551,7 @@ export default function CustomerCohortPage() {
 
       {/* ── Filter bar ── */}
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <label className="block">
             <span className="text-xs text-gray-500">{t('country')}</span>
             <select
@@ -529,13 +577,6 @@ export default function CustomerCohortPage() {
             onChange={setFilterTypes}
             allLabel={t('allTypes')}
           />
-          <MultiSelect
-            label={t('paymentStatus')}
-            options={statusOptions}
-            selected={filterStatuses}
-            onChange={setFilterStatuses}
-            allLabel={t('anyStatus')}
-          />
           <label className="block">
             <span className="text-xs text-gray-500">{t('search')}</span>
             <form
@@ -557,6 +598,29 @@ export default function CustomerCohortPage() {
               </button>
             </form>
           </label>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-3 pt-3 border-t border-gray-100">
+          <MultiSelect
+            label={t('paymentStatus')}
+            options={statusOptions}
+            selected={filterStatuses}
+            onChange={setFilterStatuses}
+            allLabel={t('anyPaymentStatus')}
+          />
+          <MultiSelect
+            label={t('connectionStatus')}
+            options={connectionOptions}
+            selected={filterConnection}
+            onChange={setFilterConnection}
+            allLabel={t('anyConnectionStatus')}
+          />
+          <MultiSelect
+            label={t('contractStatus')}
+            options={contractOptions}
+            selected={filterContract}
+            onChange={setFilterContract}
+            allLabel={t('anyContractStatus')}
+          />
         </div>
       </div>
 

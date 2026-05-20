@@ -6,8 +6,12 @@
   "allSites": "Tous les sites",
   "customerTypes": "Types de client",
   "allTypes": "Tous les types",
-  "paymentStatus": "Statut de paiement",
-  "anyStatus": "Tous les statuts",
+  "paymentStatus": "Statut de paiement (entonnoir)",
+  "anyPaymentStatus": "Tous les paiements",
+  "connectionStatus": "Statut de raccordement",
+  "anyConnectionStatus": "Tous les raccordements",
+  "contractStatus": "Statut du contrat",
+  "anyContractStatus": "Tous les contrats",
   "search": "Rechercher",
   "searchPlaceholder": "Nom, téléphone, compte...",
   "go": "OK",
@@ -85,6 +89,15 @@
     "feeRepaymentViaElectricityHint": "Partie des paiements « électricité » affectée à la dette frais (plafond 50 % ; d’abord raccordement, puis readyboard). Pas ventilée par transaction.",
     "electricityKwhHint": "Montant appliqué à l’achat de kWh (electricity_portion). N’inclut pas les remboursements d’avance ou de financement ; ils restent dans le total seulement.",
     "totalPaidHint": "Somme de toutes les lignes de paiement. Peut dépasser les quatre colonnes précédentes (avance et financement non ventilés ici)."
+  },
+  "connection": {
+    "not_connected": "Non raccordé",
+    "connected": "Raccordé",
+    "terminated": "Service résilié"
+  },
+  "contract": {
+    "signed": "Contrat signé",
+    "not_signed": "Contrat non signé"
   },
   "status": {
     "not_paid": "Non payé",

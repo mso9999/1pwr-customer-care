@@ -2979,6 +2979,10 @@ export type CohortStatus =
   | 'fully_paid_connected'
   | 'terminated';
 
+export type CohortConnectionStatus = 'not_connected' | 'connected' | 'terminated';
+
+export type CohortContractStatus = 'signed' | 'not_signed';
+
 export interface CohortRow {
   customer_id: number;
   account_number: string | null;
@@ -3011,6 +3015,8 @@ export interface CohortQueryRequest {
     sites?: string[];
     customer_types?: string[];
     statuses?: CohortStatus[];
+    connection_statuses?: CohortConnectionStatus[];
+    contract_statuses?: CohortContractStatus[];
     search?: string;
   };
   sort_by?:
@@ -3037,6 +3043,8 @@ export interface CohortQueryResponse {
     sites: string[];
     customer_types: string[] | null;
     statuses: string[] | null;
+    connection_statuses: string[] | null;
+    contract_statuses: string[] | null;
     search: string | null;
     sort_by: string;
     sort_dir: string;
@@ -3052,6 +3060,8 @@ export interface CohortExportColumn {
 
 export interface CohortStatusesCatalog {
   statuses: CohortStatus[];
+  connection_statuses: CohortConnectionStatus[];
+  contract_statuses: CohortContractStatus[];
   customer_types: string[];
   sort_columns: string[];
   export_columns: CohortExportColumn[];
