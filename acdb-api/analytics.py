@@ -710,6 +710,14 @@ def run_analytics_query(
 
     filters = req.filters or {}
     group_by = req.group_by or "none"
+    logger.info(
+        "analytics_query metrics=%s group_by=%s country=%s sites=%s customer_types=%s",
+        req.metrics,
+        group_by,
+        filters.get("country"),
+        filters.get("sites"),
+        filters.get("customer_types"),
+    )
 
     # Resolve sites
     try:
@@ -748,6 +756,7 @@ def run_analytics_query(
                 cur.execute(sql, params)
                 rows = cur.fetchall()
                 metric_data = [_row_to_dict(cur, r) for r in rows]
+                logger.info("analytics_metric_ok metric=%s rows=%d", mid, len(metric_data))
             except Exception as exc:
                 logger.exception("Metric %s query failed", mid)
                 metric_data = []
