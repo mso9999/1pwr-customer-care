@@ -48,9 +48,11 @@ router = APIRouter(prefix="/api/customer-cohort", tags=["customer-cohort"])
 COHORT_STATUSES: List[str] = [
     "not_paid",                       # total_paid <= 0 (or override='not_paid')
     "partially_paid_not_connected",   # 0 < total_paid < threshold, not connected
-    "partially_paid_connected",       # 0 < total_paid < threshold, connected
+    "partially_paid_connected",       # 0 < total_paid < threshold, connected, metered
+    "partially_paid_not_metered",     # 0 < total_paid < threshold, connected, no meter
     "fully_paid_not_connected",       # total_paid >= threshold, not connected (edge case)
-    "fully_paid_connected",           # total_paid >= threshold, connected
+    "fully_paid_connected",           # total_paid >= threshold, connected, metered
+    "fully_paid_not_metered",         # total_paid >= threshold, connected, no meter
     "terminated",                     # date_service_terminated IS NOT NULL
 ]
 
@@ -264,9 +266,66 @@ def _column_exists(cursor, table_name: str, column_name: str) -> bool:
     return bool(row and row[0])
 
 
-def _cohort_core_select() -> str:
-    """Projection for paginated list UI (must match outer SELECT and sort keys)."""
+def _not_metered_predicate(cursor) -> str:
+    """True when connected but no meter installed (column or meters table)."""
+    if cursor is not None and _column_exists(cursor, "customers", "meter_installed"):
+        return (
+            "c.date_service_connected IS NOT NULL "
+            "AND NOT COALESCE(c.meter_installed, false)"
+        )
     return """
+            c.date_service_connected IS NOT NULL
+            AND NOT EXISTS (
+                SELECT 1 FROM meters m
+                INNER JOIN accounts a_nm ON a_nm.account_number = m.account_number
+                WHERE a_nm.customer_id = c.id
+                  AND LOWER(COALESCE(m.status, 'active')) = 'active'
+            )""".strip()
+
+
+def _cohort_override_expr(cursor) -> str:
+    if cursor is not None and not _column_exists(cursor, "customers", "cohort_status_override"):
+        return "NULL::text"
+    return "c.cohort_status_override"
+
+
+def _cohort_status_case_sql(cursor) -> str:
+    """CASE expression for ``cohort_status`` (manual override wins when set)."""
+    override = _cohort_override_expr(cursor)
+    not_metered = _not_metered_predicate(cursor)
+    return f"""
+                CASE
+                    WHEN {override} IS NOT NULL AND TRIM({override}) <> ''
+                        THEN TRIM({override})
+                    WHEN c.date_service_terminated IS NOT NULL THEN 'terminated'
+                    WHEN COALESCE(pt.total_paid, 0) <= 0
+                         OR c.payment_status_override = 'not_paid'
+                        THEN 'not_paid'
+                    WHEN (c.payment_status_override = 'fully_paid'
+                          OR COALESCE(pt.total_paid, 0) >= %s)
+                         AND ({not_metered})
+                        THEN 'fully_paid_not_metered'
+                    WHEN (c.payment_status_override = 'fully_paid'
+                          OR COALESCE(pt.total_paid, 0) >= %s)
+                         AND c.date_service_connected IS NOT NULL
+                        THEN 'fully_paid_connected'
+                    WHEN (c.payment_status_override = 'fully_paid'
+                          OR COALESCE(pt.total_paid, 0) >= %s)
+                         AND c.date_service_connected IS NULL
+                        THEN 'fully_paid_not_connected'
+                    WHEN ({not_metered})
+                        THEN 'partially_paid_not_metered'
+                    WHEN c.date_service_connected IS NOT NULL
+                        THEN 'partially_paid_connected'
+                    ELSE 'partially_paid_not_connected'
+                END AS cohort_status"""
+
+
+def _cohort_core_select(cursor=None) -> str:
+    """Projection for paginated list UI (must match outer SELECT and sort keys)."""
+    status_case = _cohort_status_case_sql(cursor)
+    override_col = _cohort_override_expr(cursor)
+    return f"""
                 c.id AS customer_id,
                 c.first_name,
                 c.last_name,
@@ -276,6 +335,7 @@ def _cohort_core_select() -> str:
                 c.date_service_connected,
                 c.date_service_terminated,
                 c.payment_status_override,
+                {override_col} AS cohort_status_override,
                 a.account_number,
                 COALESCE(pt.total_paid, 0)::numeric AS total_paid,
                 COALESCE(pt.payments_connection_fee, 0)::numeric AS payments_connection_fee,
@@ -283,23 +343,7 @@ def _cohort_core_select() -> str:
                 COALESCE(pt.payments_fee_repayment_via_electricity, 0)::numeric
                     AS payments_fee_repayment_via_electricity,
                 COALESCE(pt.payments_electricity, 0)::numeric AS payments_electricity,
-                CASE
-                    WHEN c.date_service_terminated IS NOT NULL THEN 'terminated'
-                    WHEN COALESCE(pt.total_paid, 0) <= 0
-                         OR c.payment_status_override = 'not_paid'
-                        THEN 'not_paid'
-                    WHEN (c.payment_status_override = 'fully_paid'
-                          OR COALESCE(pt.total_paid, 0) >= %s)
-                         AND c.date_service_connected IS NOT NULL
-                        THEN 'fully_paid_connected'
-                    WHEN (c.payment_status_override = 'fully_paid'
-                          OR COALESCE(pt.total_paid, 0) >= %s)
-                         AND c.date_service_connected IS NULL
-                        THEN 'fully_paid_not_connected'
-                    WHEN c.date_service_connected IS NOT NULL
-                        THEN 'partially_paid_connected'
-                    ELSE 'partially_paid_not_connected'
-                END AS cohort_status"""
+                {status_case}"""
 
 
 # (table, column, sql expression, NULL fallback type) for CSV export only.
@@ -324,7 +368,7 @@ _COHORT_EXPORT_EXTRA: List[Tuple[str, str, str, str]] = [
 
 def _cohort_extended_select(cursor) -> str:
     """Export cohort projection: core columns plus optional attrs (NULL if missing)."""
-    parts = [_cohort_core_select().strip()]
+    parts = [_cohort_core_select(cursor).strip()]
     for table, col, expr, null_type in _COHORT_EXPORT_EXTRA:
         if _column_exists(cursor, table, col):
             parts.append(expr)
@@ -492,14 +536,14 @@ def _build_query(
     params: list = list(sites)
     params.extend(ct_params)
     params.extend(search_params)
-    params.extend([fee_threshold, fee_threshold])
+    params.extend([fee_threshold, fee_threshold, fee_threshold])
 
     if extended_cohort:
         if cursor is None:
             raise ValueError("extended_cohort requires a database cursor")
         cohort_body = _cohort_extended_select(cursor)
     else:
-        cohort_body = _cohort_core_select().strip()
+        cohort_body = _cohort_core_select(cursor).strip()
 
     connection_clause = _connection_filter_clause(f.connection_statuses)
     contract_clause = _contract_filter_clause(cursor, f.contract_statuses)
@@ -554,7 +598,7 @@ def _build_query(
     sql = base_cte + f"""
         SELECT customer_id, first_name, last_name, phone, site, customer_type,
                date_service_connected, date_service_terminated,
-               payment_status_override, account_number, total_paid,
+               payment_status_override, cohort_status_override, account_number, total_paid,
                payments_connection_fee, payments_readyboard_fee,
                payments_fee_repayment_via_electricity, payments_electricity,
                cohort_status

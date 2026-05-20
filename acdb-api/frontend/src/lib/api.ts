@@ -2975,8 +2975,10 @@ export type CohortStatus =
   | 'not_paid'
   | 'partially_paid_not_connected'
   | 'partially_paid_connected'
+  | 'partially_paid_not_metered'
   | 'fully_paid_not_connected'
   | 'fully_paid_connected'
+  | 'fully_paid_not_metered'
   | 'terminated';
 
 export type CohortConnectionStatus = 'not_connected' | 'connected' | 'terminated';
@@ -3007,6 +3009,7 @@ export interface CohortRow {
   /** kWh purchase slice: ``electricity_portion`` with legacy fallback. */
   payments_electricity: number;
   cohort_status: CohortStatus;
+  cohort_status_override?: string | null;
 }
 
 export interface CohortQueryRequest {
@@ -3178,4 +3181,41 @@ export async function listPaymentProofs(
 
 export function paymentProofDownloadUrl(customerId: number, proofId: number): string {
   return `${getApiBase()}/payment-status/${customerId}/proof/${proofId}/download`;
+}
+
+// ── Cohort status override (Customer Cohort funnel) ─────────────────
+
+export interface InferredCohortStatus {
+  inferred_status: CohortStatus;
+  effective_status: CohortStatus;
+  cohort_status_override: string | null;
+  cohort_status_override_by?: string | null;
+  cohort_status_override_at?: string | null;
+  total_paid: number;
+  fee_threshold: number;
+  meter_installed: boolean;
+  has_override: boolean;
+  allowed_statuses: CohortStatus[];
+}
+
+export async function getInferredCohortStatus(
+  customerId: number,
+): Promise<InferredCohortStatus> {
+  return request(`/cohort-status/${customerId}/inferred`);
+}
+
+export async function setCohortStatusOverride(
+  customerId: number,
+  status: CohortStatus,
+): Promise<{ cohort_status_override: string }> {
+  return request(`/cohort-status/${customerId}/override`, {
+    method: 'POST',
+    body: JSON.stringify({ status }),
+  });
+}
+
+export async function clearCohortStatusOverride(
+  customerId: number,
+): Promise<{ cohort_status_override: null }> {
+  return request(`/cohort-status/${customerId}/override`, { method: 'DELETE' });
 }

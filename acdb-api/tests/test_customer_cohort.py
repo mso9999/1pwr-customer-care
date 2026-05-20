@@ -32,17 +32,9 @@ from customer_cohort import (  # noqa: E402
 
 class TestStatusTaxonomy(unittest.TestCase):
     def test_canonical_six_buckets(self):
-        self.assertEqual(
-            COHORT_STATUSES,
-            [
-                "not_paid",
-                "partially_paid_not_connected",
-                "partially_paid_connected",
-                "fully_paid_not_connected",
-                "fully_paid_connected",
-                "terminated",
-            ],
-        )
+        self.assertEqual(len(COHORT_STATUSES), 8)
+        self.assertIn("fully_paid_not_metered", COHORT_STATUSES)
+        self.assertIn("partially_paid_not_metered", COHORT_STATUSES)
 
 
 class TestCustomerTypeExpansion(unittest.TestCase):
@@ -113,15 +105,21 @@ class TestQueryBuilder(unittest.TestCase):
         self.assertEqual(count_sql.count("%s"), len(count_params))
 
     def test_threshold_params_follow_scoped_filters(self):
-        """After scoped-CTE refactor, site/type/search placeholders precede the
-        two fee_threshold %s inside the cohort CASE expression."""
+        """Site/type/search placeholders precede three fee_threshold %s in cohort CASE."""
         q = CohortQuery(filters=CohortFilters(country="LS"))
         sites = _resolve_sites("LS", None)
         _, params = _build_query(q, count_only=False)
         n_sites = len(sites)
         self.assertIsInstance(params[0], str)
         self.assertEqual(params[n_sites], params[n_sites + 1])
+        self.assertEqual(params[n_sites], params[n_sites + 2])
         self.assertIsInstance(params[n_sites], (int, float))
+
+    def test_not_metered_branches_in_sql(self):
+        q = CohortQuery(filters=CohortFilters(country="LS"))
+        sql, _ = _build_query(q, count_only=False)
+        self.assertIn("fully_paid_not_metered", sql)
+        self.assertIn("partially_paid_not_metered", sql)
 
     def test_status_filter_adds_in_clause(self):
         q = CohortQuery(
@@ -246,6 +244,7 @@ class TestQueryBuilder(unittest.TestCase):
             "payments_fee_repayment_via_electricity",
             "payments_electricity",
             "cohort_status",
+            "cohort_status_override",
         }
         for ui_key, sql_expr in _SORT_COLS.items():
             for ident in re.split(r"[,\s]+", sql_expr.strip()):

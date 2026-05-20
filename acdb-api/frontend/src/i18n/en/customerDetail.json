@@ -56,5 +56,9 @@
   "status_not_paid": "Not Paid",
   "status_paid": "Paid",
   "status_fully_paid": "Fully Paid",
+  "cohortStatus": "Cohort status (payment / connection / metering)",
+  "inferredCohort": "Computed cohort status",
+  "meterInstalled": "Meter installed",
+  "setCohortOverride": "Set cohort status",
   "by": "by"
 }

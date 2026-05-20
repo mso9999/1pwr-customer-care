@@ -17,8 +17,10 @@ const ALL_STATUSES: CohortStatus[] = [
   'not_paid',
   'partially_paid_not_connected',
   'partially_paid_connected',
+  'partially_paid_not_metered',
   'fully_paid_not_connected',
   'fully_paid_connected',
+  'fully_paid_not_metered',
   'terminated',
 ];
 
@@ -70,7 +72,9 @@ function fullName(row: { first_name: string | null; last_name: string | null }):
 function statusColor(status: CohortStatus): string {
   switch (status) {
     case 'fully_paid_connected':         return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    case 'fully_paid_not_metered':       return 'bg-teal-50 text-teal-800 border-teal-200';
     case 'partially_paid_connected':     return 'bg-amber-50 text-amber-700 border-amber-200';
+    case 'partially_paid_not_metered':   return 'bg-yellow-50 text-yellow-800 border-yellow-200';
     case 'partially_paid_not_connected': return 'bg-orange-50 text-orange-700 border-orange-200';
     case 'fully_paid_not_connected':     return 'bg-blue-50 text-blue-700 border-blue-200';
     case 'not_paid':                     return 'bg-rose-50 text-rose-700 border-rose-200';
@@ -747,7 +751,7 @@ export default function CustomerCohortPage() {
                     <span className={`px-2 py-0.5 text-xs border rounded-full ${statusColor(r.cohort_status)}`}>
                       {t(`status.${r.cohort_status}`)}
                     </span>
-                    {r.payment_status_override && (
+                    {(r.cohort_status_override || r.payment_status_override) && (
                       <span
                         className="ml-1 text-[10px] text-purple-600"
                         title={t('overrideHint')}

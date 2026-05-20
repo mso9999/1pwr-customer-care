@@ -105,6 +105,8 @@
     "partially_paid_connected": "Partially Paid – Connected",
     "fully_paid_not_connected": "Fully Paid – Not Connected",
     "fully_paid_connected": "Fully Paid – Connected",
+    "fully_paid_not_metered": "Fully Paid – Not Metered",
+    "partially_paid_not_metered": "Partially Paid – Not Metered",
     "terminated": "Terminated"
   }
 }

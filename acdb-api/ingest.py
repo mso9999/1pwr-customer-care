@@ -1010,12 +1010,16 @@ def _sms_incoming_process_raw(
                     _update_sms_inbound(conn, sms_log_id, log_outcome, transaction_id=txn_db_id)
                     conn.commit()
 
-                    background_tasks.add_task(
-                        send_electricity_payment_receipt_sms,
-                        account,
-                        payer_phone,
-                        amount,
-                    )
+                    # Contract gateway applies SMS amount to fees/advance only (kwh=0).
+                    # Do not send the electricity purchase receipt — it misleads customers.
+                    elec_sms = round(float(pack.get("electricity_portion") or 0), 2)
+                    if elec_sms > 0.01:
+                        background_tasks.add_task(
+                            send_electricity_payment_receipt_sms,
+                            account,
+                            payer_phone,
+                            elec_sms,
+                        )
 
                     if COUNTRY.code == "BN":
                         logger.info(
@@ -1174,12 +1178,13 @@ def _sms_incoming_process_raw(
                     _update_sms_inbound(conn, sms_log_id, "electricity", transaction_id=txn_db_id)
                     conn.commit()
 
-                    background_tasks.add_task(
-                        send_electricity_payment_receipt_sms,
-                        account,
-                        payer_phone,
-                        amount,
-                    )
+                    if electricity_portion > 0.01:
+                        background_tasks.add_task(
+                            send_electricity_payment_receipt_sms,
+                            account,
+                            payer_phone,
+                            electricity_portion,
+                        )
 
                     if COUNTRY.code == "BN":
                         logger.info(

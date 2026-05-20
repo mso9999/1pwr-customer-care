@@ -6,6 +6,8 @@ import {
   getFinancingProducts, createFinancingAgreement,
   type CommissionContract, type FinancingProduct,
   getInferredPaymentStatus, setPaymentStatusOverride, clearPaymentStatusOverride,
+  getInferredCohortStatus, setCohortStatusOverride, clearCohortStatusOverride,
+  type InferredCohortStatus, type CohortStatus,
   uploadPaymentProof, listPaymentProofs, paymentProofDownloadUrl,
   type InferredPaymentStatus, type PaymentProof,
 } from '../lib/api';
@@ -283,8 +285,11 @@ export default function CustomerDetailPage() {
   const [selectedOverride, setSelectedOverride] = useState('');
   const [overrideSaving, setOverrideSaving] = useState(false);
   const [proofUploading, setProofUploading] = useState(false);
+  const [cohortStatus, setCohortStatus] = useState<InferredCohortStatus | null>(null);
+  const [selectedCohortOverride, setSelectedCohortOverride] = useState('');
+  const [cohortOverrideSaving, setCohortOverrideSaving] = useState(false);
   const { canWrite, canWriteCustomers, isSuperadmin, user } = useAuth();
-  const { t } = useTranslation(['customerDetail', 'common']);
+  const { t } = useTranslation(['customerDetail', 'customerCohort', 'common']);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -365,6 +370,7 @@ export default function CustomerDetailPage() {
     if (!pgId || isNaN(Number(pgId))) return;
     const cid = Number(pgId);
     getInferredPaymentStatus(cid).then(setPaymentStatus).catch(() => {});
+    getInferredCohortStatus(cid).then(setCohortStatus).catch(() => {});
     listPaymentProofs(cid).then(({ proofs: p }) => setProofs(p)).catch(() => {});
   }, [pgId]);
 
@@ -372,7 +378,31 @@ export default function CustomerDetailPage() {
     if (!pgId || isNaN(Number(pgId))) return;
     const cid = Number(pgId);
     getInferredPaymentStatus(cid).then(setPaymentStatus).catch(() => {});
+    getInferredCohortStatus(cid).then(setCohortStatus).catch(() => {});
     listPaymentProofs(cid).then(({ proofs: p }) => setProofs(p)).catch(() => {});
+  };
+
+  const handleSetCohortOverride = async () => {
+    if (!selectedCohortOverride || !pgId) return;
+    setCohortOverrideSaving(true);
+    try {
+      await setCohortStatusOverride(Number(pgId), selectedCohortOverride as CohortStatus);
+      setSelectedCohortOverride('');
+      refreshPaymentStatus();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    setCohortOverrideSaving(false);
+  };
+
+  const handleClearCohortOverride = async () => {
+    if (!pgId) return;
+    try {
+      await clearCohortStatusOverride(Number(pgId));
+      refreshPaymentStatus();
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
   };
 
   const handleSetOverride = async () => {
@@ -481,9 +511,11 @@ export default function CustomerDetailPage() {
   const displayTitle = accountNumber || urlParam || '';
   const connectedVal = record['date_service_connected'];
   const terminatedVal = record['date_service_terminated'];
+  const commissionedField = record['customer_commissioned'];
   const isConnected = connectedVal != null && String(connectedVal).trim() !== '';
   const isTerminated = terminatedVal != null && String(terminatedVal).trim() !== '';
-  const isCommissioned = isConnected && !isTerminated;
+  const isCommissioned = isConnected && !isTerminated &&
+    (commissionedField == null || String(commissionedField).toLowerCase() !== 'false');
 
   return (
     <div className="space-y-4">
@@ -672,6 +704,68 @@ export default function CustomerDetailPage() {
                   >
                     {overrideSaving ? t('common:saving') : t('common:apply')}
                   </button>
+                </div>
+              )}
+
+              {/* Cohort funnel status (Customer Cohort page) */}
+              {cohortStatus && (
+                <div className="pt-3 mt-3 border-t space-y-2">
+                  <h3 className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
+                    {t('customerDetail:cohortStatus')}
+                  </h3>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-gray-500">{t('customerDetail:inferredCohort')}</span>
+                    <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-slate-100 text-slate-700">
+                      {t(`customerCohort:status.${cohortStatus.inferred_status}`)}
+                    </span>
+                  </div>
+                  <div className="text-xs text-gray-400">
+                    {t('customerDetail:meterInstalled')}:{' '}
+                    {cohortStatus.meter_installed ? t('common:yes') : t('common:no')}
+                  </div>
+                  {cohortStatus.has_override && (
+                    <div className="flex items-center justify-between bg-indigo-50 p-2 rounded">
+                      <span className="text-sm text-indigo-900">
+                        {t('customerDetail:manualOverride')}:{' '}
+                        <strong>
+                          {t(`customerCohort:status.${cohortStatus.cohort_status_override}`)}
+                        </strong>
+                      </span>
+                      {canWrite && (
+                        <button
+                          type="button"
+                          onClick={handleClearCohortOverride}
+                          className="text-xs text-red-600 hover:text-red-800"
+                        >
+                          {t('customerDetail:clearOverride')}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {canWrite && (
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={selectedCohortOverride}
+                        onChange={(e) => setSelectedCohortOverride(e.target.value)}
+                        className="flex-1 min-w-0 px-2 py-1 border rounded text-sm bg-white"
+                      >
+                        <option value="">{t('customerDetail:setCohortOverride')}...</option>
+                        {cohortStatus.allowed_statuses.map((s) => (
+                          <option key={s} value={s}>
+                            {t(`customerCohort:status.${s}`)}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        onClick={handleSetCohortOverride}
+                        disabled={!selectedCohortOverride || cohortOverrideSaving}
+                        className="px-3 py-1 bg-indigo-600 text-white rounded text-sm hover:bg-indigo-700 disabled:opacity-50"
+                      >
+                        {cohortOverrideSaving ? t('common:saving') : t('common:apply')}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
