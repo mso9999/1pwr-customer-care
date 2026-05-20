@@ -3,7 +3,10 @@ import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useCountry } from '../contexts/CountryContext';
 import {
+  exportCustomerCohort,
+  getCustomerCohortStatuses,
   queryCustomerCohort,
+  type CohortExportColumn,
   type CohortQueryResponse,
   type CohortStatus,
 } from '../lib/api';
@@ -161,6 +164,159 @@ function MultiSelect({
   );
 }
 
+// ── Export column picker ────────────────────────────────────────────
+
+function exportColLabel(
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  col: CohortExportColumn,
+): string {
+  const key = `exportCol.${col.id}`;
+  const translated = t(key);
+  return translated === key ? col.label : translated;
+}
+
+function CohortExportModal({
+  open,
+  catalog,
+  defaultOptional,
+  selected,
+  onChangeSelected,
+  onClose,
+  onConfirm,
+  exporting,
+  error,
+}: {
+  open: boolean;
+  catalog: CohortExportColumn[];
+  defaultOptional: string[];
+  selected: Set<string>;
+  onChangeSelected: (next: Set<string>) => void;
+  onClose: () => void;
+  onConfirm: () => void;
+  exporting: boolean;
+  error: string;
+}) {
+  const { t } = useTranslation(['customerCohort']);
+
+  if (!open) return null;
+
+  const mandatory = catalog.filter((c) => c.mandatory);
+  const defaultSet = new Set(defaultOptional);
+  const tableCols = catalog.filter((c) => !c.mandatory && defaultSet.has(c.id));
+  const extraCols = catalog.filter((c) => !c.mandatory && !defaultSet.has(c.id));
+
+  const toggle = (id: string, mandatoryCol: boolean) => {
+    if (mandatoryCol) return;
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    onChangeSelected(next);
+  };
+
+  const setOptional = (ids: string[]) => {
+    const next = new Set<string>();
+    for (const c of mandatory) next.add(c.id);
+    for (const id of ids) next.add(id);
+    onChangeSelected(next);
+  };
+
+  const renderGroup = (title: string, cols: CohortExportColumn[]) => (
+    <div key={title}>
+      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">{title}</div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+        {cols.map((col) => (
+          <label
+            key={col.id}
+            className={`flex items-center gap-2 text-sm rounded px-2 py-1.5 ${
+              col.mandatory ? 'bg-gray-50 text-gray-600' : 'hover:bg-gray-50 cursor-pointer'
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={col.mandatory || selected.has(col.id)}
+              disabled={col.mandatory || exporting}
+              onChange={() => toggle(col.id, col.mandatory)}
+              className="rounded border-gray-300 text-blue-600"
+            />
+            {exportColLabel(t, col)}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40">
+      <div
+        className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] flex flex-col"
+        role="dialog"
+        aria-labelledby="cohort-export-title"
+      >
+        <div className="px-5 py-4 border-b border-gray-200">
+          <h2 id="cohort-export-title" className="text-lg font-semibold text-gray-800">
+            {t('exportTitle')}
+          </h2>
+          <p className="text-sm text-gray-500 mt-1">{t('exportHint')}</p>
+        </div>
+        <div className="px-5 py-4 overflow-y-auto space-y-4 flex-1">
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={exporting}
+              onClick={() => setOptional(defaultOptional)}
+              className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40"
+            >
+              {t('exportSelectTableDefaults')}
+            </button>
+            <button
+              type="button"
+              disabled={exporting}
+              onClick={() => setOptional(catalog.filter((c) => !c.mandatory).map((c) => c.id))}
+              className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40"
+            >
+              {t('exportSelectAllOptional')}
+            </button>
+            <button
+              type="button"
+              disabled={exporting}
+              onClick={() => setOptional([])}
+              className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40"
+            >
+              {t('exportClearOptional')}
+            </button>
+          </div>
+          {renderGroup(t('exportMandatory'), mandatory)}
+          {tableCols.length > 0 && renderGroup(t('exportTableColumns'), tableCols)}
+          {extraCols.length > 0 && renderGroup(t('exportExtraAttributes'), extraCols)}
+        </div>
+        {error && (
+          <div className="mx-5 mb-2 p-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded">
+            {error}
+          </div>
+        )}
+        <div className="px-5 py-4 border-t border-gray-200 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={exporting}
+            className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 disabled:opacity-40"
+          >
+            {t('exportCancel')}
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={exporting}
+            className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-40"
+          >
+            {exporting ? t('exporting') : t('exportConfirm')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Page ────────────────────────────────────────────────────────────
 
 export default function CustomerCohortPage() {
@@ -183,6 +339,13 @@ export default function CustomerCohortPage() {
   const [result, setResult] = useState<CohortQueryResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const [exportCatalog, setExportCatalog] = useState<CohortExportColumn[]>([]);
+  const [defaultExportOptional, setDefaultExportOptional] = useState<string[]>([]);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [exportSelected, setExportSelected] = useState<Set<string>>(new Set());
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState('');
 
   useEffect(() => {
     setFilterSites([]);
@@ -219,6 +382,21 @@ export default function CustomerCohortPage() {
 
   useEffect(() => { void runQuery(); }, [runQuery]);
 
+  useEffect(() => {
+    getCustomerCohortStatuses()
+      .then((cat) => {
+        setExportCatalog(cat.export_columns || []);
+        const defaults = cat.default_export_columns || [];
+        setDefaultExportOptional(defaults);
+        const initial = new Set<string>();
+        for (const c of cat.export_columns || []) {
+          if (c.mandatory || defaults.includes(c.id)) initial.add(c.id);
+        }
+        setExportSelected(initial);
+      })
+      .catch(() => {});
+  }, []);
+
   const totalPages = useMemo(
     () => (result ? Math.max(1, Math.ceil(result.total / PAGE_SIZE)) : 1),
     [result],
@@ -252,48 +430,68 @@ export default function CustomerCohortPage() {
   const sortIcon = (col: SortBy) =>
     sortBy === col ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '';
 
-  const exportCsv = () => {
-    if (!result || result.rows.length === 0) return;
-    const header = [
-      'site', 'account_number', 'name', 'phone', 'customer_type',
-      'cohort_status',
-      'payments_connection_fee', 'payments_readyboard_fee',
-      'payments_fee_repayment_via_electricity', 'payments_electricity',
-      'total_paid', 'date_service_connected',
-      'date_service_terminated', 'payment_status_override', 'customer_id',
-    ];
-    const escape = (v: any) => {
+  const buildCsv = (
+    columns: string[],
+    labels: Record<string, string>,
+    rows: Record<string, unknown>[],
+  ) => {
+    const escape = (v: unknown) => {
       if (v == null) return '';
       const s = String(v).replace(/"/g, '""');
       return /[",\n]/.test(s) ? `"${s}"` : s;
     };
+    const header = columns.map((c) => labels[c] || c);
     const lines = [header.join(',')];
-    for (const r of result.rows) {
-      lines.push([
-        r.site,
-        r.account_number || '',
-        fullName(r),
-        r.phone || '',
-        r.customer_type,
-        r.cohort_status,
-        r.payments_connection_fee,
-        r.payments_readyboard_fee,
-        r.payments_fee_repayment_via_electricity,
-        r.payments_electricity,
-        r.total_paid,
-        r.date_service_connected || '',
-        r.date_service_terminated || '',
-        r.payment_status_override || '',
-        r.customer_id,
-      ].map(escape).join(','));
+    for (const r of rows) {
+      lines.push(columns.map((c) => escape(r[c])).join(','));
     }
-    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `customer-cohort-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    return lines.join('\n');
+  };
+
+  const runExport = async () => {
+    setExporting(true);
+    setExportError('');
+    try {
+      const res = await exportCustomerCohort({
+        filters: {
+          country: country || undefined,
+          sites: filterSites.length ? filterSites : undefined,
+          customer_types: filterTypes.length ? filterTypes : undefined,
+          statuses: filterStatuses.length ? (filterStatuses as CohortStatus[]) : undefined,
+          search: search.trim() || undefined,
+        },
+        sort_by: sortBy,
+        sort_dir: sortDir,
+        columns: Array.from(exportSelected),
+      });
+      if (res.exported === 0) {
+        setExportError(t('noResults'));
+        return;
+      }
+      const labels: Record<string, string> = {};
+      for (const col of exportCatalog) {
+        labels[col.id] = exportColLabel(t, col);
+      }
+      Object.assign(labels, res.column_labels);
+      const csv = buildCsv(res.columns, labels, res.rows);
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `customer-cohort-${country}-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setExportModalOpen(false);
+      if (res.truncated) {
+        window.alert(
+          t('exportTruncated', { max: 50000, total: res.total }),
+        );
+      }
+    } catch (e: unknown) {
+      setExportError(e instanceof Error ? e.message : t('exportFailed'));
+    } finally {
+      setExporting(false);
+    }
   };
 
   return (
@@ -379,13 +577,29 @@ export default function CustomerCohortPage() {
           ) : null}
         </div>
         <button
-          onClick={exportCsv}
-          disabled={!result || result.rows.length === 0}
+          type="button"
+          onClick={() => {
+            setExportError('');
+            setExportModalOpen(true);
+          }}
+          disabled={!result || result.total === 0 || exportCatalog.length === 0}
           className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-40"
         >
           {t('exportCsv')}
         </button>
       </div>
+
+      <CohortExportModal
+        open={exportModalOpen}
+        catalog={exportCatalog}
+        defaultOptional={defaultExportOptional}
+        selected={exportSelected}
+        onChangeSelected={setExportSelected}
+        onClose={() => !exporting && setExportModalOpen(false)}
+        onConfirm={() => void runExport()}
+        exporting={exporting}
+        error={exportError}
+      />
 
       {error && (
         <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded">{error}</div>

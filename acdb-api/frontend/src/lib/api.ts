@@ -3044,10 +3044,34 @@ export interface CohortQueryResponse {
   };
 }
 
+export interface CohortExportColumn {
+  id: string;
+  label: string;
+  mandatory: boolean;
+}
+
 export interface CohortStatusesCatalog {
   statuses: CohortStatus[];
   customer_types: string[];
   sort_columns: string[];
+  export_columns: CohortExportColumn[];
+  default_export_columns: string[];
+}
+
+export interface CohortExportRequest {
+  filters?: CohortQueryRequest['filters'];
+  sort_by?: CohortQueryRequest['sort_by'];
+  sort_dir?: CohortQueryRequest['sort_dir'];
+  columns: string[];
+}
+
+export interface CohortExportResponse {
+  rows: Record<string, unknown>[];
+  total: number;
+  exported: number;
+  truncated: boolean;
+  columns: string[];
+  column_labels: Record<string, string>;
 }
 
 export async function getCustomerCohortStatuses(): Promise<CohortStatusesCatalog> {
@@ -3058,6 +3082,15 @@ export async function queryCustomerCohort(
   req: CohortQueryRequest,
 ): Promise<CohortQueryResponse> {
   return request('/customer-cohort/query', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
+}
+
+export async function exportCustomerCohort(
+  req: CohortExportRequest,
+): Promise<CohortExportResponse> {
+  return request('/customer-cohort/export', {
     method: 'POST',
     body: JSON.stringify(req),
   });

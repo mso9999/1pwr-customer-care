@@ -16,10 +16,13 @@ sys.path.insert(0, os.path.dirname(HERE))
 
 from customer_cohort import (  # noqa: E402
     COHORT_STATUSES,
+    CohortExportRequest,
     CohortFilters,
     CohortQuery,
+    _build_export_query,
     _build_query,
     _expand_customer_types,
+    _resolve_export_columns,
     _resolve_fee_threshold,
     _resolve_sites,
 )
@@ -220,6 +223,31 @@ class TestQueryBuilder(unittest.TestCase):
                     f"sort key {ui_key!r} → {sql_expr!r} references "
                     f"unknown CTE column {ident!r}",
                 )
+
+
+class TestExportColumns(unittest.TestCase):
+    def test_mandatory_always_included(self):
+        cols = _resolve_export_columns(["site"])
+        self.assertEqual(cols[0], "account_number")
+        self.assertEqual(cols[1], "name")
+        self.assertIn("site", cols)
+
+    def test_unknown_columns_ignored(self):
+        cols = _resolve_export_columns(["gender", "not_a_column"])
+        self.assertIn("gender", cols)
+        self.assertNotIn("not_a_column", cols)
+
+    def test_export_sql_includes_extra_attributes(self):
+        body = CohortExportRequest(
+            filters=CohortFilters(country="LS"),
+            columns=["gender", "gps_lat", "gps_lon"],
+        )
+        cols = _resolve_export_columns(body.columns)
+        sql, params = _build_export_query(body, cols)
+        self.assertIn("gender", sql)
+        self.assertIn("gps_lat", sql)
+        self.assertIn("LIMIT %s", sql)
+        self.assertEqual(params[-1], 50_000)
 
 
 class TestFeeThreshold(unittest.TestCase):

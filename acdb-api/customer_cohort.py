@@ -101,6 +101,113 @@ class CohortQuery(BaseModel):
     page_size: int = 50            # capped server-side at 500
 
 
+class CohortExportRequest(BaseModel):
+    """Export all rows matching filters (not only the current UI page)."""
+
+    filters: CohortFilters = Field(default_factory=CohortFilters)
+    sort_by: str = "site"
+    sort_dir: str = "asc"
+    columns: List[str] = Field(
+        default_factory=list,
+        description="Export column ids; account_number and name are always included.",
+    )
+
+
+EXPORT_MAX_ROWS = 50_000
+
+# Whitelisted export columns → SQL select expressions on the ``cohort`` CTE.
+# ``mandatory`` columns are always appended even if omitted from the request.
+_EXPORT_SELECT: Dict[str, Dict[str, Any]] = {
+    "account_number": {"mandatory": True, "label": "Account number", "sql": "account_number"},
+    "name": {
+        "mandatory": True,
+        "label": "Name",
+        "sql": (
+            "TRIM(CONCAT_WS(' ', NULLIF(TRIM(first_name), ''), "
+            "NULLIF(TRIM(middle_name), ''), NULLIF(TRIM(last_name), ''))) AS name"
+        ),
+    },
+    "site": {"label": "Site", "sql": "site"},
+    "phone": {"label": "Phone", "sql": "phone"},
+    "customer_type": {"label": "Customer type", "sql": "customer_type"},
+    "cohort_status": {"label": "Payment status", "sql": "cohort_status"},
+    "payments_connection_fee": {"label": "Connection fee paid", "sql": "payments_connection_fee"},
+    "payments_readyboard_fee": {"label": "Readyboard fee paid", "sql": "payments_readyboard_fee"},
+    "payments_fee_repayment_via_electricity": {
+        "label": "Fee repayment via electricity",
+        "sql": "payments_fee_repayment_via_electricity",
+    },
+    "payments_electricity": {"label": "Electricity paid", "sql": "payments_electricity"},
+    "total_paid": {"label": "Total paid", "sql": "total_paid"},
+    "date_service_connected": {"label": "Date connected", "sql": "date_service_connected"},
+    "date_service_terminated": {"label": "Date terminated", "sql": "date_service_terminated"},
+    "payment_status_override": {"label": "Payment status override", "sql": "payment_status_override"},
+    "customer_id": {"label": "Customer ID (internal)", "sql": "customer_id"},
+    "first_name": {"label": "First name", "sql": "first_name"},
+    "last_name": {"label": "Last name", "sql": "last_name"},
+    "middle_name": {"label": "Middle name", "sql": "middle_name"},
+    "gender": {"label": "Gender", "sql": "gender"},
+    "gps_lat": {"label": "GPS latitude", "sql": "gps_lat"},
+    "gps_lon": {"label": "GPS longitude", "sql": "gps_lon"},
+    "plot_number": {"label": "Plot number", "sql": "plot_number"},
+    "national_id": {"label": "National ID", "sql": "national_id"},
+    "cell_phone_1": {"label": "Cell phone 1", "sql": "cell_phone_1"},
+    "cell_phone_2": {"label": "Cell phone 2", "sql": "cell_phone_2"},
+    "email": {"label": "Email", "sql": "email"},
+    "customer_id_legacy": {"label": "Legacy customer ID", "sql": "customer_id_legacy"},
+    "survey_id": {"label": "Survey ID", "sql": "survey_id"},
+    "customer_commissioned": {"label": "Commissioned", "sql": "customer_commissioned"},
+    "customer_commissioned_date": {
+        "label": "Commissioned date",
+        "sql": "customer_commissioned_date",
+    },
+    "contract_signed": {"label": "Contract signed", "sql": "contract_signed"},
+    "contract_signed_date": {"label": "Contract signed date", "sql": "contract_signed_date"},
+}
+
+# Default optional columns matching the on-screen table (excluding mandatory).
+DEFAULT_EXPORT_COLUMNS: List[str] = [
+    "site",
+    "phone",
+    "customer_type",
+    "cohort_status",
+    "payments_connection_fee",
+    "payments_readyboard_fee",
+    "payments_fee_repayment_via_electricity",
+    "payments_electricity",
+    "total_paid",
+    "date_service_connected",
+]
+
+
+def _export_column_catalog() -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for col_id, spec in _EXPORT_SELECT.items():
+        out.append({
+            "id": col_id,
+            "label": spec["label"],
+            "mandatory": bool(spec.get("mandatory")),
+        })
+    return out
+
+
+def _resolve_export_columns(requested: Optional[List[str]]) -> List[str]:
+    """Return ordered, de-duplicated export column ids (mandatory first)."""
+    ordered: List[str] = []
+    seen: set = set()
+    for col_id, spec in _EXPORT_SELECT.items():
+        if spec.get("mandatory"):
+            if col_id not in seen:
+                ordered.append(col_id)
+                seen.add(col_id)
+    for raw in requested or []:
+        col_id = (raw or "").strip()
+        if col_id in _EXPORT_SELECT and col_id not in seen:
+            ordered.append(col_id)
+            seen.add(col_id)
+    return ordered
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -226,6 +333,7 @@ def _build_query(q: CohortQuery, *, count_only: bool) -> Tuple[str, list]:
             SELECT
                 c.id AS customer_id,
                 c.first_name,
+                c.middle_name,
                 c.last_name,
                 c.phone,
                 c.community AS site,
@@ -233,7 +341,21 @@ def _build_query(q: CohortQuery, *, count_only: bool) -> Tuple[str, list]:
                 c.date_service_connected,
                 c.date_service_terminated,
                 c.payment_status_override,
+                c.gender,
+                c.gps_lat,
+                c.gps_lon,
+                c.plot_number,
+                c.national_id,
+                c.cell_phone_1,
+                c.cell_phone_2,
+                c.email,
+                c.customer_id_legacy,
+                c.customer_commissioned,
+                c.customer_commissioned_date,
+                c.contract_signed,
+                c.contract_signed_date,
                 a.account_number,
+                a.survey_id,
                 COALESCE(pt.total_paid, 0)::numeric AS total_paid,
                 COALESCE(pt.payments_connection_fee, 0)::numeric AS payments_connection_fee,
                 COALESCE(pt.payments_readyboard_fee, 0)::numeric AS payments_readyboard_fee,
@@ -298,6 +420,69 @@ def _build_query(q: CohortQuery, *, count_only: bool) -> Tuple[str, list]:
     return sql, params
 
 
+def _build_export_query(q: CohortExportRequest, columns: List[str]) -> Tuple[str, list]:
+    """All matching rows (capped at EXPORT_MAX_ROWS) with selected export columns."""
+    base = CohortQuery(
+        filters=q.filters,
+        sort_by=q.sort_by,
+        sort_dir=q.sort_dir,
+        page=1,
+        page_size=EXPORT_MAX_ROWS,
+    )
+    sql, params = _build_query(base, count_only=False)
+    # Replace paginated SELECT with dynamic export projection (same params).
+    select_parts = [_EXPORT_SELECT[c]["sql"] for c in columns]
+    sort_col = _SORT_COLS.get(q.sort_by, _SORT_COLS["site"])
+    sort_dir = "DESC" if (q.sort_dir or "").lower() == "desc" else "ASC"
+    f = q.filters
+    statuses = [s for s in (f.statuses or []) if s in COHORT_STATUSES]
+    status_clause = ""
+    if statuses:
+        ph = ",".join(["%s"] * len(statuses))
+        status_clause = f"AND cohort_status IN ({ph})"
+    # Drop trailing LIMIT/OFFSET (last two params).
+    if len(params) >= 2:
+        params = params[:-2]
+    export_sql = sql.rsplit("SELECT", 1)[0]
+    export_sql += (
+        f"SELECT {', '.join(select_parts)} FROM cohort "
+        f"WHERE 1=1 {status_clause} "
+        f"ORDER BY {sort_col} {sort_dir} NULLS LAST, customer_id ASC "
+        f"LIMIT %s"
+    )
+    params.append(EXPORT_MAX_ROWS)
+    return export_sql, params
+
+
+def _format_cohort_row(d: Dict[str, Any]) -> Dict[str, Any]:
+    if d.get("date_service_connected"):
+        d["date_service_connected"] = d["date_service_connected"].isoformat()
+    if d.get("date_service_terminated"):
+        d["date_service_terminated"] = d["date_service_terminated"].isoformat()
+    if d.get("customer_commissioned_date"):
+        d["customer_commissioned_date"] = d["customer_commissioned_date"].isoformat()
+    if d.get("contract_signed_date"):
+        d["contract_signed_date"] = d["contract_signed_date"].isoformat()
+    if d.get("total_paid") is not None:
+        d["total_paid"] = float(d["total_paid"])
+    for k in (
+        "payments_connection_fee",
+        "payments_readyboard_fee",
+        "payments_fee_repayment_via_electricity",
+        "payments_electricity",
+    ):
+        if d.get(k) is not None:
+            d[k] = float(d[k])
+    for k in ("gps_lat", "gps_lon"):
+        if d.get(k) is not None:
+            d[k] = float(d[k])
+    if d.get("customer_commissioned") is not None:
+        d["customer_commissioned"] = bool(d["customer_commissioned"])
+    if d.get("contract_signed") is not None:
+        d["contract_signed"] = bool(d["contract_signed"])
+    return d
+
+
 def _row_to_dict(cursor, row) -> Dict[str, Any]:
     cols = [d[0] for d in cursor.description]
     return dict(zip(cols, row))
@@ -311,8 +496,13 @@ def _row_to_dict(cursor, row) -> Dict[str, Any]:
 @router.get("/statuses")
 def list_statuses(user: CurrentUser = Depends(require_employee)):
     """Return the canonical list of cohort_status values."""
-    return {"statuses": COHORT_STATUSES, "customer_types": _CUSTOMER_TYPES,
-            "sort_columns": list(_SORT_COLS.keys())}
+    return {
+        "statuses": COHORT_STATUSES,
+        "customer_types": _CUSTOMER_TYPES,
+        "sort_columns": list(_SORT_COLS.keys()),
+        "export_columns": _export_column_catalog(),
+        "default_export_columns": DEFAULT_EXPORT_COLUMNS,
+    }
 
 
 @router.post("/query")
@@ -352,23 +542,7 @@ def query_cohort(
 
             cur.execute(sql, tuple(params))
             for r in cur.fetchall():
-                d = _row_to_dict(cur, r)
-                # Format dates / numerics for JSON
-                if d.get("date_service_connected"):
-                    d["date_service_connected"] = d["date_service_connected"].isoformat()
-                if d.get("date_service_terminated"):
-                    d["date_service_terminated"] = d["date_service_terminated"].isoformat()
-                if d.get("total_paid") is not None:
-                    d["total_paid"] = float(d["total_paid"])
-                for k in (
-                    "payments_connection_fee",
-                    "payments_readyboard_fee",
-                    "payments_fee_repayment_via_electricity",
-                    "payments_electricity",
-                ):
-                    if d.get(k) is not None:
-                        d[k] = float(d[k])
-                rows.append(d)
+                rows.append(_format_cohort_row(_row_to_dict(cur, r)))
         except Exception:
             logger.exception("Cohort query failed")
             raise HTTPException(500, "Cohort query failed")
@@ -389,4 +563,50 @@ def query_cohort(
             "sort_dir": q.sort_dir,
             "fee_threshold": _resolve_fee_threshold(q.filters.country),
         },
+    }
+
+
+@router.post("/export")
+def export_cohort(
+    body: CohortExportRequest,
+    user: CurrentUser = Depends(require_employee),
+):
+    """Return all customers matching filters for CSV export (not paginated UI rows)."""
+    if body.sort_by not in _SORT_COLS:
+        raise HTTPException(400, f"sort_by must be one of {list(_SORT_COLS.keys())}")
+
+    columns = _resolve_export_columns(body.columns)
+    if not columns:
+        raise HTTPException(400, "No export columns selected")
+
+    sql, params = _build_export_query(body, columns)
+    count_q = CohortQuery(filters=body.filters, sort_by=body.sort_by, sort_dir=body.sort_dir)
+    count_sql, count_params = _build_query(count_q, count_only=True)
+
+    from customer_api import get_connection  # noqa: WPS433
+
+    rows: List[Dict[str, Any]] = []
+    total = 0
+    truncated = False
+    with get_connection() as conn:
+        cur = conn.cursor()
+        try:
+            cur.execute(count_sql, tuple(count_params))
+            total = int(cur.fetchone()[0] or 0)
+            truncated = total > EXPORT_MAX_ROWS
+
+            cur.execute(sql, tuple(params))
+            for r in cur.fetchall():
+                rows.append(_format_cohort_row(_row_to_dict(cur, r)))
+        except Exception:
+            logger.exception("Cohort export failed")
+            raise HTTPException(500, "Cohort export failed")
+
+    return {
+        "rows": rows,
+        "total": total,
+        "exported": len(rows),
+        "truncated": truncated,
+        "columns": columns,
+        "column_labels": {c: _EXPORT_SELECT[c]["label"] for c in columns},
     }
