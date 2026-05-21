@@ -7,6 +7,9 @@ import {
   patchAdvance,
   replaceAdvanceContract,
   writeoffAdvance,
+  getContractCreditAvailable,
+  convertContractCreditToElectricity,
+  refundContractCredit,
   openAdvanceContract,
   type Advance,
   type AdvanceStatus,
@@ -474,17 +477,124 @@ export default function AdvancesPage() {
     }
   };
 
+  const handleConvertContractCredit = async () => {
+    const account = window.prompt(t('advances:convert.promptAccount'));
+    if (!account) return;
+    const normalizedAccount = account.toUpperCase().trim();
+    try {
+      const available = await getContractCreditAvailable(normalizedAccount);
+      if (available.total_available <= 0) {
+        window.alert(t('advances:convert.noneAvailable', { account: normalizedAccount }));
+        return;
+      }
+      window.alert(
+        t('advances:convert.availableHint', {
+          amount: available.total_available.toFixed(2),
+          account: normalizedAccount,
+        }),
+      );
+    } catch (err: unknown) {
+      window.alert(err instanceof Error ? err.message : String(err));
+      return;
+    }
+
+    const amountRaw = window.prompt(t('advances:convert.promptAmount'));
+    if (!amountRaw) return;
+    const amount = Number(amountRaw);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      window.alert(t('advances:convert.invalidAmount'));
+      return;
+    }
+    const note = window.prompt(t('advances:convert.promptNote')) || undefined;
+    try {
+      const res = await convertContractCreditToElectricity({
+        account_number: normalizedAccount,
+        amount,
+        note,
+      });
+      window.alert(
+        t('advances:convert.success', {
+          account: res.account_number,
+          amount: res.converted_amount.toFixed(2),
+          kwh: res.converted_kwh.toFixed(4),
+        }),
+      );
+      fetchData();
+    } catch (err: unknown) {
+      window.alert(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleRefundContractCredit = async () => {
+    const account = window.prompt(t('advances:refund.promptAccount'));
+    if (!account) return;
+    const normalizedAccount = account.toUpperCase().trim();
+    try {
+      const available = await getContractCreditAvailable(normalizedAccount);
+      if (available.total_available <= 0) {
+        window.alert(t('advances:refund.noneAvailable', { account: normalizedAccount }));
+        return;
+      }
+      window.alert(
+        t('advances:refund.availableHint', {
+          amount: available.total_available.toFixed(2),
+          account: normalizedAccount,
+        }),
+      );
+    } catch (err: unknown) {
+      window.alert(err instanceof Error ? err.message : String(err));
+      return;
+    }
+    const amountRaw = window.prompt(t('advances:refund.promptAmount'));
+    if (!amountRaw) return;
+    const amount = Number(amountRaw);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      window.alert(t('advances:refund.invalidAmount'));
+      return;
+    }
+    const note = window.prompt(t('advances:refund.promptNote')) || undefined;
+    try {
+      const res = await refundContractCredit({
+        account_number: normalizedAccount,
+        amount,
+        note,
+      });
+      window.alert(
+        t('advances:refund.success', {
+          account: res.account_number,
+          amount: res.refunded_amount.toFixed(2),
+        }),
+      );
+    } catch (err: unknown) {
+      window.alert(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   return (
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-bold">{t('advances:title')}</h2>
         {canAdmin && (
-          <button
-            onClick={() => setShowCreate(true)}
-            className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
-          >
-            {t('advances:newAdvance')}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleConvertContractCredit}
+              className="px-4 py-2 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700"
+            >
+              {t('advances:convert.button')}
+            </button>
+            <button
+              onClick={handleRefundContractCredit}
+              className="px-4 py-2 bg-rose-600 text-white text-sm rounded-lg hover:bg-rose-700"
+            >
+              {t('advances:refund.button')}
+            </button>
+            <button
+              onClick={() => setShowCreate(true)}
+              className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
+            >
+              {t('advances:newAdvance')}
+            </button>
+          </div>
         )}
       </div>
 

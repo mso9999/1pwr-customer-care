@@ -73,5 +73,25 @@
   "errors": {
     "contractRequired": "A signed contract file is required to create an advance."
   },
+  "convert": {
+    "button": "Convert Debt Credit",
+    "promptAccount": "Account number to convert (e.g. 0001MAS):",
+    "promptAmount": "Amount to convert to electricity credit:",
+    "promptNote": "Reason / note (optional):",
+    "invalidAmount": "Amount must be a positive number.",
+    "noneAvailable": "No debt credit is available for {{account}}.",
+    "availableHint": "Available debt credit for {{account}}: {{amount}}",
+    "success": "Converted {{amount}} to {{kwh}} kWh electricity credit for {{account}}."
+  },
+  "refund": {
+    "button": "Refund Debt Credit",
+    "promptAccount": "Account number to refund (e.g. 0001MAS):",
+    "promptAmount": "Amount to mark as refunded:",
+    "promptNote": "Refund note / reason (optional):",
+    "invalidAmount": "Amount must be a positive number.",
+    "noneAvailable": "No debt credit is available for {{account}}.",
+    "availableHint": "Available debt credit for {{account}}: {{amount}}",
+    "success": "Marked {{amount}} as refunded debt credit for {{account}}."
+  },
   "badge": "Advance: {{outstanding}} outstanding"
 }

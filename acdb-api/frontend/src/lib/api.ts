@@ -2901,6 +2901,82 @@ export async function writeoffAdvance(id: number, note?: string): Promise<{ id: 
   });
 }
 
+export interface ContractCreditConversionResult {
+  status: string;
+  account_number: string;
+  requested_amount: number;
+  converted_amount: number;
+  unconverted_amount: number;
+  total_available_before: number;
+  total_available_after: number;
+  converted_kwh: number;
+  rate_used: number;
+  balance_before_kwh: number;
+  balance_after_kwh: number;
+  allocations: Array<{
+    source_transaction_id: number;
+    amount: number;
+  }>;
+  electricity_transaction_id: number;
+  sm_credit?: Record<string, unknown>;
+}
+
+export interface ContractCreditSource {
+  transaction_id: number;
+  base_unallocated: number;
+  already_decided: number;
+  available: number;
+}
+
+export interface ContractCreditAvailableResult {
+  account_number: string;
+  total_available: number;
+  sources: ContractCreditSource[];
+}
+
+export interface ContractCreditRefundResult {
+  status: string;
+  account_number: string;
+  requested_amount: number;
+  refunded_amount: number;
+  unrefunded_amount: number;
+  total_available_before: number;
+  total_available_after: number;
+  allocations: Array<{
+    source_transaction_id: number;
+    amount: number;
+  }>;
+  financial_credit_decision_ids: number[];
+}
+
+export async function getContractCreditAvailable(
+  account_number: string,
+): Promise<ContractCreditAvailableResult> {
+  return request(`/advances/contract-credit/available?account_number=${encodeURIComponent(account_number)}`);
+}
+
+export async function convertContractCreditToElectricity(input: {
+  account_number: string;
+  amount: number;
+  note?: string;
+}): Promise<ContractCreditConversionResult> {
+  return request('/advances/contract-credit/convert', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function refundContractCredit(input: {
+  account_number: string;
+  amount: number;
+  note?: string;
+}): Promise<ContractCreditRefundResult> {
+  return request('/advances/contract-credit/refund', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
 export function openAdvanceContract(id: number): void {
   openInNewTab(`/advances/${id}/contract`);
 }

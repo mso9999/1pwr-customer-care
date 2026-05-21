@@ -73,5 +73,25 @@
   "errors": {
     "contractRequired": "Un contrat signé est obligatoire pour créer une avance."
   },
+  "convert": {
+    "button": "Convertir crédit dette",
+    "promptAccount": "Numéro de compte à convertir (ex: 0001MAS) :",
+    "promptAmount": "Montant à convertir en crédit électricité :",
+    "promptNote": "Motif / note (facultatif) :",
+    "invalidAmount": "Le montant doit être un nombre positif.",
+    "noneAvailable": "Aucun crédit dette disponible pour {{account}}.",
+    "availableHint": "Crédit dette disponible pour {{account}} : {{amount}}",
+    "success": "Conversion de {{amount}} en {{kwh}} kWh de crédit électricité pour {{account}}."
+  },
+  "refund": {
+    "button": "Rembourser crédit dette",
+    "promptAccount": "Numéro de compte à rembourser (ex: 0001MAS) :",
+    "promptAmount": "Montant à marquer comme remboursé :",
+    "promptNote": "Note / motif du remboursement (facultatif) :",
+    "invalidAmount": "Le montant doit être un nombre positif.",
+    "noneAvailable": "Aucun crédit dette disponible pour {{account}}.",
+    "availableHint": "Crédit dette disponible pour {{account}} : {{amount}}",
+    "success": "Montant {{amount}} marqué comme crédit dette remboursé pour {{account}}."
+  },
   "badge": "Avance : {{outstanding}} restant"
 }

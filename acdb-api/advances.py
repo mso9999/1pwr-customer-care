@@ -35,7 +35,7 @@ import os
 import re
 import shutil
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import (
     APIRouter,
@@ -50,11 +50,13 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from contract_gen import CONTRACTS_DIR
-from country_config import COUNTRY
+from country_config import COUNTRY, get_tariff_rate_for_site
+from balance_engine import get_balance_kwh, record_payment_kwh
 from fee_debt import total_fee_debt_for_advance_block
 from middleware import require_employee
 from models import CCRole, CurrentUser
 from mutations import try_log_mutation
+from sm_credit_retry import credit_sm_with_retry
 
 logger = logging.getLogger("cc-api.advances")
 
@@ -214,6 +216,18 @@ class AdvancePatch(BaseModel):
 
 
 class WriteoffRequest(BaseModel):
+    note: Optional[str] = None
+
+
+class ConvertContractCreditRequest(BaseModel):
+    account_number: str
+    amount: float = Field(..., gt=0)
+    note: Optional[str] = None
+
+
+class RefundContractCreditRequest(BaseModel):
+    account_number: str
+    amount: float = Field(..., gt=0)
     note: Optional[str] = None
 
 
@@ -864,3 +878,310 @@ def writeoff_advance(
         )
         conn.commit()
     return {"status": "ok", "id": advance_id, "wrote_off_outstanding": outstanding}
+
+
+def _assert_financial_credit_table(conn) -> None:
+    cur = conn.cursor()
+    cur.execute("SELECT to_regclass('public.financial_credit_decisions')")
+    if cur.fetchone()[0] is None:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Missing table financial_credit_decisions; apply migration "
+                "035_manual_financial_credit_decisions.sql"
+            ),
+        )
+
+
+def _fetch_contract_credit_sources(conn, account: str, *, for_update: bool = False) -> list[dict[str, Any]]:
+    _assert_financial_credit_table(conn)
+    cur = conn.cursor()
+    lock_sql = " FOR UPDATE OF t" if for_update else ""
+    cur.execute(
+        f"""
+        SELECT t.id,
+               COALESCE(t.transaction_amount, 0) AS txn_amount,
+               COALESCE(t.fee_repayment_portion, 0) AS fee_rep,
+               COALESCE(t.advance_portion, 0) AS advance_rep,
+               COALESCE(t.electricity_portion, 0) AS elec_rep,
+               COALESCE(d.decided_amount, 0) AS decided_amount
+          FROM transactions t
+          LEFT JOIN (
+              SELECT source_transaction_id, SUM(amount) AS decided_amount
+              FROM financial_credit_decisions
+              GROUP BY source_transaction_id
+          ) d ON d.source_transaction_id = t.id
+         WHERE t.account_number = %s
+           AND t.source = 'sms_gateway_contract'
+           AND t.is_payment = true
+         ORDER BY t.transaction_date ASC, t.id ASC
+         {lock_sql}
+        """,
+        (account,),
+    )
+    out: list[dict[str, Any]] = []
+    for txn_id, txn_amount, fee_rep, advance_rep, elec_rep, decided_amount in cur.fetchall():
+        base_unallocated = round(
+            float(txn_amount or 0)
+            - float(fee_rep or 0)
+            - float(advance_rep or 0)
+            - float(elec_rep or 0),
+            2,
+        )
+        available = round(base_unallocated - float(decided_amount or 0), 2)
+        if available < 0:
+            available = 0.0
+        out.append(
+            {
+                "transaction_id": int(txn_id),
+                "base_unallocated": base_unallocated,
+                "already_decided": round(float(decided_amount or 0), 2),
+                "available": available,
+            }
+        )
+    return out
+
+
+def _allocate_contract_credit(sources: list[dict[str, Any]], requested: float) -> tuple[list[dict[str, Any]], float]:
+    remaining = round(float(requested), 2)
+    allocations: list[dict[str, Any]] = []
+    for src in sources:
+        if remaining <= 0:
+            break
+        avail = round(float(src["available"]), 2)
+        if avail <= 0:
+            continue
+        take = round(min(remaining, avail), 2)
+        if take <= 0:
+            continue
+        allocations.append(
+            {
+                "source_transaction_id": int(src["transaction_id"]),
+                "amount": take,
+            }
+        )
+        remaining = round(remaining - take, 2)
+    allocated = round(requested - remaining, 2)
+    return allocations, allocated
+
+
+@router.get("/contract-credit/available")
+def get_contract_credit_available(
+    account_number: str = Query(...),
+    user: CurrentUser = Depends(require_employee),
+):
+    _require_admin(user)
+    account = (account_number or "").strip().upper()
+    if not account:
+        raise HTTPException(status_code=400, detail="account_number is required")
+    with _get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM accounts WHERE account_number = %s LIMIT 1", (account,))
+        if cur.fetchone() is None:
+            raise HTTPException(status_code=404, detail=f"Unknown account {account}")
+        sources = _fetch_contract_credit_sources(conn, account, for_update=False)
+    total_available = round(sum(float(s["available"]) for s in sources), 2)
+    return {
+        "account_number": account,
+        "total_available": total_available,
+        "sources": sources,
+    }
+
+
+@router.post("/contract-credit/convert")
+def convert_contract_credit_to_electricity(
+    body: ConvertContractCreditRequest,
+    user: CurrentUser = Depends(require_employee),
+):
+    _require_admin(user)
+    account = (body.account_number or "").strip().upper()
+    if not account:
+        raise HTTPException(status_code=400, detail="account_number is required")
+    requested = round(float(body.amount), 2)
+    if requested <= 0:
+        raise HTTPException(status_code=400, detail="amount must be positive")
+    rate = float(get_tariff_rate_for_site(_site_for_account(account)) or 0.0)
+    if rate <= 0:
+        raise HTTPException(status_code=400, detail="Could not resolve tariff rate for account")
+
+    with _get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM accounts WHERE account_number = %s LIMIT 1", (account,))
+        if cur.fetchone() is None:
+            raise HTTPException(status_code=404, detail=f"Unknown account {account}")
+
+        sources = _fetch_contract_credit_sources(conn, account, for_update=True)
+        total_available = round(sum(float(s["available"]) for s in sources), 2)
+        allocations, converted_amount = _allocate_contract_credit(sources, requested)
+        if converted_amount <= 0:
+            raise HTTPException(
+                status_code=409,
+                detail="No manual credit is available to convert for this account.",
+            )
+
+        before_balance, _ = get_balance_kwh(conn, account)
+        txn_id, converted_kwh, new_balance = record_payment_kwh(
+            conn,
+            account_number=account,
+            meter_id="",
+            amount_currency=converted_amount,
+            rate=rate,
+            source="manual_contract_credit_convert",
+            ledger_amount_currency=0.0,
+        )
+        cur.execute(
+            """
+            UPDATE transactions
+               SET payment_category = 'electricity',
+                   electricity_portion = %s,
+                   fee_repayment_portion = 0,
+                   advance_portion = 0,
+                   financing_portion = 0
+             WHERE id = %s
+            """,
+            (converted_amount, txn_id),
+        )
+        note = (body.note or "").strip() or None
+        for alloc in allocations:
+            cur.execute(
+                """
+                INSERT INTO financial_credit_decisions
+                    (account_number, source_transaction_id, decision_type, amount,
+                     related_transaction_id, note, created_by)
+                VALUES (%s, %s, 'convert', %s, %s, %s, %s)
+                """,
+                (
+                    account,
+                    int(alloc["source_transaction_id"]),
+                    float(alloc["amount"]),
+                    int(txn_id),
+                    note,
+                    user.user_id,
+                ),
+            )
+
+        try_log_mutation(
+            user,
+            "create",
+            "financial_credit_decisions",
+            str(txn_id),
+            new_values={
+                "account_number": account,
+                "decision": "convert",
+                "requested_amount": requested,
+                "converted_amount": converted_amount,
+                "converted_kwh": converted_kwh,
+                "rate_used": rate,
+                "allocations": allocations,
+                "electricity_transaction_id": txn_id,
+                "note": note,
+            },
+            metadata={"endpoint": "POST /api/advances/contract-credit/convert"},
+            conn=conn,
+        )
+        conn.commit()
+
+    sm_credit = credit_sm_with_retry(
+        account_number=account,
+        amount=converted_amount,
+        memo=f"manual contract-credit conversion by {user.user_id}",
+        external_id=str(txn_id),
+        replay_due_limit=2,
+    )
+    return {
+        "status": "ok",
+        "account_number": account,
+        "requested_amount": requested,
+        "converted_amount": converted_amount,
+        "unconverted_amount": round(requested - converted_amount, 2),
+        "total_available_before": total_available,
+        "total_available_after": round(total_available - converted_amount, 2),
+        "converted_kwh": converted_kwh,
+        "rate_used": rate,
+        "balance_before_kwh": before_balance,
+        "balance_after_kwh": new_balance,
+        "allocations": allocations,
+        "electricity_transaction_id": txn_id,
+        "sm_credit": sm_credit,
+    }
+
+
+@router.post("/contract-credit/refund")
+def refund_contract_credit(
+    body: RefundContractCreditRequest,
+    user: CurrentUser = Depends(require_employee),
+):
+    _require_admin(user)
+    account = (body.account_number or "").strip().upper()
+    if not account:
+        raise HTTPException(status_code=400, detail="account_number is required")
+    requested = round(float(body.amount), 2)
+    if requested <= 0:
+        raise HTTPException(status_code=400, detail="amount must be positive")
+
+    with _get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM accounts WHERE account_number = %s LIMIT 1", (account,))
+        if cur.fetchone() is None:
+            raise HTTPException(status_code=404, detail=f"Unknown account {account}")
+
+        sources = _fetch_contract_credit_sources(conn, account, for_update=True)
+        total_available = round(sum(float(s["available"]) for s in sources), 2)
+        allocations, refunded_amount = _allocate_contract_credit(sources, requested)
+        if refunded_amount <= 0:
+            raise HTTPException(
+                status_code=409,
+                detail="No manual credit is available to refund for this account.",
+            )
+
+        note = (body.note or "").strip() or None
+        decision_ids: list[int] = []
+        for alloc in allocations:
+            cur.execute(
+                """
+                INSERT INTO financial_credit_decisions
+                    (account_number, source_transaction_id, decision_type, amount,
+                     related_transaction_id, note, created_by)
+                VALUES (%s, %s, 'refund', %s, NULL, %s, %s)
+                RETURNING id
+                """,
+                (
+                    account,
+                    int(alloc["source_transaction_id"]),
+                    float(alloc["amount"]),
+                    note,
+                    user.user_id,
+                ),
+            )
+            decision_ids.append(int(cur.fetchone()[0]))
+
+        try_log_mutation(
+            user,
+            "create",
+            "financial_credit_decisions",
+            account,
+            new_values={
+                "account_number": account,
+                "decision": "refund",
+                "requested_amount": requested,
+                "refunded_amount": refunded_amount,
+                "allocations": allocations,
+                "decision_ids": decision_ids,
+                "note": note,
+            },
+            metadata={"endpoint": "POST /api/advances/contract-credit/refund"},
+            conn=conn,
+        )
+        conn.commit()
+
+    return {
+        "status": "ok",
+        "account_number": account,
+        "requested_amount": requested,
+        "refunded_amount": refunded_amount,
+        "unrefunded_amount": round(requested - refunded_amount, 2),
+        "total_available_before": total_available,
+        "total_available_after": round(total_available - refunded_amount, 2),
+        "allocations": allocations,
+        "financial_credit_decision_ids": decision_ids,
+    }
