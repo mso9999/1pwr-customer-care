@@ -48,8 +48,34 @@ def generate_account_number(conn, community: str) -> str:
     Uses PostgreSQL's next_account_number() function defined in schema.
     """
     cursor = conn.cursor()
-    cursor.execute("SELECT next_account_number(%s)", (community.upper(),))
-    return cursor.fetchone()[0]
+    comm = community.upper()
+    cursor.execute("SELECT next_account_number(%s)", (comm,))
+    candidate = str(cursor.fetchone()[0] or "").strip().upper()
+
+    # Defensive collision handling: if account_sequence drift exists in DB,
+    # next_account_number() can return an already-used code. Walk forward
+    # until we find a free account number.
+    for _ in range(50):
+        cursor.execute(
+            "SELECT 1 FROM accounts WHERE account_number = %s LIMIT 1",
+            (candidate,),
+        )
+        if not cursor.fetchone():
+            return candidate
+
+        m = re.match(r"^(\d{4})([A-Z]{2,4})$", candidate)
+        if not m:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Invalid generated account number format: {candidate}",
+            )
+        next_seq = int(m.group(1)) + 1
+        candidate = f"{next_seq:04d}{comm}"
+
+    raise HTTPException(
+        status_code=500,
+        detail=f"Could not allocate unique account number for site {comm}",
+    )
 
 
 # ---------------------------------------------------------------------------
