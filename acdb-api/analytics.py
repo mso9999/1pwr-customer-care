@@ -599,13 +599,10 @@ def _build_query(metric_id: str, filters: Dict[str, Any], group_by: str) -> Tupl
     sql = sql.replace("%(fee_threshold)s", "%s")
 
     # --- build params tuple ---
-    # Order: sites first, then fee_threshold (if used), then date params,
-    # then customer types.
-    params: list = list(site_list)
-
-    if has_fee_threshold:
-        params.append(fee_threshold)
-
+    # Parameter order must match SQL placeholder order in templates:
+    # monthly/consumption templates place date filters before sites;
+    # funnel/customer templates place sites first (no date placeholders).
+    params: list = []
     if has_date_placeholders:
         date_from_val = date_from or "2020-01-01"
         date_to_val = date_to or datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -615,6 +612,11 @@ def _build_query(metric_id: str, filters: Dict[str, Any], group_by: str) -> Tupl
         else:
             params.append(date_from_val)
             params.append(date_to_val)
+
+    params.extend(site_list)
+
+    if has_fee_threshold:
+        params.append(fee_threshold)
 
     params.extend(ct_params)
 
