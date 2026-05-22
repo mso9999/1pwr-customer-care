@@ -17,6 +17,8 @@
   "recordPayment": "Enregistrer le paiement",
   "success": {
     "title": "Paiement enregistré",
+    "duplicateTitle": "Paiement déjà enregistré",
+    "duplicateHint": "Ce reçu est déjà enregistré sur le même compte. Les détails de la transaction existante sont affichés ci-dessous (aucun double crédit n'a été appliqué).",
     "transactionId": "ID de transaction",
     "amount": "Montant",
     "kwhVended": "kWh crédités",

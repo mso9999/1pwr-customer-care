@@ -115,6 +115,33 @@ def _payment_ref_taken(conn, ref: str) -> Optional[tuple[int, str]]:
     return (int(row[0]), str(row[1])) if row else None
 
 
+def _get_existing_payment_txn(conn, txn_id: int) -> Optional[dict]:
+    """Fetch a previously recorded payment row by id."""
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, account_number, COALESCE(transaction_amount, 0),
+               COALESCE(kwh_value, 0), COALESCE(current_balance, 0),
+               transaction_date
+        FROM transactions
+        WHERE id = %s
+        LIMIT 1
+        """,
+        (txn_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        return None
+    return {
+        "transaction_id": int(row[0]),
+        "account_number": str(row[1]),
+        "amount": float(row[2] or 0),
+        "kwh": float(row[3] or 0),
+        "balance_kwh": float(row[4] or 0),
+        "transaction_date": row[5].isoformat() if row[5] else None,
+    }
+
+
 def _get_tariff_rate(conn, account_number: str) -> float:
     """Get the applicable tariff rate (currency/kWh) for an account.
 
@@ -367,6 +394,25 @@ def record_manual_payment(
         with get_connection() as conn:
             dup = _payment_ref_taken(conn, pref)
             if dup:
+                # Idempotent duplicate handling: if same account already has this
+                # receipt, return the existing transaction details instead of a
+                # hard error so field teams can safely retry form submission.
+                existing = _get_existing_payment_txn(conn, dup[0])
+                if existing and existing["account_number"] == payload.account_number:
+                    return {
+                        "status": "duplicate",
+                        "message": (
+                            "Payment reference already recorded on this account; "
+                            "returning existing transaction."
+                        ),
+                        "transaction_id": existing["transaction_id"],
+                        "amount": existing["amount"],
+                        "kwh": existing["kwh"],
+                        "balance_kwh": existing["balance_kwh"],
+                        "account_number": existing["account_number"],
+                        "existing_transaction_date": existing["transaction_date"],
+                        "sm_credit": None,
+                    }
                 raise HTTPException(
                     status_code=409,
                     detail=(

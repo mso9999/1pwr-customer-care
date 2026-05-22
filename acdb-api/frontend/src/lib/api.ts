@@ -2175,10 +2175,13 @@ export async function bulkUpdateCommissioningStatus(updates: {
 
 export interface RecordPaymentResult {
   status: string;
+  message?: string;
   transaction_id: number;
   amount: number;
   kwh: number;
   balance_kwh: number;
+  account_number?: string;
+  existing_transaction_date?: string | null;
   sm_credit: Record<string, any> | null;
   financing?: {
     debt_portion: number;

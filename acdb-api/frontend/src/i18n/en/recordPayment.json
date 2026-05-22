@@ -17,6 +17,8 @@
   "recordPayment": "Record Payment",
   "success": {
     "title": "Payment Recorded",
+    "duplicateTitle": "Payment Already Recorded",
+    "duplicateHint": "This receipt is already posted on the same account. Existing transaction details are shown below (no second credit was applied).",
     "transactionId": "Transaction ID",
     "amount": "Amount",
     "kwhVended": "kWh Vended",
