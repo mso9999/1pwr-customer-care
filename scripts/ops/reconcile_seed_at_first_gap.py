@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import importlib.util
 import os
 import re
 from dataclasses import dataclass
@@ -23,15 +24,20 @@ from typing import Iterable
 
 import psycopg2
 
-ROOT = Path(__file__).resolve().parents[2]
 import sys
 
-for p in (ROOT / "acdb-api", ROOT / "scripts" / "ops"):
-    if str(p) not in sys.path:
-        sys.path.insert(0, str(p))
+# Prefer caller-provided PYTHONPATH (used on the production host). Fall back to
+# repo-relative discovery when executed from this repository tree.
+try:
+    ROOT = Path(__file__).resolve().parents[2]
+except IndexError:
+    ROOT = None
 
-from audit_ls_balances import run_audit as run_ls_audit  # noqa: E402
-from audit_bn_balances import run_audit as run_bn_audit, koios_login  # noqa: E402
+if ROOT is not None:
+    for p in (ROOT / "acdb-api", ROOT / "scripts" / "ops"):
+        if str(p) not in sys.path:
+            sys.path.insert(0, str(p))
+
 import requests  # noqa: E402
 
 VALID_LS_RE = re.compile(r"^\d{4}[A-Z]{2,4}$")
@@ -50,11 +56,25 @@ def _connect(url: str):
 
 def _collect_drift(conn, country: str, threshold: float) -> list[DriftRow]:
     if country == "LS":
+        from audit_ls_balances import run_audit as run_ls_audit  # noqa: WPS433
+
         rows = run_ls_audit(conn)
         out = [DriftRow(a, float(d)) for a, _, _, d, _ in rows if abs(float(d)) >= threshold]
         return [r for r in out if VALID_LS_RE.match(r.account)]
 
     # BN audit requires Koios web session
+    try:
+        from audit_bn_balances import run_audit as run_bn_audit, koios_login  # noqa: WPS433
+    except ModuleNotFoundError:
+        bn_path = os.environ.get("BN_AUDIT_SCRIPT", "/opt/1pdb/services/audit_bn_balances.py")
+        spec = importlib.util.spec_from_file_location("audit_bn_balances_ext", bn_path)
+        if spec is None or spec.loader is None:
+            raise
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        run_bn_audit = mod.run_audit
+        koios_login = mod.koios_login
+
     session = requests.Session()
     try:
         koios_login(session)
