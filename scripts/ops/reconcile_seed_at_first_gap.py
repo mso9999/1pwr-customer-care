@@ -113,7 +113,7 @@ def _seed_rows_to_reverse(conn, since_ts: datetime) -> Iterable[tuple]:
         FROM transactions
         WHERE source = 'balance_seed'
           AND transaction_date >= %s
-          AND (payment_reference IS NULL OR payment_reference NOT LIKE 'seed_reversal:%')
+          AND (payment_reference IS NULL OR payment_reference NOT LIKE 'seed_reversal:%%')
         ORDER BY transaction_date ASC, id ASC
         """,
         (since_ts,),
