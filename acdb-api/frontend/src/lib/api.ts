@@ -84,6 +84,43 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return res.json();
 }
 
+async function requestAtBase<T>(base: string, path: string, options: RequestInit = {}): Promise<T> {
+  const token = getToken();
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(options.headers as Record<string, string> || {}),
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(`${base}${path}`, { ...options, headers });
+
+  if (res.status === 401) {
+    localStorage.removeItem('cc_token');
+    localStorage.removeItem('cc_user');
+    window.location.href = '/login';
+    throw new Error('Unauthorized');
+  }
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: res.statusText }));
+    const msg = formatApiErrorDetail(body.detail) || res.statusText || `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+
+  if (res.status === 204 || res.headers.get('content-length') === '0') {
+    return {} as T;
+  }
+
+  return res.json();
+}
+
+// Gensite telemetry is currently sourced from the global CC telemetry store.
+async function requestGensite<T>(path: string, options: RequestInit = {}): Promise<T> {
+  return requestAtBase('/api', path, options);
+}
+
 async function downloadFile(path: string, fallbackFilename: string, options: RequestInit = {}): Promise<void> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -2484,24 +2521,24 @@ export interface GensiteVerifyResponse {
 }
 
 export async function getGensiteVendors(): Promise<GensiteVendorsResponse> {
-  return request('/gensite/vendors');
+  return requestGensite('/gensite/vendors');
 }
 
 export async function listGensiteSites(country?: string): Promise<{ sites: GensiteSite[]; count: number }> {
   const qs = country ? `?country=${encodeURIComponent(country)}` : '';
-  return request(`/gensite/sites${qs}`);
+  return requestGensite(`/gensite/sites${qs}`);
 }
 
 export async function getGensiteSite(code: string): Promise<GensiteSiteDetail> {
-  return request(`/gensite/sites/${encodeURIComponent(code)}`);
+  return requestGensite(`/gensite/sites/${encodeURIComponent(code)}`);
 }
 
 export async function getGensiteLive(code: string): Promise<{ site_code: string; readings: GensiteLiveReading[] }> {
-  return request(`/gensite/sites/${encodeURIComponent(code)}/live`);
+  return requestGensite(`/gensite/sites/${encodeURIComponent(code)}/live`);
 }
 
 export async function commissionGensite(req: GensiteCommissionRequest): Promise<GensiteCommissionResponse> {
-  return request('/gensite/commission', { method: 'POST', body: JSON.stringify(req) });
+  return requestGensite('/gensite/commission', { method: 'POST', body: JSON.stringify(req) });
 }
 
 export async function verifyGensiteCredential(
@@ -2509,7 +2546,7 @@ export async function verifyGensiteCredential(
   vendor: string,
   backend: string,
 ): Promise<GensiteVerifyResponse> {
-  return request(
+  return requestGensite(
     `/gensite/sites/${encodeURIComponent(code)}/credentials/${encodeURIComponent(vendor)}/${encodeURIComponent(backend)}/verify`,
     { method: 'POST' },
   );
@@ -2521,7 +2558,7 @@ export async function rotateGensiteCredential(
   backend: string,
   body: Omit<GensiteCredentialInput, 'vendor' | 'backend'>,
 ): Promise<{ credential: GensiteCredentialMasked; verify: { ok: boolean; message: string } }> {
-  return request(
+  return requestGensite(
     `/gensite/sites/${encodeURIComponent(code)}/credentials/${encodeURIComponent(vendor)}/${encodeURIComponent(backend)}/rotate`,
     { method: 'POST', body: JSON.stringify(body) },
   );
@@ -2549,7 +2586,7 @@ export async function getGensiteSeries(
   metric: string,
   hours = 24,
 ): Promise<GensiteSeriesResponse> {
-  return request(
+  return requestGensite(
     `/gensite/sites/${encodeURIComponent(code)}/series?metric=${encodeURIComponent(metric)}&hours=${hours}`,
   );
 }
@@ -2576,14 +2613,14 @@ export async function listGensiteAlarms(
   code: string,
   state: 'open' | 'all' = 'open',
 ): Promise<{ site_code: string; state: string; count: number; alarms: GensiteAlarm[] }> {
-  return request(`/gensite/sites/${encodeURIComponent(code)}/alarms?state=${state}`);
+  return requestGensite(`/gensite/sites/${encodeURIComponent(code)}/alarms?state=${state}`);
 }
 
 export async function ackGensiteAlarm(
   alarmId: number,
   note?: string,
 ): Promise<{ alarm: GensiteAlarm }> {
-  return request(`/gensite/alarms/${alarmId}/ack`, {
+  return requestGensite(`/gensite/alarms/${alarmId}/ack`, {
     method: 'POST',
     body: JSON.stringify({ note: note ?? null }),
   });
@@ -2598,7 +2635,7 @@ export async function openUgpTicketForAlarm(
     services_affected?: string;
   } = {},
 ): Promise<{ ticket_pg_id: number; ticket_id_ugp: string; alarm_id: number; site_code: string }> {
-  return request(`/gensite/alarms/${alarmId}/open-ugp-ticket`, {
+  return requestGensite(`/gensite/alarms/${alarmId}/open-ugp-ticket`, {
     method: 'POST',
     body: JSON.stringify(body),
   });
