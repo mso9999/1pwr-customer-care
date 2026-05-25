@@ -34,6 +34,10 @@ function num(v: number | null | undefined, digits = 2, unit = ''): string {
   return `${n.toFixed(digits)}${unit ? ' ' + unit : ''}`;
 }
 
+function hhmmLocal(d: Date): string {
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
 function clampPct(v: number): number {
   if (!Number.isFinite(v)) return 0;
   if (v < 0) return 0;
@@ -48,6 +52,8 @@ const FLOW_CSS = `
 @keyframes flow-forward { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -24; } }
 @keyframes flow-reverse { from { stroke-dashoffset: 0; } to { stroke-dashoffset: 24; } }
 `;
+
+type ChartRow = Record<string, number | string | null>;
 
 const POWER_AND_STATE_METRICS: Array<{ key: string; label: string; color: string; yAxisId: 'power' | 'pct' }> = [
   { key: 'pv_kw',           label: 'PV (kW)',      color: '#eab308', yAxisId: 'power' },
@@ -168,8 +174,8 @@ export default function GenSitePage() {
     }
   }
 
-  const buildChartData = (metrics: Array<{ key: string }>) => {
-    const byTs: Record<string, Record<string, number | string>> = {};
+  const buildChartData = (metrics: Array<{ key: string }>): ChartRow[] => {
+    const byTs: Record<string, ChartRow> = {};
     for (const m of metrics) {
       const s = series[m.key];
       if (!s) continue;
@@ -181,11 +187,12 @@ export default function GenSitePage() {
         agg[k].n += 1;
       }
       for (const [ts, { sum, n }] of Object.entries(agg)) {
-        if (!byTs[ts]) byTs[ts] = { ts: new Date(ts).toISOString().slice(11, 16) };
+        const d = new Date(ts);
+        if (!byTs[ts]) byTs[ts] = { ts: hhmmLocal(d), tsUtc: ts, tsMs: d.getTime() };
         byTs[ts][m.key] = m.key === 'battery_soc_pct' ? sum / n : sum;
       }
     }
-    return Object.values(byTs).sort((a, b) => String(a.ts).localeCompare(String(b.ts)));
+    return Object.values(byTs).sort((a, b) => Number(a.tsMs || 0) - Number(b.tsMs || 0));
   };
 
   const hasExplicitGenset = useMemo(() => {
@@ -194,15 +201,54 @@ export default function GenSitePage() {
   }, [detail]);
 
   // OEM-agnostic series with derived genset channel when genset is wired through inverter AC input.
-  const powerChartData = useMemo(() => {
+  const powerChartData = useMemo<ChartRow[]>(() => {
     const baseMetrics = POWER_AND_STATE_METRICS.filter(m => m.key !== 'genset_kw');
-    const data = buildChartData(baseMetrics) as Array<Record<string, number | string>>;
+    const data = buildChartData(baseMetrics);
     return data.map(row => {
       const grid = typeof row.grid_kw === 'number' ? row.grid_kw : null;
       const derived = !hasExplicitGenset && grid !== null && grid > 0 ? grid : 0;
-      return { ...row, genset_kw: derived };
+      return { ...row, genset_kw: derived } as ChartRow;
     });
   }, [series, hasExplicitGenset]);
+  const powerChartData24h = useMemo((): ChartRow[] => {
+    if (seriesWindow !== 24) return powerChartData;
+    const now = new Date();
+    const midnight = new Date(now);
+    midnight.setHours(0, 0, 0, 0);
+    const tomorrow = new Date(midnight);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const stepMs = 15 * 60 * 1000;
+
+    // Nearest-slot projection keeps vendor intervals aligned to a 24h daily view.
+    const bySlot = new Map<number, ChartRow>();
+    for (const row of powerChartData) {
+      const rowMs = Number(row.tsMs);
+      if (!Number.isFinite(rowMs)) continue;
+      const slot = Math.round((rowMs - midnight.getTime()) / stepMs);
+      if (slot < 0 || slot > 96) continue;
+      bySlot.set(slot, row);
+    }
+
+    const out: ChartRow[] = [];
+    for (let t = new Date(midnight); t <= tomorrow; t = new Date(t.getTime() + stepMs)) {
+      const slot = Math.round((t.getTime() - midnight.getTime()) / stepMs);
+      const src = bySlot.get(slot);
+      const future = t.getTime() > now.getTime();
+      out.push({
+        ts: hhmmLocal(t),
+        tsUtc: t.toISOString(),
+        tsMs: t.getTime(),
+        pv_kw: future ? null : (src?.pv_kw as number | null | undefined) ?? null,
+        ac_kw: future ? null : (src?.ac_kw as number | null | undefined) ?? null,
+        battery_kw: future ? null : (src?.battery_kw as number | null | undefined) ?? null,
+        genset_kw: future ? null : (src?.genset_kw as number | null | undefined) ?? null,
+        grid_kw: future ? null : (src?.grid_kw as number | null | undefined) ?? null,
+        battery_soc_pct: future ? null : (src?.battery_soc_pct as number | null | undefined) ?? null,
+      });
+    }
+    return out;
+  }, [powerChartData, seriesWindow]);
+  const displayedPowerChartData = seriesWindow === 24 ? powerChartData24h : powerChartData;
   const energyChartData = useMemo(() => buildChartData(ENERGY_METRICS), [series]);
 
   if (loading && !detail) return <div className="p-6 text-sm text-gray-500">Loading…</div>;
@@ -451,13 +497,13 @@ export default function GenSitePage() {
           </div>
         </div>
         <div className="bg-white border rounded-xl p-3" style={{ height: 280 }}>
-          {powerChartData.length === 0 ? (
+          {displayedPowerChartData.length === 0 ? (
             <div className="h-full flex items-center justify-center text-sm text-gray-500">
               No telemetry yet — the gensite poller will populate this chart as readings arrive.
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={powerChartData}>
+            <ResponsiveContainer width="100%" height="100%" minWidth={280} minHeight={220}>
+              <AreaChart data={displayedPowerChartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                 <XAxis dataKey="ts" tick={{ fontSize: 10 }} minTickGap={40} />
                 <YAxis yAxisId="power" tick={{ fontSize: 10 }} />
@@ -572,7 +618,7 @@ export default function GenSitePage() {
               No energy counter series available yet for this site.
             </div>
           ) : (
-            <ResponsiveContainer width="100%" height="100%">
+            <ResponsiveContainer width="100%" height="100%" minWidth={280} minHeight={180}>
               <LineChart data={energyChartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                 <XAxis dataKey="ts" tick={{ fontSize: 10 }} minTickGap={40} />
