@@ -567,6 +567,7 @@ export default function GenSitePage() {
                   x={676}
                   y={144}
                   kind="load"
+                  iconSide="right"
                   label="Load"
                   lines={[`Cap ${num(inverterCapKw || null, 1, 'kW')}`]}
                 />
@@ -973,14 +974,25 @@ function NodeBox({
   kind,
   label,
   lines,
-}: { x: number; y: number; kind: FlowNodeKind; label: string; lines: string[] }) {
+  iconSide = 'left',
+}: {
+  x: number;
+  y: number;
+  kind: FlowNodeKind;
+  label: string;
+  lines: string[];
+  iconSide?: 'left' | 'right';
+}) {
+  const iconCx = iconSide === 'right' ? 158 : -14;
+  const iconCy = 33;
   return (
     <g transform={`translate(${x},${y})`}>
       <rect rx="8" ry="8" width="144" height="66" fill="#ffffff" stroke="#4b5563" strokeWidth="2" />
-      <g transform="translate(8,7)">
+      <circle cx={iconCx} cy={iconCy} r="16" fill="#ffffff" stroke="#9ca3af" strokeWidth="1.5" />
+      <g transform={`translate(${iconCx - 11},${iconCy - 11})`}>
         <FlowIcon kind={kind} />
       </g>
-      <text x="34" y="19" fontSize="10" fill="#6b7280">{label}</text>
+      <text x="10" y="19" fontSize="10" fill="#6b7280">{label}</text>
       {lines.map((line, idx) => (
         <text key={line + idx} x="10" y={38 + idx * 16} fontSize="12" fill="#111827">{line}</text>
       ))}
