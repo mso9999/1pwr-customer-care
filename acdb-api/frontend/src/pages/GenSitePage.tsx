@@ -571,17 +571,19 @@ export default function GenSitePage() {
                 {/* node boxes */}
                 <NodeBox
                   x={64}
-                  y={112}
+                  y={100}
                   kind="pv"
                   iconPlacement="top"
+                  iconOffsetY={12}
                   label="PV"
                   lines={[`Cap ${num(pvCapKw || null, 1, 'kW')}`]}
                 />
                 <NodeBox
                   x={64}
-                  y={184}
+                  y={200}
                   kind="genset"
                   iconPlacement="bottom"
+                  iconOffsetY={-16}
                   label="Genset"
                   lines={[`Cap ${num(gensetCapKw || null, 1, 'kW')}`]}
                 />
@@ -1026,6 +1028,8 @@ function NodeBox({
   lines,
   iconPlacement = 'left',
   iconBatteryState,
+  iconOffsetX = 0,
+  iconOffsetY = 0,
 }: {
   x: number;
   y: number;
@@ -1034,11 +1038,15 @@ function NodeBox({
   lines: string[];
   iconPlacement?: 'left' | 'right' | 'top' | 'bottom';
   iconBatteryState?: BatteryIconState;
+  iconOffsetX?: number;
+  iconOffsetY?: number;
 }) {
   const iconScale = 3;
   const iconHalf = 11 * iconScale;
-  const iconCx = iconPlacement === 'right' ? 214 : iconPlacement === 'left' ? -70 : 72;
-  const iconCy = iconPlacement === 'top' ? -72 : iconPlacement === 'bottom' ? 138 : 33;
+  const iconCxBase = iconPlacement === 'right' ? 214 : iconPlacement === 'left' ? -70 : 72;
+  const iconCyBase = iconPlacement === 'top' ? -72 : iconPlacement === 'bottom' ? 138 : 33;
+  const iconCx = iconCxBase + iconOffsetX;
+  const iconCy = iconCyBase + iconOffsetY;
   return (
     <g transform={`translate(${x},${y})`}>
       <rect rx="8" ry="8" width="144" height="66" fill="#ffffff" stroke="#4b5563" strokeWidth="2" />
