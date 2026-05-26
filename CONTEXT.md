@@ -100,7 +100,7 @@ This is **orthogonal** to the **1Meter mesh “gateway”** (a Mesh-Lite node at
 | File | Purpose |
 |------|---------|
 | `customer_api.py` | Main FastAPI app -- mounts all routers, psycopg2 pool, CORS, auth |
-| `gensite/` | Generation-site commissioning + inverter telemetry: router, vendor adapters (Victron ready; Deye/Solarman, Sinosoar, SMA stubs), Fernet-encrypted `site_credentials` store. Migration `013`. Docs: `docs/ops/gensite-commissioning.md`, `docs/ops/gensite-credentials.md`. |
+| `gensite/` | Generation-site commissioning + inverter telemetry ingestion into **1PDB** (`inverter_readings`, `inverter_alarms`) via a shared multi-vendor poller path. Frontend UX contract is OEM-agnostic around normalized channels (`pv_kw`, `ac_kw`, `battery_kw`, `battery_soc_pct`, `grid_kw`, `ac_kwh_total`, optional genset derived channel). Contains router, vendor adapters, and Fernet-encrypted `site_credentials` store. Includes fleet aggregate endpoint `GET /api/gensite/aggregate-live` used by the main dashboard aggregate flow card. Migration `013`. Docs: `docs/ops/gensite-commissioning.md`, `docs/ops/gensite-credentials.md`, `docs/ops/gensite-poller.md`. |
 | `om_report.py` | O&M analytics endpoints: customer stats, consumption, sales, ARPU |
 | `crud.py` | Customer CRUD operations (PostgreSQL information_schema introspection) |
 | `auth.py` | Authentication (employee login, JWT tokens) |
@@ -127,7 +127,7 @@ This is **orthogonal** to the **1Meter mesh “gateway”** (a Mesh-Lite node at
 | `src/lib/api.ts` | API client (all backend calls, types) |
 | `src/pages/FinancialPage.tsx` | Financial analytics (ARPU charts, revenue tables) |
 | `src/pages/OMReportPage.tsx` | O&M quarterly report |
-| `src/pages/DashboardPage.tsx` | Main dashboard |
+| `src/pages/DashboardPage.tsx` | Main dashboard (portfolio KPIs + featured aggregate 1PWR powerflow panel sourced from `/api/gensite/aggregate-live`) |
 | `src/pages/CustomerListPage.tsx` | Customer search and list |
 | `src/pages/TariffPage.tsx` | Tariff management |
 
@@ -299,6 +299,7 @@ in `onepowerLS/onepwr-aws-mesh`. Do not expect MQTT / TLS / OTA code to live in 
 ### Data Sources
 | Source | Platform | Coverage | Ingestion |
 |--------|----------|----------|-----------|
+| Generation telemetry (multi-vendor) | Deye / Victron / other commissioned inverter platforms | Country/site dependent generation assets | `acdb-api/scripts/ops/gensite_poller.py` via `cc-gensite-poll.timer`; writes `inverter_readings` + `inverter_alarms` to 1PDB. Vendor adapters are enabled as they move from stub to ready. |
 | Koios v2 historical | SparkMeter Cloud | KET, LSB, MAS, MAT, SEH, SHG, TLH (LS) + GBO, SAM (BN). RIB/TOS not yet operational. | `import_hourly.py` (incremental commits, `--no-skip` for gap-filling) + systemd timer |
 | ThunderCloud parquet | SparkMeter on-prem | MAK | `import_thundercloud.py` (batch, ~1 day lag, `ON CONFLICT DO UPDATE` for gap-fill) |
 | ThunderCloud v0 live | SparkMeter on-prem | MAK | `import_tc_live.py` (cumulative register diffs, non-lossy, 15-min intervals) |
@@ -549,6 +550,20 @@ This is the **"exact-until-paid"** rule: once finance verifies the fee, future p
 **Payment ingestion behaviour change.** Both `payments.py` (webhook + manual `/record`) **and** `ingest.py` (SMS `/api/sms/incoming`) now run the classifier first:
 - Fee match → `record_fee_transaction` (no kWh, no SM credit) + `payment_verifications` row.
 - Otherwise → `compute_advance_split` (defaults to 50/50: half to advance outstanding, half to kWh) chained with the existing `compute_financing_split` for movable-asset financing. SparkMeter is credited only on the electricity portion, not the full payment.
+
+**Manual positive financial-credit decisions (2026-05-21).** Positive credit from the contract/fee channel is now handled as an explicit manual decision, never auto-routed:
+
+| Concept | Where it lives |
+|---|---|
+| Manual decision ledger (`convert` / `refund`) | `financial_credit_decisions` table (`acdb-api/migrations/035_manual_financial_credit_decisions.sql`) |
+| Available credit view | `GET /api/advances/contract-credit/available?account_number=...` |
+| Convert financial credit to electricity | `POST /api/advances/contract-credit/convert` (creates electricity txn + SparkMeter credit/retry) |
+| Mark financial credit as refunded | `POST /api/advances/contract-credit/refund` (audit-only cash decision in CC) |
+| Frontend controls | `frontend/src/pages/AdvancesPage.tsx` buttons: **Convert Debt Credit** / **Refund Debt Credit** |
+
+**Operational invariant:** keep two ledgers conceptually separate:
+- Financial/debt side resolves from negative toward zero and any residual positive credit requires a manual decision (`convert` or `refund`).
+- Electricity side remains prepaid kWh credit and should not be auto-filled by fee/contract overpayments.
 
 **Why advances are NOT in `financing_agreements`.** The `financing` module is reserved for movable assets (fridges, readyboards as financed appliances, etc.) with an interest schedule and dunning calendar. Connection / readyboard advances are different: short-lived working-capital extensions tied to the connection event itself, with a flat monthly fee % rather than an interest schedule, and a hard contract requirement. Mixing the two in one ledger would have made finance reporting harder for both.
 

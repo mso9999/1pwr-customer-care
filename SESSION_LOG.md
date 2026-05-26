@@ -3,6 +3,92 @@
 > AI session handoffs for continuity across conversations.
 > Read the last 2-3 entries at the start of each new session.
 
+## Session 2026-05-25 202605251135 (Gensite UX OEM-agnostic metric contract)
+
+### What Was Done
+- Updated `frontend/src/pages/GenSitePage.tsx` so the dashboard is explicitly OEM-agnostic at the UX layer:
+  - added normalized **Power flow now** tiles (PV, Load, Battery, SoC, Grid, Genset),
+  - expanded telemetry to include grid power and a dedicated **Energy counters** chart (`ac_kwh_total`),
+  - kept all channels sourced from normalized 1PDB telemetry instead of vendor-specific fields.
+- Updated terminology in the equipment cards (`Load`, `Battery`, `Energy`) to avoid inverter/OEM-specific assumptions.
+- Updated `frontend/src/pages/GenSiteListPage.tsx` subtitle to describe OEM-agnostic normalization into 1PDB.
+- Updated `frontend/src/pages/CommissionSitePage.tsx` equipment taxonomy to include generator assets (`genset`, `generator`, `grid_meter`, plus generator roles) so commissioning metadata supports neutral flow views.
+- Added a new **OEM-agnostic UX metric contract** section in `docs/ops/gensite-poller.md` defining normalized channels (`pv_kw`, `ac_kw`, `battery_kw`, `battery_soc_pct`, `grid_kw`, `ac_kwh_total`, optional genset derived channel) and null-handling expectations.
+- Updated `CONTEXT.md` `gensite/` key-file row to explicitly call out the OEM-agnostic frontend channel contract.
+
+### What Next Session Should Know
+- Genset power is currently derived from equipment metadata (`kind` / `role` containing `genset|generator|diesel`) and `ac_kw`; if adapters expose a dedicated genset channel later, add it to `inverter_readings` and the series allow-list.
+- The dashboard now supports optional channels gracefully (missing metrics render as no-data/`—` rather than vendor-specific fallback assumptions).
+
+## Session 2026-05-25 202605251215 (Deye integration execution pass)
+
+### What Was Done
+- Ran `scripts/ops/deye_add_loggers_and_verify.py` in add+verify mode across the onboarding tracker using the current Deye credentials.
+- Result: `device_list_count=15`, `station_list_count=7`, `add_batches=0` (no pending logger adds among tracked sites).
+- Wrote run artifacts:
+  - `docs/ops/deye_add_and_verify_report_2026-05-25_1215.csv`
+  - `docs/ops/deye_add_and_verify_report_2026-05-25_1215.json`
+  - `docs/ops/deye_station_inventory_2026-05-25_1215.csv`
+  - `docs/ops/deye_device_inventory_2026-05-25_1215.csv`
+  - `docs/ops/deye_device_latest_inventory_2026-05-25_1215.csv`
+- Updated `docs/ops/deyecloud-logger-onboarding-tracker-2026-05-25.csv` with refreshed verification timestamps and notes from the rerun.
+- Updated `docs/ops/deyecloud-logger-onboarding-checklist.md` to clarify that collector/logger `device/latest` can be empty; done criteria should include live inverter telemetry.
+- Updated `docs/ops/deyecloud-bn-site-device-mapping-2026-05-25.csv` with newly discovered live inverter `2202144244` (site attribution pending).
+
+### What Next Session Should Know
+- All currently tracked logger SNs are integrated from an account-binding perspective (no missing logger adds in this run).
+- Deye `station/list` currently includes duplicate/test stations (`TEST-BENIN`, `TEST-LESOTHO`, duplicate `KOTOKPA`), and most stations report `NO_DEVICE` even while inverters are visible via `device/list`; station-level cleanup should be coordinated with ops/vendor support.
+- One live inverter (`2202144244`) is not yet mapped to a confirmed site code in CC docs.
+
+## Session 2026-05-25 202605251227 (Victron/Sinosoar/SMA integration pass)
+
+### What Was Done
+- Added `scripts/ops/run_gensite_adapter_verify.py` to verify configured gensite credentials in bulk for selected vendors (`victron,sinosoar,sma` by default), optionally write verify status back to `site_credentials`, and emit CSV/JSON reports for operations.
+- Updated `docs/ops/gensite-commissioning.md` to match current adapter reality:
+  - Victron/Deye/Sinosoar/AlphaESS listed as ready,
+  - SMA listed as pending (`stub`) instead of implying live support.
+- Added `docs/ops/gensite-vendor-readiness-matrix.md` as the cross-OEM integration handoff doc (readiness table, required credential fields, bulk verify command, and SMA gap callout).
+- Set `acdb-api/gensite/adapters/sma.py` `implementation_status` to `stub` so poller intentionally skips SMA until `fetch_live` is implemented (prevents false outage/noise).
+
+### What Next Session Should Know
+- Run the new bulk verify script on the CC host (where `DATABASE_URL` and `CC_CREDENTIAL_ENCRYPTION_KEY` are present) to integrate as many configured Victron/Sinosoar credentials as possible in one pass.
+- SMA still needs real Sunny Portal auth/data implementation before it can join live polling.
+- `docs/ops/gensite-vendor-readiness-matrix.md` is now the canonical integration checklist for these OEMs.
+
+## Session 2026-05-25 202605251343 (CC-host OEM integration execution)
+
+### What Was Done
+- Connected directly to the current CC host (`ec2-13-245-142-186.af-south-1.compute.amazonaws.com`) via SSH using `EOver.pem`.
+- Installed and ran `scripts/ops/run_gensite_adapter_verify.py` on host as `cc_api` with production env (`/opt/1pdb/.env`).
+- Initial run exposed host drift: deployed `sinosoar` adapter was still a stub build.
+- Promoted updated `sinosoar.py` to host and restarted `1pdb-api` + `1pdb-api-bn`.
+- Fixed adapter compatibility bug (`VerifyResult(... extra_patch=...)` unsupported by current base model), redeployed, and reran.
+- Added CAPTCHA retry logic in `sinosoar.verify()` (3 attempts), redeployed, and reran.
+- Final host result: `sinosoar` credentials verified **9/9 success** (KET, MAK, MAS, MAT, SEB, SEH, SHG, TLH, TOS).
+- Copied host run artifacts into repo:
+  - `docs/ops/gensite_verify_2026-05-25_1343.csv`
+  - `docs/ops/gensite_verify_2026-05-25_1343_after_sinosoar.csv`
+  - `docs/ops/gensite_verify_2026-05-25_1343_after_fix2.csv`
+  - `docs/ops/gensite_verify_2026-05-25_1343_after_fix3.csv`
+  - `docs/ops/gensite_verify_2026-05-25_1343_after_retrypatch.csv`
+  - `docs/ops/gensite_verify_2026-05-25_1343_sinosoar_only.csv`
+  - matching `.json` files for each run.
+
+### What Next Session Should Know
+- Sinosoar integration is now operational on the live host and credentials are verified.
+- Current configured credential set on host for this run was Sinosoar-only (9 rows); a targeted `--vendors victron,sma` pass confirmed **0 configured credentials** for those vendors at this time.
+- SMA remains intentionally `stub`; implementing Sunny Portal auth/data extraction is the remaining OEM gap for this trio.
+
+### Follow-up (same session): SMA credentials seeded
+- User provided SMA Sunny Portal credentials; seeded encrypted SMA credential rows on CC host for:
+  - `BOB`, `MAN`, `MET`, `NKU`
+- Script used: `scripts/ops/seed_gensite_credentials.py` (new utility for repeatable credential seeding/upsert).
+- Verification pass (`--vendors sma`) confirms `credentials=4`, `ok=0`, `failed=4` with expected stub message:
+  - "SMA Sunny Portal adapter is scheduled for Phase 2 ... live scrape is not wired yet."
+- Reports:
+  - `docs/ops/gensite_verify_2026-05-25_1404_sma.csv`
+  - `docs/ops/gensite_verify_2026-05-25_1404_sma.json`
+
 ## Session 2026-05-13 202605132400 (502: lazy xhtml2pdf import)
 
 ### What Was Done
@@ -4925,3 +5011,710 @@ Root cause: **Dual registration without synchronization**
 - **`cc_bridge_notify.bridge_credentials`**: generic `CC_BRIDGE_NOTIFY_URL_<CC>` / `CC_BRIDGE_SECRET_<CC>` with fallback to unsuffixed vars (same behaviour for LS/BN; Zambia can use `_ZM` without new Python branches).
 - **`CONTEXT.md`**: Multi-Country section links to SOP; Related Documentation table updated.
 - **`docs/whatsapp-customer-care.md`**: bridge env wording aligned with generic suffix pattern.
+
+---
+
+## Session 2026-05-21 202605211030 (Registration ID Collision Fix)
+
+### What Was Done
+- Investigated live registration failures and confirmed root cause in production DB: `accounts.account_sequence` drifted behind `account_number` prefixes (example: `0273MAS` stored as sequence `182`), causing `next_account_number()` to return an existing ID.
+- Added migration `034_fix_account_sequence_generator.sql` to backfill `account_sequence` from `account_number` and harden `next_account_number()` to use the greater of sequence/max prefix.
+- Added defensive collision handling in `registration.py::generate_account_number()` so API walks forward if DB returns an already-used account code.
+- Deployed to production (`main`, run `26214983848`) and verified on LS DB: `0273MAS` now has sequence `273`, and `next_account_number('MAS')` now returns `0274MAS`.
+
+### Key Decisions
+- Fix the root cause in schema + data (migration) and add application-level guardrail (defensive allocator) so registration remains available even if future sequence drift appears.
+- Keep 1PDB account-number generation as source of truth; avoid introducing alternate ID generators outside current registration flow.
+
+### What Next Session Should Know
+- If Koios commissioning says “customer ID already exists”, first verify CC registration succeeded and the generated account code is unique in `accounts`; this incident was caused by sequence drift, not by true new-customer duplication.
+- Migration `034` is now required baseline for environments where customer registration is enabled.
+
+### Files Modified
+- `acdb-api/migrations/034_fix_account_sequence_generator.sql`
+- `acdb-api/registration.py`
+
+### Senescence Notes
+- No senescence signals observed in this short fix cycle.
+
+### Protocol Feedback
+- CONTEXT.md had enough deployment and architecture detail to quickly isolate live DB behavior.
+- SESSION_LOG would benefit from more recent entries around registration/account-number incidents to reduce repeated deep-dive diagnostics.
+
+---
+
+## Session 2026-05-21 202605211130 (Balance Sync Stabilization)
+
+### What Was Done
+- Investigated repeated balance drift and confirmed LS had a scheduled auto-apply seeding job (`cc-ls-balance-audit.service`) running `audit_ls_balances.py --reconcile --apply` daily.
+- Changed the LS systemd service to audit-only (`--check`) to stop continuous reseed churn.
+- Ran one controlled LS reseed pass at `1.0 kWh` threshold and re-verified drift with `--check --threshold 1.0` (clean for the active audit set).
+- Ran controlled BN reseed for valid BN customer account codes (`NNNNGBO|NNNNSAM`) present in `accounts`, applied 85 seeds, then one final seed for `0065GBO`.
+- Verified BN post-fix drift for the valid-account set at `>=1.0 kWh` is now zero.
+
+### Key Decisions
+- Move LS from auto-reconcile to monitor-only scheduling; reconciliation should be operator-triggered and thresholded, not daily blind apply.
+- Use stricter reconciliation scope in BN (valid account codes present in `accounts`) to avoid polluting ledger with non-customer/junk identifiers.
+- Use `1.0 kWh` threshold for operational synchronization to avoid oscillation from rounding/quantization noise around `0.5`.
+
+### What Next Session Should Know
+- LS timer now checks drift only; it no longer writes `balance_seed` transactions automatically.
+- BN is synchronized for the valid-account cohort; if drift reappears, first check new Koios payments vs CC ingestion lag before reseeding.
+- Remaining LS drift lines in full raw report are dominated by non-commissioned/invalid or special legacy codes and should stay excluded from auto-fix workflows.
+
+### Senescence Notes
+- No senescence signal in this cycle; context stayed coherent with prior audit work.
+
+### Protocol Feedback
+- Adding a dedicated “Balance Sync Runbook” reference in CONTEXT.md (including approved thresholds and exclusion policy) would reduce repeated operational ambiguity.
+
+---
+
+## Session 2026-05-21 202605211146 (Seed Reversal + Strict Reseed)
+
+### What Was Done
+- Executed user-requested cleanup for spurious balance seeds by posting explicit offsetting reversals (`meter_id='SEED_REVERSAL'`, `source='balance_seed'`) instead of deleting history.
+- LS: reversed recent churn-window seed injections, then ran a strict reseed scoped to shared valid customer IDs (`^\d{4}[A-Z]{3}$` present in both `accounts` and SparkMeter snapshot).
+- BN: reversed historical seeds, then reseeded from current deltas for valid BN account IDs (`^\d{4}(GBO|SAM)$`) present in both `accounts` and SparkMeter snapshot.
+- Verification on strict shared-account cohorts reached zero drift at `>= 1.0 kWh` threshold for both LS and BN.
+
+### Key Decisions
+- Reconcile only across shared, valid account identifiers to avoid injecting credits/debits for orphaned, non-customer, or malformed account codes.
+- Keep full audit trail by offsetting transactions rather than destructive edits.
+- Treat broad “union” audit outputs as diagnostic only; operational reconciliation scope must be explicitly bounded.
+
+### What Next Session Should Know
+- LS scheduled service remains check-only (`cc-ls-balance-audit.service` uses `--check`).
+- If drift appears again, run strict shared-account delta reconciliation rather than broad union reseeding.
+- High legacy seed row counts now include reversal history by design; net effect matters more than gross row count.
+
+### Senescence Notes
+- No senescence signal observed; state remained stable through long operational sequence.
+
+### Protocol Feedback
+- A codified ops script for “strict shared-account reconcile” should be promoted into `scripts/ops/` to avoid ad hoc one-off execution.
+
+---
+
+## Session 2026-05-21 202605211346 (SMS Demo Channel Routing)
+
+### What Was Done
+- Traced SMS gateway wiring and confirmed CC ingest was healthy; issue was channel routing expectations for the new `smsdemo` host.
+- Updated `SMSComms/receive.php` in repo so mirror target is selected by gateway host:
+  - `smsdemo.*` → `POST /api/sms/incoming-contract-fees`
+  - all other hosts (including `sms.*`) → `POST /api/sms/incoming`
+- Added `X-SMS-Gateway-Host` header to mirror POSTs for better observability.
+- Pushed to `onepowerLS/SMSComms` `main` (`79bb213`) and verified live behavior with test payloads:
+  - `test-smsdemo-route-002` reached `/api/sms/incoming-contract-fees`
+  - `test-sms-main-route-002` reached `/api/sms/incoming`
+
+### Key Decisions
+- Keep one ingress path (`/receive.php`) for the gateway app and split channels by host-based mirror routing in PHP.
+- Preserve repo-as-source-of-truth for cPanel behavior instead of relying on ad hoc live edits.
+
+### What Next Session Should Know
+- Gateway app can now point `smsdemo.1pwrafrica.com/receive.php` for fee/non-electricity channel while `sms.1pwrafrica.com/receive.php` remains electricity.
+- DNS currently resolves `sms`, `smsdemo`, and `smsbn` to the same IP; differentiation relies on host header, not source IP.
+
+### Senescence Notes
+- No senescence signal observed during this debugging/deploy cycle.
+
+### Protocol Feedback
+- Consider adding a small ops runbook section with canonical test message IDs and expected CC endpoint path per host to simplify future gateway cutovers.
+
+---
+
+## Session 2026-05-21 202605211404 (Manual Debt-Credit Decision Workflow)
+
+### What Was Done
+- Implemented a full manual decision process for positive contract/debt credit in CC (convert to electricity or refund).
+- Added migration `035_manual_financial_credit_decisions.sql` to create an append-only `financial_credit_decisions` audit ledger.
+- Added backend APIs in `acdb-api/advances.py`:
+  - `GET /api/advances/contract-credit/available`
+  - `POST /api/advances/contract-credit/convert`
+  - `POST /api/advances/contract-credit/refund`
+- Reworked conversion behavior to avoid mutating original `sms_gateway_contract` transactions; conversion now creates a dedicated electricity transaction and records source allocations in the decision ledger.
+- Added frontend controls on `AdvancesPage` for `Convert Debt Credit` and `Refund Debt Credit`, with availability checks before action.
+- Updated tutorial and context documentation to reflect the new two-account operating model and manual decision path.
+- Deployed to production on `main` (`2d0a171`), GitHub Actions run `26224684790` passed backend + frontend deploy jobs.
+
+### Key Decisions
+- Positive financial credit must never auto-flow into electricity; every positive residual is an explicit human decision (`convert` or `refund`).
+- Preserve immutable source payment history; track decisions in a dedicated ledger table tied to source transactions.
+- Keep conversion path operationally complete: create electricity transaction, record audit metadata, and push SparkMeter credit via retry-capable path.
+
+### What Next Session Should Know
+- Migration `035` is required baseline for this workflow; APIs return an explicit migration-needed error if missing.
+- `refund` is an audited CC decision record (cash handling is off-platform); `convert` creates kWh credit and triggers SparkMeter credit push.
+- Advances tutorial now includes explicit debt-credit decision guidance; links/help mappings were updated to keep step arrays aligned.
+
+### Files Modified
+- `acdb-api/migrations/035_manual_financial_credit_decisions.sql`
+- `acdb-api/advances.py`
+- `acdb-api/frontend/src/lib/api.ts`
+- `acdb-api/frontend/src/pages/AdvancesPage.tsx`
+- `acdb-api/frontend/src/i18n/en/advances.json`
+- `acdb-api/frontend/src/i18n/fr/advances.json`
+- `acdb-api/frontend/src/i18n/en/tutorial.json`
+- `acdb-api/frontend/src/i18n/fr/tutorial.json`
+- `acdb-api/frontend/src/pages/tutorialWorkflows.ts`
+- `CONTEXT.md`
+
+### Senescence Notes
+- No degradation signal observed during implementation; model and invariants remained consistent through backend, UI, and docs updates.
+
+### Protocol Feedback
+- The context file benefited from explicit ledger semantics; adding this decision workflow to CONTEXT.md should reduce future ambiguity around fee-credit handling.
+
+---
+
+## Session 2026-05-24 202605240934 (Singular Seed Reconcile Strategy)
+
+### What Was Done
+- Updated `scripts/ops/reconcile_seed_at_first_gap.py` to support a singular-seed reconciliation mode:
+  - Reverse existing non-reversal `balance_seed` rows per drifted account before inserting a new anchor seed.
+  - Place the default anchor at the **most recent gap** (`last_gap`) rather than earliest gap.
+- Added anchor strategy controls:
+  - `--anchor-mode {last_gap,first_gap,last_tx}` (default `last_gap`)
+  - `--singular-seed` / `--no-singular-seed`
+- Added richer plan CSV fields for ops review:
+  - `anchor_mode`, `singular_seed`, `account_seed_reversals_planned`
+- Added runtime summary fields:
+  - `account_seed_reversals_applied`, `anchor_mode`, `singular_seed`
+- Verified script syntax (`py_compile`) and lints clean.
+
+### Key Decisions
+- Reconciliation must converge toward one active seed per account, not an accumulating seed history.
+- Anchor timing should reflect the most recent observed ledger break (latest uncredited receipt, fallback latest account transaction), matching operator intent for “single corrective seed at current divergence”.
+
+### What Next Session Should Know
+- Default behavior now enforces singular-seed cleanup when applying anchors.
+- To preserve prior behavior, operators can still use `--anchor-mode first_gap` and/or `--no-singular-seed`.
+- This change updates strategy implementation only; no production data mutation occurs until script is run with apply flags.
+
+### Recovery Addendum (2026-05-24 08:03 UTC)
+- A direct LS production run with `--anchor-mode last_gap --singular-seed` was executed and produced unstable drift amplification because backdated anchor seeds plus blanket historical seed reversal interact badly on this ledger shape.
+- Immediate rollback was executed in two parts:
+  1. Reversed 335 same-window `seed_reversal:*` rows from the failed run window.
+  2. Reversed 175 `anchor_ls_20260524T074234Z:*` backdated anchors by batch tag.
+- Post-rollback LS audit returned to the pre-change baseline envelope (175 accounts > 1.0 kWh, top deltas back to ~20-33 kWh range rather than hundreds/thousands).
+- BN singular apply was intentionally not executed during this recovery cycle to avoid propagating the failed pattern.
+
+### Guarded Singular Addendum (2026-05-24 08:10 UTC)
+- Added simulation-gated singular controls to `scripts/ops/reconcile_seed_at_first_gap.py`:
+  - `--guarded-singular` / `--no-guarded-singular`
+  - `--max-predicted-residual-kwh` (default 2.0)
+  - `--max-net-change-kwh` (default 100.0)
+- Planning now records guard diagnostics per account:
+  - `existing_seed_kwh`, `guard_pass`, `guard_reason`, `net_change_kwh`, `predicted_residual_kwh`.
+- Dry-runs on production host:
+  - LS (`/tmp/ls_guarded_singular_plan.csv`): 177 drift accounts, 5 guard-safe, 172 skipped.
+  - BN (`/tmp/bn_guarded_singular_plan.csv`): 118 drift accounts, 35 guard-safe, 83 skipped.
+- No guarded singular apply executed yet (dry-run only), pending operator approval of guard thresholds and scope.
+
+### Guarded Apply + Recovery Note (2026-05-24 08:55 UTC)
+- Guarded apply was executed after approval.
+- An environment mismatch caused an initial BN-tagged apply invocation to hit LS DB context; those rows were fully rolled back:
+  - 63 rollback rows inserted to neutralize `guard_bn_20260524T084612Z` artifacts.
+  - Post-check LS returned to baseline envelope (`174` accounts > 1.0 kWh).
+- BN apply then executed with BN env context and inserted:
+  - `anchors_applied: 1`, `guarded_skipped: 8` on the narrower drift cohort seen in that context.
+- Post BN check remained at the known broad-state baseline (`24` accounts > 1.0 kWh with malformed/non-customer identifiers dominating top lines), i.e., no broad regression and no material drift closure yet.
+
+### Deterministic Env Runner Addendum (2026-05-24 10:42 UTC)
+- Moved execution to deterministic env parsing (no `source .env`) by reading `DATABASE_URL` and passing `--database-url` explicitly.
+- LS deterministic guarded apply:
+  - `anchors_applied: 5`
+  - `account_seed_reversals_applied: 19`
+  - Post-check: `173` accounts > 1.0 kWh (marginal improvement from 174 baseline).
+- BN deterministic guarded apply:
+  - first deterministic pass: `anchors_applied: 0` (all 9 blocked by guard).
+  - prior single-anchor BN batch (`guard_bnfix_20260524T085314Z`) was explicitly rolled back via `rollback_seed_batch.py`.
+  - BN broad check remains noisy with malformed/non-customer identifiers; latest run: `26` > 1.0 kWh.
+- Added utility script: `scripts/ops/rollback_seed_batch.py` for idempotent rollback of one batch prefix.
+
+### Strict Shared Cohort Addendum (2026-05-24 11:02 UTC)
+- Added `--strict-shared-cohort` to `reconcile_seed_at_first_gap.py`:
+  - limits to valid IDs that are present in both `accounts` and current SparkMeter snapshot.
+- Strict shared guarded dry-runs:
+  - LS: `drift_accounts_planned=175`, `guarded_skipped=173` (2 safe under tight guard; 7 safe under relaxed guard `residual<=5, net<=300`).
+  - BN: `drift_accounts_planned=7`, all 7 guard-blocked even under relaxed guard.
+- Applied relaxed strict shared LS pass:
+  - `anchors_applied=7`, `account_seed_reversals_applied=20`.
+  - Post-check did not materially improve global LS drift envelope (`175` > 1.0 kWh, effectively unchanged/noise-level worse).
+- BN strict shared apply not meaningful (0 guard-safe under deterministic pass); prior single BN anchor remained rolled back.
+
+### Zero-New-Drift RCA Addendum (2026-05-24 11:12 UTC)
+- Ran LS payment-history RCA (`rca_ls_balance_drift.py`) across all drifted accounts from a fresh audit snapshot:
+  - 268 accounts analyzed (`/tmp/ls_drift_rca_summary.csv`).
+  - Site concentration by account count: MAK (136), SHG (37), MAT (32), MAS (28) dominate.
+  - Merchant history-only footprint is large: `mm_null_kwh_rows=4002`, `mm_lsl=716,698.78`.
+  - Balance seeds are not the dominant driver in aggregate (`balance_seed_pay_kwh=-52.83` across RCA set).
+- BN drift cohort classification (current broad check):
+  - `26` total drifted lines; only `9` are valid shared customer IDs.
+  - `17` lines are invalid/non-shared identifiers (examples: `GBO`, `NAN`, SparkMeter serials, malformed account codes), inflating broad drift metrics.
+- Implication: durable mitigation must prioritize source-data hygiene and merchant-history handling over additional seed mechanics.
+
+### Fix A Patch (Merchant History Credit Suppression) — 2026-05-24 13:26 UTC
+- Patched `scripts/ops/backfill_merchant_payments_from_exports.py` to prevent false duplicate suppression for electricity credit:
+  - `_fuzzy_already_credited()` now treats only *credited* kWh payments (or verified fee categories) as duplicates.
+  - Added `_has_credited_kwh_payment()` helper for explicit electricity-credit existence checks.
+  - Added `_insert_repair_credit()` path: when a payment is flagged as fuzzy-duplicate but no credited kWh payment exists, create a repair electricity credit (`record_payment_kwh`) and annotate metadata.
+  - Classification is now computed earlier in `process_payments()` and reused by `_insert_payment()`.
+- Resulting behavior: historical `mm:%` rows no longer block needed electricity credit creation in backfill workflows.
+- Validation:
+  - `py_compile` passes.
+  - `acdb-api/tests/test_merchant_backfill.py` passes (`3 passed`).
+
+### Phase-1 Repair Trial + Rollback (2026-05-24 11:48 UTC)
+- Ran a capped LS repair trial with `repair_historical_payment_credits.py --apply --limit 500`.
+  - 500 historical repair credits inserted (`txn_id` range `4451653..4452165`).
+  - Immediate post-check showed material drift worsening (215 accounts > 1.0 kWh, strong negative MAK deltas), so rollout was aborted.
+- Rolled back the 500 trial rows using compensating transactions via `scripts/ops/rollback_hist_repair_range.py`.
+  - 500 rollback rows inserted for the exact id range.
+- Also rolled back prior LS guarded-seed batches for additional stabilization:
+  - `guard_lsfix2_20260524T103427Z` (5 rows)
+  - `strict_ls_guard_20260524T105658Z` (7 rows)
+- Post-rollback LS broad check remains elevated/noisy (`182` > 1.0 kWh), confirming that broad-metric behavior is now highly sensitive to layered compensating rows and not a reliable indicator for phased repair writes without a cleaner test harness.
+
+---
+
+## Session 2026-05-24 202605241428 (Spurious Seed History Purge - Archive First)
+
+### What Was Done
+- Added `scripts/ops/archive_and_purge_seed_prefixes.py` to safely remove selected `balance_seed` rows from live `transactions` using an archive-first flow:
+  - Creates `transactions_seed_archive` table if missing.
+  - Copies matched rows (with original transaction id + archive metadata) into archive table.
+  - Deletes only the selected rows from `transactions` after successful archive.
+- Added `scripts/ops/inventory_seed_prefixes.py` to inventory `balance_seed` rows by `payment_reference` prefix for targeted cleanup.
+- Ran LS prefix inventory and identified major spurious attempt groups from the current reconcile/recovery cycle.
+- Executed dry-run and then apply purge for these spurious prefixes:
+  - `seed_reversal`
+  - `seed_rollback_20260524`
+  - `seed_rollback_20260524_anchor`
+  - `seed_rollback_guardbn_20260524`
+  - `guard_bn_20260524T084612Z`
+  - `guard_lsfix2_20260524T103427Z`
+  - `strict_ls_guard_20260524T105658Z`
+  - `seed_rollback_guard_lsfix2_20260524T103427Z`
+  - `seed_rollback_strict_ls_guard_20260524T105658Z`
+  - `anchor_ls_20260524T074234Z`
+  - `hist_repair_rollback`
+- Purge result on LS: `8256` rows archived, `8256` rows deleted from live `transactions`.
+- Post-purge LS seed inventory reduced total `balance_seed` rows from `17408` to `9152`.
+
+### Key Decisions
+- For the user’s “remove spurious seed attempts from history” directive, use **archive+delete** rather than compensating rows to actually clean live history while retaining recoverability/auditability.
+- Scope this pass to known spurious attempt batches from the unstable 2026-05-24 reconcile/recovery cycle, not all historical cutover/legacy seed rows.
+
+### What Next Session Should Know
+- Archive table now contains the removed rows (`transactions_seed_archive`) and can be used for selective restore if needed.
+- Remaining seed history still includes legacy/cutover prefixes (`''`, `anchor_ls_20260523`, `smp_cutover_*`) that were intentionally not purged in this pass.
+- If broader cleanup is requested, run another inventory-first pass and explicitly enumerate additional prefixes.
+
+### Files Modified
+- `scripts/ops/archive_and_purge_seed_prefixes.py`
+- `scripts/ops/inventory_seed_prefixes.py`
+
+### Senescence Notes
+- No senescence signal observed in this cleanup cycle.
+
+### Protocol Feedback
+- The previous session entries gave critical context on which prefixes were reconcile artifacts vs. historical baseline, which reduced accidental over-purge risk.
+
+### Second-Pass Addendum (2026-05-24 13:34 UTC)
+- User approved full cleanup of remaining legacy/cutover seed prefixes.
+- Executed dry-run + apply archive/purge for:
+  - `''` (blank prefix)
+  - `anchor_ls_20260523`
+  - `smp_cutover_2026-05-12`
+  - `smp_cutover_2026-05-12_live2`
+  - `smp_cutover_2026-05-12_live`
+  - `smp_cutover_2026-05-12_adj`
+  - `smp_cutover_2026-05-12_live3`
+- Second-pass result: `9152` rows archived, `9152` rows deleted.
+- Post-cleanup verification:
+  - `REMAINING_BALANCE_SEED = 0`
+  - `ARCHIVE_TOTAL = 17408`
+  - `ARCHIVE_REASON[spurious_seed_attempt_cleanup_20260524] = 8256`
+  - `ARCHIVE_REASON[spurious_seed_attempt_cleanup_20260524_pass2] = 9152`
+
+### CC-Only Ops Sync Addendum (2026-05-24 14:20 UTC)
+- Implemented a new ops importer: `scripts/ops/import_sm_manual_credits.py`.
+  - Purpose: backfill SparkMeter-side historical credits that are missing from CC so CC remains the single operational surface.
+  - Idempotency guards:
+    - skips rows that match existing CC `payment_reference`/`source_table`,
+    - skips rows whose `external_id` maps to an existing CC transaction id/reference,
+    - writes imported rows with stable synthetic `payment_reference` + `source_table` fingerprints (`sm_manual_hist:*`) to prevent repeat inserts.
+  - Supports dry-run/apply and country/platform scoping (`LS`/`BN`, `koios`/`thundercloud`/`all`).
+- Updated `acdb-api/crud.py` SparkMeter credit path to use durable retry queue (`credit_sm_with_retry`) instead of direct `credit_sparkmeter`, aligning CRUD writes with the payments/ingest reliability path.
+- Live probe findings while validating importer behavior:
+  - Koios v1 payment enumeration currently returns `400 Unsupported` for this org/key combination (`"Full payment enumeration is unsupported."`), so Koios historical pull cannot currently be completed via this API path.
+  - ThunderCloud transaction pull works (sample run fetched ~5.2k credits for 365-day window), but full dry-run over the entire set is currently slow due per-row dedupe checks; script remains functional but should be optimized before large apply runs.
+
+### ThunderCloud Historical Apply (2026-05-24 15:27 UTC)
+- Optimized `import_sm_manual_credits.py` for full-window runs:
+  - pre-indexes existing refs/ids in memory to avoid per-row DB lookup loops,
+  - adds optional `--fuzzy-window-minutes` (set to `0` for deterministic backfill),
+  - guards `source_table` writes to existing schema constraints (`varchar(50)` in prod).
+- Ran full LS dry-run (`--platform thundercloud --days 365`) after optimization:
+  - `candidates=5269`
+  - `would_insert=3545`
+  - `skip_cc_reference=1147`
+  - `skip_cc_external_id=576`
+  - `skip_already_imported=1`
+- Ran full LS apply on production host with corrected script:
+  - `inserted=3372`
+  - `skip_cc_reference=1147`
+  - `skip_cc_external_id=576`
+  - `skip_already_imported=174`
+- Post-apply verification:
+  - `total_sm_manual_hist_rows=3372`
+  - `duplicate_payment_reference_keys=0`
+  - id range: `4458807..4463823`
+- Koios history still blocked by API policy (`/api/v1/payments` enumeration unsupported), so this pass covers ThunderCloud historical credits only.
+- Post-apply LS broad drift check remains materially drifted (`1219` accounts > `1.0 kWh`); this confirms that historical SM-credit reflection and broad CC↔SM balance parity are related but not equivalent cleanup dimensions.
+
+### Koios Historical Apply via Web Payments (2026-05-24 20:09 UTC)
+- Implemented Koios historical import path in `import_sm_manual_credits.py` using web-session endpoint:
+  - `GET /sm/organizations/{KOIOS_ORG_ID}/payments` (paginated, 50 rows/page in current platform behavior).
+  - Built account mapping from `/sm/organizations/{org}/customers` roster (`id -> code`, meter serial fallback).
+  - This bypasses the v1 API limitation (`/api/v1/payments` full enumeration unsupported for current key/org context).
+- LS Koios dry-run (`--platform koios --days 365`) results:
+  - `candidates=14101`
+  - `would_insert=9258`
+  - `skip_cc_reference=3072`
+  - `skip_cc_external_id=1771`
+- LS Koios apply results:
+  - `inserted=9258`
+  - `skip_cc_reference=3072`
+  - `skip_cc_external_id=1771`
+- Combined `sm_manual_hist` verification after ThunderCloud+Koios applies:
+  - `total_sm_manual_hist_rows=12630`
+  - `duplicate_payment_reference_keys=0`
+  - id range `4458807..4480937`
+- Post-import LS broad drift check remains high (`1247` accounts > `1.0 kWh`), indicating that historical SM-credit reflection is now in place but does not by itself close all CC↔SM balance divergence sources.
+
+## Session 2026-05-25 [202605250828] (Incremental SM Mirror Automation)
+
+### What Was Done
+- Extended `scripts/ops/import_sm_manual_credits.py` to support incremental watermark mode:
+  - new CLI flags: `--from-ts`, `--to-ts`, `--use-watermark`, `--watermark-overlap-minutes`, `--state-table`,
+  - persisted per-country/per-platform state in `sm_credit_mirror_state`,
+  - state captures `last_credited_at`, status/message, and candidate/insert counters.
+- Added migration `acdb-api/migrations/037_create_sm_credit_mirror_state.sql` to create `sm_credit_mirror_state`.
+- Added orchestrator `scripts/ops/run_sm_credit_mirror_incremental.py`:
+  - runs LS Koios + LS ThunderCloud every cycle,
+  - also runs BN Koios when `DATABASE_URL_BN` is present in env file,
+  - forwards shared env values to child importer calls.
+- Added deployment units:
+  - `deploy/systemd/cc-sm-credit-mirror.service`
+  - `deploy/systemd/cc-sm-credit-mirror.timer` (15-minute cadence, persistent).
+
+### Key Decisions
+- Use overlap-based watermarking (default 120 minutes backtrack) to avoid missing late-arriving or out-of-order upstream credits while preserving idempotent inserts.
+- Keep importer single-platform per incremental run in watermark mode (explicitly disallow `--platform all` with `--use-watermark`) so each stream advances independently and safely.
+- Make timer orchestration country-aware by env presence (`DATABASE_URL_BN`) rather than requiring separate per-country timer units.
+
+### What Next Session Should Know
+- Installation on host is still a manual systemd copy/enable step (same pattern as other CC ops timers).
+- Initial bootstrap depth per stream is controlled by runner `--bootstrap-days` (default `30`); watermark takes over after first successful apply.
+- `sm_credit_mirror_state` is now the canonical checkpoint for incremental SM historical credit mirroring.
+
+### Files Modified
+- `scripts/ops/import_sm_manual_credits.py`
+- `scripts/ops/run_sm_credit_mirror_incremental.py`
+- `acdb-api/migrations/037_create_sm_credit_mirror_state.sql`
+- `deploy/systemd/cc-sm-credit-mirror.service`
+- `deploy/systemd/cc-sm-credit-mirror.timer`
+
+### Senescence Notes
+- No senescence signal observed during this implementation pass.
+
+### Protocol Feedback
+- Prior session details about Koios web payments and ThunderCloud ingestion behavior were sufficient to implement incremental watermarking without re-probing endpoints.
+
+## Session 2026-05-25 [202605251010] (Deye Telemetry Onboarding + API Validation)
+
+### What Was Done
+- Consolidated Deye onboarding execution artifacts:
+  - `docs/ops/deyecloud-logger-onboarding-tracker-2026-05-25.csv`
+  - `docs/ops/deyecloud-logger-onboarding-checklist.md`
+  - `docs/ops/deyecloud-bn-site-device-mapping-2026-05-25.csv`
+  - `docs/ops/solarman-hourly-archive-runbook.md`
+  - `scripts/ops/deye_add_loggers_and_verify.py`
+  - `scripts/ops/build_solarman_archive_manifest.py`
+- Verified Deye OpenAPI with app credentials (`AppId 202605114846016`) and company scope (`companyId 10396086`):
+  - station listing works,
+  - device listing/telemetry works for newly onboarded device set.
+- Executed API onboarding and verification loops for BN and LSB:
+  - successful logger additions for known-good collector SNs,
+  - identified/resolved serial transcription mismatch for AGL logger (`D257258373F0` vs typo missing digit),
+  - registered LSB inverter via explicit `device/register` using Solarman-derived gateway/inverter pairing:
+    - `gatewaySn=2337105481`
+    - `deviceSn=2202144213`
+- Final observed state: BN (`KOTOKPA`, `AGLAMINDJODJI`, `SAMIONTA`) and LSB have API-visible telemetry paths with site-specific nuances captured in tracker/mapping docs.
+
+### Key Decisions
+- Treat Deye mobile/web UI and OpenAPI as eventually consistent surfaces; verify with API before escalation.
+- Use copy/paste of SNs from UI (or authoritative logger details) as policy; avoid manual transcription.
+- Prefer additive onboarding (`addLogger`, `device/register`) over destructive/unbind operations.
+- Keep Solarman historical archive capture as protective pre-cutover discipline, even when Deye says no unbind required.
+
+### What Next Session Should Know
+- For LSB specifically, the usable pairing came from Solarman metadata:
+  - inverter SN from nameplate/portal (`2202144213`)
+  - logger/gateway SN (`2337105481`).
+- `station/listWithDevice` provided useful station-level device associations when `device/list` lagged or was ambiguous.
+- There are duplicate/test stations in account scope; tracker/mapping docs should be the operational source of truth for production sites.
+- Next engineering step is to close the loop into CC UX + 1PDB by operationalizing a stable ingest pipeline from verified Deye APIs into `inverter_readings`/`inverter_alarms`.
+
+### Files Modified
+- `docs/ops/deyecloud-logger-onboarding-tracker-2026-05-25.csv`
+- `docs/ops/deyecloud-logger-onboarding-checklist.md`
+- `docs/ops/deyecloud-bn-site-device-mapping-2026-05-25.csv`
+- `docs/ops/solarman-hourly-archive-runbook.md`
+- `scripts/ops/deye_add_loggers_and_verify.py`
+- `scripts/ops/build_solarman_archive_manifest.py`
+
+### Senescence Notes
+- One transient false escalation path was avoided after re-checking exact SN strings; no broader context degradation detected.
+
+### Protocol Feedback
+- For cross-surface platform integrations (mobile/web/API), session continuity is much better when tracker/mapping files are updated live with exact identifiers and verification timestamps.
+
+### Multi-vendor Clarification Addendum (2026-05-25 09:20 UTC)
+- Updated core docs to explicitly state that generation telemetry ingest is a **multi-vendor** workstream, not Deye-only:
+  - `CONTEXT.md` `gensite/` entry now frames the shared CC->1PDB path (`inverter_readings`, `inverter_alarms`) and references `docs/ops/gensite-poller.md`.
+  - Added generation telemetry row to the **Data Sources** table in `CONTEXT.md`.
+  - `docs/ops/gensite-poller.md` status/operations wording updated to remove stale "first target only" and hardcoded vendor-stub assumptions.
+  - `acdb-api/scripts/ops/gensite_poller.py` header clarified that stub skipping is runtime-generic and that all vendors should funnel through the same poller pipeline as adapters mature.
+
+## Session 2026-05-25 [202605251413] (SMA Adapter Activation Pass)
+
+### What Was Done
+- Implemented live SMA adapter path in `acdb-api/gensite/adapters/sma.py`:
+  - OAuth2 password grant against `login.sma.energy` realm `SMA` (client `SPpbeOS` default, override via `extra.client_id`),
+  - plant discovery via `/api/v1/navigation`,
+  - live point extraction via `/api/v1/measurements/{plantId}/energybalance?dateBeginLocal=YYYY-MM-DD`.
+- Moved SMA adapter from `stub` to `ready` and replaced placeholder verify with real auth/API verification.
+- Implemented `fetch_live()` normalization mapping to OEM-neutral channels:
+  - `pv_kw`, `ac_kw`, `battery_kw`, `battery_soc_pct`, `grid_kw`.
+- Updated adapter registry/docs to reflect SMA readiness:
+  - `acdb-api/gensite/adapters/__init__.py`
+  - `docs/ops/gensite-commissioning.md`
+  - `docs/ops/gensite-vendor-readiness-matrix.md`
+
+### Key Decisions
+- Use Sunny Portal UI API (stable and validated) instead of brittle browser scrape.
+- Treat `energybalance.detail` rows as power snapshots in watts and normalize to kW for CC telemetry contract.
+- Keep `fetch_day()` and `fetch_alarms()` minimal for now; prioritize live verify/live fetch activation first.
+
+### What Next Session Should Know
+- SMA credentials now verify successfully and return visible plant inventory (`7` plants on current account scope).
+- `site_id_on_vendor` should be Sunny `plantId/componentId` from `/api/v1/navigation`.
+- Remaining SMA gaps are historical backfill (`fetch_day`) and alarm ingestion (`fetch_alarms`).
+
+### Files Modified
+- `acdb-api/gensite/adapters/sma.py`
+- `acdb-api/gensite/adapters/__init__.py`
+- `docs/ops/gensite-commissioning.md`
+- `docs/ops/gensite-vendor-readiness-matrix.md`
+
+### Verification
+- Local smoke test passed for provided credentials:
+  - `verify`: success (`Connected to SMA plant '1PWR_HC_Bobete'`)
+  - `fetch_live`: returned normalized live row (PV/load/battery/SOC/grid).
+
+### Host execution follow-up
+- Deployed updated `sma.py` + adapter registry to CC host and restarted:
+  - `1pdb-api`
+  - `1pdb-api-bn`
+- Host verify run after deployment:
+  - `--vendors sma` returned `credentials=4`, `ok=4`, `failed=0`.
+  - Report files:
+    - `docs/ops/gensite_verify_2026-05-25_1413_sma.csv`
+    - `docs/ops/gensite_verify_2026-05-25_1413_sma_mapped.csv`
+- Mapped SMA `site_id_on_vendor` for seeded LS sites:
+  - `BOB -> 6202555` (`1PWR_HC_Bobete`)
+  - `MAN -> 6360299` (`1PWR_HC_Manamaneng`)
+  - `MET -> 6727482` (`1PWR_HC_Methalaneng`)
+  - `NKU -> 6060012` (`1PWR_HC_Nkau`)
+- Root-cause found for zero live rows after initial verify: these sites had no
+  `site_equipment` rows. Seeded one SMA inverter equipment row per site.
+- Ran one-shot `gensite_poller.py` on host; confirmed SMA writes in
+  `inverter_readings` for all 4 mapped sites (latest rows within execution window).
+
+### Fetch-day completion follow-up
+- Implemented SMA `fetch_day()` in `acdb-api/gensite/adapters/sma.py` using:
+  - `/api/v1/measurements/{plantId}/energybalance?dateBeginLocal=YYYY-MM-DD`
+  - per-point mapping to normalized interval channels (`pv_kw`, `ac_kw`,
+    `battery_kw`, `battery_soc_pct`, `grid_kw`) with UTC timestamps from `timeUtc`.
+- Kept `fetch_alarms()` as conservative no-op pending a stable SMA endpoint with
+  durable event timestamps/codes suitable for deduplicated ingestion.
+- Added host smoke utility:
+  - `scripts/ops/smoke_sma_fetch_day.py`
+- Host smoke run (`--day 2026-05-25`) confirms populated interval outputs:
+  - `BOB=179`, `MAN=179`, `MET=183`, `NKU=179` rows.
+
+### Victron credential activation follow-up
+- User provided Victron credentials; seeded encrypted `victron/vrm` credential
+  for `GBO` and verified on host (`1 / 1 success`).
+- Discovered VRM installation and mapped `site_id_on_vendor`:
+  - `GBO -> 372788` (`GBOWELE`, identifier `c0619ab4463f`)
+- Seeded minimal `site_equipment` inverter row for `GBO` vendor `victron` so
+  poller can attach readings.
+- One-shot poller confirmed `GBO/victron/vrm: OK, 1 reading(s)` on host.
+- Patched `acdb-api/gensite/adapters/victron.py` to handle newer VRM Status
+  payloads (metadata-only) by falling back to `/diagnostics` code mapping.
+  This restored non-null normalized channels for GBO:
+  - `pv_kw`, `ac_kw`, `battery_kw`, `battery_soc_pct`, `grid_kw`,
+    `ac_freq_hz`, `ac_v_avg`.
+- Verification artifacts added:
+  - `docs/ops/gensite_verify_2026-05-25_1525_victron.csv`
+  - `docs/ops/gensite_verify_2026-05-25_1526_victron_mapped.csv`
+
+## Session 2026-05-26 [202605261011] (Gensite Flow Balance Alerts Configurable)
+
+### What Was Done
+- Updated gensite powerflow balance alerting from hardcoded frontend thresholds to per-site configurable settings.
+- Added migration `acdb-api/migrations/039_gensite_flow_balance_settings.sql` with optional `sites` columns:
+  - `flow_balance_warn_pct`
+  - `flow_balance_crit_pct`
+  - `flow_balance_min_scale_kw`
+- Extended gensite backend:
+  - `acdb-api/gensite/store.py`:
+    - `upsert_site(...)` now accepts and persists flow-balance settings.
+    - added `update_site_flow_balance_settings(...)` helper.
+  - `acdb-api/gensite/router.py`:
+    - `CommissionRequest` now accepts optional flow-balance settings.
+    - validation ensures critical threshold is not below warn threshold.
+    - added `PATCH /api/gensite/sites/{code}/flow-balance-settings` for post-commission tuning.
+- Extended frontend typing/API:
+  - `acdb-api/frontend/src/lib/api.ts`:
+    - `GensiteSite` now includes optional flow-balance fields.
+    - added `updateGensiteFlowBalanceSettings(...)` client helper.
+- Updated dashboard behavior:
+  - `acdb-api/frontend/src/pages/GenSitePage.tsx` now reads site-level settings with defaults fallback (`warn=8%`, `crit=15%`, `min_scale=0.5 kW`).
+  - Balance severity now uses configured thresholds in runtime alert rendering.
+
+### Key Decisions
+- Keep defaults in UI as fallback so existing commissioned sites behave safely before any explicit config is set.
+- Make settings per-site (not global) because telemetry quality and measurement noise vary by site/vendor topology.
+- Add a focused patch endpoint so operators can tune thresholds without re-running full site commission.
+
+### What Next Session Should Know
+- The settings are now persisted on `sites` and returned automatically by `GET /api/gensite/sites/{code}`.
+- Existing sites keep prior behavior unless settings are populated.
+- Operational follow-up can add a small UI editor for these three fields in commissioning/detail screens if desired.
+
+### Files Modified
+- `acdb-api/migrations/039_gensite_flow_balance_settings.sql`
+- `acdb-api/gensite/store.py`
+- `acdb-api/gensite/router.py`
+- `acdb-api/frontend/src/lib/api.ts`
+- `acdb-api/frontend/src/pages/GenSitePage.tsx`
+
+### Verification
+- Frontend typecheck: `npx tsc -b --noEmit` (pass)
+- Backend syntax: `python3 -m py_compile acdb-api/gensite/router.py acdb-api/gensite/store.py` (pass)
+
+## Session 2026-05-26 [202605261011] (HQ Meter Addressing SOP/File-Pack v1.1)
+
+### What Was Done
+- Added an explicit HQ-facing meter addressing SOP update:
+  - `docs/ops/1meter-hq-meter-addressing-sop.md`
+  - versioned at `v1.1` with no-response/empty-scan RS485 triage.
+- Added a versioned file-pack definition:
+  - `docs/ops/1meter-hq-meter-addressing-file-pack.md`
+  - versioned at `v1.1` with release checklist and scope boundaries.
+- Clarified that `idf.py monitor` is out-of-scope for HQ address assignment and that empty scans are primarily comms-path failures (power/wiring/polarity/adapter).
+
+### Key Decisions
+- Keep SOP + file-pack as separate docs: SOP for operator steps, file-pack doc for release control and version tracking.
+- Treat this update as an incremental version bump (`v1.1`) rather than a new process line, since it extends triage guidance on the existing workflow.
+
+### What Next Session Should Know
+- If HQ still reports empty scans after v1.1 triage, collect adapter model, terminal-block photo, and TX/RX LED behavior to distinguish hardware adapter failure vs bus wiring.
+- Next UX improvement could be a one-page printable troubleshooting card derived from the SOP.
+
+### Files Modified
+- `docs/ops/1meter-hq-meter-addressing-sop.md`
+- `docs/ops/1meter-hq-meter-addressing-file-pack.md`
+
+## Session 2026-05-26 [202605261802] (1Meter Auto-Cert Flash Packaging Hardening)
+
+### What Was Done
+- Root-caused field mismatch where technicians could run `Flash-OneMeter.bat` without flashing `esp_secure_cert.bin`, leaving stale device identity on the meter.
+- Patched all 19 per-meter packages in `1meter-fw-v11.53-MAK-field/` so:
+  - `Flash-OneMeter.bat` now always runs `FLASH_CERT.bat` after firmware flash.
+  - If cert flash fails, the main script exits non-zero and marks the unit as not field-ready.
+  - `FLASH_CERT.bat` accepts COM port as an argument (`%~1`) to support non-interactive handoff from the main script while preserving manual mode.
+- Rebuilt aggregate distribution bundle:
+  - `1meter-fw-v1.1.53d-MAK-all-meters-AUTOCERT-STRICT.zip`
+
+### Key Decisions
+- Keep cert flashing as a mandatory in-sequence operation in the primary script to eliminate operator path variance.
+- Preserve strict fail behavior for missing `esp_secure_cert.bin` (no fallback/skip) to enforce complete package integrity.
+
+### What Next Session Should Know
+- This packaging fix addresses the exact failure mode where app firmware is updated but old cert partition remains, causing Thing/cert SHA mismatch despite “using the ZIP.”
+- Field acceptance should still gate on boot log identity (`DEVICE_CERT_SHA1`) and MQTT success.
+
+### Files Modified
+- `1meter-fw-v11.53-MAK-field/1meter-fw-v1.1.53-OneMeter*.zip` (all 19 per-meter ZIPs; updated `Flash-OneMeter.bat` + `FLASH_CERT.bat`)
+- `1meter-fw-v1.1.53d-MAK-all-meters-AUTOCERT-STRICT.zip`
+
+## Session 2026-05-26 [202605262349] (Gensite Flow Diagram Refinement + Fleet Aggregate Panel)
+
+### What Was Done
+- Iteratively refined `GenSitePage` powerflow UX:
+  - moved node icons outside boxes with per-node placement control (`left|right|top|bottom`),
+  - switched symbols to provided icon assets (`docs/icons` copied into `frontend/src/assets/flow-icons/`),
+  - added dynamic battery icon states and blink bands based on SoC thresholds,
+  - adjusted node and bubble geometry (PV/genset left shifts, inverter/load top icons, battery icon right-side),
+  - removed icon circle badges and tuned visual spacing.
+- Corrected inferred genset math in frontend flow/timeseries from discharge-only logic to signed battery logic:
+  - now uses `genset = max(0, load - pv - battery_signed)` where battery is `+discharge / -charge`.
+  - This fixes cases where battery charging demand was excluded from inferred genset.
+- Updated balance warning behavior:
+  - absolute residuals below `1.8 kW` are ignored,
+  - status banner now renders only for true warning/critical states.
+- Added a new fleet aggregate powerflow capability and surfaced it on the main dashboard:
+  - backend endpoint `GET /api/gensite/aggregate-live` (optional `country` filter),
+  - frontend API client type + call,
+  - featured "Aggregate 1PWR Power Flow" panel on `DashboardPage`.
+- Updated orientation/system docs so future sessions immediately see the new aggregate endpoint and dashboard panel context.
+
+### Key Decisions
+- Keep aggregate flow server-side (latest-per-equipment + per-site explicit/derived genset logic) to avoid heavy client fan-out and ensure consistent calculation rules.
+- Preserve signed battery convention end-to-end to avoid masking charging load in inferred-source calculations.
+- Treat low absolute residuals as operator-noise floor to reduce false-positive balance alerts.
+
+### What Next Session Should Know
+- Dashboard now includes a live aggregate flow card; any changes to gensite channel semantics should update both:
+  - `acdb-api/gensite/store.py::aggregate_latest_flow`
+  - `acdb-api/frontend/src/pages/GenSitePage.tsx` derivation paths.
+- If operators request exact OEM-matched fleet totals, add backend fields for explicit-vs-derived contribution breakdown and expose on the aggregate endpoint.
+
+### Files Modified
+- `acdb-api/frontend/src/pages/GenSitePage.tsx`
+- `acdb-api/frontend/src/assets/flow-icons/*.png`
+- `acdb-api/gensite/store.py`
+- `acdb-api/gensite/router.py`
+- `acdb-api/frontend/src/lib/api.ts`
+- `acdb-api/frontend/src/pages/DashboardPage.tsx`
+- `CONTEXT.md`
+- `SESSION_LOG.md`
+
+### Verification
+- Frontend typecheck repeatedly passed during incremental UI and logic changes:
+  - `cd acdb-api/frontend && npx tsc -b --noEmit`
+- Backend syntax checks passed for new aggregate endpoint/store logic:
+  - `python3 -m py_compile acdb-api/gensite/store.py acdb-api/gensite/router.py`
+
+### Senescence Notes
+- No material context-loss observed in this session despite many iterative UI adjustments; state continuity remained stable.
+
+### Protocol Feedback
+- Current orientation docs were strong on gensite ingestion architecture but lacked explicit mention of fleet aggregate flow API/dashboard usage; this session added that to `CONTEXT.md`.
