@@ -15,6 +15,15 @@ import {
   type GensiteSeriesResponse,
   type GensiteAlarm,
 } from '../lib/api';
+import solarPanelIcon from '../assets/flow-icons/solar-panel.png';
+import generatorIcon from '../assets/flow-icons/generator.png';
+import inverterIcon from '../assets/flow-icons/solar-inverter.png';
+import powerGridIcon from '../assets/flow-icons/power-grid.png';
+import housesIcon from '../assets/flow-icons/houses.png';
+import fullBatteryIcon from '../assets/flow-icons/full-battery.png';
+import halfBatteryIcon from '../assets/flow-icons/half-battery.png';
+import lowBatteryIcon from '../assets/flow-icons/low-battery.png';
+import emptyBatteryIcon from '../assets/flow-icons/empty-battery.png';
 
 function formatTs(ts: string | null | undefined, withSeconds = false): string {
   if (!ts) return '—';
@@ -67,8 +76,12 @@ const FLOW_CSS = `
 .flow-line { stroke-dasharray: 8 8; }
 .flow-forward { animation: flow-forward 1.1s linear infinite; }
 .flow-reverse { animation: flow-reverse 1.1s linear infinite; }
+.icon-blink-a { animation: icon-blink-a 1s steps(1, end) infinite; transform-origin: center; }
+.icon-blink-b { animation: icon-blink-b 1s steps(1, end) infinite; transform-origin: center; }
 @keyframes flow-forward { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -24; } }
 @keyframes flow-reverse { from { stroke-dashoffset: 0; } to { stroke-dashoffset: 24; } }
+@keyframes icon-blink-a { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+@keyframes icon-blink-b { 0%, 49% { opacity: 0; } 50%, 100% { opacity: 1; } }
 `;
 
 type ChartRow = Record<string, number | string | null>;
@@ -410,6 +423,15 @@ export default function GenSitePage() {
   const loadActive = loadNow > 0.05;
   const batteryActive = Math.abs(batteryNow) > 0.05;
   const batteryDischarging = batteryNow > 0.05;
+  const batteryIconState: BatteryIconState = (() => {
+    if (flowNow.soc === null) return 'offline';
+    if (flowNow.soc > 90) return 'full';
+    if (flowNow.soc > 55) return 'fullHalfBlink';
+    if (flowNow.soc >= 45) return 'half';
+    if (flowNow.soc >= 25) return 'halfRedBlink';
+    if (flowNow.soc >= 15) return 'red';
+    return 'redBlink';
+  })();
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -575,6 +597,7 @@ export default function GenSitePage() {
                   x={332}
                   y={286}
                   kind="battery"
+                  iconBatteryState={batteryIconState}
                   label={batteryDischarging ? 'Battery out' : 'Battery in'}
                   lines={[
                     `Cap ${num(batteryCapKw || null, 1, 'kW')} / ${num(batteryCapKwh || null, 1, 'kWh')}`,
@@ -907,55 +930,75 @@ function Tile({ label, value }: { label: string; value: string }) {
 }
 
 type FlowNodeKind = 'pv' | 'genset' | 'inverter' | 'battery' | 'load';
+type BatteryIconState =
+  | 'full'
+  | 'fullHalfBlink'
+  | 'half'
+  | 'halfRedBlink'
+  | 'red'
+  | 'redBlink'
+  | 'offline';
 
-function FlowIcon({ kind }: { kind: FlowNodeKind }) {
+function FlowIcon({
+  kind,
+  batteryState = 'offline',
+}: {
+  kind: FlowNodeKind;
+  batteryState?: BatteryIconState;
+}) {
   if (kind === 'pv') {
     return (
-      <g>
-        <circle cx="11" cy="8" r="4" fill="#facc15" />
-        <rect x="3" y="13" width="16" height="9" rx="1.5" fill="none" stroke="#0f172a" strokeWidth="1.2" />
-        <line x1="3" y1="17.5" x2="19" y2="17.5" stroke="#0f172a" strokeWidth="1" />
-        <line x1="8.3" y1="13" x2="8.3" y2="22" stroke="#0f172a" strokeWidth="1" />
-        <line x1="13.7" y1="13" x2="13.7" y2="22" stroke="#0f172a" strokeWidth="1" />
-      </g>
+      <image href={solarPanelIcon} x="1" y="1" width="20" height="20" preserveAspectRatio="xMidYMid meet" />
     );
   }
   if (kind === 'genset') {
     return (
-      <g>
-        <rect x="3" y="8" width="16" height="12" rx="2" fill="none" stroke="#0f172a" strokeWidth="1.2" />
-        <circle cx="8" cy="20.5" r="1.8" fill="#0f172a" />
-        <circle cx="15" cy="20.5" r="1.8" fill="#0f172a" />
-        <line x1="6" y1="13" x2="16" y2="13" stroke="#0f172a" strokeWidth="1.1" />
-      </g>
+      <image href={generatorIcon} x="1" y="1" width="20" height="20" preserveAspectRatio="xMidYMid meet" />
     );
   }
   if (kind === 'battery') {
+    if (batteryState === 'fullHalfBlink') {
+      return (
+        <g>
+          <image className="icon-blink-a" href={fullBatteryIcon} x="1" y="1" width="20" height="20" preserveAspectRatio="xMidYMid meet" />
+          <image className="icon-blink-b" href={halfBatteryIcon} x="1" y="1" width="20" height="20" preserveAspectRatio="xMidYMid meet" />
+        </g>
+      );
+    }
+    if (batteryState === 'halfRedBlink') {
+      return (
+        <g>
+          <image className="icon-blink-a" href={halfBatteryIcon} x="1" y="1" width="20" height="20" preserveAspectRatio="xMidYMid meet" />
+          <image className="icon-blink-b" href={lowBatteryIcon} x="1" y="1" width="20" height="20" preserveAspectRatio="xMidYMid meet" />
+        </g>
+      );
+    }
+    if (batteryState === 'redBlink') {
+      return (
+        <image className="icon-blink-a" href={lowBatteryIcon} x="1" y="1" width="20" height="20" preserveAspectRatio="xMidYMid meet" />
+      );
+    }
+    const batteryIcon = batteryState === 'full'
+      ? fullBatteryIcon
+      : batteryState === 'half'
+        ? halfBatteryIcon
+        : batteryState === 'red'
+          ? lowBatteryIcon
+          : emptyBatteryIcon;
     return (
-      <g>
-        <rect x="4" y="9" width="14" height="11" rx="1.8" fill="none" stroke="#0f172a" strokeWidth="1.2" />
-        <rect x="18" y="12.5" width="2.5" height="4" rx="0.8" fill="#0f172a" />
-        <line x1="9" y1="14.5" x2="13" y2="14.5" stroke="#0f172a" strokeWidth="1.2" />
-      </g>
+      <image href={batteryIcon} x="1" y="1" width="20" height="20" preserveAspectRatio="xMidYMid meet" />
     );
   }
   if (kind === 'load') {
     return (
       <g>
-        <line x1="11" y1="7" x2="11" y2="21" stroke="#0f172a" strokeWidth="1.4" />
-        <line x1="5" y1="10" x2="17" y2="10" stroke="#0f172a" strokeWidth="1.2" />
-        <line x1="6" y1="14" x2="16" y2="14" stroke="#0f172a" strokeWidth="1.2" />
-        <line x1="8" y1="18" x2="14" y2="18" stroke="#0f172a" strokeWidth="1.2" />
+        <image href={powerGridIcon} x="-1" y="1" width="11" height="20" preserveAspectRatio="xMidYMid meet" />
+        <image href={housesIcon} x="9" y="1" width="14" height="20" preserveAspectRatio="xMidYMid meet" />
       </g>
     );
   }
   return (
-    <g>
-      <line x1="3" y1="9" x2="8" y2="9" stroke="#0f172a" strokeWidth="1.2" />
-      <line x1="3" y1="13" x2="8" y2="13" stroke="#0f172a" strokeWidth="1.2" />
-      <line x1="3" y1="17" x2="8" y2="17" stroke="#0f172a" strokeWidth="1.2" />
-      <path d="M10 17 C11 9, 13 9, 14 17 C15 25, 17 25, 18 17" fill="none" stroke="#0f172a" strokeWidth="1.2" />
-    </g>
+    <image href={inverterIcon} x="1" y="1" width="20" height="20" preserveAspectRatio="xMidYMid meet" />
   );
 }
 
@@ -975,6 +1018,7 @@ function NodeBox({
   label,
   lines,
   iconSide = 'left',
+  iconBatteryState,
 }: {
   x: number;
   y: number;
@@ -982,6 +1026,7 @@ function NodeBox({
   label: string;
   lines: string[];
   iconSide?: 'left' | 'right';
+  iconBatteryState?: BatteryIconState;
 }) {
   const iconCx = iconSide === 'right' ? 158 : -14;
   const iconCy = 33;
@@ -990,7 +1035,7 @@ function NodeBox({
       <rect rx="8" ry="8" width="144" height="66" fill="#ffffff" stroke="#4b5563" strokeWidth="2" />
       <circle cx={iconCx} cy={iconCy} r="16" fill="#ffffff" stroke="#9ca3af" strokeWidth="1.5" />
       <g transform={`translate(${iconCx - 11},${iconCy - 11})`}>
-        <FlowIcon kind={kind} />
+        <FlowIcon kind={kind} batteryState={iconBatteryState} />
       </g>
       <text x="10" y="19" fontSize="10" fill="#6b7280">{label}</text>
       {lines.map((line, idx) => (
