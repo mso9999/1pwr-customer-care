@@ -1001,8 +1001,10 @@ function FlowIcon({
   if (kind === 'load') {
     return (
       <g>
-        <image href={powerGridIcon} x="-1" y="1" width="11" height="20" preserveAspectRatio="xMidYMid meet" />
-        <image href={housesIcon} x="9" y="1" width="14" height="20" preserveAspectRatio="xMidYMid meet" />
+        <g transform="translate(-5,-5) scale(2)">
+          <image href={powerGridIcon} x="-1" y="1" width="11" height="20" preserveAspectRatio="xMidYMid meet" />
+          <image href={housesIcon} x="9" y="1" width="14" height="20" preserveAspectRatio="xMidYMid meet" />
+        </g>
       </g>
     );
   }
