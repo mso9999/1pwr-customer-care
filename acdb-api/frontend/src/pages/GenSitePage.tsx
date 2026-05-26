@@ -95,6 +95,26 @@ function isGensetEquipment(kind: string | null | undefined, role: string | null 
     || r.includes('genset') || r.includes('generator') || r.includes('diesel');
 }
 
+function isInverterEquipment(kind: string | null | undefined, role: string | null | undefined): boolean {
+  const k = (kind || '').toLowerCase();
+  const r = (role || '').toLowerCase();
+  return k.includes('inverter') || k.includes('pcs') || r.includes('inverter');
+}
+
+function isBatteryEquipment(kind: string | null | undefined, role: string | null | undefined): boolean {
+  const k = (kind || '').toLowerCase();
+  const r = (role || '').toLowerCase();
+  return k.includes('battery') || k.includes('bess') || k.includes('storage')
+    || r.includes('battery') || r.includes('bess') || r.includes('storage');
+}
+
+function isPvEquipment(kind: string | null | undefined, role: string | null | undefined): boolean {
+  const k = (kind || '').toLowerCase();
+  const r = (role || '').toLowerCase();
+  return k.includes('pv') || k.includes('solar') || k.includes('panel')
+    || r.includes('pv') || r.includes('solar');
+}
+
 export default function GenSitePage() {
   const { code = '' } = useParams<{ code: string }>();
   const [params] = useSearchParams();
@@ -349,6 +369,21 @@ export default function GenSitePage() {
   const loadNow = flowNow.load ?? 0;
   const batteryNow = flowNow.battery ?? 0;
   const gensetNow = flowNow.genset ?? 0;
+  const pvCapKw = equipment
+    .filter(eq => isPvEquipment(eq.kind, eq.role))
+    .reduce((acc, eq) => acc + (asNum(eq.nameplate_kw) ?? 0), 0);
+  const gensetCapKw = equipment
+    .filter(eq => isGensetEquipment(eq.kind, eq.role))
+    .reduce((acc, eq) => acc + (asNum(eq.nameplate_kw) ?? 0), 0);
+  const inverterCapKw = equipment
+    .filter(eq => isInverterEquipment(eq.kind, eq.role))
+    .reduce((acc, eq) => acc + (asNum(eq.nameplate_kw) ?? 0), 0);
+  const batteryCapKw = equipment
+    .filter(eq => isBatteryEquipment(eq.kind, eq.role))
+    .reduce((acc, eq) => acc + (asNum(eq.nameplate_kw) ?? 0), 0);
+  const batteryCapKwh = equipment
+    .filter(eq => isBatteryEquipment(eq.kind, eq.role))
+    .reduce((acc, eq) => acc + (asNum(eq.nameplate_kwh) ?? 0), 0);
   const pvToLoadPct = clampPct(loadNow > 0 ? (pvNow / loadNow) * 100 : 0);
   const batteryDischargeKw = batteryNow > 0 ? batteryNow : 0;
   const batteryChargeKw = batteryNow < 0 ? Math.abs(batteryNow) : 0;
@@ -501,12 +536,50 @@ export default function GenSitePage() {
                     markerStart={!batteryDischarging ? 'url(#arrowHead)' : undefined}
                   />
                 )}
+                {/* flow power bubbles */}
+                <FlowBubble x={246} y={114} value={num(flowNow.pv, 2, 'kW')} color="#eab308" />
+                <FlowBubble x={248} y={228} value={num(flowNow.genset, 2, 'kW')} color="#ef4444" />
+                <FlowBubble x={514} y={164} value={num(flowNow.load, 2, 'kW')} color="#0ea5e9" />
+                <FlowBubble x={424} y={234} value={num(Math.abs(flowNow.battery ?? 0), 2, 'kW')} color="#22c55e" />
                 {/* node boxes */}
-                <NodeBox x={90} y={62} label="PV" value={num(flowNow.pv, 2, 'kW')} />
-                <NodeBox x={58} y={232} label="Genset" value={num(flowNow.genset, 2, 'kW')} />
-                <NodeBox x={340} y={154} label="Inverter" value={num((flowNow.load ?? 0) - (flowNow.genset ?? 0), 2, 'kW')} />
-                <NodeBox x={675} y={154} label="Load" value={num(flowNow.load, 2, 'kW')} />
-                <NodeBox x={338} y={304} label={batteryDischarging ? 'Battery out' : 'Battery in'} value={num(Math.abs(flowNow.battery ?? 0), 2, 'kW')} />
+                <NodeBox
+                  x={84}
+                  y={54}
+                  kind="pv"
+                  label="PV"
+                  lines={[`Cap ${num(pvCapKw || null, 1, 'kW')}`]}
+                />
+                <NodeBox
+                  x={52}
+                  y={222}
+                  kind="genset"
+                  label="Genset"
+                  lines={[`Cap ${num(gensetCapKw || null, 1, 'kW')}`]}
+                />
+                <NodeBox
+                  x={334}
+                  y={144}
+                  kind="inverter"
+                  label="Inverter"
+                  lines={[`Cap ${num(inverterCapKw || null, 1, 'kW')}`]}
+                />
+                <NodeBox
+                  x={676}
+                  y={144}
+                  kind="load"
+                  label="Load"
+                  lines={[`Cap ${num(inverterCapKw || null, 1, 'kW')}`]}
+                />
+                <NodeBox
+                  x={332}
+                  y={286}
+                  kind="battery"
+                  label={batteryDischarging ? 'Battery out' : 'Battery in'}
+                  lines={[
+                    `Cap ${num(batteryCapKw || null, 1, 'kW')} / ${num(batteryCapKwh || null, 1, 'kWh')}`,
+                    `SoC ${num(flowNow.soc, 1, '%')}`,
+                  ]}
+                />
               </svg>
             </div>
             <div className={`mt-3 text-xs rounded-lg px-3 py-2 border ${
@@ -832,12 +905,85 @@ function Tile({ label, value }: { label: string; value: string }) {
   );
 }
 
-function NodeBox({ x, y, label, value }: { x: number; y: number; label: string; value: string }) {
+type FlowNodeKind = 'pv' | 'genset' | 'inverter' | 'battery' | 'load';
+
+function FlowIcon({ kind }: { kind: FlowNodeKind }) {
+  if (kind === 'pv') {
+    return (
+      <g>
+        <circle cx="11" cy="8" r="4" fill="#facc15" />
+        <rect x="3" y="13" width="16" height="9" rx="1.5" fill="none" stroke="#0f172a" strokeWidth="1.2" />
+        <line x1="3" y1="17.5" x2="19" y2="17.5" stroke="#0f172a" strokeWidth="1" />
+        <line x1="8.3" y1="13" x2="8.3" y2="22" stroke="#0f172a" strokeWidth="1" />
+        <line x1="13.7" y1="13" x2="13.7" y2="22" stroke="#0f172a" strokeWidth="1" />
+      </g>
+    );
+  }
+  if (kind === 'genset') {
+    return (
+      <g>
+        <rect x="3" y="8" width="16" height="12" rx="2" fill="none" stroke="#0f172a" strokeWidth="1.2" />
+        <circle cx="8" cy="20.5" r="1.8" fill="#0f172a" />
+        <circle cx="15" cy="20.5" r="1.8" fill="#0f172a" />
+        <line x1="6" y1="13" x2="16" y2="13" stroke="#0f172a" strokeWidth="1.1" />
+      </g>
+    );
+  }
+  if (kind === 'battery') {
+    return (
+      <g>
+        <rect x="4" y="9" width="14" height="11" rx="1.8" fill="none" stroke="#0f172a" strokeWidth="1.2" />
+        <rect x="18" y="12.5" width="2.5" height="4" rx="0.8" fill="#0f172a" />
+        <line x1="9" y1="14.5" x2="13" y2="14.5" stroke="#0f172a" strokeWidth="1.2" />
+      </g>
+    );
+  }
+  if (kind === 'load') {
+    return (
+      <g>
+        <line x1="11" y1="7" x2="11" y2="21" stroke="#0f172a" strokeWidth="1.4" />
+        <line x1="5" y1="10" x2="17" y2="10" stroke="#0f172a" strokeWidth="1.2" />
+        <line x1="6" y1="14" x2="16" y2="14" stroke="#0f172a" strokeWidth="1.2" />
+        <line x1="8" y1="18" x2="14" y2="18" stroke="#0f172a" strokeWidth="1.2" />
+      </g>
+    );
+  }
+  return (
+    <g>
+      <line x1="3" y1="9" x2="8" y2="9" stroke="#0f172a" strokeWidth="1.2" />
+      <line x1="3" y1="13" x2="8" y2="13" stroke="#0f172a" strokeWidth="1.2" />
+      <line x1="3" y1="17" x2="8" y2="17" stroke="#0f172a" strokeWidth="1.2" />
+      <path d="M10 17 C11 9, 13 9, 14 17 C15 25, 17 25, 18 17" fill="none" stroke="#0f172a" strokeWidth="1.2" />
+    </g>
+  );
+}
+
+function FlowBubble({ x, y, value, color }: { x: number; y: number; value: string; color: string }) {
   return (
     <g transform={`translate(${x},${y})`}>
-      <rect rx="8" ry="8" width="128" height="52" fill="#ffffff" stroke="#4b5563" strokeWidth="2" />
-      <text x="10" y="20" fontSize="10" fill="#6b7280">{label}</text>
-      <text x="10" y="38" fontSize="13" fill="#111827">{value}</text>
+      <rect rx="14" ry="14" width="96" height="28" fill="#ffffff" stroke={color} strokeWidth="1.5" />
+      <text x="48" y="19" textAnchor="middle" fontSize="12" fill="#0f172a">{value}</text>
+    </g>
+  );
+}
+
+function NodeBox({
+  x,
+  y,
+  kind,
+  label,
+  lines,
+}: { x: number; y: number; kind: FlowNodeKind; label: string; lines: string[] }) {
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <rect rx="8" ry="8" width="144" height="66" fill="#ffffff" stroke="#4b5563" strokeWidth="2" />
+      <g transform="translate(8,7)">
+        <FlowIcon kind={kind} />
+      </g>
+      <text x="34" y="19" fontSize="10" fill="#6b7280">{label}</text>
+      {lines.map((line, idx) => (
+        <text key={line + idx} x="10" y={38 + idx * 16} fontSize="12" fill="#111827">{line}</text>
+      ))}
     </g>
   );
 }
