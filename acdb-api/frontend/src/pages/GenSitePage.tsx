@@ -582,6 +582,7 @@ export default function GenSitePage() {
                   x={334}
                   y={144}
                   kind="inverter"
+                  iconPlacement="top"
                   label="Inverter"
                   lines={[`Cap ${num(inverterCapKw || null, 1, 'kW')}`]}
                 />
@@ -589,7 +590,7 @@ export default function GenSitePage() {
                   x={676}
                   y={144}
                   kind="load"
-                  iconSide="right"
+                  iconPlacement="top"
                   label="Load"
                   lines={[`Cap ${num(inverterCapKw || null, 1, 'kW')}`]}
                 />
@@ -1017,7 +1018,7 @@ function NodeBox({
   kind,
   label,
   lines,
-  iconSide = 'left',
+  iconPlacement = 'left',
   iconBatteryState,
 }: {
   x: number;
@@ -1025,16 +1026,18 @@ function NodeBox({
   kind: FlowNodeKind;
   label: string;
   lines: string[];
-  iconSide?: 'left' | 'right';
+  iconPlacement?: 'left' | 'right' | 'top';
   iconBatteryState?: BatteryIconState;
 }) {
-  const iconCx = iconSide === 'right' ? 158 : -14;
-  const iconCy = 33;
+  const iconScale = 3;
+  const iconHalf = 11 * iconScale;
+  const iconCx = iconPlacement === 'right' ? 214 : iconPlacement === 'left' ? -70 : 72;
+  const iconCy = iconPlacement === 'top' ? -72 : 33;
   return (
     <g transform={`translate(${x},${y})`}>
       <rect rx="8" ry="8" width="144" height="66" fill="#ffffff" stroke="#4b5563" strokeWidth="2" />
-      <circle cx={iconCx} cy={iconCy} r="16" fill="#ffffff" stroke="#9ca3af" strokeWidth="1.5" />
-      <g transform={`translate(${iconCx - 11},${iconCy - 11})`}>
+      <circle cx={iconCx} cy={iconCy} r="36" fill="#ffffff" stroke="#9ca3af" strokeWidth="1.8" />
+      <g transform={`translate(${iconCx - iconHalf},${iconCy - iconHalf}) scale(${iconScale})`}>
         <FlowIcon kind={kind} batteryState={iconBatteryState} />
       </g>
       <text x="10" y="19" fontSize="10" fill="#6b7280">{label}</text>
