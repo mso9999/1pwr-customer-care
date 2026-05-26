@@ -407,7 +407,19 @@ def latest_readings_for_site(site_code: str) -> List[Dict[str, Any]]:
                 FROM inverter_readings r
                 JOIN site_equipment e ON e.id = r.equipment_id
                 WHERE r.site_code = %s
-                ORDER BY r.equipment_id, r.ts_utc DESC
+                ORDER BY
+                    r.equipment_id,
+                    CASE
+                        WHEN (
+                            r.ac_kw IS NOT NULL OR
+                            r.pv_kw IS NOT NULL OR
+                            r.battery_kw IS NOT NULL OR
+                            r.battery_soc_pct IS NOT NULL OR
+                            r.grid_kw IS NOT NULL
+                        ) THEN 0
+                        ELSE 1
+                    END,
+                    r.ts_utc DESC
                 """,
                 (site_code.upper(),),
             )
@@ -522,6 +534,118 @@ def readings_series(
         {"ts": r["bucket_ts"], "equipment_id": r["equipment_id"], "value": r["value"]}
         for r in rows
     ]
+
+
+def upsert_hourly_site_metrics(hours_back: int = 72) -> int:
+    """Persist hourly site-level telemetry averages for archival use.
+
+    Stores average PV power, load power, genset power, and SOC on a 1-hour timestep.
+    Genset power follows the dashboard rule: use explicit genset equipment where present,
+    otherwise infer from positive grid import (common genset-through-inverter wiring).
+    """
+    if hours_back < 1:
+        hours_back = 1
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                WITH per_ts AS (
+                    SELECT
+                        r.site_code,
+                        date_trunc('hour', r.ts_utc) AS hour_utc,
+                        r.ts_utc,
+                        SUM(r.pv_kw)::FLOAT AS pv_kw_sum,
+                        SUM(r.ac_kw)::FLOAT AS load_kw_sum,
+                        AVG(r.battery_soc_pct)::FLOAT AS soc_avg,
+                        SUM(
+                            CASE
+                                WHEN (
+                                    lower(coalesce(e.kind, '')) LIKE '%%genset%%' OR
+                                    lower(coalesce(e.kind, '')) LIKE '%%generator%%' OR
+                                    lower(coalesce(e.kind, '')) LIKE '%%diesel%%' OR
+                                    lower(coalesce(e.role, '')) LIKE '%%genset%%' OR
+                                    lower(coalesce(e.role, '')) LIKE '%%generator%%' OR
+                                    lower(coalesce(e.role, '')) LIKE '%%diesel%%'
+                                )
+                                THEN COALESCE(r.ac_kw, 0)
+                                ELSE 0
+                            END
+                        )::FLOAT AS explicit_genset_kw_sum,
+                        SUM(CASE WHEN COALESCE(r.grid_kw, 0) > 0 THEN r.grid_kw ELSE 0 END)::FLOAT AS grid_import_kw_sum,
+                        COUNT(*) FILTER (
+                            WHERE (
+                                lower(coalesce(e.kind, '')) LIKE '%%genset%%' OR
+                                lower(coalesce(e.kind, '')) LIKE '%%generator%%' OR
+                                lower(coalesce(e.kind, '')) LIKE '%%diesel%%' OR
+                                lower(coalesce(e.role, '')) LIKE '%%genset%%' OR
+                                lower(coalesce(e.role, '')) LIKE '%%generator%%' OR
+                                lower(coalesce(e.role, '')) LIKE '%%diesel%%'
+                            ) AND r.ac_kw IS NOT NULL
+                        ) AS explicit_genset_points
+                    FROM inverter_readings r
+                    JOIN site_equipment e ON e.id = r.equipment_id
+                    WHERE r.ts_utc >= (NOW() - (%s || ' hours')::interval)
+                      AND (
+                            r.pv_kw IS NOT NULL OR
+                            r.ac_kw IS NOT NULL OR
+                            r.battery_soc_pct IS NOT NULL OR
+                            r.grid_kw IS NOT NULL
+                          )
+                    GROUP BY r.site_code, date_trunc('hour', r.ts_utc), r.ts_utc
+                ),
+                per_hour AS (
+                    SELECT
+                        site_code,
+                        hour_utc,
+                        AVG(pv_kw_sum) AS avg_pv_kw,
+                        AVG(load_kw_sum) AS avg_load_kw,
+                        AVG(
+                            CASE
+                                WHEN explicit_genset_points > 0 THEN explicit_genset_kw_sum
+                                ELSE grid_import_kw_sum
+                            END
+                        ) AS avg_genset_kw,
+                        AVG(soc_avg) AS avg_battery_soc_pct,
+                        COUNT(*)::INT AS sample_count,
+                        BOOL_AND(explicit_genset_points = 0) AS genset_inferred_from_grid
+                    FROM per_ts
+                    GROUP BY site_code, hour_utc
+                )
+                INSERT INTO gensite_hourly_metrics (
+                    site_code,
+                    hour_utc,
+                    avg_pv_kw,
+                    avg_load_kw,
+                    avg_genset_kw,
+                    avg_battery_soc_pct,
+                    sample_count,
+                    genset_inferred_from_grid
+                )
+                SELECT
+                    site_code,
+                    hour_utc,
+                    avg_pv_kw,
+                    avg_load_kw,
+                    avg_genset_kw,
+                    avg_battery_soc_pct,
+                    sample_count,
+                    genset_inferred_from_grid
+                FROM per_hour
+                ON CONFLICT (site_code, hour_utc)
+                DO UPDATE SET
+                    avg_pv_kw = EXCLUDED.avg_pv_kw,
+                    avg_load_kw = EXCLUDED.avg_load_kw,
+                    avg_genset_kw = EXCLUDED.avg_genset_kw,
+                    avg_battery_soc_pct = EXCLUDED.avg_battery_soc_pct,
+                    sample_count = EXCLUDED.sample_count,
+                    genset_inferred_from_grid = EXCLUDED.genset_inferred_from_grid,
+                    updated_at = NOW()
+                """,
+                (hours_back,),
+            )
+            touched = cur.rowcount or 0
+        conn.commit()
+    return int(touched)
 
 
 # ---------------------------------------------------------------------------

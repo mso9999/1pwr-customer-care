@@ -13,8 +13,13 @@ Runs as a oneshot from ``cc-gensite-poll.timer`` every minute. Each invocation:
   4. Persists per-credential state in ``STATE_FILE`` so alerts fire only on
      transitions (offline / recovery / new CRITICAL alarm), not on every run.
 
-Skips adapters whose ``implementation_status == 'stub'`` (Solarman, Sinosoar,
-SMA for now) — they'd just fail.
+Skips adapters whose ``implementation_status == 'stub'`` (determined at runtime)
+so unfinished vendor integrations don't break the polling loop.
+
+Design intent: this poller is vendor-agnostic. As additional vendor adapters
+move from ``stub`` to ``ready``, their generation assets should flow through the
+same CC -> 1PDB telemetry pipeline (``inverter_readings`` / ``inverter_alarms``)
+without creating separate side pipelines.
 
 Env (loaded by the systemd unit from ``/opt/1pdb/.env``):
   DATABASE_URL                     1PDB DSN                                   (required)
@@ -352,6 +357,11 @@ def main() -> int:
                 cred_meta.get("backend"),
                 exc,
             )
+    try:
+        touched = store.upsert_hourly_site_metrics(hours_back=72)
+        log.info("gensite-hourly-metrics upsert touched: %d row(s)", touched)
+    except Exception as exc:
+        log.warning("hourly telemetry rollup failed: %s", exc)
     save_state(state)
     return 0
 
