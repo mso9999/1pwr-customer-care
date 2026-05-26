@@ -647,6 +647,8 @@ export default function CustomerDataPage() {
                       <th className="px-4 py-3 font-medium text-gray-500 text-right cursor-pointer select-none" onClick={() => toggleSort('amount_lsl')}>
                         {t('customerData:amountLSL')} {sortIcon('amount_lsl')}
                       </th>
+                      <th className="px-4 py-3 font-medium text-gray-500 text-right">Elec (LSL)</th>
+                      <th className="px-4 py-3 font-medium text-gray-500 text-right">Debt (LSL)</th>
                       <th className="px-4 py-3 font-medium text-gray-500 text-right cursor-pointer select-none" onClick={() => toggleSort('kwh')}>
                         {t('customerData:kwh')} {sortIcon('kwh')}
                       </th>
@@ -672,6 +674,24 @@ export default function CustomerDataPage() {
                         </td>
                         <td className={`px-4 py-2.5 text-right font-mono ${txn.is_payment ? 'text-green-600' : 'text-gray-600'}`}>
                           {txn.is_payment ? '+' : ''}{txn.amount_lsl.toFixed(2)}
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-mono text-blue-700">
+                          {txn.is_payment
+                            ? (() => {
+                              const elec = txn.electricity_portion ?? txn.amount_lsl;
+                              return elec.toFixed(2);
+                            })()
+                            : '--'}
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-mono text-amber-700">
+                          {txn.is_payment
+                            ? (() => {
+                              const fee = txn.fee_repayment_portion ?? 0;
+                              const adv = txn.advance_portion ?? 0;
+                              const fin = txn.financing_portion ?? 0;
+                              return (fee + adv + fin).toFixed(2);
+                            })()
+                            : '--'}
                         </td>
                         <td className="px-4 py-2.5 text-right font-mono text-gray-700">{txn.kwh.toFixed(2)}</td>
                         <td className="px-4 py-2.5 text-right font-mono text-gray-400">{txn.rate.toFixed(2)}</td>
@@ -707,7 +727,7 @@ export default function CustomerDataPage() {
                       </tr>
                     ))}
                     {paged.length === 0 && (
-                      <tr><td colSpan={canEditTxns ? 9 : 8} className="px-4 py-8 text-center text-gray-400">{t('customerData:noTransactions')}</td></tr>
+                      <tr><td colSpan={canEditTxns ? 11 : 10} className="px-4 py-8 text-center text-gray-400">{t('customerData:noTransactions')}</td></tr>
                     )}
                   </tbody>
                 </table>

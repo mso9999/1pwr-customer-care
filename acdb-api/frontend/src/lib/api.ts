@@ -1476,6 +1476,14 @@ export interface Transaction {
   balance?: number | null;
   /** M-Pesa / provider receipt when recorded via portal or gateway */
   payment_reference?: string | null;
+  /** Portion of payment applied to electricity credit (currency). */
+  electricity_portion?: number | null;
+  /** Portion of payment applied to fee debt repayment (currency). */
+  fee_repayment_portion?: number | null;
+  /** Portion of payment applied to connection/readyboard advance (currency). */
+  advance_portion?: number | null;
+  /** Portion of payment applied to financing debt (currency). */
+  financing_portion?: number | null;
 }
 
 export interface TariffInfo {

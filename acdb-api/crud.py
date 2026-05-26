@@ -22,7 +22,7 @@ from models import (
 )
 from middleware import can_write_table, get_current_user, require_employee
 from mutations import log_mutation
-from sparkmeter_credit import credit_sparkmeter
+from sm_credit_retry import credit_sm_with_retry
 from sparkmeter_customer import is_thundercloud_account, sync_thundercloud_customer_name
 
 logger = logging.getLogger("acdb-api.crud")
@@ -896,23 +896,28 @@ def _maybe_credit_sm(
     if not account:
         return None
 
-    result = credit_sparkmeter(
+    result = credit_sm_with_retry(
         account_number=account,
         amount=amount,
         memo=f"CC portal txn {txn_id}",
         external_id=str(txn_id),
     )
-    summary = {"success": result.success, "platform": result.platform}
-    if result.sm_transaction_id:
-        summary["sm_transaction_id"] = result.sm_transaction_id
-    if result.error:
-        summary["error"] = result.error
-    if not result.success:
-        logger.warning("SM credit via CRUD failed for %s: %s", account, result.error)
+    summary = {
+        "success": bool(result.get("success")),
+        "platform": result.get("platform"),
+    }
+    if result.get("sm_transaction_id"):
+        summary["sm_transaction_id"] = result.get("sm_transaction_id")
+    if result.get("error"):
+        summary["error"] = result.get("error")
+    if result.get("queued_retry"):
+        summary["queued_retry"] = True
+    if not result.get("success"):
+        logger.warning("SM credit via CRUD failed for %s: %s", account, result.get("error"))
     else:
         logger.info(
             "SM credit via CRUD OK for %s M%.2f → %s",
-            account, amount, result.platform,
+            account, amount, result.get("platform"),
         )
     return summary
 
@@ -1719,7 +1724,8 @@ def employee_customer_data(
         transactions = []
         _txn_sel = (
             "SELECT id, account_number, meter_id, transaction_date, "
-            "transaction_amount, rate_used, kwh_value, is_payment, current_balance"
+            "transaction_amount, rate_used, kwh_value, is_payment, current_balance, "
+            "fee_repayment_portion, advance_portion, financing_portion, electricity_portion"
         )
         _txn_from = " FROM transactions WHERE account_number = %s ORDER BY transaction_date DESC"
         from country_config import UTC_OFFSET_HOURS as _TXN_UTC_OFF
@@ -1727,17 +1733,35 @@ def employee_customer_data(
 
         txn_rows: list = []
         include_payment_ref = False
+        include_split_cols = False
         try:
             cursor.execute(_txn_sel + ", payment_reference" + _txn_from, (acct,))
             include_payment_ref = True
+            include_split_cols = True
             txn_rows = list(cursor.fetchall())
         except Exception as e:
             err = str(e).lower()
-            if "payment_reference" in err and "does not exist" in err:
+            if (
+                ("payment_reference" in err and "does not exist" in err)
+                or ("fee_repayment_portion" in err and "does not exist" in err)
+                or ("advance_portion" in err and "does not exist" in err)
+                or ("financing_portion" in err and "does not exist" in err)
+                or ("electricity_portion" in err and "does not exist" in err)
+            ):
                 conn.rollback()
                 try:
-                    cursor.execute(_txn_sel + _txn_from, (acct,))
-                    txn_rows = list(cursor.fetchall())
+                    base_sel = (
+                        "SELECT id, account_number, meter_id, transaction_date, "
+                        "transaction_amount, rate_used, kwh_value, is_payment, current_balance"
+                    )
+                    try:
+                        cursor.execute(base_sel + ", payment_reference" + _txn_from, (acct,))
+                        include_payment_ref = True
+                        txn_rows = list(cursor.fetchall())
+                    except Exception:
+                        conn.rollback()
+                        cursor.execute(base_sel + _txn_from, (acct,))
+                        txn_rows = list(cursor.fetchall())
                 except Exception as e2:
                     logger.warning("customer-data: failed to read transactions (fallback): %s", e2)
                     conn.rollback()
@@ -1779,10 +1803,20 @@ def employee_customer_data(
             except (ValueError, TypeError):
                 txn["balance"] = None
             if include_payment_ref:
-                pr = r[9]
+                pr = r[13] if include_split_cols else r[9]
                 txn["payment_reference"] = str(pr).strip() if pr else None
             else:
                 txn["payment_reference"] = None
+            if include_split_cols:
+                txn["fee_repayment_portion"] = round(float(r[9] or 0), 2)
+                txn["advance_portion"] = round(float(r[10] or 0), 2)
+                txn["financing_portion"] = round(float(r[11] or 0), 2)
+                txn["electricity_portion"] = round(float(r[12] or 0), 2)
+            else:
+                txn["fee_repayment_portion"] = 0.0
+                txn["advance_portion"] = 0.0
+                txn["financing_portion"] = 0.0
+                txn["electricity_portion"] = None
             transactions.append(txn)
 
         # --- Supplement with monthly_transactions for months beyond history ---
