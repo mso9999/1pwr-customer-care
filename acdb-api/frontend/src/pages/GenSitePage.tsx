@@ -503,18 +503,18 @@ export default function GenSitePage() {
                 </defs>
 
                 {/* static guide lines */}
-                <line x1="180" y1="90" x2="410" y2="180" stroke="#d1d5db" strokeWidth="3" />
-                <line x1="180" y1="260" x2="410" y2="180" stroke="#d1d5db" strokeWidth="3" />
-                <line x1="410" y1="180" x2="660" y2="180" stroke="#d1d5db" strokeWidth="3" />
-                <line x1="410" y1="300" x2="410" y2="180" stroke="#d1d5db" strokeWidth="3" />
+                <line x1="244" y1="145" x2="406" y2="210" stroke="#d1d5db" strokeWidth="3" />
+                <line x1="244" y1="217" x2="406" y2="210" stroke="#d1d5db" strokeWidth="3" />
+                <line x1="478" y1="180" x2="676" y2="180" stroke="#d1d5db" strokeWidth="3" />
+                <line x1="404" y1="286" x2="404" y2="210" stroke="#d1d5db" strokeWidth="3" />
 
                 {/* animated flow lines */}
                 {pvActive && (
                   <line
-                    x1="180"
-                    y1="90"
-                    x2="410"
-                    y2="180"
+                    x1="244"
+                    y1="145"
+                    x2="406"
+                    y2="210"
                     stroke="#eab308"
                     strokeWidth="6"
                     className="flow-line flow-forward"
@@ -523,10 +523,10 @@ export default function GenSitePage() {
                 )}
                 {gensetActive && (
                   <line
-                    x1="180"
-                    y1="260"
-                    x2="410"
-                    y2="180"
+                    x1="244"
+                    y1="217"
+                    x2="406"
+                    y2="210"
                     stroke="#ef4444"
                     strokeWidth="6"
                     className="flow-line flow-forward"
@@ -535,9 +535,9 @@ export default function GenSitePage() {
                 )}
                 {loadActive && (
                   <line
-                    x1="410"
+                    x1="478"
                     y1="180"
-                    x2="660"
+                    x2="676"
                     y2="180"
                     stroke="#0ea5e9"
                     strokeWidth="6"
@@ -547,10 +547,10 @@ export default function GenSitePage() {
                 )}
                 {batteryActive && (
                   <line
-                    x1="410"
-                    y1="300"
-                    x2="410"
-                    y2="180"
+                    x1="404"
+                    y1="286"
+                    x2="404"
+                    y2="210"
                     stroke="#22c55e"
                     strokeWidth="6"
                     className={`flow-line ${batteryDischarging ? 'flow-forward' : 'flow-reverse'}`}
@@ -559,22 +559,24 @@ export default function GenSitePage() {
                   />
                 )}
                 {/* flow power bubbles */}
-                <FlowBubble x={246} y={114} value={num(flowNow.pv, 2, 'kW')} color="#eab308" />
-                <FlowBubble x={248} y={228} value={num(flowNow.genset, 2, 'kW')} color="#ef4444" />
-                <FlowBubble x={514} y={164} value={num(flowNow.load, 2, 'kW')} color="#0ea5e9" />
-                <FlowBubble x={424} y={234} value={num(Math.abs(flowNow.battery ?? 0), 2, 'kW')} color="#22c55e" />
+                <FlowBubble x={274} y={132} value={num(flowNow.pv, 2, 'kW')} color="#eab308" />
+                <FlowBubble x={274} y={196} value={num(flowNow.genset, 2, 'kW')} color="#ef4444" />
+                <FlowBubble x={524} y={164} value={num(flowNow.load, 2, 'kW')} color="#0ea5e9" />
+                <FlowBubble x={418} y={236} value={num(Math.abs(flowNow.battery ?? 0), 2, 'kW')} color="#22c55e" />
                 {/* node boxes */}
                 <NodeBox
-                  x={84}
-                  y={54}
+                  x={100}
+                  y={112}
                   kind="pv"
+                  iconPlacement="top"
                   label="PV"
                   lines={[`Cap ${num(pvCapKw || null, 1, 'kW')}`]}
                 />
                 <NodeBox
-                  x={52}
-                  y={222}
+                  x={100}
+                  y={184}
                   kind="genset"
+                  iconPlacement="bottom"
                   label="Genset"
                   lines={[`Cap ${num(gensetCapKw || null, 1, 'kW')}`]}
                 />
@@ -1026,13 +1028,13 @@ function NodeBox({
   kind: FlowNodeKind;
   label: string;
   lines: string[];
-  iconPlacement?: 'left' | 'right' | 'top';
+  iconPlacement?: 'left' | 'right' | 'top' | 'bottom';
   iconBatteryState?: BatteryIconState;
 }) {
   const iconScale = 3;
   const iconHalf = 11 * iconScale;
   const iconCx = iconPlacement === 'right' ? 214 : iconPlacement === 'left' ? -70 : 72;
-  const iconCy = iconPlacement === 'top' ? -72 : 33;
+  const iconCy = iconPlacement === 'top' ? -72 : iconPlacement === 'bottom' ? 138 : 33;
   return (
     <g transform={`translate(${x},${y})`}>
       <rect rx="8" ry="8" width="144" height="66" fill="#ffffff" stroke="#4b5563" strokeWidth="2" />
