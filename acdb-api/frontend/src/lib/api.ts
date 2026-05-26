@@ -2584,6 +2584,23 @@ export async function listGensiteSites(country?: string): Promise<{ sites: Gensi
   return requestGensite(`/gensite/sites${qs}`);
 }
 
+export interface GensiteAggregateLive {
+  country: string | null;
+  site_count: number;
+  latest_ts_utc: string | null;
+  pv_kw: number;
+  load_kw: number;
+  battery_kw: number;
+  genset_kw: number;
+  battery_soc_pct: number | null;
+  balance_residual_kw: number;
+}
+
+export async function getGensiteAggregateLive(country?: string): Promise<GensiteAggregateLive> {
+  const qs = country ? `?country=${encodeURIComponent(country)}` : '';
+  return requestGensite(`/gensite/aggregate-live${qs}`);
+}
+
 export async function getGensiteSite(code: string): Promise<GensiteSiteDetail> {
   return requestGensite(`/gensite/sites/${encodeURIComponent(code)}`);
 }

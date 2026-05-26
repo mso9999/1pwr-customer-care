@@ -460,6 +460,167 @@ def latest_readings_for_site(site_code: str) -> List[Dict[str, Any]]:
             return [dict(r) for r in cur.fetchall()]
 
 
+def _is_genset_equipment(kind: Optional[str], role: Optional[str]) -> bool:
+    k = (kind or "").lower()
+    r = (role or "").lower()
+    return (
+        "genset" in k
+        or "generator" in k
+        or "diesel" in k
+        or "genset" in r
+        or "generator" in r
+        or "diesel" in r
+    )
+
+
+def aggregate_latest_flow(country: Optional[str] = None) -> Dict[str, Any]:
+    """Aggregate latest telemetry into a fleet-level powerflow snapshot.
+
+    For each site, use latest-per-equipment readings, then:
+      - sum pv/load/battery channels
+      - use explicit genset equipment if present
+      - otherwise infer genset as ``max(0, load - pv - battery_signed)``
+        where battery convention is +discharge / -charge.
+    """
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            if country:
+                cur.execute(
+                    """
+                    SELECT DISTINCT ON (r.site_code, r.equipment_id)
+                        r.site_code,
+                        r.ts_utc,
+                        r.ac_kw,
+                        r.pv_kw,
+                        r.battery_kw,
+                        r.battery_soc_pct,
+                        e.kind,
+                        e.role
+                    FROM inverter_readings r
+                    JOIN site_equipment e ON e.id = r.equipment_id
+                    JOIN sites s ON s.code = r.site_code
+                    WHERE s.country = %s
+                    ORDER BY
+                        r.site_code,
+                        r.equipment_id,
+                        CASE
+                            WHEN (
+                                r.ac_kw IS NOT NULL OR
+                                r.pv_kw IS NOT NULL OR
+                                r.battery_kw IS NOT NULL OR
+                                r.battery_soc_pct IS NOT NULL
+                            ) THEN 0
+                            ELSE 1
+                        END,
+                        r.ts_utc DESC
+                    """,
+                    (country.upper(),),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT DISTINCT ON (r.site_code, r.equipment_id)
+                        r.site_code,
+                        r.ts_utc,
+                        r.ac_kw,
+                        r.pv_kw,
+                        r.battery_kw,
+                        r.battery_soc_pct,
+                        e.kind,
+                        e.role
+                    FROM inverter_readings r
+                    JOIN site_equipment e ON e.id = r.equipment_id
+                    ORDER BY
+                        r.site_code,
+                        r.equipment_id,
+                        CASE
+                            WHEN (
+                                r.ac_kw IS NOT NULL OR
+                                r.pv_kw IS NOT NULL OR
+                                r.battery_kw IS NOT NULL OR
+                                r.battery_soc_pct IS NOT NULL
+                            ) THEN 0
+                            ELSE 1
+                        END,
+                        r.ts_utc DESC
+                    """
+                )
+            rows = [dict(r) for r in cur.fetchall()]
+
+    by_site: Dict[str, Dict[str, Any]] = {}
+    latest_ts: Optional[datetime] = None
+    soc_sum = 0.0
+    soc_n = 0
+
+    for r in rows:
+        site_code = (r.get("site_code") or "").upper()
+        if not site_code:
+            continue
+        s = by_site.setdefault(
+            site_code,
+            {
+                "pv": 0.0,
+                "load": 0.0,
+                "battery": 0.0,
+                "genset_explicit": 0.0,
+                "has_explicit_genset": False,
+            },
+        )
+
+        ts = r.get("ts_utc")
+        if isinstance(ts, datetime) and (latest_ts is None or ts > latest_ts):
+            latest_ts = ts
+
+        ac_kw = r.get("ac_kw")
+        if ac_kw is not None:
+            s["load"] += float(ac_kw)
+            if _is_genset_equipment(r.get("kind"), r.get("role")):
+                s["genset_explicit"] += float(ac_kw)
+                s["has_explicit_genset"] = True
+
+        pv_kw = r.get("pv_kw")
+        if pv_kw is not None:
+            s["pv"] += float(pv_kw)
+
+        batt_kw = r.get("battery_kw")
+        if batt_kw is not None:
+            s["battery"] += float(batt_kw)
+
+        soc = r.get("battery_soc_pct")
+        if soc is not None:
+            soc_sum += float(soc)
+            soc_n += 1
+
+    total_pv = 0.0
+    total_load = 0.0
+    total_battery = 0.0
+    total_genset = 0.0
+    for s in by_site.values():
+        site_pv = float(s["pv"])
+        site_load = float(s["load"])
+        site_battery = float(s["battery"])
+        site_genset = (
+            float(s["genset_explicit"])
+            if s["has_explicit_genset"]
+            else max(0.0, site_load - site_pv - site_battery)
+        )
+        total_pv += site_pv
+        total_load += site_load
+        total_battery += site_battery
+        total_genset += site_genset
+
+    return {
+        "site_count": len(by_site),
+        "latest_ts_utc": latest_ts,
+        "pv_kw": total_pv,
+        "load_kw": total_load,
+        "battery_kw": total_battery,
+        "genset_kw": total_genset,
+        "battery_soc_pct": (soc_sum / soc_n) if soc_n > 0 else None,
+        "balance_residual_kw": total_pv + total_genset + total_battery - total_load,
+    }
+
+
 def insert_readings(readings) -> int:
     """Bulk-insert LiveReading / IntervalReading rows. No-op when empty."""
     if not readings:

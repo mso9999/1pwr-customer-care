@@ -8,7 +8,9 @@ import {
   getSiteSummary,
   getCustomerRecordCompleteness,
   getRevenueSummary,
+  getGensiteAggregateLive,
   type CustomerRecordCompletenessResponse,
+  type GensiteAggregateLive,
   type RevenueSummaryResponse,
   type TableInfo,
   type SiteStat,
@@ -36,6 +38,7 @@ export default function DashboardPage() {
   const [siteData, setSiteData] = useState<SiteRow[]>([]);
   const [recordCompleteness, setRecordCompleteness] = useState<CustomerRecordCompletenessResponse | null>(null);
   const [revenueSummary, setRevenueSummary] = useState<RevenueSummaryResponse | null>(null);
+  const [aggregateFlow, setAggregateFlow] = useState<GensiteAggregateLive | null>(null);
   const [enabledCountries, setEnabledCountries] = useState<Set<string>>(new Set());
   const [enabledSites, setEnabledSites] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
@@ -59,6 +62,11 @@ export default function DashboardPage() {
     return 'bg-red-100 text-red-700';
   };
 
+  const fmtKw = (v: number | null | undefined) => {
+    if (v == null || !Number.isFinite(v)) return '—';
+    return `${v.toFixed(2)} kW`;
+  };
+
   useEffect(() => {
     setLoading(true);
     Promise.all([
@@ -67,7 +75,8 @@ export default function DashboardPage() {
       getSiteSummary().catch(() => ({ sites: [], totals: { mwh: 0, lsl_thousands: 0 } })),
       getCustomerRecordCompleteness().catch(() => null),
       getRevenueSummary(12).catch(() => null),
-    ]).then(([t, sitesResp, stats, completeness, revenue]) => {
+      getGensiteAggregateLive((country || '').toUpperCase() === 'ALL' ? undefined : country).catch(() => null),
+    ]).then(([t, sitesResp, stats, completeness, revenue, aggFlow]) => {
       setTables(t);
 
       const statsMap = new Map<string, SiteStat>();
@@ -97,6 +106,7 @@ export default function DashboardPage() {
       setEnabledSites(new Set(merged.map(s => s.concession)));
       setRecordCompleteness(completeness);
       setRevenueSummary(revenue);
+      setAggregateFlow(aggFlow);
       if (revenue) {
         setEnabledCountries(new Set(revenue.countries.map(c => c.country)));
       }
@@ -189,6 +199,46 @@ export default function DashboardPage() {
               </button>
             );
           })}
+        </div>
+      )}
+
+      {aggregateFlow && aggregateFlow.site_count > 0 && (
+        <div className="bg-white rounded-lg shadow p-4 sm:p-5">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-base sm:text-lg font-semibold text-gray-700">
+              Aggregate 1PWR Power Flow
+            </h2>
+            <div className="text-xs text-gray-500">
+              {aggregateFlow.site_count} sites · Last {formatTimestamp(aggregateFlow.latest_ts_utc)}
+            </div>
+          </div>
+          <div className="border rounded-xl bg-gray-50 p-2 overflow-x-auto">
+            <svg viewBox="0 0 860 250" className="w-full h-[210px] min-w-[760px]">
+              <line x1="178" y1="78" x2="392" y2="125" stroke="#d1d5db" strokeWidth="3" />
+              <line x1="178" y1="172" x2="392" y2="125" stroke="#d1d5db" strokeWidth="3" />
+              <line x1="468" y1="125" x2="674" y2="125" stroke="#d1d5db" strokeWidth="3" />
+              <line x1="392" y1="194" x2="392" y2="125" stroke="#d1d5db" strokeWidth="3" />
+
+              <FlowBubble x={246} y={88} value={fmtKw(aggregateFlow.pv_kw)} color="#eab308" />
+              <FlowBubble x={246} y={143} value={fmtKw(aggregateFlow.genset_kw)} color="#ef4444" />
+              <FlowBubble x={518} y={111} value={fmtKw(aggregateFlow.load_kw)} color="#0ea5e9" />
+              <FlowBubble x={404} y={170} value={fmtKw(Math.abs(aggregateFlow.battery_kw ?? 0))} color="#22c55e" />
+
+              <NodeBox x={64} y={58} label="PV" lines={[fmtKw(aggregateFlow.pv_kw)]} />
+              <NodeBox x={64} y={150} label="Genset" lines={[fmtKw(aggregateFlow.genset_kw)]} />
+              <NodeBox x={320} y={92} label="Inverter" lines={[`Residual ${fmtKw(aggregateFlow.balance_residual_kw)}`]} />
+              <NodeBox x={686} y={92} label="Load" lines={[fmtKw(aggregateFlow.load_kw)]} />
+              <NodeBox
+                x={320}
+                y={184}
+                label={aggregateFlow.battery_kw >= 0 ? 'Battery out' : 'Battery in'}
+                lines={[
+                  fmtKw(aggregateFlow.battery_kw),
+                  `SoC ${aggregateFlow.battery_soc_pct == null ? '—' : `${aggregateFlow.battery_soc_pct.toFixed(1)}%`}`,
+                ]}
+              />
+            </svg>
+          </div>
         </div>
       )}
 
@@ -728,5 +778,26 @@ export default function DashboardPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function FlowBubble({ x, y, value, color }: { x: number; y: number; value: string; color: string }) {
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <rect rx="14" ry="14" width="96" height="28" fill="#ffffff" stroke={color} strokeWidth="1.5" />
+      <text x="48" y="19" textAnchor="middle" fontSize="12" fill="#0f172a">{value}</text>
+    </g>
+  );
+}
+
+function NodeBox({ x, y, label, lines }: { x: number; y: number; label: string; lines: string[] }) {
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <rect rx="8" ry="8" width="112" height="52" fill="#ffffff" stroke="#4b5563" strokeWidth="2" />
+      <text x="8" y="16" fontSize="10" fill="#6b7280">{label}</text>
+      {lines.map((line, idx) => (
+        <text key={line + idx} x="8" y={34 + idx * 13} fontSize="11" fill="#111827">{line}</text>
+      ))}
+    </g>
   );
 }

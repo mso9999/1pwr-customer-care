@@ -179,6 +179,18 @@ def list_sites(
     return {"sites": sites, "count": len(sites)}
 
 
+@router.get("/aggregate-live")
+def get_aggregate_live(
+    country: Optional[str] = None,
+    user: CurrentUser = Depends(require_employee),
+) -> Dict[str, Any]:
+    agg = store.aggregate_latest_flow(country=country)
+    return {
+        "country": country.upper() if country else None,
+        **agg,
+    }
+
+
 # ---------------------------------------------------------------------------
 # GET /sites/{code}
 # ---------------------------------------------------------------------------
