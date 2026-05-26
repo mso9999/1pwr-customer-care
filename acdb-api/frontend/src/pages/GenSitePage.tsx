@@ -503,15 +503,15 @@ export default function GenSitePage() {
                 </defs>
 
                 {/* static guide lines */}
-                <line x1="244" y1="145" x2="406" y2="210" stroke="#d1d5db" strokeWidth="3" />
-                <line x1="244" y1="217" x2="406" y2="210" stroke="#d1d5db" strokeWidth="3" />
+                <line x1="228" y1="145" x2="406" y2="210" stroke="#d1d5db" strokeWidth="3" />
+                <line x1="228" y1="217" x2="406" y2="210" stroke="#d1d5db" strokeWidth="3" />
                 <line x1="478" y1="180" x2="676" y2="180" stroke="#d1d5db" strokeWidth="3" />
                 <line x1="404" y1="286" x2="404" y2="210" stroke="#d1d5db" strokeWidth="3" />
 
                 {/* animated flow lines */}
                 {pvActive && (
                   <line
-                    x1="244"
+                    x1="228"
                     y1="145"
                     x2="406"
                     y2="210"
@@ -523,7 +523,7 @@ export default function GenSitePage() {
                 )}
                 {gensetActive && (
                   <line
-                    x1="244"
+                    x1="228"
                     y1="217"
                     x2="406"
                     y2="210"
@@ -559,13 +559,13 @@ export default function GenSitePage() {
                   />
                 )}
                 {/* flow power bubbles */}
-                <FlowBubble x={274} y={132} value={num(flowNow.pv, 2, 'kW')} color="#eab308" />
-                <FlowBubble x={274} y={196} value={num(flowNow.genset, 2, 'kW')} color="#ef4444" />
+                <FlowBubble x={258} y={132} value={num(flowNow.pv, 2, 'kW')} color="#eab308" />
+                <FlowBubble x={258} y={196} value={num(flowNow.genset, 2, 'kW')} color="#ef4444" />
                 <FlowBubble x={524} y={164} value={num(flowNow.load, 2, 'kW')} color="#0ea5e9" />
                 <FlowBubble x={418} y={236} value={num(Math.abs(flowNow.battery ?? 0), 2, 'kW')} color="#22c55e" />
                 {/* node boxes */}
                 <NodeBox
-                  x={100}
+                  x={84}
                   y={112}
                   kind="pv"
                   iconPlacement="top"
@@ -573,7 +573,7 @@ export default function GenSitePage() {
                   lines={[`Cap ${num(pvCapKw || null, 1, 'kW')}`]}
                 />
                 <NodeBox
-                  x={100}
+                  x={84}
                   y={184}
                   kind="genset"
                   iconPlacement="bottom"
@@ -600,6 +600,7 @@ export default function GenSitePage() {
                   x={332}
                   y={286}
                   kind="battery"
+                  iconPlacement="right"
                   iconBatteryState={batteryIconState}
                   label={batteryDischarging ? 'Battery out' : 'Battery in'}
                   lines={[
@@ -1038,7 +1039,6 @@ function NodeBox({
   return (
     <g transform={`translate(${x},${y})`}>
       <rect rx="8" ry="8" width="144" height="66" fill="#ffffff" stroke="#4b5563" strokeWidth="2" />
-      <circle cx={iconCx} cy={iconCy} r="36" fill="#ffffff" stroke="#9ca3af" strokeWidth="1.8" />
       <g transform={`translate(${iconCx - iconHalf},${iconCy - iconHalf}) scale(${iconScale})`}>
         <FlowIcon kind={kind} batteryState={iconBatteryState} />
       </g>
