@@ -242,7 +242,7 @@ export default function GenSitePage() {
       const load = typeof row.ac_kw === 'number' ? row.ac_kw : 0;
       const pv = typeof row.pv_kw === 'number' ? row.pv_kw : 0;
       const battery = typeof row.battery_kw === 'number' ? row.battery_kw : 0;
-      const batteryDischarge = battery < 0 ? Math.abs(battery) : 0;
+      const batteryDischarge = battery > 0 ? battery : 0;
       const derived = !hasExplicitGenset ? Math.max(0, load - pv - batteryDischarge) : 0;
       return { ...row, genset_kw: derived } as ChartRow;
     });
@@ -326,7 +326,7 @@ export default function GenSitePage() {
         socCount += 1;
       }
     }
-    const batteryDischargeKw = battery < 0 ? Math.abs(battery) : 0;
+    const batteryDischargeKw = battery > 0 ? battery : 0;
     const derivedGenset = !hasExplicitGenset && loadN > 0
       ? Math.max(0, load - pv - batteryDischargeKw)
       : null;
@@ -350,9 +350,9 @@ export default function GenSitePage() {
   const batteryNow = flowNow.battery ?? 0;
   const gensetNow = flowNow.genset ?? 0;
   const pvToLoadPct = clampPct(loadNow > 0 ? (pvNow / loadNow) * 100 : 0);
-  const batteryDischargeKw = batteryNow < 0 ? Math.abs(batteryNow) : 0;
-  const batteryChargeKw = batteryNow > 0 ? batteryNow : 0;
-  const batteryBalanceKw = -batteryNow; // charging is negative contribution, discharging positive
+  const batteryDischargeKw = batteryNow > 0 ? batteryNow : 0;
+  const batteryChargeKw = batteryNow < 0 ? Math.abs(batteryNow) : 0;
+  const batteryBalanceKw = batteryNow; // charging is negative contribution, discharging positive
   const flowBalanceWarnPct = asNum(site.flow_balance_warn_pct) ?? DEFAULT_FLOW_BALANCE_WARN_PCT;
   const flowBalanceCritPct = asNum(site.flow_balance_crit_pct) ?? DEFAULT_FLOW_BALANCE_CRIT_PCT;
   const flowBalanceMinScaleKw = asNum(site.flow_balance_min_scale_kw) ?? DEFAULT_FLOW_BALANCE_MIN_SCALE_KW;
@@ -374,7 +374,7 @@ export default function GenSitePage() {
   const gensetActive = gensetNow > 0.05;
   const loadActive = loadNow > 0.05;
   const batteryActive = Math.abs(batteryNow) > 0.05;
-  const batteryDischarging = batteryNow < -0.05;
+  const batteryDischarging = batteryNow > 0.05;
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
