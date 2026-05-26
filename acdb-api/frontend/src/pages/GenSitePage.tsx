@@ -88,6 +88,7 @@ type ChartRow = Record<string, number | string | null>;
 const DEFAULT_FLOW_BALANCE_MIN_SCALE_KW = 0.5;
 const DEFAULT_FLOW_BALANCE_WARN_PCT = 8;
 const DEFAULT_FLOW_BALANCE_CRIT_PCT = 15;
+const FLOW_BALANCE_IGNORE_DELTA_KW = 1.8;
 
 const POWER_AND_STATE_METRICS: Array<{ key: string; label: string; color: string; yAxisId: 'power' | 'pct' }> = [
   { key: 'pv_kw',           label: 'PV (kW)',      color: '#eab308', yAxisId: 'power' },
@@ -412,11 +413,15 @@ export default function GenSitePage() {
     Math.abs(pvNow) + Math.abs(gensetNow) + Math.abs(batteryBalanceKw),
     flowBalanceMinScaleKw,
   );
-  const balanceDeviationPct = (Math.abs(balanceResidualKw) / balanceScaleKw) * 100;
+  const balanceResidualAbsKw = Math.abs(balanceResidualKw);
+  const balanceDeviationPct = (balanceResidualAbsKw / balanceScaleKw) * 100;
+  const ignoreBalanceWarning = balanceResidualAbsKw < FLOW_BALANCE_IGNORE_DELTA_KW;
   const balanceSeverity: 'ok' | 'warn' | 'critical' = (
-    balanceDeviationPct >= flowBalanceCritPct ? 'critical'
-      : balanceDeviationPct >= flowBalanceWarnPct ? 'warn'
-        : 'ok'
+    ignoreBalanceWarning
+      ? 'ok'
+      : balanceDeviationPct >= flowBalanceCritPct ? 'critical'
+        : balanceDeviationPct >= flowBalanceWarnPct ? 'warn'
+          : 'ok'
   );
   const pvActive = pvNow > 0.05;
   const gensetActive = gensetNow > 0.05;
@@ -503,15 +508,15 @@ export default function GenSitePage() {
                 </defs>
 
                 {/* static guide lines */}
-                <line x1="228" y1="145" x2="406" y2="210" stroke="#d1d5db" strokeWidth="3" />
-                <line x1="228" y1="217" x2="406" y2="210" stroke="#d1d5db" strokeWidth="3" />
+                <line x1="208" y1="145" x2="406" y2="210" stroke="#d1d5db" strokeWidth="3" />
+                <line x1="208" y1="217" x2="406" y2="210" stroke="#d1d5db" strokeWidth="3" />
                 <line x1="478" y1="180" x2="676" y2="180" stroke="#d1d5db" strokeWidth="3" />
                 <line x1="404" y1="286" x2="404" y2="210" stroke="#d1d5db" strokeWidth="3" />
 
                 {/* animated flow lines */}
                 {pvActive && (
                   <line
-                    x1="228"
+                    x1="208"
                     y1="145"
                     x2="406"
                     y2="210"
@@ -523,7 +528,7 @@ export default function GenSitePage() {
                 )}
                 {gensetActive && (
                   <line
-                    x1="228"
+                    x1="208"
                     y1="217"
                     x2="406"
                     y2="210"
@@ -559,13 +564,13 @@ export default function GenSitePage() {
                   />
                 )}
                 {/* flow power bubbles */}
-                <FlowBubble x={258} y={132} value={num(flowNow.pv, 2, 'kW')} color="#eab308" />
-                <FlowBubble x={258} y={196} value={num(flowNow.genset, 2, 'kW')} color="#ef4444" />
+                <FlowBubble x={238} y={132} value={num(flowNow.pv, 2, 'kW')} color="#eab308" />
+                <FlowBubble x={238} y={196} value={num(flowNow.genset, 2, 'kW')} color="#ef4444" />
                 <FlowBubble x={524} y={164} value={num(flowNow.load, 2, 'kW')} color="#0ea5e9" />
                 <FlowBubble x={418} y={236} value={num(Math.abs(flowNow.battery ?? 0), 2, 'kW')} color="#22c55e" />
                 {/* node boxes */}
                 <NodeBox
-                  x={84}
+                  x={64}
                   y={112}
                   kind="pv"
                   iconPlacement="top"
@@ -573,7 +578,7 @@ export default function GenSitePage() {
                   lines={[`Cap ${num(pvCapKw || null, 1, 'kW')}`]}
                 />
                 <NodeBox
-                  x={84}
+                  x={64}
                   y={184}
                   kind="genset"
                   iconPlacement="bottom"
@@ -610,22 +615,20 @@ export default function GenSitePage() {
                 />
               </svg>
             </div>
-            <div className={`mt-3 text-xs rounded-lg px-3 py-2 border ${
-              balanceSeverity === 'critical'
-                ? 'bg-red-50 border-red-200 text-red-700'
-                : balanceSeverity === 'warn'
-                  ? 'bg-yellow-50 border-yellow-200 text-yellow-700'
-                  : 'bg-green-50 border-green-200 text-green-700'
-            }`}>
-              Balance check: PV in + Genset in + Battery(in-/out+) - Load = 0.
-              Current residual {num(balanceResidualKw, 2, 'kW')} ({num(balanceDeviationPct, 1, '%')} deviation).
-              Thresholds: warn {num(flowBalanceWarnPct, 1, '%')}, critical {num(flowBalanceCritPct, 1, '%')}.
-              {balanceSeverity === 'critical'
-                ? ' Significant imbalance detected - please inspect telemetry quality or site behavior.'
-                : balanceSeverity === 'warn'
-                  ? ' Moderate imbalance detected - monitor trend and investigate if persistent.'
-                  : ' Within expected tolerance.'}
-            </div>
+            {balanceSeverity !== 'ok' && (
+              <div className={`mt-3 text-xs rounded-lg px-3 py-2 border ${
+                balanceSeverity === 'critical'
+                  ? 'bg-red-50 border-red-200 text-red-700'
+                  : 'bg-yellow-50 border-yellow-200 text-yellow-700'
+              }`}>
+                Balance check: PV in + Genset in + Battery(in-/out+) - Load = 0.
+                Current residual {num(balanceResidualKw, 2, 'kW')} ({num(balanceDeviationPct, 1, '%')} deviation).
+                Thresholds: warn {num(flowBalanceWarnPct, 1, '%')}, critical {num(flowBalanceCritPct, 1, '%')}.
+                {balanceSeverity === 'critical'
+                  ? ' Significant imbalance detected - please inspect telemetry quality or site behavior.'
+                  : ' Moderate imbalance detected - monitor trend and investigate if persistent.'}
+              </div>
+            )}
           </div>
           <div className="border rounded-xl p-4 bg-white">
             <h3 className="font-semibold mb-3">Utilization</h3>
