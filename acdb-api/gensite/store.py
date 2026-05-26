@@ -107,6 +107,9 @@ def upsert_site(
     ugp_project_id: Optional[str] = None,
     notes: Optional[str] = None,
     commissioned_at: Optional[datetime] = None,
+    flow_balance_warn_pct: Optional[float] = None,
+    flow_balance_crit_pct: Optional[float] = None,
+    flow_balance_min_scale_kw: Optional[float] = None,
 ) -> Dict[str, Any]:
     with _conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -114,9 +117,10 @@ def upsert_site(
                 """
                 INSERT INTO sites (
                     code, country, kind, display_name, district,
-                    gps_lat, gps_lon, ugp_project_id, notes, commissioned_at
+                    gps_lat, gps_lon, ugp_project_id, notes, commissioned_at,
+                    flow_balance_warn_pct, flow_balance_crit_pct, flow_balance_min_scale_kw
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (code) DO UPDATE SET
                     country         = EXCLUDED.country,
                     kind            = EXCLUDED.kind,
@@ -126,17 +130,47 @@ def upsert_site(
                     gps_lon         = COALESCE(EXCLUDED.gps_lon,         sites.gps_lon),
                     ugp_project_id  = COALESCE(EXCLUDED.ugp_project_id,  sites.ugp_project_id),
                     notes           = COALESCE(EXCLUDED.notes,           sites.notes),
-                    commissioned_at = COALESCE(EXCLUDED.commissioned_at, sites.commissioned_at)
+                    commissioned_at = COALESCE(EXCLUDED.commissioned_at, sites.commissioned_at),
+                    flow_balance_warn_pct = COALESCE(EXCLUDED.flow_balance_warn_pct, sites.flow_balance_warn_pct),
+                    flow_balance_crit_pct = COALESCE(EXCLUDED.flow_balance_crit_pct, sites.flow_balance_crit_pct),
+                    flow_balance_min_scale_kw = COALESCE(EXCLUDED.flow_balance_min_scale_kw, sites.flow_balance_min_scale_kw)
                 RETURNING *
                 """,
                 (
                     code.upper(), country.upper(), kind, display_name, district,
                     gps_lat, gps_lon, ugp_project_id, notes, commissioned_at,
+                    flow_balance_warn_pct, flow_balance_crit_pct, flow_balance_min_scale_kw,
                 ),
             )
             row = cur.fetchone()
         conn.commit()
     return dict(row)
+
+
+def update_site_flow_balance_settings(
+    code: str,
+    *,
+    warn_pct: Optional[float] = None,
+    crit_pct: Optional[float] = None,
+    min_scale_kw: Optional[float] = None,
+) -> Optional[Dict[str, Any]]:
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                UPDATE sites
+                SET
+                    flow_balance_warn_pct = COALESCE(%s, flow_balance_warn_pct),
+                    flow_balance_crit_pct = COALESCE(%s, flow_balance_crit_pct),
+                    flow_balance_min_scale_kw = COALESCE(%s, flow_balance_min_scale_kw)
+                WHERE code = %s
+                RETURNING *
+                """,
+                (warn_pct, crit_pct, min_scale_kw, code.upper()),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    return dict(row) if row else None
 
 
 # ---------------------------------------------------------------------------

@@ -2439,6 +2439,9 @@ export interface GensiteSite {
   ugp_project_id: string | null;
   commissioned_at: string | null;
   notes: string | null;
+  flow_balance_warn_pct?: number | null;
+  flow_balance_crit_pct?: number | null;
+  flow_balance_min_scale_kw?: number | null;
   created_at: string;
   updated_at: string;
   last_reading_ts?: string | null;
@@ -2693,6 +2696,20 @@ export async function downloadGensiteHourlyMetrics(
     '/api',
     `/gensite/sites/${encodeURIComponent(code)}/hourly-export?hours=${hours}`,
     `gensite_hourly_metrics_${code}.csv`,
+  );
+}
+
+export async function updateGensiteFlowBalanceSettings(
+  code: string,
+  body: {
+    warn_pct?: number;
+    crit_pct?: number;
+    min_scale_kw?: number;
+  },
+): Promise<{ site: GensiteSite }> {
+  return requestGensite(
+    `/gensite/sites/${encodeURIComponent(code)}/flow-balance-settings`,
+    { method: 'PATCH', body: JSON.stringify(body) },
   );
 }
 

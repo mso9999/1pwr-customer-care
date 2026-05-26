@@ -252,6 +252,9 @@ class CommissionRequest(BaseModel):
     ugp_project_id: Optional[str] = None
     commissioned_at: Optional[datetime] = None
     notes: Optional[str] = None
+    flow_balance_warn_pct: Optional[float] = Field(default=None, ge=0, le=100)
+    flow_balance_crit_pct: Optional[float] = Field(default=None, ge=0, le=100)
+    flow_balance_min_scale_kw: Optional[float] = Field(default=None, ge=0)
     equipment: List[EquipmentInput] = Field(default_factory=list)
     credentials: List[CredentialInput] = Field(default_factory=list)
 
@@ -266,6 +269,15 @@ def commission_site(
 
     if not req.equipment:
         raise HTTPException(status_code=400, detail="At least one piece of equipment is required.")
+    if (
+        req.flow_balance_warn_pct is not None
+        and req.flow_balance_crit_pct is not None
+        and req.flow_balance_crit_pct < req.flow_balance_warn_pct
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="flow_balance_crit_pct must be greater than or equal to flow_balance_warn_pct.",
+        )
 
     # ---- Phase 1: site upsert ----
     site = store.upsert_site(
@@ -279,6 +291,9 @@ def commission_site(
         ugp_project_id=req.ugp_project_id,
         notes=req.notes,
         commissioned_at=req.commissioned_at or datetime.now(timezone.utc),
+        flow_balance_warn_pct=req.flow_balance_warn_pct,
+        flow_balance_crit_pct=req.flow_balance_crit_pct,
+        flow_balance_min_scale_kw=req.flow_balance_min_scale_kw,
     )
     _try_log_mutation(
         user, "upsert", "sites", site["code"],
@@ -389,6 +404,54 @@ def commission_site(
         "equipment": installed,
         "credentials": credential_results,
     }
+
+
+class FlowBalanceSettingsPatchRequest(BaseModel):
+    warn_pct: Optional[float] = Field(default=None, ge=0, le=100)
+    crit_pct: Optional[float] = Field(default=None, ge=0, le=100)
+    min_scale_kw: Optional[float] = Field(default=None, ge=0)
+
+
+@router.patch("/sites/{code}/flow-balance-settings")
+def patch_flow_balance_settings(
+    code: str,
+    req: FlowBalanceSettingsPatchRequest,
+    user: CurrentUser = Depends(require_employee),
+) -> Dict[str, Any]:
+    _require_write_role(user)
+    site = store.get_site(code)
+    if not site:
+        raise HTTPException(status_code=404, detail=f"Site '{code}' not found.")
+
+    current_warn = site.get("flow_balance_warn_pct")
+    current_crit = site.get("flow_balance_crit_pct")
+    final_warn = req.warn_pct if req.warn_pct is not None else current_warn
+    final_crit = req.crit_pct if req.crit_pct is not None else current_crit
+    if final_warn is not None and final_crit is not None and final_crit < final_warn:
+        raise HTTPException(
+            status_code=400,
+            detail="crit_pct must be greater than or equal to warn_pct.",
+        )
+
+    updated = store.update_site_flow_balance_settings(
+        code,
+        warn_pct=req.warn_pct,
+        crit_pct=req.crit_pct,
+        min_scale_kw=req.min_scale_kw,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail=f"Site '{code}' not found.")
+
+    _try_log_mutation(
+        user, "update", "sites", updated["code"],
+        new_values={
+            "flow_balance_warn_pct": updated.get("flow_balance_warn_pct"),
+            "flow_balance_crit_pct": updated.get("flow_balance_crit_pct"),
+            "flow_balance_min_scale_kw": updated.get("flow_balance_min_scale_kw"),
+        },
+        metadata={"kind": "gensite_flow_balance_settings"},
+    )
+    return {"site": updated}
 
 
 # ---------------------------------------------------------------------------

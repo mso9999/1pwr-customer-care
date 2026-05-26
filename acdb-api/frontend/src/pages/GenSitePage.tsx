@@ -72,13 +72,15 @@ const FLOW_CSS = `
 `;
 
 type ChartRow = Record<string, number | string | null>;
+const DEFAULT_FLOW_BALANCE_MIN_SCALE_KW = 0.5;
+const DEFAULT_FLOW_BALANCE_WARN_PCT = 8;
+const DEFAULT_FLOW_BALANCE_CRIT_PCT = 15;
 
 const POWER_AND_STATE_METRICS: Array<{ key: string; label: string; color: string; yAxisId: 'power' | 'pct' }> = [
   { key: 'pv_kw',           label: 'PV (kW)',      color: '#eab308', yAxisId: 'power' },
   { key: 'ac_kw',           label: 'Load (kW)',    color: '#0ea5e9', yAxisId: 'power' },
   { key: 'battery_kw',      label: 'Battery (kW)', color: '#22c55e', yAxisId: 'power' },
   { key: 'genset_kw',       label: 'Genset (kW)',  color: '#ef4444', yAxisId: 'power' },
-  { key: 'grid_kw',         label: 'Grid (kW)',    color: '#f97316', yAxisId: 'power' },
   { key: 'battery_soc_pct', label: 'SoC (%)',      color: '#a855f7', yAxisId: 'pct' },
 ];
 
@@ -237,8 +239,11 @@ export default function GenSitePage() {
     const baseMetrics = POWER_AND_STATE_METRICS.filter(m => m.key !== 'genset_kw');
     const data = buildChartData(baseMetrics);
     return data.map(row => {
-      const grid = typeof row.grid_kw === 'number' ? row.grid_kw : null;
-      const derived = !hasExplicitGenset && grid !== null && grid > 0 ? grid : 0;
+      const load = typeof row.ac_kw === 'number' ? row.ac_kw : 0;
+      const pv = typeof row.pv_kw === 'number' ? row.pv_kw : 0;
+      const battery = typeof row.battery_kw === 'number' ? row.battery_kw : 0;
+      const batteryDischarge = battery < 0 ? Math.abs(battery) : 0;
+      const derived = !hasExplicitGenset ? Math.max(0, load - pv - batteryDischarge) : 0;
       return { ...row, genset_kw: derived } as ChartRow;
     });
   }, [series, hasExplicitGenset]);
@@ -274,7 +279,6 @@ export default function GenSitePage() {
         ac_kw: future ? null : (src?.ac_kw as number | null | undefined) ?? null,
         battery_kw: future ? null : (src?.battery_kw as number | null | undefined) ?? null,
         genset_kw: future ? null : (src?.genset_kw as number | null | undefined) ?? null,
-        grid_kw: future ? null : (src?.grid_kw as number | null | undefined) ?? null,
         battery_soc_pct: future ? null : (src?.battery_soc_pct as number | null | undefined) ?? null,
       });
     }
@@ -301,7 +305,6 @@ export default function GenSitePage() {
     let pv = 0; let pvN = 0;
     let load = 0; let loadN = 0;
     let battery = 0; let batteryN = 0;
-    let grid = 0; let gridN = 0;
     let genset = 0; let gensetN = 0;
     let socSum = 0;
     let socCount = 0;
@@ -317,20 +320,20 @@ export default function GenSitePage() {
       }
       const batteryKw = asNum(r.battery_kw);
       if (batteryKw !== null) { battery += batteryKw; batteryN += 1; }
-      const gridKw = asNum(r.grid_kw);
-      if (gridKw !== null) { grid += gridKw; gridN += 1; }
       const soc = asNum(r.battery_soc_pct);
       if (soc !== null) {
         socSum += soc;
         socCount += 1;
       }
     }
-    const derivedGenset = !hasExplicitGenset && gridN > 0 && grid > 0 ? grid : null;
+    const batteryDischargeKw = battery < 0 ? Math.abs(battery) : 0;
+    const derivedGenset = !hasExplicitGenset && loadN > 0
+      ? Math.max(0, load - pv - batteryDischargeKw)
+      : null;
     return {
       pv: pvN > 0 ? pv : null,
       load: loadN > 0 ? load : null,
       battery: batteryN > 0 ? battery : null,
-      grid: gridN > 0 ? grid : null,
       genset: gensetN > 0 ? genset : derivedGenset,
       soc: socCount > 0 ? socSum / socCount : null,
     };
@@ -345,22 +348,33 @@ export default function GenSitePage() {
   const pvNow = flowNow.pv ?? 0;
   const loadNow = flowNow.load ?? 0;
   const batteryNow = flowNow.battery ?? 0;
-  const gridNow = flowNow.grid ?? 0;
   const gensetNow = flowNow.genset ?? 0;
   const pvToLoadPct = clampPct(loadNow > 0 ? (pvNow / loadNow) * 100 : 0);
   const batteryDischargeKw = batteryNow < 0 ? Math.abs(batteryNow) : 0;
   const batteryChargeKw = batteryNow > 0 ? batteryNow : 0;
+  const batteryBalanceKw = -batteryNow; // charging is negative contribution, discharging positive
+  const flowBalanceWarnPct = asNum(site.flow_balance_warn_pct) ?? DEFAULT_FLOW_BALANCE_WARN_PCT;
+  const flowBalanceCritPct = asNum(site.flow_balance_crit_pct) ?? DEFAULT_FLOW_BALANCE_CRIT_PCT;
+  const flowBalanceMinScaleKw = asNum(site.flow_balance_min_scale_kw) ?? DEFAULT_FLOW_BALANCE_MIN_SCALE_KW;
   const batteryToLoadPct = clampPct(loadNow > 0 ? (batteryDischargeKw / loadNow) * 100 : 0);
   const gensetToLoadPct = clampPct(loadNow > 0 ? (gensetNow / loadNow) * 100 : 0);
-  const gridImportKw = gridNow > 0 ? gridNow : 0;
-  const gridExportKw = gridNow < 0 ? Math.abs(gridNow) : 0;
+  const balanceResidualKw = pvNow + gensetNow + batteryBalanceKw - loadNow;
+  const balanceScaleKw = Math.max(
+    Math.abs(loadNow),
+    Math.abs(pvNow) + Math.abs(gensetNow) + Math.abs(batteryBalanceKw),
+    flowBalanceMinScaleKw,
+  );
+  const balanceDeviationPct = (Math.abs(balanceResidualKw) / balanceScaleKw) * 100;
+  const balanceSeverity: 'ok' | 'warn' | 'critical' = (
+    balanceDeviationPct >= flowBalanceCritPct ? 'critical'
+      : balanceDeviationPct >= flowBalanceWarnPct ? 'warn'
+        : 'ok'
+  );
   const pvActive = pvNow > 0.05;
   const gensetActive = gensetNow > 0.05;
   const loadActive = loadNow > 0.05;
   const batteryActive = Math.abs(batteryNow) > 0.05;
   const batteryDischarging = batteryNow < -0.05;
-  const gridImportActive = gridImportKw > 0.05;
-  const gridExportActive = gridExportKw > 0.05;
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-6">
@@ -419,9 +433,11 @@ export default function GenSitePage() {
           <div className="md:col-span-2 border rounded-xl p-4 bg-white">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-lg font-semibold">Power flow now</h2>
-              <div className="text-xs text-gray-500">Animated direction from normalized channels</div>
+              <div className="text-xs text-gray-500">
+                Balance dev {num(balanceDeviationPct, 1, '%')} ({num(balanceResidualKw, 2, 'kW')})
+              </div>
             </div>
-            <div className="relative border rounded-xl bg-gray-50 p-2">
+            <div className="relative border-2 border-gray-400 rounded-xl bg-gray-50 p-2">
               <svg viewBox="0 0 860 360" className="w-full h-[260px]">
                 <defs>
                   <marker id="arrowHead" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto" markerUnits="strokeWidth">
@@ -434,7 +450,6 @@ export default function GenSitePage() {
                 <line x1="180" y1="260" x2="410" y2="180" stroke="#d1d5db" strokeWidth="3" />
                 <line x1="410" y1="180" x2="660" y2="180" stroke="#d1d5db" strokeWidth="3" />
                 <line x1="410" y1="300" x2="410" y2="180" stroke="#d1d5db" strokeWidth="3" />
-                <line x1="410" y1="50" x2="410" y2="180" stroke="#d1d5db" strokeWidth="3" />
 
                 {/* animated flow lines */}
                 {pvActive && (
@@ -486,28 +501,29 @@ export default function GenSitePage() {
                     markerStart={!batteryDischarging ? 'url(#arrowHead)' : undefined}
                   />
                 )}
-                {(gridImportActive || gridExportActive) && (
-                  <line
-                    x1="410"
-                    y1="50"
-                    x2="410"
-                    y2="180"
-                    stroke="#f97316"
-                    strokeWidth="6"
-                    className={`flow-line ${gridImportActive ? 'flow-forward' : 'flow-reverse'}`}
-                    markerEnd={gridImportActive ? 'url(#arrowHead)' : undefined}
-                    markerStart={gridExportActive ? 'url(#arrowHead)' : undefined}
-                  />
-                )}
-
                 {/* node boxes */}
                 <NodeBox x={90} y={62} label="PV" value={num(flowNow.pv, 2, 'kW')} />
                 <NodeBox x={58} y={232} label="Genset" value={num(flowNow.genset, 2, 'kW')} />
                 <NodeBox x={340} y={154} label="Inverter" value={num((flowNow.load ?? 0) - (flowNow.genset ?? 0), 2, 'kW')} />
                 <NodeBox x={675} y={154} label="Load" value={num(flowNow.load, 2, 'kW')} />
                 <NodeBox x={338} y={304} label={batteryDischarging ? 'Battery out' : 'Battery in'} value={num(Math.abs(flowNow.battery ?? 0), 2, 'kW')} />
-                <NodeBox x={352} y={6} label={gridImportActive ? 'Grid in' : gridExportActive ? 'Grid out' : 'Grid'} value={num(flowNow.grid, 2, 'kW')} />
               </svg>
+            </div>
+            <div className={`mt-3 text-xs rounded-lg px-3 py-2 border ${
+              balanceSeverity === 'critical'
+                ? 'bg-red-50 border-red-200 text-red-700'
+                : balanceSeverity === 'warn'
+                  ? 'bg-yellow-50 border-yellow-200 text-yellow-700'
+                  : 'bg-green-50 border-green-200 text-green-700'
+            }`}>
+              Balance check: PV in + Genset in + Battery(in-/out+) - Load = 0.
+              Current residual {num(balanceResidualKw, 2, 'kW')} ({num(balanceDeviationPct, 1, '%')} deviation).
+              Thresholds: warn {num(flowBalanceWarnPct, 1, '%')}, critical {num(flowBalanceCritPct, 1, '%')}.
+              {balanceSeverity === 'critical'
+                ? ' Significant imbalance detected - please inspect telemetry quality or site behavior.'
+                : balanceSeverity === 'warn'
+                  ? ' Moderate imbalance detected - monitor trend and investigate if persistent.'
+                  : ' Within expected tolerance.'}
             </div>
           </div>
           <div className="border rounded-xl p-4 bg-white">
@@ -517,7 +533,6 @@ export default function GenSitePage() {
               <RingStat label="Battery -> Load" value={batteryToLoadPct} color="#22c55e" />
               <RingStat label="Genset -> Load" value={gensetToLoadPct} color="#ef4444" />
               <RingStat label="Battery charging" value={clampPct(loadNow > 0 ? (batteryChargeKw / loadNow) * 100 : 0)} color="#10b981" />
-              <RingStat label="Grid import" value={clampPct(loadNow > 0 ? (gridImportKw / loadNow) * 100 : 0)} color="#f97316" />
             </div>
           </div>
         </div>
@@ -734,7 +749,7 @@ export default function GenSitePage() {
                     <Tile label="PV"  value={num(r?.pv_kw ?? null, 2, 'kW')} />
                     <Tile label="SoC" value={num(r?.battery_soc_pct ?? null, 1, '%')} />
                     <Tile label="Battery" value={num(r?.battery_kw ?? null, 2, 'kW')} />
-                    <Tile label="Grid" value={num(r?.grid_kw ?? null, 2, 'kW')} />
+                    <Tile label="Freq" value={num(r?.ac_freq_hz ?? null, 2, 'Hz')} />
                     <Tile label="Energy" value={num(r?.ac_kwh_total ?? null, 2, 'kWh')} />
                   </div>
                   <div className="mt-2 text-xs text-gray-500">
@@ -820,7 +835,7 @@ function Tile({ label, value }: { label: string; value: string }) {
 function NodeBox({ x, y, label, value }: { x: number; y: number; label: string; value: string }) {
   return (
     <g transform={`translate(${x},${y})`}>
-      <rect rx="8" ry="8" width="128" height="52" fill="#ffffff" stroke="#e5e7eb" />
+      <rect rx="8" ry="8" width="128" height="52" fill="#ffffff" stroke="#4b5563" strokeWidth="2" />
       <text x="10" y="20" fontSize="10" fill="#6b7280">{label}</text>
       <text x="10" y="38" fontSize="13" fill="#111827">{value}</text>
     </g>
