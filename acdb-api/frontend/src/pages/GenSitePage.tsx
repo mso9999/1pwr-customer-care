@@ -34,6 +34,12 @@ function num(v: number | null | undefined, digits = 2, unit = ''): string {
   return `${n.toFixed(digits)}${unit ? ' ' + unit : ''}`;
 }
 
+function asNum(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 function hhmmLocal(d: Date): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
@@ -181,9 +187,11 @@ export default function GenSitePage() {
       if (!s) continue;
       const agg: Record<string, { sum: number; n: number }> = {};
       for (const p of s.points) {
+        const val = asNum(p.value);
+        if (val === null) continue;
         const k = p.ts;
         if (!agg[k]) agg[k] = { sum: 0, n: 0 };
-        agg[k].sum += p.value;
+        agg[k].sum += val;
         agg[k].n += 1;
       }
       for (const [ts, { sum, n }] of Object.entries(agg)) {
@@ -266,34 +274,40 @@ export default function GenSitePage() {
   const isLive = freshnessMin !== null && freshnessMin <= 20;
   const flowNow = (() => {
     const eqById = new Map(equipment.map(eq => [eq.id, eq]));
-    let pv = 0;
-    let load = 0;
-    let battery = 0;
-    let grid = 0;
-    let genset = 0;
+    let pv = 0; let pvN = 0;
+    let load = 0; let loadN = 0;
+    let battery = 0; let batteryN = 0;
+    let grid = 0; let gridN = 0;
+    let genset = 0; let gensetN = 0;
     let socSum = 0;
     let socCount = 0;
     for (const r of latest_readings) {
       const eq = eqById.get(r.equipment_id);
-      if (typeof r.pv_kw === 'number') pv += r.pv_kw;
-      if (typeof r.ac_kw === 'number') {
-        load += r.ac_kw;
-        if (isGensetEquipment(eq?.kind, eq?.role)) genset += r.ac_kw;
+      const pvKw = asNum(r.pv_kw);
+      if (pvKw !== null) { pv += pvKw; pvN += 1; }
+      const acKw = asNum(r.ac_kw);
+      if (acKw !== null) {
+        load += acKw;
+        loadN += 1;
+        if (isGensetEquipment(eq?.kind, eq?.role)) { genset += acKw; gensetN += 1; }
       }
-      if (typeof r.battery_kw === 'number') battery += r.battery_kw;
-      if (typeof r.grid_kw === 'number') grid += r.grid_kw;
-      if (typeof r.battery_soc_pct === 'number') {
-        socSum += r.battery_soc_pct;
+      const batteryKw = asNum(r.battery_kw);
+      if (batteryKw !== null) { battery += batteryKw; batteryN += 1; }
+      const gridKw = asNum(r.grid_kw);
+      if (gridKw !== null) { grid += gridKw; gridN += 1; }
+      const soc = asNum(r.battery_soc_pct);
+      if (soc !== null) {
+        socSum += soc;
         socCount += 1;
       }
     }
-    const derivedGenset = !hasExplicitGenset && grid > 0 ? grid : 0;
+    const derivedGenset = !hasExplicitGenset && gridN > 0 && grid > 0 ? grid : null;
     return {
-      pv,
-      load,
-      battery,
-      grid,
-      genset: genset > 0 ? genset : derivedGenset,
+      pv: pvN > 0 ? pv : null,
+      load: loadN > 0 ? load : null,
+      battery: batteryN > 0 ? battery : null,
+      grid: gridN > 0 ? grid : null,
+      genset: gensetN > 0 ? genset : derivedGenset,
       soc: socCount > 0 ? socSum / socCount : null,
     };
   })();
@@ -304,18 +318,23 @@ export default function GenSitePage() {
     const delta = vals[vals.length - 1].value - vals[0].value;
     return Number.isFinite(delta) ? Math.max(0, delta) : null;
   })();
-  const pvToLoadPct = clampPct(flowNow.load > 0 ? (flowNow.pv / flowNow.load) * 100 : 0);
-  const batteryDischargeKw = flowNow.battery < 0 ? Math.abs(flowNow.battery) : 0;
-  const batteryChargeKw = flowNow.battery > 0 ? flowNow.battery : 0;
-  const batteryToLoadPct = clampPct(flowNow.load > 0 ? (batteryDischargeKw / flowNow.load) * 100 : 0);
-  const gensetToLoadPct = clampPct(flowNow.load > 0 ? (flowNow.genset / flowNow.load) * 100 : 0);
-  const gridImportKw = flowNow.grid > 0 ? flowNow.grid : 0;
-  const gridExportKw = flowNow.grid < 0 ? Math.abs(flowNow.grid) : 0;
-  const pvActive = flowNow.pv > 0.05;
-  const gensetActive = flowNow.genset > 0.05;
-  const loadActive = flowNow.load > 0.05;
-  const batteryActive = Math.abs(flowNow.battery) > 0.05;
-  const batteryDischarging = flowNow.battery < -0.05;
+  const pvNow = flowNow.pv ?? 0;
+  const loadNow = flowNow.load ?? 0;
+  const batteryNow = flowNow.battery ?? 0;
+  const gridNow = flowNow.grid ?? 0;
+  const gensetNow = flowNow.genset ?? 0;
+  const pvToLoadPct = clampPct(loadNow > 0 ? (pvNow / loadNow) * 100 : 0);
+  const batteryDischargeKw = batteryNow < 0 ? Math.abs(batteryNow) : 0;
+  const batteryChargeKw = batteryNow > 0 ? batteryNow : 0;
+  const batteryToLoadPct = clampPct(loadNow > 0 ? (batteryDischargeKw / loadNow) * 100 : 0);
+  const gensetToLoadPct = clampPct(loadNow > 0 ? (gensetNow / loadNow) * 100 : 0);
+  const gridImportKw = gridNow > 0 ? gridNow : 0;
+  const gridExportKw = gridNow < 0 ? Math.abs(gridNow) : 0;
+  const pvActive = pvNow > 0.05;
+  const gensetActive = gensetNow > 0.05;
+  const loadActive = loadNow > 0.05;
+  const batteryActive = Math.abs(batteryNow) > 0.05;
+  const batteryDischarging = batteryNow < -0.05;
   const gridImportActive = gridImportKw > 0.05;
   const gridExportActive = gridExportKw > 0.05;
 
@@ -460,9 +479,9 @@ export default function GenSitePage() {
                 {/* node boxes */}
                 <NodeBox x={90} y={62} label="PV" value={num(flowNow.pv, 2, 'kW')} />
                 <NodeBox x={58} y={232} label="Genset" value={num(flowNow.genset, 2, 'kW')} />
-                <NodeBox x={340} y={154} label="Inverter" value={num(flowNow.load - flowNow.genset, 2, 'kW')} />
+                <NodeBox x={340} y={154} label="Inverter" value={num((flowNow.load ?? 0) - (flowNow.genset ?? 0), 2, 'kW')} />
                 <NodeBox x={675} y={154} label="Load" value={num(flowNow.load, 2, 'kW')} />
-                <NodeBox x={338} y={304} label={batteryDischarging ? 'Battery out' : 'Battery in'} value={num(Math.abs(flowNow.battery), 2, 'kW')} />
+                <NodeBox x={338} y={304} label={batteryDischarging ? 'Battery out' : 'Battery in'} value={num(Math.abs(flowNow.battery ?? 0), 2, 'kW')} />
                 <NodeBox x={352} y={6} label={gridImportActive ? 'Grid in' : gridExportActive ? 'Grid out' : 'Grid'} value={num(flowNow.grid, 2, 'kW')} />
               </svg>
             </div>
@@ -473,8 +492,8 @@ export default function GenSitePage() {
               <RingStat label="PV -> Load" value={pvToLoadPct} color="#eab308" />
               <RingStat label="Battery -> Load" value={batteryToLoadPct} color="#22c55e" />
               <RingStat label="Genset -> Load" value={gensetToLoadPct} color="#ef4444" />
-              <RingStat label="Battery charging" value={clampPct(flowNow.load > 0 ? (batteryChargeKw / flowNow.load) * 100 : 0)} color="#10b981" />
-              <RingStat label="Grid import" value={clampPct(flowNow.load > 0 ? (gridImportKw / flowNow.load) * 100 : 0)} color="#f97316" />
+              <RingStat label="Battery charging" value={clampPct(loadNow > 0 ? (batteryChargeKw / loadNow) * 100 : 0)} color="#10b981" />
+              <RingStat label="Grid import" value={clampPct(loadNow > 0 ? (gridImportKw / loadNow) * 100 : 0)} color="#f97316" />
             </div>
           </div>
         </div>
