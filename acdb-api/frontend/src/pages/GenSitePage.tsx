@@ -276,8 +276,9 @@ export default function GenSitePage() {
       const load = typeof row.ac_kw === 'number' ? row.ac_kw : 0;
       const pv = typeof row.pv_kw === 'number' ? row.pv_kw : 0;
       const battery = typeof row.battery_kw === 'number' ? row.battery_kw : 0;
-      const batteryDischarge = battery > 0 ? battery : 0;
-      const derived = !hasExplicitGenset ? Math.max(0, load - pv - batteryDischarge) : 0;
+      // Signed battery convention: +discharge, -charge.
+      // Derive genset as remaining source needed to satisfy both load and battery charge.
+      const derived = !hasExplicitGenset ? Math.max(0, load - pv - battery) : 0;
       return { ...row, genset_kw: derived } as ChartRow;
     });
   }, [series, hasExplicitGenset]);
@@ -360,9 +361,8 @@ export default function GenSitePage() {
         socCount += 1;
       }
     }
-    const batteryDischargeKw = battery > 0 ? battery : 0;
     const derivedGenset = !hasExplicitGenset && loadN > 0
-      ? Math.max(0, load - pv - batteryDischargeKw)
+      ? Math.max(0, load - pv - battery)
       : null;
     return {
       pv: pvN > 0 ? pv : null,
