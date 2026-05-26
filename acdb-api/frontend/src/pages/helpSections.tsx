@@ -476,6 +476,15 @@ function PaymentsContent() {
           Si le client a un financement actif, le paiement est automatiquement réparti entre l'électricité et le remboursement de la dette. Un indicateur affiche la répartition sur l'écran de résultat.
         </Warning>
 
+        <SubHead>Ordre de répartition d'un paiement « électricité »</SubHead>
+        <Ul>
+          <li><Bold>Étape 1 (dette frais)</Bold> : jusqu'à <Bold>50 %</Bold> du paiement peut d'abord rembourser la dette de frais de raccordement / readyboard restante (raccordement en priorité, puis readyboard).</li>
+          <li><Bold>Étape 2 (avance)</Bold> : sur le montant restant, la <Bold>fraction de remboursement</Bold> de l'avance est appliquée (par défaut 50 %), plafonnée au solde d'avance restant.</li>
+          <li><Bold>Étape 3 (financement)</Bold> : sur la portion électricité restante, la logique de financement peut prélever sa part.</li>
+          <li><Bold>Étape 4 (kWh)</Bold> : seule la <Bold>portion électricité finale</Bold> est convertie en kWh et créditée sur le compteur.</li>
+        </Ul>
+        <P>En conséquence, il est possible qu'un paiement de 5.00 ne crédite que 2.50 en électricité ; le reste est visible comme remboursement de dette.</P>
+
         <SubHead>Reconnaissance automatique des frais (raccordement / tableau de distribution)</SubHead>
         <P>
           Le portail reconnaît automatiquement les paiements pour les frais de <Bold>raccordement</Bold> et de
@@ -522,6 +531,15 @@ function PaymentsContent() {
       <Warning>
         If the customer has active financing, the payment is automatically split between electricity and debt repayment. An indicator shows the split on the result screen.
       </Warning>
+
+      <SubHead>Allocation order for an "electricity" payment</SubHead>
+      <Ul>
+        <li><Bold>Step 1 (fee debt)</Bold>: up to <Bold>50%</Bold> of the payment may first repay outstanding connection/readyboard fee debt (connection bucket first, then readyboard).</li>
+        <li><Bold>Step 2 (advance)</Bold>: from the remainder, the configured advance repayment fraction is applied (default 50%), capped by remaining advance outstanding.</li>
+        <li><Bold>Step 3 (financing)</Bold>: from the remaining electricity slice, financing logic may take its debt portion.</li>
+        <li><Bold>Step 4 (kWh credit)</Bold>: only the <Bold>final electricity portion</Bold> is converted to kWh and credited to the meter.</li>
+      </Ul>
+      <P>So a payment of 5.00 can legitimately credit only 2.50 to electricity when the other 2.50 is routed to debt repayment.</P>
 
       <SubHead>Automatic fee recognition (connection / readyboard)</SubHead>
       <P>
