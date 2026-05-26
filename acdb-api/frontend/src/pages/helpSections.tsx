@@ -614,6 +614,7 @@ function AdvancesContent() {
           <li>Si une avance ET un accord de financement actifs coexistent, l'<Bold>avance est remboursée en premier</Bold>, puis le financement applique sa propre répartition sur la portion électricité restante.</li>
           <li>Quand l'avance atteint zéro, son statut passe à <Bold>paid_off</Bold> et 100 % des paiements suivants vont aux kWh (et aux financements actifs le cas échéant).</li>
           <li>Les paiements <Bold>reconnus comme frais de raccordement / tableau</Bold> par leur montant exact ne réduisent pas l'avance — ils sont mis en file pour vérification par les finances.</li>
+          <li>Le suivi du remboursement se fait dans <PageLink to="/advances">Avances</PageLink> (colonne <Bold>Outstanding</Bold> et détail du grand livre). Un résumé est aussi visible dans <PageLink to="/customer-data">Customer Data</PageLink> du client.</li>
         </Ul>
 
         <SubHead>Frais mensuel automatique</SubHead>
@@ -684,6 +685,7 @@ function AdvancesContent() {
         <li>If both an advance and an active financing agreement exist, the <Bold>advance is repaid first</Bold>; the financing module then applies its own split to the remaining electricity portion.</li>
         <li>When the advance reaches zero, status flips to <Bold>paid_off</Bold> and 100% of subsequent payments go to kWh (and to active financings, if any).</li>
         <li>Payments <Bold>recognised as connection / readyboard fees</Bold> by their exact amount do <Bold>not</Bold> reduce the advance — those are queued for finance verification instead.</li>
+        <li>Track the repayment balance in <PageLink to="/advances">Advances</PageLink> (the <Bold>Outstanding</Bold> column and each advance ledger). A customer-level summary is also shown in <PageLink to="/customer-data">Customer Data</PageLink>.</li>
       </Ul>
 
       <SubHead>Automatic monthly fee accrual</SubHead>

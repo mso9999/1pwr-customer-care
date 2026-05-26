@@ -268,19 +268,21 @@ def _column_exists(cursor, table_name: str, column_name: str) -> bool:
 
 def _not_metered_predicate(cursor) -> str:
     """True when connected but no meter installed (column or meters table)."""
-    if cursor is not None and _column_exists(cursor, "customers", "meter_installed"):
-        return (
-            "c.date_service_connected IS NOT NULL "
-            "AND NOT COALESCE(c.meter_installed, false)"
-        )
-    return """
-            c.date_service_connected IS NOT NULL
-            AND NOT EXISTS (
+    meter_exists_predicate = """
+            EXISTS (
                 SELECT 1 FROM meters m
                 INNER JOIN accounts a_nm ON a_nm.account_number = m.account_number
                 WHERE a_nm.customer_id = c.id
-                  AND LOWER(COALESCE(m.status, 'active')) = 'active'
+                  AND LOWER(COALESCE(m.status, 'active')) NOT IN ('decommissioned', 'retired')
             )""".strip()
+    if cursor is not None and _column_exists(cursor, "customers", "meter_installed"):
+        return (
+            "c.date_service_connected IS NOT NULL "
+            f"AND NOT (COALESCE(c.meter_installed, false) OR {meter_exists_predicate})"
+        )
+    return f"""
+            c.date_service_connected IS NOT NULL
+            AND NOT ({meter_exists_predicate})""".strip()
 
 
 def _cohort_override_expr(cursor) -> str:
@@ -293,6 +295,19 @@ def _cohort_status_case_sql(cursor) -> str:
     """CASE expression for ``cohort_status`` (manual override wins when set)."""
     override = _cohort_override_expr(cursor)
     not_metered = _not_metered_predicate(cursor)
+    has_fee_debt = (
+        cursor is not None
+        and _column_exists(cursor, "customers", "fee_debt_connection_remaining")
+        and _column_exists(cursor, "customers", "fee_debt_readyboard_remaining")
+    )
+    fully_paid_expr = (
+        "(c.payment_status_override = 'fully_paid' "
+        "OR (COALESCE(c.fee_debt_connection_remaining, 0) + "
+        "COALESCE(c.fee_debt_readyboard_remaining, 0)) <= 0.005 "
+        "OR COALESCE(pt.total_paid, 0) >= %s)"
+        if has_fee_debt
+        else "(c.payment_status_override = 'fully_paid' OR COALESCE(pt.total_paid, 0) >= %s)"
+    )
     return f"""
                 CASE
                     WHEN {override} IS NOT NULL AND TRIM({override}) <> ''
@@ -301,16 +316,13 @@ def _cohort_status_case_sql(cursor) -> str:
                     WHEN COALESCE(pt.total_paid, 0) <= 0
                          OR c.payment_status_override = 'not_paid'
                         THEN 'not_paid'
-                    WHEN (c.payment_status_override = 'fully_paid'
-                          OR COALESCE(pt.total_paid, 0) >= %s)
+                    WHEN ({fully_paid_expr})
                          AND ({not_metered})
                         THEN 'fully_paid_not_metered'
-                    WHEN (c.payment_status_override = 'fully_paid'
-                          OR COALESCE(pt.total_paid, 0) >= %s)
+                    WHEN ({fully_paid_expr})
                          AND c.date_service_connected IS NOT NULL
                         THEN 'fully_paid_connected'
-                    WHEN (c.payment_status_override = 'fully_paid'
-                          OR COALESCE(pt.total_paid, 0) >= %s)
+                    WHEN ({fully_paid_expr})
                          AND c.date_service_connected IS NULL
                         THEN 'fully_paid_not_connected'
                     WHEN ({not_metered})

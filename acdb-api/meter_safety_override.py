@@ -110,8 +110,9 @@ def set_meter_override(
       calls the Koios/ThunderCloud disconnect API.
 
     **auto**: clear the override and return to normal billing.
-      Does NOT send a relay-close — billing engine / customer top-ups
-      handle reconnection.
+      For SparkMeter, this issues an explicit reconnect call so the relay state
+      matches the mode change immediately. For 1Meter, we only clear the
+      override flag and let billing logic drive relay state.
     """
     if payload.state not in VALID_STATES:
         raise HTTPException(
@@ -164,79 +165,88 @@ def set_meter_override(
 
         relay_result = None
 
-        # Execute relay action when toggling to 'off'
-        if payload.state == "off":
-            if is_prototype:
-                # 1Meter: queue relay-open via existing IoT MQTT
-                thing_name = _thing_name_for_meter(mid)
-                cmd_id = str(uuid.uuid4())
-                now = _now_utc()
+        # Execute relay action:
+        # - prototype: only when toggling to 'off' (open relay command queue)
+        # - SparkMeter: both directions ('off' disconnect, 'auto' reconnect)
+        if is_prototype and payload.state == "off":
+            # 1Meter: queue relay-open via existing IoT MQTT
+            thing_name = _thing_name_for_meter(mid)
+            cmd_id = str(uuid.uuid4())
+            now = _now_utc()
 
-                request_payload = {
-                    "cmd_id": cmd_id,
-                    "thing_name": thing_name,
-                    "meter_id": mid,
-                    "account_number": account_number,
-                    "action": "open",
-                    "reason": f"safety_override: {payload.reason}",
-                    "ttl_seconds": DEFAULT_TTL_SECONDS,
-                    "force": True,
-                    "note": payload.note or "Safety override by ops team",
-                }
+            request_payload = {
+                "cmd_id": cmd_id,
+                "thing_name": thing_name,
+                "meter_id": mid,
+                "account_number": account_number,
+                "action": "open",
+                "reason": f"safety_override: {payload.reason}",
+                "ttl_seconds": DEFAULT_TTL_SECONDS,
+                "force": True,
+                "note": payload.note or "Safety override by ops team",
+            }
 
-                cur.execute(
-                    """
-                    INSERT INTO relay_commands
-                        (cmd_id, thing_name, meter_id, account_number,
-                         command, platform, action, reason, requested_by,
-                         ttl_seconds, status, payload)
-                    VALUES
-                        (%s::uuid, %s, %s, %s,
-                         'disconnect', 'prototype', 'open', %s, %s,
-                         %s, 'queued', %s::jsonb)
-                    RETURNING id
-                    """,
-                    (
-                        cmd_id,
-                        thing_name,
-                        mid,
-                        account_number,
-                        f"safety_override: {payload.reason}",
-                        f"user:{user.user_id}",
-                        DEFAULT_TTL_SECONDS,
-                        json.dumps(request_payload),
-                    ),
-                )
-                relay_row_id = cur.fetchone()[0]
+            cur.execute(
+                """
+                INSERT INTO relay_commands
+                    (cmd_id, thing_name, meter_id, account_number,
+                     command, platform, action, reason, requested_by,
+                     ttl_seconds, status, payload)
+                VALUES
+                    (%s::uuid, %s, %s, %s,
+                     'disconnect', 'prototype', 'open', %s, %s,
+                     %s, 'queued', %s::jsonb)
+                RETURNING id
+                """,
+                (
+                    cmd_id,
+                    thing_name,
+                    mid,
+                    account_number,
+                    f"safety_override: {payload.reason}",
+                    f"user:{user.user_id}",
+                    DEFAULT_TTL_SECONDS,
+                    json.dumps(request_payload),
+                ),
+            )
+            relay_row_id = cur.fetchone()[0]
 
+            relay_result = {
+                "platform": "prototype",
+                "success": True,
+                "cmd_id": cmd_id,
+                "relay_row_id": relay_row_id,
+            }
+
+        elif not is_prototype:
+            # SparkMeter: call Koios/ThunderCloud API
+            try:
+                from sparkmeter_control import disconnect_sparkmeter, reconnect_sparkmeter
+            except ImportError:
+                logger.warning("sparkmeter_control not available")
+                disconnect_sparkmeter = None
+                reconnect_sparkmeter = None
+
+            if disconnect_sparkmeter and reconnect_sparkmeter:
+                fn = disconnect_sparkmeter if payload.state == "off" else reconnect_sparkmeter
+                result = fn(mid, account_number)
                 relay_result = {
-                    "platform": "prototype",
-                    "success": True,
-                    "cmd_id": cmd_id,
-                    "relay_row_id": relay_row_id,
+                    "platform": result.platform,
+                    "success": result.success,
+                    "error": result.error,
                 }
-
+                if not result.success:
+                    action_label = "disconnect" if payload.state == "off" else "reconnect"
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"SparkMeter {action_label} failed for meter '{mid}': "
+                               f"{result.error or 'unknown error'}",
+                    )
             else:
-                # SparkMeter: call Koios/ThunderCloud disconnect API
-                try:
-                    from sparkmeter_control import disconnect_sparkmeter
-                except ImportError:
-                    logger.warning("sparkmeter_control not available")
-                    disconnect_sparkmeter = None
-
-                if disconnect_sparkmeter:
-                    result = disconnect_sparkmeter(mid, account_number)
-                    relay_result = {
-                        "platform": result.platform,
-                        "success": result.success,
-                        "error": result.error,
-                    }
-                else:
-                    relay_result = {
-                        "platform": "sparkmeter",
-                        "success": False,
-                        "error": "sparkmeter_control module not available",
-                    }
+                raise HTTPException(
+                    status_code=503,
+                    detail="sparkmeter_control module not available",
+                )
 
         # Update meters table
         cur.execute(

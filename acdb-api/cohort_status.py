@@ -62,15 +62,30 @@ def get_inferred_cohort_status(
     """Computed cohort status vs manual override for one customer."""
     with get_connection() as conn:
         cur = conn.cursor()
+        meter_exists_expr = """EXISTS (
+            SELECT 1 FROM meters m
+            INNER JOIN accounts a_m ON a_m.account_number = m.account_number
+            WHERE a_m.customer_id = c.id
+              AND LOWER(COALESCE(m.status, 'active')) NOT IN ('decommissioned', 'retired')
+        )"""
         if _column_exists(cur, "customers", "meter_installed"):
-            meter_expr = "COALESCE(c.meter_installed, false)"
+            meter_expr = f"(COALESCE(c.meter_installed, false) OR {meter_exists_expr})"
         else:
-            meter_expr = """EXISTS (
-                SELECT 1 FROM meters m
-                INNER JOIN accounts a_m ON a_m.account_number = m.account_number
-                WHERE a_m.customer_id = c.id
-                  AND LOWER(COALESCE(m.status, 'active')) = 'active'
-            )"""
+            meter_expr = meter_exists_expr
+        has_fee_debt_cols = (
+            _column_exists(cur, "customers", "fee_debt_connection_remaining")
+            and _column_exists(cur, "customers", "fee_debt_readyboard_remaining")
+        )
+        fee_debt_conn_expr = (
+            "c.fee_debt_connection_remaining"
+            if has_fee_debt_cols
+            else "NULL::numeric AS fee_debt_connection_remaining"
+        )
+        fee_debt_rb_expr = (
+            "c.fee_debt_readyboard_remaining"
+            if has_fee_debt_cols
+            else "NULL::numeric AS fee_debt_readyboard_remaining"
+        )
         if _column_exists(cur, "customers", "cohort_status_override"):
             override_sel = "c.cohort_status_override"
             override_meta = "c.cohort_status_override_by, c.cohort_status_override_at"
@@ -85,6 +100,8 @@ def get_inferred_cohort_status(
                    c.payment_status_override,
                    {override_sel},
                    {override_meta},
+                   {fee_debt_conn_expr},
+                   {fee_debt_rb_expr},
                    {meter_expr} AS meter_installed,
                    a.account_number
             FROM customers c
@@ -105,7 +122,7 @@ def get_inferred_cohort_status(
                 country = code
                 break
         fee_threshold = _resolve_fee_threshold(country or None)
-        account_number = row[8]
+        account_number = row[10]
 
         total_paid = 0.0
         if account_number:
@@ -121,16 +138,30 @@ def get_inferred_cohort_status(
             )
             total_paid = float(cur.fetchone()[0] or 0)
 
-        meter_installed = bool(row[7])
+        meter_installed = bool(row[9])
         not_metered = row[1] is not None and not meter_installed
-        inferred = _compute_inferred_cohort_status(
-            total_paid=total_paid,
-            fee_threshold=fee_threshold,
-            payment_override=row[3],
-            date_connected=row[1],
-            date_terminated=row[2],
-            not_metered=not_metered,
-        )
+        fee_debt_conn = float(row[7] or 0)
+        fee_debt_rb = float(row[8] or 0)
+        has_fee_debt = row[7] is not None or row[8] is not None
+        fully_paid_from_debt = has_fee_debt and (fee_debt_conn + fee_debt_rb) <= 0.005
+        payment_override = row[3]
+        if payment_override == "fully_paid":
+            inferred = "fully_paid_not_metered" if not_metered else (
+                "fully_paid_connected" if row[1] is not None else "fully_paid_not_connected"
+            )
+        elif fully_paid_from_debt and row[2] is None:
+            inferred = "fully_paid_not_metered" if not_metered else (
+                "fully_paid_connected" if row[1] is not None else "fully_paid_not_connected"
+            )
+        else:
+            inferred = _compute_inferred_cohort_status(
+                total_paid=total_paid,
+                fee_threshold=fee_threshold,
+                payment_override=payment_override,
+                date_connected=row[1],
+                date_terminated=row[2],
+                not_metered=not_metered,
+            )
         override = row[4]
         effective = override if override else inferred
 
