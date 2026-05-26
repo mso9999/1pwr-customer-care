@@ -250,6 +250,86 @@ class VictronAdapter(InverterAdapter):
             except (TypeError, ValueError):
                 return None
 
+        ac_kw = _num("Ac/Out/L1/P") or _num("acOutput")
+        pv_kw = _num("Dc/Pv/Power") or _num("pvPower")
+        battery_kw = _num("Dc/Battery/Power") or _num("batteryPower")
+        battery_soc_pct = _num("Dc/Battery/Soc") or _num("soc")
+        grid_kw = _num("Ac/Grid/L1/P") or _num("gridPower")
+        ac_freq_hz = _num("Ac/Out/L1/F")
+        ac_v_avg = _num("Ac/Out/L1/V")
+        status_code = str(records.get("state", "")) or None
+        source_payload: Dict[str, Any] = {"status": records}
+
+        # Newer VRM Status widget payloads can be metadata-only. If we still
+        # have no normalized channels, fall back to /diagnostics (code/value list).
+        if all(v is None for v in (ac_kw, pv_kw, battery_kw, battery_soc_pct, grid_kw)):
+            try:
+                rd = session.get(
+                    f"{base}/installations/{cred.site_id_on_vendor}/diagnostics",
+                    timeout=HTTP_TIMEOUT,
+                )
+                if rd.status_code < 400:
+                    diag_payload = rd.json() or {}
+                    diag_records = diag_payload.get("records") or []
+                    code_vals: Dict[str, List[float]] = {}
+                    for item in diag_records:
+                        if not isinstance(item, dict):
+                            continue
+                        code = str(item.get("code") or "")
+                        if not code:
+                            continue
+                        raw = item.get("rawValue")
+                        try:
+                            val = float(raw)
+                        except (TypeError, ValueError):
+                            continue
+                        code_vals.setdefault(code, []).append(val)
+
+                    def _sum_codes(*codes: str) -> Optional[float]:
+                        vals: List[float] = []
+                        for c in codes:
+                            vals.extend(code_vals.get(c, []))
+                        if not vals:
+                            return None
+                        return float(sum(vals))
+
+                    def _first_code(*codes: str) -> Optional[float]:
+                        for c in codes:
+                            vals = code_vals.get(c, [])
+                            if vals:
+                                return float(vals[0])
+                        return None
+
+                    def _avg_codes(*codes: str) -> Optional[float]:
+                        vals: List[float] = []
+                        for c in codes:
+                            vals.extend(code_vals.get(c, []))
+                        if not vals:
+                            return None
+                        return float(sum(vals) / len(vals))
+
+                    # Diagnostics values are mostly W for power channels.
+                    pv_w = _sum_codes("P", "P2", "P3", "Pdc")
+                    if pv_w is None:
+                        pv_w = _sum_codes("pP1", "pP2", "pP3", "PVP")
+                    load_w = _sum_codes("a1", "a2", "a3")
+                    if load_w is None:
+                        load_w = _sum_codes("o1", "o2", "o3")
+                    batt_w = _first_code("bp", "ScW")
+                    grid_w = _sum_codes("IP1", "IP2", "IP3")
+
+                    ac_kw = (load_w / 1000.0) if load_w is not None else ac_kw
+                    pv_kw = (pv_w / 1000.0) if pv_w is not None else pv_kw
+                    battery_kw = (batt_w / 1000.0) if batt_w is not None else battery_kw
+                    battery_soc_pct = _first_code("bs", "SOC", "VSH") or battery_soc_pct
+                    grid_kw = (grid_w / 1000.0) if grid_w is not None else grid_kw
+                    ac_freq_hz = _first_code("OF", "IF1") or ac_freq_hz
+                    ac_v_avg = _avg_codes("OV1", "OV2", "OV3") or ac_v_avg
+                    status_code = str(int(_first_code("S") or 0)) if status_code is None else status_code
+                    source_payload["diagnostics"] = diag_records
+            except requests.RequestException:
+                pass
+
         target = next(
             (e for e in equipment if e.kind == "inverter"),
             equipment[0],
@@ -259,15 +339,15 @@ class VictronAdapter(InverterAdapter):
             LiveReading(
                 equipment_id=target.id,
                 ts_utc=ts,
-                ac_kw=_num("Ac/Out/L1/P") or _num("acOutput"),
-                pv_kw=_num("Dc/Pv/Power") or _num("pvPower"),
-                battery_kw=_num("Dc/Battery/Power") or _num("batteryPower"),
-                battery_soc_pct=_num("Dc/Battery/Soc") or _num("soc"),
-                grid_kw=_num("Ac/Grid/L1/P") or _num("gridPower"),
-                ac_freq_hz=_num("Ac/Out/L1/F"),
-                ac_v_avg=_num("Ac/Out/L1/V"),
-                status_code=str(records.get("state", "")) or None,
-                raw_json=records,
+                ac_kw=ac_kw,
+                pv_kw=pv_kw,
+                battery_kw=battery_kw,
+                battery_soc_pct=battery_soc_pct,
+                grid_kw=grid_kw,
+                ac_freq_hz=ac_freq_hz,
+                ac_v_avg=ac_v_avg,
+                status_code=status_code,
+                raw_json=source_payload,
             )
         ]
 

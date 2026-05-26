@@ -1,15 +1,21 @@
 """
 Vendor adapter registry for gensite telemetry.
 
+QUARANTINED NON-POLICY AREA (for event-parity scope):
+- Gensite adapter work is intentionally separate from current CC<->SM parity strategy.
+- Do not include these adapter changes in parity PRs unintentionally.
+- See docs/ops/non-policy-quarantine-registry.md.
+
 Each adapter implements `InverterAdapter` (see .base) and is registered in
 REGISTRY below. The commission wizard offers `REGISTRY.keys()` as the vendor
 dropdown; the poller dispatches on `site_credentials.vendor`.
 
-Phase 1 status:
-    victron   — implemented (Victron VRM public REST API)
-    solarman  — stub       (Deye LSB / Deye SAM via Solarman OpenAPI)
-    sinosoar  — stub       (Sinosoar Cloud — sinosoarcloud.com SPA + JSON XHR)
-    sma       — stub       (SMA Sunny Portal — session scrape)
+Status:
+    victron   — ready  (Victron VRM REST API)
+    deye      — ready  (Deye ESS Cloud OpenAPI — developer-ess-eu1.deyecloud.com)
+    alphaess  — ready  (AlphaESS Cloud — sgcloud.alphaess.com/api)
+    sinosoar  — ready  (Sinosoar Cloud — JeecgBoot SPA + CAPTCHA OCR)
+    sma       — ready  (SMA Sunny Portal — Keycloak token + uiapi energybalance)
 """
 
 from typing import Dict
