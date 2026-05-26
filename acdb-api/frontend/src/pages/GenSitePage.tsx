@@ -41,6 +41,17 @@ function asNum(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+function formatMetricTooltip(value: unknown, key: string): [string, string] {
+  const n = asNum(value);
+  if (n === null) return ['—', key];
+  const k = (key || '').toLowerCase();
+  if (k.includes('soc') || k.includes('pct')) return [`${n.toFixed(1)} %`, key];
+  if (k.includes('kwh')) return [`${n.toFixed(3)} kWh`, key];
+  if (k.includes('hz')) return [`${n.toFixed(3)} Hz`, key];
+  if (k.includes('v_') || k.endsWith('_v') || k.includes('voltage')) return [`${n.toFixed(2)} V`, key];
+  return [`${n.toFixed(3)} kW`, key];
+}
+
 function hhmmLocal(d: Date): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
@@ -546,9 +557,19 @@ export default function GenSitePage() {
               <AreaChart data={displayedPowerChartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                 <XAxis dataKey="ts" tick={{ fontSize: 10 }} minTickGap={40} />
-                <YAxis yAxisId="power" tick={{ fontSize: 10 }} />
-                <YAxis yAxisId="pct" orientation="right" tick={{ fontSize: 10 }} domain={[0, 100]} />
-                <Tooltip />
+                <YAxis
+                  yAxisId="power"
+                  tick={{ fontSize: 10 }}
+                  label={{ value: 'Power [kW]', angle: -90, position: 'insideLeft', offset: 4, style: { fontSize: 11 } }}
+                />
+                <YAxis
+                  yAxisId="pct"
+                  orientation="right"
+                  tick={{ fontSize: 10 }}
+                  domain={[0, 100]}
+                  label={{ value: 'SoC [%]', angle: 90, position: 'insideRight', offset: 4, style: { fontSize: 11 } }}
+                />
+                <Tooltip formatter={(value, name) => formatMetricTooltip(value, String(name))} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
                 {POWER_AND_STATE_METRICS.map(m => (
                   <Area
@@ -663,7 +684,7 @@ export default function GenSitePage() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                 <XAxis dataKey="ts" tick={{ fontSize: 10 }} minTickGap={40} />
                 <YAxis tick={{ fontSize: 10 }} />
-                <Tooltip />
+                <Tooltip formatter={(value, name) => formatMetricTooltip(value, String(name))} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
                 {ENERGY_METRICS.map(m => (
                   <Line
