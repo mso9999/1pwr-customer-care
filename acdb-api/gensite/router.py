@@ -32,10 +32,13 @@ superadmin or onm_team for writes):
 from __future__ import annotations
 
 import logging
+import csv
+import io
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from middleware import require_employee
@@ -558,6 +561,56 @@ def get_series(
         "bucket_seconds": bucket,
         "points": points,
     }
+
+
+# ---------------------------------------------------------------------------
+# GET /sites/{code}/hourly-export — archival hourly metrics CSV
+# ---------------------------------------------------------------------------
+
+@router.get("/sites/{code}/hourly-export")
+def export_hourly_metrics_csv(
+    code: str,
+    hours: int = Query(24 * 30, ge=1, le=24 * 365, description="Window size in hours (default 30d)"),
+    to: Optional[datetime] = Query(None, description="End (UTC). Default: now."),
+    user: CurrentUser = Depends(require_employee),
+):
+    site = store.get_site(code)
+    if not site:
+        raise HTTPException(status_code=404, detail=f"Site '{code}' not found.")
+    end = to or datetime.now(timezone.utc)
+    start = end - timedelta(hours=hours)
+    rows = store.list_hourly_site_metrics(code, start, end)
+
+    sio = io.StringIO()
+    w = csv.writer(sio)
+    w.writerow([
+        "site_code",
+        "hour_utc",
+        "avg_pv_kw",
+        "avg_load_kw",
+        "avg_genset_kw",
+        "avg_battery_soc_pct",
+        "sample_count",
+        "genset_inferred_from_grid",
+    ])
+    for r in rows:
+        w.writerow([
+            r.get("site_code"),
+            r.get("hour_utc"),
+            r.get("avg_pv_kw"),
+            r.get("avg_load_kw"),
+            r.get("avg_genset_kw"),
+            r.get("avg_battery_soc_pct"),
+            r.get("sample_count"),
+            r.get("genset_inferred_from_grid"),
+        ])
+    payload = sio.getvalue().encode("utf-8")
+    fname = f"gensite_hourly_metrics_{code.upper()}_{start.strftime('%Y%m%d%H%M')}_{end.strftime('%Y%m%d%H%M')}.csv"
+    return StreamingResponse(
+        iter([payload]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={fname}"},
+    )
 
 
 # ---------------------------------------------------------------------------

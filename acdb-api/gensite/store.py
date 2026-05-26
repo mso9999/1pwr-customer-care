@@ -648,6 +648,36 @@ def upsert_hourly_site_metrics(hours_back: int = 72) -> int:
     return int(touched)
 
 
+def list_hourly_site_metrics(
+    site_code: str,
+    start_utc: datetime,
+    end_utc: datetime,
+) -> List[Dict[str, Any]]:
+    """Return archived hourly telemetry rows for one site."""
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT
+                    site_code,
+                    hour_utc,
+                    avg_pv_kw,
+                    avg_load_kw,
+                    avg_genset_kw,
+                    avg_battery_soc_pct,
+                    sample_count,
+                    genset_inferred_from_grid
+                FROM gensite_hourly_metrics
+                WHERE site_code = %s
+                  AND hour_utc >= %s
+                  AND hour_utc < %s
+                ORDER BY hour_utc ASC
+                """,
+                (site_code.upper(), start_utc, end_utc),
+            )
+            return [dict(r) for r in cur.fetchall()]
+
+
 # ---------------------------------------------------------------------------
 # inverter_alarms
 # ---------------------------------------------------------------------------

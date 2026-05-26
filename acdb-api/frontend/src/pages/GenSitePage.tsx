@@ -10,6 +10,7 @@ import {
   ackGensiteAlarm,
   openUgpTicketForAlarm,
   verifyGensiteCredential,
+  downloadGensiteHourlyMetrics,
   type GensiteSiteDetail,
   type GensiteSeriesResponse,
   type GensiteAlarm,
@@ -96,6 +97,7 @@ export default function GenSitePage() {
   const [seriesWindow, setSeriesWindow] = useState<number>(24);
   const [series, setSeries] = useState<Record<string, GensiteSeriesResponse>>({});
   const [busyAlarm, setBusyAlarm] = useState<number | null>(null);
+  const [exportingHourly, setExportingHourly] = useState(false);
 
   async function reload() {
     try {
@@ -177,6 +179,17 @@ export default function GenSitePage() {
       alert(`Ticket creation failed: ${e}`);
     } finally {
       setBusyAlarm(null);
+    }
+  }
+
+  async function exportHourlyCsv() {
+    setExportingHourly(true);
+    try {
+      await downloadGensiteHourlyMetrics(code, Math.max(seriesWindow, 24));
+    } catch (e) {
+      setVerifyMsg(`hourly export: error — ${String(e)}`);
+    } finally {
+      setExportingHourly(false);
     }
   }
 
@@ -503,7 +516,7 @@ export default function GenSitePage() {
       <section>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-semibold">Power and state telemetry</h2>
-          <div className="flex gap-1 text-xs">
+          <div className="flex gap-2 text-xs items-center">
             {[6, 24, 24 * 7, 24 * 30].map(h => (
               <button
                 key={h}
@@ -513,6 +526,14 @@ export default function GenSitePage() {
                 {h === 6 ? '6h' : h === 24 ? '24h' : h === 168 ? '7d' : '30d'}
               </button>
             ))}
+            <button
+              onClick={exportHourlyCsv}
+              disabled={exportingHourly}
+              className="px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 disabled:opacity-50"
+              title="Download archived hourly PV/load/genset/SOC CSV"
+            >
+              {exportingHourly ? 'Exporting…' : 'Export hourly CSV'}
+            </button>
           </div>
         </div>
         <div className="bg-white border rounded-xl p-3" style={{ height: 280 }}>

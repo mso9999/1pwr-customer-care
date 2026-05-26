@@ -121,6 +121,50 @@ async function requestGensite<T>(path: string, options: RequestInit = {}): Promi
   return requestAtBase('/api', path, options);
 }
 
+async function downloadFileAtBase(
+  base: string,
+  path: string,
+  fallbackFilename: string,
+  options: RequestInit = {},
+): Promise<void> {
+  const token = getToken();
+  const headers: Record<string, string> = {
+    ...(options.headers as Record<string, string> || {}),
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(`${base}${path}`, { ...options, headers });
+
+  if (res.status === 401) {
+    localStorage.removeItem('cc_token');
+    localStorage.removeItem('cc_user');
+    window.location.href = '/login';
+    throw new Error('Unauthorized');
+  }
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ detail: res.statusText }));
+    const msg = formatApiErrorDetail(body.detail) || res.statusText || `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+
+  const blob = await res.blob();
+  const disposition = res.headers.get('content-disposition') || '';
+  const match = disposition.match(/filename="?([^"]+)"?/i);
+  const filename = match?.[1] || fallbackFilename;
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 async function downloadFile(path: string, fallbackFilename: string, options: RequestInit = {}): Promise<void> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -2639,6 +2683,17 @@ export async function openUgpTicketForAlarm(
     method: 'POST',
     body: JSON.stringify(body),
   });
+}
+
+export async function downloadGensiteHourlyMetrics(
+  code: string,
+  hours = 24 * 30,
+): Promise<void> {
+  return downloadFileAtBase(
+    '/api',
+    `/gensite/sites/${encodeURIComponent(code)}/hourly-export?hours=${hours}`,
+    `gensite_hourly_metrics_${code}.csv`,
+  );
 }
 
 // Health is at root level, not under /api
