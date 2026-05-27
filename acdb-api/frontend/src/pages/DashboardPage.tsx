@@ -165,6 +165,14 @@ export default function DashboardPage() {
     revenue_thousands: filteredSites.reduce((s, r) => s + r.revenue_thousands, 0),
   }), [filteredSites]);
 
+  // Country-scoped totals (independent of site pill toggles)
+  const countryTotals = useMemo(() => ({
+    customers: siteData.reduce((s, r) => s + r.customer_count, 0),
+    mwh: siteData.reduce((s, r) => s + r.mwh, 0),
+    revenue_thousands: siteData.reduce((s, r) => s + r.revenue_thousands, 0),
+    sites: siteData.length,
+  }), [siteData]);
+
   const totalCustomers = filteredSites.reduce((sum, s) => sum + s.customer_count, 0);
   const totalTables = tables.length;
 
@@ -381,27 +389,25 @@ export default function DashboardPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <div className="bg-white rounded-lg shadow p-4 sm:p-5">
           <p className="text-xs sm:text-sm text-gray-500">{t('dashboard:dashboard.cards.registeredCustomers')}</p>
-          <p className="text-2xl sm:text-3xl font-bold text-blue-700">{totalCustomers.toLocaleString()}</p>
+          <p className="text-2xl sm:text-3xl font-bold text-blue-700">{countryTotals.customers.toLocaleString()}</p>
           <p className="text-xs text-gray-400 mt-0.5">
-            {allSites
-              ? `${currentCountry?.name ?? country} \u00b7 ${t('dashboard:dashboard.cards.allSitesSubtitle')}`
-              : `${filteredSites.map(s => s.concession).join(', ')}`}
+            {`${currentCountry?.name ?? country} \u00b7 ${t('dashboard:dashboard.cards.allSitesSubtitle')}`}
           </p>
         </div>
         <div className="bg-white rounded-lg shadow p-4 sm:p-5">
           <p className="text-xs sm:text-sm text-gray-500">{t('dashboard:dashboard.cards.allTimeMwh')}</p>
-          <p className="text-2xl sm:text-3xl font-bold text-green-700">{filteredTotals.mwh.toLocaleString(undefined, { maximumFractionDigits: 1 })}</p>
+          <p className="text-2xl sm:text-3xl font-bold text-green-700">{countryTotals.mwh.toLocaleString(undefined, { maximumFractionDigits: 1 })}</p>
           <p className="text-xs text-gray-400 mt-0.5">{t('dashboard:dashboard.cards.cumulativeEnergyDelivered')}</p>
         </div>
         <div className="bg-white rounded-lg shadow p-4 sm:p-5">
           <p className="text-xs sm:text-sm text-gray-500">{t('dashboard:dashboard.cards.allTimeRevenue')}</p>
-          <p className="text-2xl sm:text-3xl font-bold text-amber-700">'000 {currency} {filteredTotals.revenue_thousands.toLocaleString(undefined, { maximumFractionDigits: 1 })}</p>
+          <p className="text-2xl sm:text-3xl font-bold text-amber-700">'000 {currency} {countryTotals.revenue_thousands.toLocaleString(undefined, { maximumFractionDigits: 1 })}</p>
           <p className="text-xs text-gray-400 mt-0.5">Cumulative &middot; {currentCountry?.name ?? country} only</p>
         </div>
         <div className="bg-white rounded-lg shadow p-4 sm:p-5">
           <p className="text-xs sm:text-sm text-gray-500">{t('dashboard:dashboard.cards.sites')}</p>
           <p className="text-2xl sm:text-3xl font-bold text-purple-700">
-            {allSites ? siteData.length : `${filteredSites.length} / ${siteData.length}`}
+            {countryTotals.sites}
           </p>
         </div>
       </div>
