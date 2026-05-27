@@ -5742,3 +5742,28 @@ Root cause: **Dual registration without synchronization**
 ### Verification
 - Frontend typecheck passed:
   - `cd acdb-api/frontend && npx tsc -b --noEmit`
+
+## Session 2026-05-27 [202605271246] (Dashboard Overflow + All Countries Selector)
+
+### What Was Done
+- Fixed aggregate dashboard flow rendering to stay within the card viewport by removing the forced minimum SVG width and using a responsive height layout.
+- Added a first-class `ALL` country option in frontend country context and selector UX:
+  - selector now exposes an explicit "All countries" option,
+  - portfolio dropdown in ALL mode uses the full portfolio list,
+  - country context bypasses per-country `/config` fetch for ALL mode.
+- Added `ALL` mapping to frontend API base route resolution for consistent request routing.
+
+### Key Decisions
+- Keep all-country mode frontend-driven while reusing existing backend endpoints already capable of cross-country aggregate behavior when no specific country is provided.
+- Treat `ALL` as a valid country context code so existing page logic can branch explicitly (`country === 'ALL'`) without brittle implicit behavior.
+
+### Files Modified
+- `acdb-api/frontend/src/pages/DashboardPage.tsx`
+- `acdb-api/frontend/src/contexts/CountryContext.tsx`
+- `acdb-api/frontend/src/components/Layout.tsx`
+- `acdb-api/frontend/src/lib/api.ts`
+- `SESSION_LOG.md`
+
+### Verification
+- Frontend typecheck passed:
+  - `cd acdb-api/frontend && npx tsc -b --noEmit`

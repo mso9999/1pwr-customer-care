@@ -92,10 +92,10 @@ function NavIcon({ d }: { d: string }) {
 
 export default function Layout() {
   const { user, logout, isEmployee, isCustomer, isSuperadmin } = useAuth();
-  const { country, setCountry, countries, portfolio, setPortfolio } = useCountry();
+  const { country, setCountry, countries, portfolios, portfolio, setPortfolio } = useCountry();
   const { t, i18n } = useTranslation('common');
   const currentCountry = countries.find((c) => c.code === country);
-  const countryPortfolios = currentCountry?.portfolios ?? [];
+  const countryPortfolios = country === 'ALL' ? portfolios : (currentCountry?.portfolios ?? []);
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -161,7 +161,9 @@ export default function Layout() {
             className="w-full text-sm border border-gray-200 rounded-md px-2 py-1.5 bg-white focus:ring-1 focus:ring-blue-400 focus:outline-none"
           >
             {countries.map((c) => (
-              <option key={c.code} value={c.code}>{c.flag} {c.name}</option>
+              <option key={c.code} value={c.code}>
+                {c.flag} {c.code === 'ALL' ? t('allCountries') : c.name}
+              </option>
             ))}
           </select>
           {countryPortfolios.length > 0 && (

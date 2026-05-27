@@ -29,10 +29,24 @@ interface CountryContextType {
 }
 
 const COUNTRY_ROUTES: Record<string, string> = {
+  ALL: '/api',
   LS: '/api',
   BN: '/api/bn',
   ZM: '/api/zm',
 };
+
+const ALL_COUNTRIES_ENTRY: CountryEntry = {
+  code: 'ALL',
+  name: 'All countries',
+  flag: '🌍',
+  baseCurrency: 'USD',
+  portfolios: [],
+};
+
+function withAllCountries(entries: CountryEntry[]): CountryEntry[] {
+  const filtered = entries.filter((c) => c.code !== 'ALL');
+  return [ALL_COUNTRIES_ENTRY, ...filtered];
+}
 
 const FALLBACK_COUNTRIES: CountryEntry[] = [
   { code: 'LS', name: 'Lesotho', flag: '\u{1F1F1}\u{1F1F8}', baseCurrency: 'LSL', portfolios: [] },
@@ -50,7 +64,7 @@ export function CountryProvider({ children }: { children: ReactNode }) {
     () => localStorage.getItem('cc_portfolio') || ''
   );
   const [config, setConfig] = useState<CountryConfig | null>(null);
-  const [countries, setCountries] = useState<CountryEntry[]>(FALLBACK_COUNTRIES);
+  const [countries, setCountries] = useState<CountryEntry[]>(withAllCountries(FALLBACK_COUNTRIES));
   const [allPortfolios, setAllPortfolios] = useState<Portfolio[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -60,7 +74,7 @@ export function CountryProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     fetchPortfolios()
       .then(({ countries: c, portfolios: p }) => {
-        if (c.length > 0) setCountries(c);
+        if (c.length > 0) setCountries(withAllCountries(c));
         setAllPortfolios(p);
       })
       .catch((err) => {
@@ -91,6 +105,11 @@ export function CountryProvider({ children }: { children: ReactNode }) {
 
   // ── Fetch country config from CC backend when country changes ──
   useEffect(() => {
+    if (country === 'ALL') {
+      setConfig(null);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setConfig(null);
     fetch(`${apiBase}/config`)

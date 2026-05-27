@@ -259,8 +259,8 @@ export default function DashboardPage() {
               {aggregateFlow.site_count} sites · Last {formatTimestamp(aggregateFlow.latest_ts_utc)}
             </div>
           </div>
-          <div className="border rounded-xl bg-gray-50 p-2 overflow-x-auto">
-            <svg viewBox="0 0 860 360" className="w-full h-[260px] min-w-[760px]">
+          <div className="border rounded-xl bg-gray-50 p-2 overflow-hidden">
+            <svg viewBox="0 0 860 360" className="w-full h-[220px] sm:h-[260px]">
               <defs>
                 <marker id="dashArrowHead" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto" markerUnits="strokeWidth">
                   <path d="M0,0 L8,4 L0,8 z" fill="currentColor" />

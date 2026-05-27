@@ -3,6 +3,7 @@
  */
 
 const COUNTRY_ROUTES: Record<string, string> = {
+  ALL: '/api',
   LS: '/api',
   BN: '/api/bn',
   ZM: '/api/zm',
