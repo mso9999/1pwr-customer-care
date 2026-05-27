@@ -17,14 +17,54 @@ import {
 } from '../lib/api';
 import { useCountry } from '../contexts/CountryContext';
 import { useAuth } from '../contexts/AuthContext';
+import solarPanelIcon from '../assets/flow-icons/solar-panel.png';
+import generatorIcon from '../assets/flow-icons/generator.png';
+import inverterIcon from '../assets/flow-icons/solar-inverter.png';
+import powerGridIcon from '../assets/flow-icons/power-grid.png';
+import housesIcon from '../assets/flow-icons/houses.png';
+import fullBatteryIcon from '../assets/flow-icons/full-battery.png';
+import halfBatteryIcon from '../assets/flow-icons/half-battery.png';
+import lowBatteryIcon from '../assets/flow-icons/low-battery.png';
+import emptyBatteryIcon from '../assets/flow-icons/empty-battery.png';
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316', '#ec4899', '#14b8a6', '#6366f1', '#84cc16', '#e11d48', '#0ea5e9', '#a855f7'];
+const FLOW_CSS = `
+.flow-line { stroke-dasharray: 8 8; }
+.flow-forward { animation: flow-forward 1.1s linear infinite; }
+.flow-reverse { animation: flow-reverse 1.1s linear infinite; }
+.icon-blink-a { animation: icon-blink-a 1s steps(1, end) infinite; transform-origin: center; }
+.icon-blink-b { animation: icon-blink-b 1s steps(1, end) infinite; transform-origin: center; }
+@keyframes flow-forward { from { stroke-dashoffset: 0; } to { stroke-dashoffset: -24; } }
+@keyframes flow-reverse { from { stroke-dashoffset: 0; } to { stroke-dashoffset: 24; } }
+@keyframes icon-blink-a { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+@keyframes icon-blink-b { 0%, 49% { opacity: 0; } 50%, 100% { opacity: 1; } }
+`;
 
 interface SiteRow {
   concession: string;
   customer_count: number;
   mwh: number;
   revenue_thousands: number;
+}
+
+type FlowNodeKind = 'pv' | 'genset' | 'inverter' | 'battery' | 'load';
+type BatteryIconState =
+  | 'full'
+  | 'fullHalfBlink'
+  | 'half'
+  | 'halfRedBlink'
+  | 'red'
+  | 'redBlink'
+  | 'offline';
+
+function batteryIconStateFromSoc(soc: number | null | undefined): BatteryIconState {
+  if (soc === null || soc === undefined || !Number.isFinite(soc)) return 'offline';
+  if (soc > 90) return 'full';
+  if (soc > 55) return 'fullHalfBlink';
+  if (soc >= 45) return 'half';
+  if (soc >= 25) return 'halfRedBlink';
+  if (soc >= 15) return 'red';
+  return 'redBlink';
 }
 
 export default function DashboardPage() {
@@ -151,9 +191,16 @@ export default function DashboardPage() {
     ...s,
     label: `${s.mwh.toFixed(1)} MWh / ${s.revenue_thousands.toFixed(1)}k ${currency}`,
   }));
+  const aggregateBatteryDischarging = (aggregateFlow?.battery_kw ?? 0) > 0.05;
+  const aggregatePvActive = (aggregateFlow?.pv_kw ?? 0) > 0.05;
+  const aggregateGensetActive = (aggregateFlow?.genset_kw ?? 0) > 0.05;
+  const aggregateLoadActive = (aggregateFlow?.load_kw ?? 0) > 0.05;
+  const aggregateBatteryActive = Math.abs(aggregateFlow?.battery_kw ?? 0) > 0.05;
+  const aggregateBatteryIconState = batteryIconStateFromSoc(aggregateFlow?.battery_soc_pct);
 
   return (
     <div className="space-y-4 sm:space-y-6">
+      <style>{FLOW_CSS}</style>
       <div className="flex items-baseline gap-3 flex-wrap">
         <h1 className="text-xl sm:text-2xl font-bold text-gray-800">{t('dashboard:dashboard.title')}</h1>
         {portfolio && (
@@ -213,27 +260,116 @@ export default function DashboardPage() {
             </div>
           </div>
           <div className="border rounded-xl bg-gray-50 p-2 overflow-x-auto">
-            <svg viewBox="0 0 860 250" className="w-full h-[210px] min-w-[760px]">
+            <svg viewBox="0 0 860 360" className="w-full h-[260px] min-w-[760px]">
+              <defs>
+                <marker id="dashArrowHead" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto" markerUnits="strokeWidth">
+                  <path d="M0,0 L8,4 L0,8 z" fill="currentColor" />
+                </marker>
+              </defs>
+
               <line x1="178" y1="78" x2="392" y2="125" stroke="#d1d5db" strokeWidth="3" />
               <line x1="178" y1="172" x2="392" y2="125" stroke="#d1d5db" strokeWidth="3" />
               <line x1="468" y1="125" x2="674" y2="125" stroke="#d1d5db" strokeWidth="3" />
               <line x1="392" y1="194" x2="392" y2="125" stroke="#d1d5db" strokeWidth="3" />
+
+              {aggregatePvActive && (
+                <line
+                  x1="178"
+                  y1="78"
+                  x2="392"
+                  y2="125"
+                  stroke="#eab308"
+                  strokeWidth="6"
+                  className="flow-line flow-forward"
+                  markerEnd="url(#dashArrowHead)"
+                />
+              )}
+              {aggregateGensetActive && (
+                <line
+                  x1="178"
+                  y1="172"
+                  x2="392"
+                  y2="125"
+                  stroke="#ef4444"
+                  strokeWidth="6"
+                  className="flow-line flow-forward"
+                  markerEnd="url(#dashArrowHead)"
+                />
+              )}
+              {aggregateLoadActive && (
+                <line
+                  x1="468"
+                  y1="125"
+                  x2="674"
+                  y2="125"
+                  stroke="#0ea5e9"
+                  strokeWidth="6"
+                  className="flow-line flow-forward"
+                  markerEnd="url(#dashArrowHead)"
+                />
+              )}
+              {aggregateBatteryActive && (
+                <line
+                  x1="392"
+                  y1="194"
+                  x2="392"
+                  y2="125"
+                  stroke="#22c55e"
+                  strokeWidth="6"
+                  className={`flow-line ${aggregateBatteryDischarging ? 'flow-forward' : 'flow-reverse'}`}
+                  markerEnd={aggregateBatteryDischarging ? 'url(#dashArrowHead)' : undefined}
+                  markerStart={!aggregateBatteryDischarging ? 'url(#dashArrowHead)' : undefined}
+                />
+              )}
 
               <FlowBubble x={246} y={88} value={fmtKw(aggregateFlow.pv_kw)} color="#eab308" />
               <FlowBubble x={246} y={143} value={fmtKw(aggregateFlow.genset_kw)} color="#ef4444" />
               <FlowBubble x={518} y={111} value={fmtKw(aggregateFlow.load_kw)} color="#0ea5e9" />
               <FlowBubble x={404} y={170} value={fmtKw(Math.abs(aggregateFlow.battery_kw ?? 0))} color="#22c55e" />
 
-              <NodeBox x={64} y={58} label="PV" lines={[fmtKw(aggregateFlow.pv_kw)]} />
-              <NodeBox x={64} y={150} label="Genset" lines={[fmtKw(aggregateFlow.genset_kw)]} />
-              <NodeBox x={320} y={92} label="Inverter" lines={[`Residual ${fmtKw(aggregateFlow.balance_residual_kw)}`]} />
-              <NodeBox x={686} y={92} label="Load" lines={[fmtKw(aggregateFlow.load_kw)]} />
+              <NodeBox
+                x={32}
+                y={50}
+                kind="pv"
+                iconPlacement="top"
+                iconOffsetY={12}
+                label="PV"
+                lines={[`Now ${fmtKw(aggregateFlow.pv_kw)}`]}
+              />
+              <NodeBox
+                x={32}
+                y={144}
+                kind="genset"
+                iconPlacement="bottom"
+                iconOffsetY={-16}
+                label="Genset"
+                lines={[`Now ${fmtKw(aggregateFlow.genset_kw)}`]}
+              />
+              <NodeBox
+                x={320}
+                y={92}
+                kind="inverter"
+                iconPlacement="top"
+                label="Inverter"
+                lines={[`Residual ${fmtKw(aggregateFlow.balance_residual_kw)}`]}
+              />
+              <NodeBox
+                x={686}
+                y={92}
+                kind="load"
+                iconPlacement="top"
+                label="Load"
+                lines={[`Now ${fmtKw(aggregateFlow.load_kw)}`]}
+              />
               <NodeBox
                 x={320}
                 y={184}
+                kind="battery"
+                iconPlacement="right"
+                iconBatteryState={aggregateBatteryIconState}
                 label={aggregateFlow.battery_kw >= 0 ? 'Battery out' : 'Battery in'}
                 lines={[
-                  fmtKw(aggregateFlow.battery_kw),
+                  `Now ${fmtKw(aggregateFlow.battery_kw)}`,
                   `SoC ${aggregateFlow.battery_soc_pct == null ? '—' : `${aggregateFlow.battery_soc_pct.toFixed(1)}%`}`,
                 ]}
               />
@@ -781,6 +917,71 @@ export default function DashboardPage() {
   );
 }
 
+function FlowIcon({
+  kind,
+  batteryState = 'offline',
+}: {
+  kind: FlowNodeKind;
+  batteryState?: BatteryIconState;
+}) {
+  if (kind === 'pv') {
+    return (
+      <image href={solarPanelIcon} x="1" y="1" width="20" height="20" preserveAspectRatio="xMidYMid meet" />
+    );
+  }
+  if (kind === 'genset') {
+    return (
+      <image href={generatorIcon} x="1" y="1" width="20" height="20" preserveAspectRatio="xMidYMid meet" />
+    );
+  }
+  if (kind === 'battery') {
+    if (batteryState === 'fullHalfBlink') {
+      return (
+        <g>
+          <image className="icon-blink-a" href={fullBatteryIcon} x="1" y="1" width="20" height="20" preserveAspectRatio="xMidYMid meet" />
+          <image className="icon-blink-b" href={halfBatteryIcon} x="1" y="1" width="20" height="20" preserveAspectRatio="xMidYMid meet" />
+        </g>
+      );
+    }
+    if (batteryState === 'halfRedBlink') {
+      return (
+        <g>
+          <image className="icon-blink-a" href={halfBatteryIcon} x="1" y="1" width="20" height="20" preserveAspectRatio="xMidYMid meet" />
+          <image className="icon-blink-b" href={lowBatteryIcon} x="1" y="1" width="20" height="20" preserveAspectRatio="xMidYMid meet" />
+        </g>
+      );
+    }
+    if (batteryState === 'redBlink') {
+      return (
+        <image className="icon-blink-a" href={lowBatteryIcon} x="1" y="1" width="20" height="20" preserveAspectRatio="xMidYMid meet" />
+      );
+    }
+    const batteryIcon = batteryState === 'full'
+      ? fullBatteryIcon
+      : batteryState === 'half'
+        ? halfBatteryIcon
+        : batteryState === 'red'
+          ? lowBatteryIcon
+          : emptyBatteryIcon;
+    return (
+      <image href={batteryIcon} x="1" y="1" width="20" height="20" preserveAspectRatio="xMidYMid meet" />
+    );
+  }
+  if (kind === 'load') {
+    return (
+      <g>
+        <g transform="translate(-5,-5) scale(2)">
+          <image href={powerGridIcon} x="-1" y="1" width="11" height="20" preserveAspectRatio="xMidYMid meet" />
+          <image href={housesIcon} x="9" y="1" width="14" height="20" preserveAspectRatio="xMidYMid meet" />
+        </g>
+      </g>
+    );
+  }
+  return (
+    <image href={inverterIcon} x="1" y="1" width="20" height="20" preserveAspectRatio="xMidYMid meet" />
+  );
+}
+
 function FlowBubble({ x, y, value, color }: { x: number; y: number; value: string; color: string }) {
   return (
     <g transform={`translate(${x},${y})`}>
@@ -790,13 +991,42 @@ function FlowBubble({ x, y, value, color }: { x: number; y: number; value: strin
   );
 }
 
-function NodeBox({ x, y, label, lines }: { x: number; y: number; label: string; lines: string[] }) {
+function NodeBox({
+  x,
+  y,
+  kind,
+  label,
+  lines,
+  iconPlacement = 'left',
+  iconBatteryState,
+  iconOffsetX = 0,
+  iconOffsetY = 0,
+}: {
+  x: number;
+  y: number;
+  kind: FlowNodeKind;
+  label: string;
+  lines: string[];
+  iconPlacement?: 'left' | 'right' | 'top' | 'bottom';
+  iconBatteryState?: BatteryIconState;
+  iconOffsetX?: number;
+  iconOffsetY?: number;
+}) {
+  const iconScale = 3;
+  const iconHalf = 11 * iconScale;
+  const iconCxBase = iconPlacement === 'right' ? 214 : iconPlacement === 'left' ? -70 : 72;
+  const iconCyBase = iconPlacement === 'top' ? -72 : iconPlacement === 'bottom' ? 138 : 33;
+  const iconCx = iconCxBase + iconOffsetX;
+  const iconCy = iconCyBase + iconOffsetY;
   return (
     <g transform={`translate(${x},${y})`}>
-      <rect rx="8" ry="8" width="112" height="52" fill="#ffffff" stroke="#4b5563" strokeWidth="2" />
-      <text x="8" y="16" fontSize="10" fill="#6b7280">{label}</text>
+      <rect rx="8" ry="8" width="144" height="66" fill="#ffffff" stroke="#4b5563" strokeWidth="2" />
+      <g transform={`translate(${iconCx - iconHalf},${iconCy - iconHalf}) scale(${iconScale})`}>
+        <FlowIcon kind={kind} batteryState={iconBatteryState} />
+      </g>
+      <text x="10" y="19" fontSize="10" fill="#6b7280">{label}</text>
       {lines.map((line, idx) => (
-        <text key={line + idx} x="8" y={34 + idx * 13} fontSize="11" fill="#111827">{line}</text>
+        <text key={line + idx} x="10" y={38 + idx * 16} fontSize="12" fill="#111827">{line}</text>
       ))}
     </g>
   );

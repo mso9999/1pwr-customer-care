@@ -5718,3 +5718,27 @@ Root cause: **Dual registration without synchronization**
 
 ### Protocol Feedback
 - Current orientation docs were strong on gensite ingestion architecture but lacked explicit mention of fleet aggregate flow API/dashboard usage; this session added that to `CONTEXT.md`.
+
+## Session 2026-05-27 [202605271219] (Dashboard Aggregate Flow Visual Parity)
+
+### What Was Done
+- Updated `acdb-api/frontend/src/pages/DashboardPage.tsx` aggregate powerflow card to match the individual site flow diagram look-and-feel:
+  - added the same external icon set (PV, genset, inverter, load composite, battery),
+  - added animated directional flow lines with arrowheads for active channels,
+  - added SoC-driven battery icon states and blink behavior (`full`, `full/half blink`, `half`, `half/red blink`, `red`, `red blink`, `offline`),
+  - replaced simplified aggregate node rendering with the same richer `FlowIcon` + `NodeBox` style used on `GenSitePage`.
+
+### Key Decisions
+- Reused existing aggregate endpoint values (`pv_kw`, `load_kw`, `battery_kw`, `genset_kw`, `battery_soc_pct`, `balance_residual_kw`) and only changed visualization behavior, keeping backend aggregation semantics intact.
+- Kept icon placement and visual hierarchy aligned with site-level flow to maintain operator familiarity.
+
+### What Next Session Should Know
+- Dashboard aggregate and site-level flow visuals are now intentionally parallel; future icon/animation tweaks should be applied to both views to avoid UX drift.
+- If aggregate installed capacities are needed inside boxes (to mirror site capacity lines exactly), backend aggregate payload will need capacity rollups.
+
+### Files Modified
+- `acdb-api/frontend/src/pages/DashboardPage.tsx`
+
+### Verification
+- Frontend typecheck passed:
+  - `cd acdb-api/frontend && npx tsc -b --noEmit`
