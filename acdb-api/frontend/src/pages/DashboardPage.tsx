@@ -268,24 +268,24 @@ export default function DashboardPage() {
             </div>
           </div>
           <div className="border rounded-xl bg-gray-50 p-2 overflow-hidden">
-            <svg viewBox="0 -56 860 416" className="w-full h-[220px] sm:h-[260px]">
+            <svg viewBox="0 -76 860 436" className="w-full h-[220px] sm:h-[260px]">
               <defs>
                 <marker id="dashArrowHead" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto" markerUnits="strokeWidth">
                   <path d="M0,0 L8,4 L0,8 z" fill="currentColor" />
                 </marker>
               </defs>
 
-              <line x1="178" y1="78" x2="392" y2="125" stroke="#d1d5db" strokeWidth="3" />
-              <line x1="178" y1="172" x2="392" y2="125" stroke="#d1d5db" strokeWidth="3" />
-              <line x1="468" y1="125" x2="674" y2="125" stroke="#d1d5db" strokeWidth="3" />
-              <line x1="392" y1="194" x2="392" y2="125" stroke="#d1d5db" strokeWidth="3" />
+              <line x1="164" y1="69" x2="360" y2="119" stroke="#d1d5db" strokeWidth="3" />
+              <line x1="164" y1="223" x2="360" y2="119" stroke="#d1d5db" strokeWidth="3" />
+              <line x1="504" y1="119" x2="690" y2="119" stroke="#d1d5db" strokeWidth="3" />
+              <line x1="432" y1="242" x2="432" y2="152" stroke="#d1d5db" strokeWidth="3" />
 
               {aggregatePvActive && (
                 <line
-                  x1="178"
-                  y1="78"
-                  x2="392"
-                  y2="125"
+                  x1="164"
+                  y1="69"
+                  x2="360"
+                  y2="119"
                   stroke="#eab308"
                   strokeWidth="6"
                   className="flow-line flow-forward"
@@ -294,10 +294,10 @@ export default function DashboardPage() {
               )}
               {aggregateGensetActive && (
                 <line
-                  x1="178"
-                  y1="172"
-                  x2="392"
-                  y2="125"
+                  x1="164"
+                  y1="223"
+                  x2="360"
+                  y2="119"
                   stroke="#ef4444"
                   strokeWidth="6"
                   className="flow-line flow-forward"
@@ -306,10 +306,10 @@ export default function DashboardPage() {
               )}
               {aggregateLoadActive && (
                 <line
-                  x1="468"
-                  y1="125"
-                  x2="674"
-                  y2="125"
+                  x1="504"
+                  y1="119"
+                  x2="690"
+                  y2="119"
                   stroke="#0ea5e9"
                   strokeWidth="6"
                   className="flow-line flow-forward"
@@ -318,10 +318,10 @@ export default function DashboardPage() {
               )}
               {aggregateBatteryActive && (
                 <line
-                  x1="392"
-                  y1="194"
-                  x2="392"
-                  y2="125"
+                  x1="432"
+                  y1="242"
+                  x2="432"
+                  y2="152"
                   stroke="#22c55e"
                   strokeWidth="6"
                   className={`flow-line ${aggregateBatteryDischarging ? 'flow-forward' : 'flow-reverse'}`}
@@ -330,14 +330,14 @@ export default function DashboardPage() {
                 />
               )}
 
-              <FlowBubble x={246} y={88} value={fmtKw(aggregateFlow.pv_kw)} color="#eab308" />
-              <FlowBubble x={246} y={143} value={fmtKw(aggregateFlow.genset_kw)} color="#ef4444" />
-              <FlowBubble x={518} y={111} value={fmtKw(aggregateFlow.load_kw)} color="#0ea5e9" />
-              <FlowBubble x={404} y={170} value={fmtKw(Math.abs(aggregateFlow.battery_kw ?? 0))} color="#22c55e" />
+              <FlowBubble x={226} y={76} value={fmtKw(aggregateFlow.pv_kw)} color="#eab308" />
+              <FlowBubble x={226} y={170} value={fmtKw(aggregateFlow.genset_kw)} color="#ef4444" />
+              <FlowBubble x={552} y={103} value={fmtKw(aggregateFlow.load_kw)} color="#0ea5e9" />
+              <FlowBubble x={446} y={198} value={fmtKw(Math.abs(aggregateFlow.battery_kw ?? 0))} color="#22c55e" />
 
               <NodeBox
-                x={32}
-                y={50}
+                x={20}
+                y={36}
                 kind="pv"
                 iconPlacement="top"
                 iconOffsetY={12}
@@ -345,8 +345,8 @@ export default function DashboardPage() {
                 lines={[`Now ${fmtKw(aggregateFlow.pv_kw)}`]}
               />
               <NodeBox
-                x={32}
-                y={144}
+                x={20}
+                y={190}
                 kind="genset"
                 iconPlacement="bottom"
                 iconOffsetY={-16}
@@ -354,24 +354,24 @@ export default function DashboardPage() {
                 lines={[`Now ${fmtKw(aggregateFlow.genset_kw)}`]}
               />
               <NodeBox
-                x={320}
-                y={92}
+                x={360}
+                y={86}
                 kind="inverter"
                 iconPlacement="top"
                 label="Inverter"
                 lines={[`Residual ${fmtKw(aggregateFlow.balance_residual_kw)}`]}
               />
               <NodeBox
-                x={686}
-                y={92}
+                x={690}
+                y={86}
                 kind="load"
                 iconPlacement="top"
                 label="Load"
                 lines={[`Now ${fmtKw(aggregateFlow.load_kw)}`]}
               />
               <NodeBox
-                x={320}
-                y={184}
+                x={360}
+                y={242}
                 kind="battery"
                 iconPlacement="right"
                 iconBatteryState={aggregateBatteryIconState}
