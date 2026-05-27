@@ -66,7 +66,7 @@ def get_inferred_cohort_status(
             SELECT 1 FROM meters m
             INNER JOIN accounts a_m ON a_m.account_number = m.account_number
             WHERE a_m.customer_id = c.id
-              AND LOWER(COALESCE(m.status, 'active')) NOT IN ('decommissioned', 'retired')
+              AND LOWER(COALESCE(m.status::text, 'active')) NOT IN ('decommissioned', 'retired')
         )"""
         if _column_exists(cur, "customers", "meter_installed"):
             meter_expr = f"(COALESCE(c.meter_installed, false) OR {meter_exists_expr})"

@@ -240,6 +240,8 @@ def _resolve_sites(country: Optional[str], sites: Optional[List[str]]) -> List[s
         return valid
     if country:
         cc = country.upper().strip()
+        if cc == "ALL":
+            return sorted(ALL_KNOWN_SITES)
         cfg = _REGISTRY.get(cc)
         if not cfg:
             raise HTTPException(400, f"Unknown country: {country}")
@@ -250,6 +252,8 @@ def _resolve_sites(country: Optional[str], sites: Optional[List[str]]) -> List[s
 def _resolve_fee_threshold(country: Optional[str]) -> float:
     """Connection + readyboard fee threshold for full-payment classification."""
     cc = (country or "").upper().strip()
+    if cc == "ALL":
+        return 1.0
     cfg = _REGISTRY.get(cc)
     if cfg:
         return float(cfg.default_connection_fee + cfg.default_readyboard_fee)
@@ -273,7 +277,7 @@ def _not_metered_predicate(cursor) -> str:
                 SELECT 1 FROM meters m
                 INNER JOIN accounts a_nm ON a_nm.account_number = m.account_number
                 WHERE a_nm.customer_id = c.id
-                  AND LOWER(COALESCE(m.status, 'active')) NOT IN ('decommissioned', 'retired')
+                  AND LOWER(COALESCE(m.status::text, 'active')) NOT IN ('decommissioned', 'retired')
             )""".strip()
     if cursor is not None and _column_exists(cursor, "customers", "meter_installed"):
         return (
