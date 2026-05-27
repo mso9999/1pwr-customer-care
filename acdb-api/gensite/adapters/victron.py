@@ -49,6 +49,18 @@ VRM_BASE = "https://vrmapi.victronenergy.com/v2"
 HTTP_TIMEOUT = 20
 
 
+def _num(v: Any) -> Optional[float]:
+    if v is None:
+        return None
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return None
+    if not n == n:
+        return None
+    return n
+
+
 class VictronAdapter(InverterAdapter):
     vendor = "victron"
     display_name = "Victron Energy (VRM)"
@@ -528,5 +540,79 @@ class VictronAdapter(InverterAdapter):
                     cleared_at=ended_dt,
                     event_json=item,
                 )
+            )
+        return out
+
+    def discover_installed_capacity(self, cred: SiteCredential) -> List[Dict[str, Any]]:
+        """Best-effort capacity extraction from installation metadata and diagnostics."""
+        if not cred.site_id_on_vendor:
+            return []
+        session = self._session(cred)
+        self._auth_headers(cred, session)
+        base = (cred.base_url or VRM_BASE).rstrip("/")
+        site_id = str(cred.site_id_on_vendor)
+
+        inverter_kw: Optional[float] = None
+        pv_kw: Optional[float] = None
+        battery_kwh: Optional[float] = None
+        battery_kw: Optional[float] = None
+
+        # 1) Installation metadata often exposes PV/system sizing fields.
+        try:
+            user_id = self._user_id(session)
+            if user_id:
+                r = session.get(f"{base}/users/{user_id}/installations", timeout=HTTP_TIMEOUT)
+                if r.status_code == 200:
+                    records = (r.json() or {}).get("records", [])
+                    match = next((x for x in records if str(x.get("idSite")) == site_id), None)
+                    if isinstance(match, dict):
+                        for k, raw in match.items():
+                            lk = str(k).lower()
+                            n = _num(raw)
+                            if n is None or n <= 0:
+                                continue
+                            if any(t in lk for t in ("pv", "solar")) and any(t in lk for t in ("power", "kw", "peak", "size", "capacity")):
+                                pv_kw = max(pv_kw or 0.0, n)
+                            if any(t in lk for t in ("inverter", "ac")) and any(t in lk for t in ("power", "kw", "rated", "nominal", "capacity")):
+                                inverter_kw = max(inverter_kw or 0.0, n)
+                            if "battery" in lk and any(t in lk for t in ("kwh", "energy", "capacity")):
+                                battery_kwh = max(battery_kwh or 0.0, n)
+                            if "battery" in lk and any(t in lk for t in ("power", "kw", "rated", "nominal")):
+                                battery_kw = max(battery_kw or 0.0, n)
+        except requests.RequestException:
+            pass
+
+        # 2) Diagnostics may include static battery sizing fields.
+        try:
+            rd = session.get(f"{base}/installations/{site_id}/diagnostics", timeout=HTTP_TIMEOUT)
+            if rd.status_code == 200:
+                diag_records = (rd.json() or {}).get("records") or []
+                for item in diag_records:
+                    if not isinstance(item, dict):
+                        continue
+                    label = str(item.get("description") or item.get("name") or item.get("code") or "").lower()
+                    n = _num(item.get("rawValue"))
+                    if n is None or n <= 0:
+                        continue
+                    if "battery" in label and any(t in label for t in ("kwh", "energy", "capacity")):
+                        battery_kwh = max(battery_kwh or 0.0, n)
+                    if "battery" in label and any(t in label for t in ("power", "kw", "rated", "nominal")):
+                        battery_kw = max(battery_kw or 0.0, n)
+        except requests.RequestException:
+            pass
+
+        out: List[Dict[str, Any]] = []
+        if inverter_kw:
+            out.append({"kind": "inverter", "nameplate_kw": inverter_kw})
+        if pv_kw:
+            out.append({"kind": "pv_array", "role": "pv", "nameplate_kw": pv_kw})
+        if battery_kw or battery_kwh:
+            out.append(
+                {
+                    "kind": "battery",
+                    "role": "battery",
+                    "nameplate_kw": battery_kw,
+                    "nameplate_kwh": battery_kwh,
+                }
             )
         return out

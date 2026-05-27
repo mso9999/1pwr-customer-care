@@ -150,6 +150,43 @@ def _map_reading(data_list: List[dict]) -> Dict[str, float]:
     return result
 
 
+def _extract_device_capacity(device: Dict[str, Any]) -> Dict[str, Optional[float]]:
+    inverter_kw: Optional[float] = None
+    pv_kw: Optional[float] = None
+    battery_kw: Optional[float] = None
+    battery_kwh: Optional[float] = None
+
+    for key, raw in (device or {}).items():
+        lk = str(key).lower()
+        n = _num(raw)
+        if n is None or n <= 0:
+            continue
+
+        # Normalize likely W values when clearly too large for kW nameplate.
+        if "kw" not in lk and "kwh" not in lk and n > 10000:
+            n = n / 1000.0
+
+        if "battery" in lk and any(x in lk for x in ("kwh", "energy", "capacity")):
+            battery_kwh = max(battery_kwh or 0.0, n)
+            continue
+        if "battery" in lk and any(x in lk for x in ("power", "kw", "rated", "nominal", "max")):
+            battery_kw = max(battery_kw or 0.0, n)
+            continue
+        if any(x in lk for x in ("pv", "solar")) and any(x in lk for x in ("power", "kw", "rated", "nominal", "capacity", "peak", "max")):
+            pv_kw = max(pv_kw or 0.0, n)
+            continue
+        if any(x in lk for x in ("rated", "nominal", "max", "capacity", "nameplate")) and any(x in lk for x in ("power", "kw", "kva")):
+            inverter_kw = max(inverter_kw or 0.0, n)
+            continue
+
+    return {
+        "inverter_kw": inverter_kw,
+        "pv_kw": pv_kw,
+        "battery_kw": battery_kw,
+        "battery_kwh": battery_kwh,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Token cache
 # ---------------------------------------------------------------------------
@@ -624,3 +661,49 @@ class SolarmanAdapter(InverterAdapter):
                 )
             )
         return results
+
+    def discover_installed_capacity(self, cred: SiteCredential) -> List[Dict[str, Any]]:
+        dev_data = self._api_post(cred, "/v1.0/device/list", {"page": 1, "size": 200})
+        devices = dev_data.get("deviceList") or []
+        if not isinstance(devices, list):
+            return []
+
+        target_sn = str(cred.site_id_on_vendor or "").strip()
+        if target_sn:
+            devices = [d for d in devices if str(d.get("deviceSn") or "").strip() == target_sn]
+            if not devices:
+                return []
+
+        inv_kw_vals: List[float] = []
+        pv_kw_vals: List[float] = []
+        batt_kw_vals: List[float] = []
+        batt_kwh_vals: List[float] = []
+
+        for d in devices:
+            if not isinstance(d, dict):
+                continue
+            caps = _extract_device_capacity(d)
+            if caps["inverter_kw"]:
+                inv_kw_vals.append(caps["inverter_kw"])
+            if caps["pv_kw"]:
+                pv_kw_vals.append(caps["pv_kw"])
+            if caps["battery_kw"]:
+                batt_kw_vals.append(caps["battery_kw"])
+            if caps["battery_kwh"]:
+                batt_kwh_vals.append(caps["battery_kwh"])
+
+        out: List[Dict[str, Any]] = []
+        if inv_kw_vals:
+            out.append({"kind": "inverter", "nameplate_kw": max(inv_kw_vals)})
+        if pv_kw_vals:
+            out.append({"kind": "pv_array", "role": "pv", "nameplate_kw": max(pv_kw_vals)})
+        if batt_kw_vals or batt_kwh_vals:
+            out.append(
+                {
+                    "kind": "battery",
+                    "role": "battery",
+                    "nameplate_kw": max(batt_kw_vals) if batt_kw_vals else None,
+                    "nameplate_kwh": max(batt_kwh_vals) if batt_kwh_vals else None,
+                }
+            )
+        return out

@@ -167,6 +167,18 @@ def _make_session(token: str) -> requests.Session:
     return s
 
 
+def _num(v: Any) -> Optional[float]:
+    if v is None:
+        return None
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return None
+    if not n == n:
+        return None
+    return n
+
+
 # ---------------------------------------------------------------------------
 # Adapter
 # ---------------------------------------------------------------------------
@@ -472,3 +484,56 @@ class SinosoarAdapter(InverterAdapter):
         since: datetime,
     ) -> List[AlarmEvent]:
         return []
+
+    def discover_installed_capacity(self, cred: SiteCredential) -> List[Dict[str, Any]]:
+        token = self._get_token(cred)
+        session = _make_session(token)
+
+        pid = str(cred.site_id_on_vendor or "").strip()
+        if not pid:
+            return []
+
+        project: Optional[Dict[str, Any]] = None
+        try:
+            data = _api_get(session, "powerstation/iotProject/lists", params={"pageNo": 1, "pageSize": 200})
+            projects = data.get("result") or []
+            if isinstance(projects, list):
+                project = next((p for p in projects if str((p or {}).get("id", "")) == pid), None)
+        except Exception:
+            project = None
+
+        inverter_kw: Optional[float] = None
+        pv_kw: Optional[float] = None
+        battery_kw: Optional[float] = None
+        battery_kwh: Optional[float] = None
+
+        if isinstance(project, dict):
+            for k, raw in project.items():
+                lk = str(k).lower()
+                n = _num(raw)
+                if n is None or n <= 0:
+                    continue
+                if any(t in lk for t in ("pv", "solar")) and any(t in lk for t in ("power", "kw", "rated", "capacity", "installed", "peak")):
+                    pv_kw = max(pv_kw or 0.0, n)
+                if any(t in lk for t in ("pcs", "inverter")) and any(t in lk for t in ("power", "kw", "rated", "capacity", "nominal", "max")):
+                    inverter_kw = max(inverter_kw or 0.0, n)
+                if "battery" in lk and any(t in lk for t in ("power", "kw", "rated", "capacity")):
+                    battery_kw = max(battery_kw or 0.0, n)
+                if "battery" in lk and any(t in lk for t in ("kwh", "energy", "capacity")):
+                    battery_kwh = max(battery_kwh or 0.0, n)
+
+        out: List[Dict[str, Any]] = []
+        if inverter_kw:
+            out.append({"kind": "inverter", "nameplate_kw": inverter_kw})
+        if pv_kw:
+            out.append({"kind": "pv_array", "role": "pv", "nameplate_kw": pv_kw})
+        if battery_kw or battery_kwh:
+            out.append(
+                {
+                    "kind": "battery",
+                    "role": "battery",
+                    "nameplate_kw": battery_kw,
+                    "nameplate_kwh": battery_kwh,
+                }
+            )
+        return out

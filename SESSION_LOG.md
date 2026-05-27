@@ -5743,6 +5743,42 @@ Root cause: **Dual registration without synchronization**
 - Frontend typecheck passed:
   - `cd acdb-api/frontend && npx tsc -b --noEmit`
 
+## Session 2026-05-27 [202605271253] (Gensite Capacity Discovery Sync from OEM APIs)
+
+### What Was Done
+- Implemented backend capacity-sync plumbing to enrich `site_equipment` nameplate fields from vendor APIs after successful credential verification:
+  - sync now runs in:
+    - `POST /api/gensite/commission` (per credential)
+    - `POST /api/gensite/sites/{code}/credentials/{vendor}/{backend}/verify`
+    - `POST /api/gensite/sites/{code}/credentials/{vendor}/{backend}/rotate`
+  - responses now include `capacity_sync` metadata (`supported`, `discovered`, `updated`, `skipped`, optional `error`).
+- Added conservative store-side matcher `apply_discovered_capacities(...)`:
+  - updates existing rows by serial first, then unique `(kind, role)`, then unique `kind`,
+  - updates only existing equipment rows (no blind auto-create), preserving current commissioning integrity.
+- Added best-effort adapter capacity discovery methods for:
+  - Victron (`victron.py`)
+  - Deye/Solarman (`solarman.py`)
+  - SMA (`sma.py`)
+  - Sinosoar (`sinosoar.py`)
+  Each returns normalized discovered specs for inverter/PV/battery capacities when exposed by the upstream metadata payloads.
+
+### Key Decisions
+- Keep discovery non-blocking and best-effort: commissioning/verify should still succeed even if capacity endpoints are unavailable or sparse.
+- Prefer conservative update-only behavior in `site_equipment` to avoid creating incorrect ghost equipment from ambiguous API payloads.
+
+### Files Modified
+- `acdb-api/gensite/router.py`
+- `acdb-api/gensite/store.py`
+- `acdb-api/gensite/adapters/victron.py`
+- `acdb-api/gensite/adapters/solarman.py`
+- `acdb-api/gensite/adapters/sma.py`
+- `acdb-api/gensite/adapters/sinosoar.py`
+- `SESSION_LOG.md`
+
+### Verification
+- Backend syntax check passed:
+  - `python3 -m py_compile acdb-api/gensite/store.py acdb-api/gensite/router.py acdb-api/gensite/adapters/sma.py acdb-api/gensite/adapters/solarman.py acdb-api/gensite/adapters/victron.py acdb-api/gensite/adapters/sinosoar.py`
+
 ## Session 2026-05-27 [202605271246] (Dashboard Overflow + All Countries Selector)
 
 ### What Was Done

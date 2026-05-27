@@ -188,6 +188,114 @@ def list_equipment(site_code: str, include_decommissioned: bool = False) -> List
             return [dict(r) for r in cur.fetchall()]
 
 
+def _as_float(v: Any) -> Optional[float]:
+    if v is None:
+        return None
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return None
+    if not n == n:  # NaN guard
+        return None
+    return n
+
+
+def apply_discovered_capacities(
+    site_code: str,
+    vendor: str,
+    discovered: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Best-effort nameplate sync from adapter-discovered metadata.
+
+    Matching strategy (conservative, update-only):
+    1) serial exact match within (site, vendor)
+    2) unique (kind, role) within (site, vendor)
+    3) unique kind within (site, vendor)
+    """
+    scoped = [
+        e for e in list_equipment(site_code, include_decommissioned=False)
+        if (e.get("vendor") or "").lower() == (vendor or "").lower()
+    ]
+    if not scoped or not discovered:
+        return {"updated": 0, "skipped": len(discovered or []), "updated_ids": []}
+
+    by_serial: Dict[str, Dict[str, Any]] = {}
+    by_kind: Dict[str, List[Dict[str, Any]]] = {}
+    by_kind_role: Dict[str, List[Dict[str, Any]]] = {}
+    for row in scoped:
+        serial = (row.get("serial") or "").strip().lower()
+        if serial:
+            by_serial[serial] = row
+        kind = (row.get("kind") or "").strip().lower()
+        role = (row.get("role") or "").strip().lower()
+        if kind:
+            by_kind.setdefault(kind, []).append(row)
+        if kind and role:
+            by_kind_role.setdefault(f"{kind}|{role}", []).append(row)
+
+    updated = 0
+    skipped = 0
+    updated_ids: List[int] = []
+    touched: set[int] = set()
+
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            for item in discovered:
+                if not isinstance(item, dict):
+                    skipped += 1
+                    continue
+
+                kw = _as_float(item.get("nameplate_kw"))
+                kwh = _as_float(item.get("nameplate_kwh"))
+                if kw is None and kwh is None:
+                    skipped += 1
+                    continue
+
+                serial = (item.get("serial") or "").strip().lower()
+                kind = (item.get("kind") or "").strip().lower()
+                role = (item.get("role") or "").strip().lower()
+                model = item.get("model")
+
+                target: Optional[Dict[str, Any]] = None
+                if serial and serial in by_serial:
+                    target = by_serial[serial]
+                elif kind and role:
+                    candidates = by_kind_role.get(f"{kind}|{role}", [])
+                    if len(candidates) == 1:
+                        target = candidates[0]
+                if target is None and kind:
+                    candidates = by_kind.get(kind, [])
+                    if len(candidates) == 1:
+                        target = candidates[0]
+                if target is None:
+                    skipped += 1
+                    continue
+
+                eq_id = int(target["id"])
+                cur.execute(
+                    """
+                    UPDATE site_equipment
+                    SET
+                        model = COALESCE(%s, model),
+                        role = COALESCE(%s, role),
+                        nameplate_kw = COALESCE(%s, nameplate_kw),
+                        nameplate_kwh = COALESCE(%s, nameplate_kwh)
+                    WHERE id = %s
+                    RETURNING id
+                    """,
+                    (model, role or None, kw, kwh, eq_id),
+                )
+                row = cur.fetchone()
+                if row and eq_id not in touched:
+                    touched.add(eq_id)
+                    updated += 1
+                    updated_ids.append(eq_id)
+                else:
+                    skipped += 1
+        conn.commit()
+    return {"updated": updated, "skipped": skipped, "updated_ids": updated_ids}
+
+
 def insert_equipment(
     *,
     site_code: str,

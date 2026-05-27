@@ -103,6 +103,44 @@ def _try_log_mutation(user: CurrentUser, action: str, table: str, record_id: str
         logger.warning("cc_mutations audit skipped: %s", exc)
 
 
+def _sync_capacity_from_adapter(
+    *,
+    adapter: Any,
+    cred: SiteCredential,
+    site_code: str,
+    vendor: str,
+) -> Dict[str, Any]:
+    discover_fn = getattr(adapter, "discover_installed_capacity", None)
+    if not callable(discover_fn):
+        return {"supported": False, "discovered": 0, "updated": 0, "skipped": 0}
+    try:
+        discovered = discover_fn(cred) or []
+    except Exception as exc:
+        logger.warning(
+            "capacity discovery failed for %s/%s/%s: %s",
+            site_code.upper(),
+            vendor.lower(),
+            cred.backend.lower(),
+            exc,
+        )
+        return {
+            "supported": True,
+            "discovered": 0,
+            "updated": 0,
+            "skipped": 0,
+            "error": str(exc),
+        }
+
+    applied = store.apply_discovered_capacities(site_code, vendor.lower(), discovered)
+    return {
+        "supported": True,
+        "discovered": len(discovered),
+        "updated": applied.get("updated", 0),
+        "skipped": applied.get("skipped", 0),
+        "updated_ids": applied.get("updated_ids", []),
+    }
+
+
 # ---------------------------------------------------------------------------
 # GET /vendors
 # ---------------------------------------------------------------------------
@@ -409,6 +447,26 @@ def commission_site(
         credential_results.append({
             "credential": stored,
             "verify": {"ok": verify_ok, "message": verify_msg},
+            "capacity_sync": (
+                _sync_capacity_from_adapter(
+                    adapter=adapter,
+                    cred=SiteCredential(
+                        site_code=req.site_code.upper(),
+                        vendor=cred_in.vendor.lower(),
+                        backend=cred_in.backend.lower(),
+                        base_url=cred_in.base_url,
+                        username=cred_in.username,
+                        secret=cred_in.secret,
+                        api_key=cred_in.api_key,
+                        site_id_on_vendor=discovered_site_id or cred_in.site_id_on_vendor,
+                        extra=cred_in.extra or {},
+                    ),
+                    site_code=req.site_code,
+                    vendor=cred_in.vendor,
+                )
+                if verify_ok else
+                {"supported": False, "discovered": 0, "updated": 0, "skipped": 0}
+            ),
         })
 
     return {
@@ -510,6 +568,27 @@ def verify_credential(
             discovered_site_id=getattr(vr, "discovered_site_id", None),
         )
 
+    capacity_sync = (
+        _sync_capacity_from_adapter(
+            adapter=adapter,
+            cred=SiteCredential(
+                site_code=code.upper(),
+                vendor=vendor.lower(),
+                backend=backend.lower(),
+                base_url=cred.base_url,
+                username=cred.username,
+                secret=cred.secret,
+                api_key=cred.api_key,
+                site_id_on_vendor=getattr(vr, "discovered_site_id", None) or cred.site_id_on_vendor,
+                extra=cred.extra or {},
+            ),
+            site_code=code,
+            vendor=vendor,
+        )
+        if vr.ok else
+        {"supported": False, "discovered": 0, "updated": 0, "skipped": 0}
+    )
+
     return {
         "site_code": code.upper(),
         "vendor": vendor.lower(),
@@ -518,6 +597,7 @@ def verify_credential(
         "message": vr.message,
         "discovered_site_id": getattr(vr, "discovered_site_id", None),
         "discovered_equipment": getattr(vr, "discovered_equipment", []),
+        "capacity_sync": capacity_sync,
     }
 
 
@@ -592,9 +672,31 @@ def rotate_credential(
         },
         metadata={"kind": "site_credential_rotate", "site_code": code.upper()},
     )
+
+    capacity_sync = (
+        _sync_capacity_from_adapter(
+            adapter=adapter,
+            cred=SiteCredential(
+                site_code=code.upper(),
+                vendor=vendor.lower(),
+                backend=backend.lower(),
+                base_url=req.base_url,
+                username=req.username,
+                secret=req.secret,
+                api_key=req.api_key,
+                site_id_on_vendor=getattr(vr, "discovered_site_id", None) or req.site_id_on_vendor,
+                extra=req.extra or {},
+            ),
+            site_code=code,
+            vendor=vendor,
+        )
+        if vr.ok else
+        {"supported": False, "discovered": 0, "updated": 0, "skipped": 0}
+    )
     return {
         "credential": stored,
         "verify": {"ok": vr.ok, "message": vr.message},
+        "capacity_sync": capacity_sync,
     }
 
 

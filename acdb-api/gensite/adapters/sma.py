@@ -90,6 +90,28 @@ def _map_energybalance_row(row: Dict[str, Any]) -> Dict[str, Optional[float]]:
     }
 
 
+def _extract_named_numeric(node: Any, name_hints: List[str]) -> List[float]:
+    out: List[float] = []
+    if isinstance(node, dict):
+        for k, v in node.items():
+            lk = str(k).lower()
+            if any(h in lk for h in name_hints):
+                n = _num(v)
+                if n is not None:
+                    out.append(n)
+            out.extend(_extract_named_numeric(v, name_hints))
+    elif isinstance(node, list):
+        for item in node:
+            out.extend(_extract_named_numeric(item, name_hints))
+    return out
+
+
+def _normalize_kw(n: Optional[float]) -> Optional[float]:
+    if n is None or n <= 0:
+        return None
+    return (n / 1000.0) if n > 10000 else n
+
+
 class SMAAdapter(InverterAdapter):
     vendor = "sma"
     display_name = "SMA Sunny Portal"
@@ -319,3 +341,51 @@ class SMAAdapter(InverterAdapter):
         # Keep conservative no-op until we have a stable SMA event endpoint with
         # durable timestamps/codes suitable for deduplicated alarm ingestion.
         return []
+
+    def discover_installed_capacity(self, cred: SiteCredential) -> List[Dict[str, Any]]:
+        """Best-effort extraction of installed nameplate capacities from Sunny Portal metadata."""
+        token = self._token(cred)
+        plant_id = self._plant_id(cred, token)
+        if not plant_id:
+            return []
+        plant = self._api_get(cred, token, f"/api/v1/plants/{plant_id}")
+        if not isinstance(plant, dict):
+            return []
+
+        inv_candidates = _extract_named_numeric(
+            plant,
+            ["inverter", "nominalpower", "ratedpower", "acpower", "maxac", "inverterpower", "power"],
+        )
+        pv_candidates = _extract_named_numeric(
+            plant,
+            ["pv", "generator", "peakpower", "installedpower", "dcpower", "pvpower"],
+        )
+        batt_kwh_candidates = _extract_named_numeric(
+            plant,
+            ["batterycapacity", "storagecapacity", "usablecapacity", "batterykwh", "energycapacity", "kwh"],
+        )
+        batt_kw_candidates = _extract_named_numeric(
+            plant,
+            ["batterypower", "batteryinverterpower", "storagepower", "chargepower", "dischargepower"],
+        )
+
+        inverter_kw = _normalize_kw(max(inv_candidates) if inv_candidates else None)
+        pv_kw = _normalize_kw(max(pv_candidates) if pv_candidates else None)
+        battery_kw = _normalize_kw(max(batt_kw_candidates) if batt_kw_candidates else None)
+        battery_kwh = max([v for v in batt_kwh_candidates if v > 0], default=None)
+
+        out: List[Dict[str, Any]] = []
+        if inverter_kw:
+            out.append({"kind": "inverter", "nameplate_kw": inverter_kw})
+        if pv_kw:
+            out.append({"kind": "pv_array", "role": "pv", "nameplate_kw": pv_kw})
+        if battery_kw or battery_kwh:
+            out.append(
+                {
+                    "kind": "battery",
+                    "role": "battery",
+                    "nameplate_kw": battery_kw,
+                    "nameplate_kwh": battery_kwh,
+                }
+            )
+        return out
