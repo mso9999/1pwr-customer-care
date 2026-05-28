@@ -1071,12 +1071,13 @@ function startInboundHttpServer() {
                 }
                 var jid = body.jid || TICKET_TRACKER_JID;
                 if (!jid || !sock) {
-                    res.writeHead(503);
+                    res.statusCode = 503;
+                    res.setHeader("Content-Type", "application/json");
                     res.end(JSON.stringify({ ok: false, reason: "wa_not_ready" }));
                     return;
                 }
                 sock.sendMessage(jid, { text: text }).then(function() {
-                    res.writeHead(200);
+                    res.statusCode = 200;
                     res.setHeader("Content-Type", "application/json");
                     res.end(JSON.stringify({ ok: true, jid: jid, length: text.length }));
                 }).catch(function(e) {
@@ -1086,13 +1087,14 @@ function startInboundHttpServer() {
                 return;
             }
             if (!TICKET_TRACKER_JID || !sock) {
-                res.writeHead(503);
+                res.statusCode = 503;
+                res.setHeader("Content-Type", "application/json");
                 res.end(JSON.stringify({ ok: false, reason: "wa_not_ready" }));
                 return;
             }
             var text = buildCareInboundText(body);
             sock.sendMessage(TICKET_TRACKER_JID, { text: text }).then(function() {
-                res.writeHead(200);
+                res.statusCode = 200;
                 res.setHeader("Content-Type", "application/json");
                 res.end(JSON.stringify({ ok: true }));
             }).catch(function(e) {

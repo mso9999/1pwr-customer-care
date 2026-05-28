@@ -72,7 +72,7 @@ def notify_cc_bridge(
     try:
         with urllib.request.urlopen(req, timeout=8) as resp:
             logger.info("bridge_notify country=%s status=%s", code, resp.status)
-    except urllib.error.URLError as e:
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
         logger.warning("bridge_notify country=%s failed: %s", code, e)
 
 
@@ -145,6 +145,6 @@ def broadcast_to_bridge(
             ok = 200 <= resp.status < 300
             logger.info("bridge_broadcast country=%s status=%s ok=%s", code, resp.status, ok)
             return ok
-    except urllib.error.URLError as e:
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
         logger.warning("bridge_broadcast country=%s failed: %s", code, e)
         return False
