@@ -61,6 +61,15 @@ def _num(v: Any) -> Optional[float]:
     return n
 
 
+def _is_genset_equipment(eq: SiteEquipment) -> bool:
+    k = (eq.kind or "").lower()
+    r = (eq.role or "").lower()
+    return (
+        "genset" in k or "generator" in k or "diesel" in k
+        or "genset" in r or "generator" in r or "diesel" in r
+    )
+
+
 class VictronAdapter(InverterAdapter):
     vendor = "victron"
     display_name = "Victron Energy (VRM)"
@@ -267,6 +276,14 @@ class VictronAdapter(InverterAdapter):
         battery_kw = _num("Dc/Battery/Power") or _num("batteryPower")
         battery_soc_pct = _num("Dc/Battery/Soc") or _num("soc")
         grid_kw = _num("Ac/Grid/L1/P") or _num("gridPower")
+        genset_kw = (
+            _num("Ac/Genset/L1/P")
+            or _num("Ac/GenSet/L1/P")
+            or _num("Ac/In/1/L1/P")
+            or _num("Ac/Input/L1/P")
+            or _num("gensetPower")
+            or _num("generatorPower")
+        )
         ac_freq_hz = _num("Ac/Out/L1/F")
         ac_v_avg = _num("Ac/Out/L1/V")
         status_code = str(records.get("state", "")) or None
@@ -329,12 +346,14 @@ class VictronAdapter(InverterAdapter):
                         load_w = _sum_codes("o1", "o2", "o3")
                     batt_w = _first_code("bp", "ScW")
                     grid_w = _sum_codes("IP1", "IP2", "IP3")
+                    genset_w = _sum_codes("GP1", "GP2", "GP3", "GensetP")
 
                     ac_kw = (load_w / 1000.0) if load_w is not None else ac_kw
                     pv_kw = (pv_w / 1000.0) if pv_w is not None else pv_kw
                     battery_kw = (batt_w / 1000.0) if batt_w is not None else battery_kw
                     battery_soc_pct = _first_code("bs", "SOC", "VSH") or battery_soc_pct
                     grid_kw = (grid_w / 1000.0) if grid_w is not None else grid_kw
+                    genset_kw = (genset_w / 1000.0) if genset_w is not None else genset_kw
                     ac_freq_hz = _first_code("OF", "IF1") or ac_freq_hz
                     ac_v_avg = _avg_codes("OV1", "OV2", "OV3") or ac_v_avg
                     status_code = str(int(_first_code("S") or 0)) if status_code is None else status_code
@@ -342,14 +361,13 @@ class VictronAdapter(InverterAdapter):
             except requests.RequestException:
                 pass
 
-        target = next(
+        inverter_target = next(
             (e for e in equipment if e.kind == "inverter"),
             equipment[0],
         )
-
-        return [
+        readings = [
             LiveReading(
-                equipment_id=target.id,
+                equipment_id=inverter_target.id,
                 ts_utc=ts,
                 ac_kw=ac_kw,
                 pv_kw=pv_kw,
@@ -362,6 +380,26 @@ class VictronAdapter(InverterAdapter):
                 raw_json=source_payload,
             )
         ]
+
+        genset_target = next((e for e in equipment if _is_genset_equipment(e)), None)
+        if genset_target and genset_kw is not None:
+            readings.append(
+                LiveReading(
+                    equipment_id=genset_target.id,
+                    ts_utc=ts,
+                    ac_kw=genset_kw,
+                    status_code=status_code,
+                    raw_json={
+                        "victron_genset_kw": genset_kw,
+                        "source": "status_or_diagnostics",
+                    },
+                )
+            )
+        elif genset_kw is not None:
+            # Keep visibility for debugging when no genset equipment row exists yet.
+            source_payload["genset_kw_unmapped"] = genset_kw
+
+        return readings
 
     # -------------------------------------------------------------------
     # fetch_day — hourly stats for 24 h / 30 d charts

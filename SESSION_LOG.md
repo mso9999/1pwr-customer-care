@@ -5779,6 +5779,28 @@ Root cause: **Dual registration without synchronization**
 - Backend syntax check passed:
   - `python3 -m py_compile acdb-api/gensite/store.py acdb-api/gensite/router.py acdb-api/gensite/adapters/sma.py acdb-api/gensite/adapters/solarman.py acdb-api/gensite/adapters/victron.py acdb-api/gensite/adapters/sinosoar.py`
 
+## Session 2026-05-28 [202605280741] (Victron Explicit Genset Channel Mapping)
+
+### What Was Done
+- Extended Victron adapter live parsing to look for explicit generator/ac-input power channels in VRM status payloads (best-effort key support for genset and AC-in variants).
+- Added diagnostics fallback extraction for generator-like channels when status payload is sparse.
+- Updated adapter output behavior:
+  - when a genset-equipment row exists for the site, emit an additional `LiveReading` on that genset equipment with `ac_kw = genset_kw` (explicit genset telemetry path),
+  - when no genset-equipment row exists, keep visibility by storing `genset_kw_unmapped` in inverter `raw_json`.
+- This reduces dependence on inferred genset math for Victron sites where upstream payload includes real generator input power.
+
+### Key Decisions
+- Keep mapping additive and non-breaking: existing inverter reading row remains unchanged; genset row is appended only when a matching genset equipment asset exists.
+- Use conservative best-effort key matching because VRM payload keys vary by installation and firmware generation.
+
+### Files Modified
+- `acdb-api/gensite/adapters/victron.py`
+- `SESSION_LOG.md`
+
+### Verification
+- Backend syntax check passed:
+  - `python3 -m py_compile acdb-api/gensite/adapters/victron.py`
+
 ## Session 2026-05-27 [202605271246] (Dashboard Overflow + All Countries Selector)
 
 ### What Was Done
