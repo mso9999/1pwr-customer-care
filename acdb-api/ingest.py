@@ -67,6 +67,9 @@ logger = logging.getLogger("cc-api.ingest")
 SMS_INGEST_PUSH_SPARKMETER = os.environ.get("SMS_INGEST_PUSH_SPARKMETER", "1").lower() in (
     "1", "true", "yes",
 )
+SMS_NOTIFY_CM_ON_PAYMENT = os.environ.get("SMS_NOTIFY_CM_ON_PAYMENT", "1").lower() in (
+    "1", "true", "yes",
+)
 
 
 def _log_sms_inbound(
@@ -560,6 +563,59 @@ def _notify_sms_phone_fallback(
     )
 
 
+def _notify_sms_payment_ingested(
+    *,
+    account: str,
+    amount: float,
+    provider: str,
+    category: str,
+    allocation: str,
+    transaction_id: int,
+    receipt_key: str,
+    reference: str,
+    phone: str,
+    electricity_portion: float,
+    advance_portion: float,
+    fee_portion: float,
+) -> None:
+    """WhatsApp Customer Care summary for each successfully ingested SMS payment."""
+    if not SMS_NOTIFY_CM_ON_PAYMENT:
+        return
+
+    sym = COUNTRY.currency_symbol
+    provider_label = (provider or "mpesa").upper()
+    if COUNTRY.code == "BN":
+        amount_line = f"Amount: {amount:,.0f} {sym} ({COUNTRY.currency})"
+    else:
+        amount_line = f"Amount: {sym}{amount:.2f}"
+
+    text = "\n".join(
+        [
+            f"{provider_label} SMS payment ingested in CC.",
+            f"Account: {account}",
+            amount_line,
+            f"Category: {category}",
+            f"Allocation: {allocation}",
+            f"Electricity: {sym}{electricity_portion:.2f}",
+            f"Advance: {sym}{advance_portion:.2f}",
+            f"Fee debt: {sym}{fee_portion:.2f}",
+            f"Payer phone: {phone or '?'}",
+            f"Reference: {reference or '(empty)'}",
+            f"Receipt: {receipt_key or '?'}",
+            f"Transaction ID: {transaction_id}",
+        ],
+    )
+    notify_cc_bridge(
+        {
+            "source": "sms_payment",
+            "account_number": account,
+            "category": "sms_payment_ingested",
+            "text": text,
+        },
+        country_code=COUNTRY.code,
+    )
+
+
 def _sms_ingest_credit_sm(
     account_number: str,
     amount: float,
@@ -813,6 +869,21 @@ def _sms_incoming_process_raw(
                                 "SMS fee payment: txn=%d acct=%s category=%s amount=%.2f from %s receipt=%s",
                                 txn_db_id, account, category, amount, phone, receipt_key,
                             )
+                            background_tasks.add_task(
+                                _notify_sms_payment_ingested,
+                                account=account,
+                                amount=amount,
+                                provider=(parsed.get("provider") or "mpesa"),
+                                category=category,
+                                allocation=allocation,
+                                transaction_id=txn_db_id,
+                                receipt_key=receipt_key,
+                                reference=reference,
+                                phone=phone,
+                                electricity_portion=0.0,
+                                advance_portion=0.0,
+                                fee_portion=amount,
+                            )
                             if allocation == "phone_fallback":
                                 background_tasks.add_task(
                                     _notify_sms_phone_fallback,
@@ -1036,6 +1107,21 @@ def _sms_incoming_process_raw(
                             txn_db_id, account, allocation, amount,
                             applied_adv, fee_rep_total, unalloc,
                         )
+                    background_tasks.add_task(
+                        _notify_sms_payment_ingested,
+                        account=account,
+                        amount=amount,
+                        provider=(parsed.get("provider") or "mpesa"),
+                        category="fee_advance_sms",
+                        allocation=allocation,
+                        transaction_id=txn_db_id,
+                        receipt_key=receipt_key,
+                        reference=reference,
+                        phone=phone,
+                        electricity_portion=0.0,
+                        advance_portion=applied_adv,
+                        fee_portion=fee_rep_total,
+                    )
 
                     if allocation == "phone_fallback":
                         background_tasks.add_task(
@@ -1203,6 +1289,21 @@ def _sms_incoming_process_raw(
                             receipt_key, electricity_portion, advance_portion,
                             fee_rep,
                         )
+                    background_tasks.add_task(
+                        _notify_sms_payment_ingested,
+                        account=account,
+                        amount=amount,
+                        provider=(parsed.get("provider") or "mpesa"),
+                        category="electricity",
+                        allocation=allocation,
+                        transaction_id=txn_db_id,
+                        receipt_key=receipt_key,
+                        reference=reference,
+                        phone=phone,
+                        electricity_portion=electricity_portion,
+                        advance_portion=advance_portion,
+                        fee_portion=fee_rep,
+                    )
 
                     if allocation == "phone_fallback":
                         background_tasks.add_task(

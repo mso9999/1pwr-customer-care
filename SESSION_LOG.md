@@ -1,3 +1,38 @@
+## Session 2026-05-29 [202605291043] (SMS Ingest Visible but CM Feed Missing)
+
+### What Was Done
+- Investigated live production evidence for the reported 10:37+ failure window across:
+  - API logs (`journalctl -u 1pdb-api`)
+  - `sms_inbound_log` outcomes and linked transaction IDs
+  - WhatsApp bridge PM2 logs
+- Confirmed SMS ingest itself is active and creating transactions in 1PDB (including Postman test key `TEST000002` and multiple gateway-origin payments).
+- Identified CM "no incoming messages" root cause: bridge notifications were only emitted for special allocation events (e.g., phone fallback), not for normal successful SMS payment ingests.
+- Implemented backend change in `acdb-api/ingest.py`:
+  - added `_notify_sms_payment_ingested(...)` helper,
+  - emits `notify_cc_bridge` summaries for each successfully ingested SMS payment path (fee, contract-fee gateway, and electricity),
+  - added `SMS_NOTIFY_CM_ON_PAYMENT` env guard (default enabled).
+
+### Key Decisions
+- Treat CM payment visibility as a first-class operational signal: emit app notifications on successful ingest, not only on anomaly/fallback paths.
+- Keep rollout controllable with env flag (`SMS_NOTIFY_CM_ON_PAYMENT`) in case message volume needs temporary throttling.
+
+### Files Modified
+- `acdb-api/ingest.py`
+- `SESSION_LOG.md`
+
+### Verification
+- Parser regression tests passed:
+  - `PYTHONPATH="acdb-api" pytest -q acdb-api/tests/test_mpesa_sms.py`
+- Syntax check passed:
+  - `python3 -m py_compile acdb-api/ingest.py`
+
+### What Next Session Should Know
+- This change is local until committed/pushed and deployed through the normal `main` pipeline.
+- Production evidence currently shows:
+  - successful ingests with transactions,
+  - duplicate skips for replayed receipt keys,
+  - no-account outcomes for malformed/non-resolvable references,
+  - sparse CM alerts due to prior "fallback-only notify" design.
 # 1PWR Customer Care - Session Log
 
 > AI session handoffs for continuity across conversations.
