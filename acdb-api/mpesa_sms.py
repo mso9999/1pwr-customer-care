@@ -17,48 +17,51 @@ from __future__ import annotations
 import re
 from typing import Any, Optional, Tuple
 
+# Amounts can be plain (M50.00) or grouped (M1,000.00 / M13,390.74).
+_AMOUNT_RE = r"(?P<amount>\d[\d,]*(?:\.\d{1,2})?)"
+
 # Confirmation with Reference line (legacy)
 MPESA_PATTERN = re.compile(
-    r"(?P<txn_id>\w+)\s+Confirmed\.\s+on\s+.+?"
-    r"M(?P<amount>\d+(?:\.\d{1,2})?)\s+received\s+from\s+"
-    r"(?P<phone>\d{8,15})"
-    r".*?Reference:\s*(?P<ref>\d+)",
+    rf"(?P<txn_id>\w+)\s+Confirmed\.\s+on\s+.+?"
+    rf"M{_AMOUNT_RE}\s+received\s+from\s+"
+    rf"(?P<phone>\d{{8,15}})"
+    rf".*?Reference:\s*(?P<ref>\d+)",
     re.IGNORECASE | re.DOTALL,
 )
 
 # Amount + phone without requiring Reference (Remark-only or alternate layouts)
 MPESA_LOOSE = re.compile(
-    r"(?P<txn_id>[\w-]+)\s+Confirmed\.\s+on\s+.+?"
-    r"M(?P<amount>\d+(?:\.\d{1,2})?)\s+received\s+from\s+"
-    r"(?P<phone>\d{8,15})",
+    rf"(?P<txn_id>[\w-]+)\s+Confirmed\.\s+on\s+.+?"
+    rf"M{_AMOUNT_RE}\s+received\s+from\s+"
+    rf"(?P<phone>\d{{8,15}})",
     re.IGNORECASE | re.DOTALL,
 )
 
 # Phone group allows spaces / + (EcoCash and operator templates sometimes break \d{8,15}).
 MPESA_FALLBACK = re.compile(
-    r"M(?P<amount>\d+(?:\.\d{1,2})?)\s+received\s+from\s+(?P<phone>[\d+\s\u00a0\-]{10,36})",
+    rf"M{_AMOUNT_RE}\s+received\s+from\s+(?P<phone>[\d+\s\u00a0\-]{{10,36}})",
     re.IGNORECASE,
 )
 
 # --- Lesotho EcoCash (MAT site and others): parallel to PHP read_payment_file.php (sender 199) ---
 # Templates vary; short code 199 is the usual gateway sender. Amounts are often Maloti as M#.#.
 _ECOCASH_BRAND_M = re.compile(
-    r"(?is)EcoCash.*?M(?P<amount>\d+(?:\.\d{1,2})?)\s+received\s+from\s+"
+    rf"(?is)EcoCash.*?M{_AMOUNT_RE}\s+received\s+from\s+"
     r"(?P<phone>\+?266\d{8,10}|\d{10,15})",
 )
 _ECOCASH_BRAND_M2 = re.compile(
-    r"(?is)M(?P<amount>\d+(?:\.\d{1,2})?)\s+received\s+from\s+"
+    rf"(?is)M{_AMOUNT_RE}\s+received\s+from\s+"
     r"(?P<phone>\+?266\d{8,10}|\d{10,15}).*?EcoCash",
 )
 # No "Confirmed." line (differs from typical M-Pesa) but still has M-line + phone
 _ECOCASH_MLINE_ONLY = re.compile(
-    r"(?is)^(?P<txn_id>[\w-]{4,36})\s+.*?M(?P<amount>\d+(?:\.\d{1,2})?)\s+received\s+from\s+"
+    rf"(?is)^(?P<txn_id>[\w-]{{4,36}})\s+.*?M{_AMOUNT_RE}\s+received\s+from\s+"
     r"(?P<phone>\+?266\d{8,10}|\d{10,15})",
 )
 # Econet EcoCash (common on MAT): amount BEFORE "received", payer blob, "for NNNNXXX" account — not M-Pesa shape.
 # Example: "You have received M25 from Tiisetso Lebotho-62205631 for 0118mat. Approval Code: MP260416...."
 _ECOCASH_YOU_HAVE_RECEIVED_FOR = re.compile(
-    r"(?is)You have received M(?P<amount>\d+(?:\.\d{1,2})?)\s+from\s+(?P<from_blob>.+?)\s+for\s+"
+    rf"(?is)You have received M{_AMOUNT_RE}\s+from\s+(?P<from_blob>.+?)\s+for\s+"
     r"(?P<acct>\d{3,4})\s*(?P<site>[A-Za-z]{2,4})",
 )
 _APPROVAL_CODE = re.compile(r"Approval\s*Code:\s*([A-Za-z0-9_.]+)", re.IGNORECASE)
@@ -83,6 +86,11 @@ ACCOUNT_TOKEN_RE = re.compile(
 def _normalize_ls_payment_phone(raw: str) -> str:
     """Digits-only for SMS payer phone (handles +266, spaces, NBSP in EcoCash templates)."""
     return "".join(c for c in (raw or "") if c.isdigit())
+
+
+def _parse_amount(raw: str) -> float:
+    """Parse M-Pesa/EcoCash amount strings that may include thousands commas."""
+    return float((raw or "").replace(",", "").strip())
 
 
 def extract_remark_text(content: str) -> str:
@@ -114,7 +122,7 @@ def parse_mpesa_sms(content: str) -> Optional[dict[str, Any]]:
         remark = extract_remark_text(content)
         return {
             "txn_id": m.group("txn_id"),
-            "amount": float(m.group("amount")),
+            "amount": _parse_amount(m.group("amount")),
             "phone": _normalize_ls_payment_phone(m.group("phone")),
             "reference": m.group("ref"),
             "remark_raw": remark,
@@ -127,7 +135,7 @@ def parse_mpesa_sms(content: str) -> Optional[dict[str, Any]]:
         remark = extract_remark_text(content)
         return {
             "txn_id": m.group("txn_id"),
-            "amount": float(m.group("amount")),
+            "amount": _parse_amount(m.group("amount")),
             "phone": _normalize_ls_payment_phone(m.group("phone")),
             "reference": ref_match.group(1) if ref_match else "",
             "remark_raw": remark,
@@ -140,7 +148,7 @@ def parse_mpesa_sms(content: str) -> Optional[dict[str, Any]]:
         remark = extract_remark_text(content)
         return {
             "txn_id": "",
-            "amount": float(m.group("amount")),
+            "amount": _parse_amount(m.group("amount")),
             "phone": _normalize_ls_payment_phone(m.group("phone")),
             "reference": ref_match.group(1) if ref_match else "",
             "remark_raw": remark,
@@ -174,7 +182,7 @@ def _parse_ecocash_you_have_received_for(content: str) -> Optional[dict[str, Any
     m = _ECOCASH_YOU_HAVE_RECEIVED_FOR.search(content)
     if not m:
         return None
-    amount = float(m.group("amount"))
+    amount = _parse_amount(m.group("amount"))
     from_blob = (m.group("from_blob") or "").strip()
     # Payer phone: digits after hyphen (Name-62205631) or last 8–12 digit run in blob
     phone_raw = ""
@@ -245,7 +253,7 @@ def parse_ecocash_ls_sms(content: str, sender: str = "") -> Optional[dict[str, A
         m = rx.search(content)
         if m:
             return _ecocash_build_dict(
-                float(m.group("amount")),
+                _parse_amount(m.group("amount")),
                 m.group("phone"),
                 content,
             )
@@ -253,7 +261,7 @@ def parse_ecocash_ls_sms(content: str, sender: str = "") -> Optional[dict[str, A
     m = _ECOCASH_MLINE_ONLY.search(content)
     if m:
         return _ecocash_build_dict(
-            float(m.group("amount")),
+            _parse_amount(m.group("amount")),
             m.group("phone"),
             content,
             txn_id=m.group("txn_id"),
@@ -265,7 +273,7 @@ def parse_ecocash_ls_sms(content: str, sender: str = "") -> Optional[dict[str, A
         m = MPESA_FALLBACK.search(content)
         if m:
             return _ecocash_build_dict(
-                float(m.group("amount")),
+                _parse_amount(m.group("amount")),
                 m.group("phone"),
                 content,
             )

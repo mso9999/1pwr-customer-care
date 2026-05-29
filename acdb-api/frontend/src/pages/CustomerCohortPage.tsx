@@ -45,6 +45,7 @@ type SortBy =
   | 'phone'
   | 'customer_type'
   | 'total_paid'
+  | 'first_fee_payment_date'
   | 'date_connected'
   | 'cohort_status';
 
@@ -712,6 +713,9 @@ export default function CustomerCohortPage() {
                 <th className="px-3 py-2 font-medium text-right cursor-pointer select-none" onClick={() => handleSort('total_paid')} title={t('col.totalPaidHint')}>
                   {t('col.totalPaid')}{sortIcon('total_paid')}
                 </th>
+                <th className="px-3 py-2 font-medium cursor-pointer select-none" onClick={() => handleSort('first_fee_payment_date')}>
+                  {t('col.firstFeePaymentDate')}{sortIcon('first_fee_payment_date')}
+                </th>
                 <th className="px-3 py-2 font-medium cursor-pointer select-none" onClick={() => handleSort('date_connected')}>
                   {t('col.connected')}{sortIcon('date_connected')}
                 </th>
@@ -776,13 +780,16 @@ export default function CustomerCohortPage() {
                     {fmtNum(r.total_paid)}
                   </td>
                   <td className="px-3 py-2 text-gray-600 whitespace-nowrap">
+                    {fmtDate(r.first_fee_payment_date)}
+                  </td>
+                  <td className="px-3 py-2 text-gray-600 whitespace-nowrap">
                     {fmtDate(r.date_service_connected)}
                   </td>
                 </tr>
               ))}
               {result && result.rows.length === 0 && !loading && (
                 <tr>
-                  <td colSpan={12} className="text-center py-12 text-gray-400">
+                  <td colSpan={13} className="text-center py-12 text-gray-400">
                     {t('noResults')}
                   </td>
                 </tr>

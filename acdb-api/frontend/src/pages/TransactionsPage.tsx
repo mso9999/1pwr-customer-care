@@ -4,13 +4,22 @@ import { useTranslation } from 'react-i18next';
 import { listRows, deleteRecord, type PaginatedResponse } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
+const CC_TIMEZONE = 'Africa/Maseru';
+
+function parseDbDate(raw: string): Date | null {
+  if (!raw) return null;
+  const isoLike = raw.includes('T') ? raw : raw.replace(' ', 'T');
+  const dt = new Date(isoLike);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
 function fmtDate(d: string | null): string {
   if (!d) return '--';
-  try {
-    const dt = new Date(d);
-    return dt.toLocaleDateString('en-ZA', { year: 'numeric', month: 'short', day: 'numeric' })
-      + ' ' + dt.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
-  } catch { return d; }
+  const dt = parseDbDate(d);
+  if (!dt) return d;
+  return dt.toLocaleDateString('en-ZA', { year: 'numeric', month: 'short', day: 'numeric', timeZone: CC_TIMEZONE })
+    + ' '
+    + dt.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit', timeZone: CC_TIMEZONE });
 }
 
 function fmtNum(v: unknown, decimals = 2): string {
@@ -38,7 +47,7 @@ export default function TransactionsPage() {
       page,
       limit: 50,
       search: search || undefined,
-      sort: 'transaction_date',
+      sort: 'created_at',
       order: 'desc',
       filter_col: filterPayment ? 'is_payment' : undefined,
       filter_val: filterPayment || undefined,
@@ -191,7 +200,7 @@ export default function TransactionsPage() {
                   const rid = String(row['id'] ?? '');
                   const acct = String(row['account_number'] || '');
                   const mid = String(row['meter_id'] || '');
-                  const date = String(row['transaction_date'] || '');
+                  const date = String(row['created_at'] || row['transaction_date'] || '');
                   const amount = row['transaction_amount'];
                   const kwh = row['kwh_value'];
                   const rate = row['rate_used'];
@@ -237,7 +246,7 @@ export default function TransactionsPage() {
             {data.rows.map((row, i) => {
               const rid = String(row['id'] ?? '');
               const acct = String(row['account_number'] || '');
-              const date = String(row['transaction_date'] || '');
+              const date = String(row['created_at'] || row['transaction_date'] || '');
               const amount = row['transaction_amount'];
               const kwh = row['kwh_value'];
               const isPay = row['is_payment'] === true || row['is_payment'] === 'true' || row['is_payment'] === 1;

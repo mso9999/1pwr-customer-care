@@ -41,6 +41,26 @@ function fmtRecharge(seconds: number): string {
   return `${d}d ${h}h ${m}m`;
 }
 
+function fmtTxnDate(value: string | null | undefined): string {
+  if (!value) return '--';
+  const isoLike = value.includes('T') ? value : value.replace(' ', 'T');
+  const dt = new Date(isoLike);
+  if (Number.isNaN(dt.getTime())) return value.slice(0, 16);
+  return (
+    dt.toLocaleDateString('en-ZA', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      timeZone: 'Africa/Maseru',
+    }) + ' ' +
+    dt.toLocaleTimeString('en-ZA', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'Africa/Maseru',
+    })
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Transaction table name in the CC database
 // ---------------------------------------------------------------------------
@@ -664,7 +684,7 @@ export default function CustomerDataPage() {
                   <tbody className="divide-y divide-gray-100">
                     {paged.map((txn: Transaction) => (
                       <tr key={txn.id} className="hover:bg-gray-50 group">
-                        <td className="px-4 py-2.5 text-gray-700 whitespace-nowrap">{txn.date?.slice(0, 16) || '--'}</td>
+                        <td className="px-4 py-2.5 text-gray-700 whitespace-nowrap">{fmtTxnDate(txn.date)}</td>
                         <td className="px-4 py-2.5">
                           <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${
                             txn.is_payment ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'

@@ -1451,6 +1451,9 @@ export interface LoadProfileResponse {
   customer_types?: string[];
   total_readings?: number;
   note?: string;
+  error?: string;
+  data_source?: string;
+  diagnostics?: Record<string, unknown>;
 }
 
 export async function getDailyLoadProfiles(site?: string, customerType?: string): Promise<LoadProfileResponse> {
@@ -3225,6 +3228,7 @@ export interface CohortRow {
   date_service_terminated: string | null;
   payment_status_override: string | null;
   total_paid: number;
+  first_fee_payment_date?: string | null;
   /** Sum of ``payment_category = connection_fee`` payment rows. */
   payments_connection_fee: number;
   /** Sum of ``payment_category = readyboard_fee`` payment rows. */
@@ -3257,6 +3261,7 @@ export interface CohortQueryRequest {
     | 'phone'
     | 'customer_type'
     | 'total_paid'
+    | 'first_fee_payment_date'
     | 'date_connected'
     | 'cohort_status';
   sort_dir?: 'asc' | 'desc';

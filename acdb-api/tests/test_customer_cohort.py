@@ -239,6 +239,7 @@ class TestQueryBuilder(unittest.TestCase):
             "payment_status_override",
             "account_number",
             "total_paid",
+            "first_fee_payment_date",
             "payments_connection_fee",
             "payments_readyboard_fee",
             "payments_fee_repayment_via_electricity",

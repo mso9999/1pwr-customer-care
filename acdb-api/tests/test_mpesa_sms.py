@@ -164,6 +164,28 @@ class TestParseMpesaSms(unittest.TestCase):
         self.assertEqual(p["amount"], 50.0)
         self.assertEqual(p["remark_raw"], "0252SHG bill")
 
+    def test_amount_with_thousands_separator(self):
+        body = (
+            "TEST000001 Confirmed. on 13/8/24 at 12:50 PM "
+            "M13,390.74 received from 26653716557. Reference: 0001MAT"
+        )
+        p = parse_mpesa_sms(body)
+        self.assertIsNotNone(p)
+        assert p is not None
+        self.assertEqual(p["amount"], 13390.74)
+        self.assertEqual(p["phone"], "26653716557")
+
+    def test_amount_with_thousands_separator_ecocash(self):
+        body = (
+            "EcoCash: M1,000.00 received from 26650123456. "
+            "Remark: 0155 KET"
+        )
+        p = parse_ls_sms_payment(body, "199")
+        self.assertIsNotNone(p)
+        assert p is not None
+        self.assertEqual(p["provider"], "ecocash")
+        self.assertEqual(p["amount"], 1000.0)
+
 
 class TestResolveSmsAccount(unittest.TestCase):
     def _mock_conn(self, account_rows: list):

@@ -83,6 +83,7 @@ _SORT_COLS: Dict[str, str] = {
     "phone":              "phone",
     "customer_type":      "customer_type",
     "total_paid":         "total_paid",
+    "first_fee_payment_date": "first_fee_payment_date",
     "date_connected":     "date_service_connected",
     "cohort_status":      "cohort_status",
 }
@@ -157,6 +158,7 @@ _EXPORT_SELECT: Dict[str, Dict[str, Any]] = {
     },
     "payments_electricity": {"label": "Electricity paid", "sql": "payments_electricity"},
     "total_paid": {"label": "Total paid", "sql": "total_paid"},
+    "first_fee_payment_date": {"label": "First fee payment date", "sql": "first_fee_payment_date"},
     "date_service_connected": {"label": "Date connected", "sql": "date_service_connected"},
     "date_service_terminated": {"label": "Date terminated", "sql": "date_service_terminated"},
     "payment_status_override": {"label": "Payment status override", "sql": "payment_status_override"},
@@ -194,6 +196,7 @@ DEFAULT_EXPORT_COLUMNS: List[str] = [
     "payments_fee_repayment_via_electricity",
     "payments_electricity",
     "total_paid",
+    "first_fee_payment_date",
     "date_service_connected",
 ]
 
@@ -354,6 +357,7 @@ def _cohort_core_select(cursor=None) -> str:
                 {override_col} AS cohort_status_override,
                 a.account_number,
                 COALESCE(pt.total_paid, 0)::numeric AS total_paid,
+                pt.first_fee_payment_date,
                 COALESCE(pt.payments_connection_fee, 0)::numeric AS payments_connection_fee,
                 COALESCE(pt.payments_readyboard_fee, 0)::numeric AS payments_readyboard_fee,
                 COALESCE(pt.payments_fee_repayment_via_electricity, 0)::numeric
@@ -461,6 +465,17 @@ def _paid_totals_cte(cursor) -> str:
             SELECT sc.customer_id,
                    COALESCE(SUM(CASE WHEN t.is_payment AND t.transaction_amount > 0
                                      THEN t.transaction_amount ELSE 0 END), 0) AS total_paid,
+                   MIN(
+                       CASE
+                           WHEN t.is_payment AND t.transaction_amount > 0
+                                AND (
+                                    t.payment_category IN ('connection_fee', 'readyboard_fee')
+                                    OR COALESCE({fee_rep}, 0) > 0
+                                )
+                           THEN t.transaction_date
+                           ELSE NULL
+                       END
+                   ) AS first_fee_payment_date,
                    COALESCE(SUM(CASE WHEN t.is_payment AND t.transaction_amount > 0
                                        AND t.payment_category = 'connection_fee'
                                      THEN t.transaction_amount ELSE 0 END), 0)
@@ -615,6 +630,7 @@ def _build_query(
         SELECT customer_id, first_name, last_name, phone, site, customer_type,
                date_service_connected, date_service_terminated,
                payment_status_override, cohort_status_override, account_number, total_paid,
+               first_fee_payment_date,
                payments_connection_fee, payments_readyboard_fee,
                payments_fee_repayment_via_electricity, payments_electricity,
                cohort_status
@@ -653,6 +669,8 @@ def _format_cohort_row(d: Dict[str, Any]) -> Dict[str, Any]:
         d["date_service_connected"] = d["date_service_connected"].isoformat()
     if d.get("date_service_terminated"):
         d["date_service_terminated"] = d["date_service_terminated"].isoformat()
+    if d.get("first_fee_payment_date"):
+        d["first_fee_payment_date"] = d["first_fee_payment_date"].isoformat()
     if d.get("customer_commissioned_date"):
         d["customer_commissioned_date"] = d["customer_commissioned_date"].isoformat()
     if d.get("contract_signed_date"):

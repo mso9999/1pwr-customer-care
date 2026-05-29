@@ -5743,6 +5743,174 @@ Root cause: **Dual registration without synchronization**
 - Frontend typecheck passed:
   - `cd acdb-api/frontend && npx tsc -b --noEmit`
 
+## Session 2026-05-29 [202605290721] (SMS Ingest Parse + Cohort First Fee Date)
+
+### What Was Done
+- Investigated the reported "payload sent but no CC transaction" path using production API logs and confirmed two root causes:
+  - duplicate protection: replayed `TEST000001` was skipped as `SMS duplicate payment ref TEST000001`
+  - parser gap: valid M-Pesa texts with comma-grouped amounts (e.g. `M1,000.00`, `M13,390.74`) were classified as unparsed
+- Hardened SMS amount parsing in `mpesa_sms.py`:
+  - regexes now accept grouped amounts (`\d[\d,]*(\.\d{1,2})?`)
+  - parsing now normalizes commas before float conversion
+  - applied across M-Pesa and EcoCash paths
+- Added regression coverage in `tests/test_mpesa_sms.py` for:
+  - M-Pesa with grouped amount (`M13,390.74`)
+  - EcoCash with grouped amount (`M1,000.00`)
+- Implemented "First Fee Payment Date" in Customer Cohort:
+  - backend derives `first_fee_payment_date` as earliest qualifying fee payment timestamp
+  - exposed for query sort + CSV export
+  - added to cohort table UI and EN/FR i18n labels
+- Improved transaction timestamp troubleshooting UX:
+  - `TransactionsPage` now sorts by `created_at` (latest ingestion first)
+  - date rendering normalized and shown in `Africa/Maseru` timezone
+  - `CustomerDataPage` transaction date display aligned to the same timezone formatting
+
+### Key Decisions
+- Keep dedupe behavior intact (receipt-based idempotency is correct); improve operator clarity via logs and UI ordering rather than weakening duplicate controls.
+- Treat grouped-amount parsing as a parser correctness issue (root cause) instead of adding fallback post-processing in ingest flow.
+- Preserve `transaction_date` semantics for business logic while using `created_at` for "latest troubleshooting timeline" in list UI.
+
+### Files Modified
+- `acdb-api/mpesa_sms.py`
+- `acdb-api/tests/test_mpesa_sms.py`
+- `acdb-api/customer_cohort.py`
+- `acdb-api/tests/test_customer_cohort.py`
+- `acdb-api/frontend/src/lib/api.ts`
+- `acdb-api/frontend/src/pages/CustomerCohortPage.tsx`
+- `acdb-api/frontend/src/i18n/en/customerCohort.json`
+- `acdb-api/frontend/src/i18n/fr/customerCohort.json`
+- `acdb-api/frontend/src/pages/TransactionsPage.tsx`
+- `acdb-api/frontend/src/pages/CustomerDataPage.tsx`
+- `SESSION_LOG.md`
+
+### Verification
+- Backend tests:
+  - `PYTHONPATH="acdb-api" python3 -m pytest acdb-api/tests/test_mpesa_sms.py acdb-api/tests/test_customer_cohort.py`
+  - Result: `49 passed`
+- Frontend typecheck:
+  - `cd acdb-api/frontend && npx tsc -b --noEmit`
+  - Result: pass
+- Production log verification:
+  - confirmed duplicate skip behavior for `TEST000001`
+  - confirmed unparsed grouped-amount examples motivating parser fix
+
+## Session 2026-05-28 [202605281252] (SMS Bridge Timeout + Relay Fallback Hotfix)
+
+### What Was Done
+- Investigated the production incident where customer-care relay notifications to CM were timing out and meter relay override actions were failing in CC.
+- Confirmed repeated bridge-side `ERR_HTTP_HEADERS_SENT` failures in `whatsapp-cc` logs and correlated API-side warnings (`bridge_notify ... timed out`).
+- Hardened `whatsapp-bridge/whatsapp-customer-care.js` inbound HTTP response handling:
+  - added guarded `sendJson` / `sendText` helpers to prevent duplicate writes on closed/sent responses,
+  - changed `/notify` and `/broadcast` to return immediate `202 queued` responses (decoupled from WhatsApp send latency),
+  - retained async WhatsApp send with explicit success/error logging.
+- Updated `acdb-api/sparkmeter_control.py` Koios relay logic:
+  - refactored disconnect/reconnect into shared `_koios_relay_control`,
+  - added controlled fallback request shapes (payload and URL/method variants) to handle Koios org endpoint differences causing HTTP 405 invalid-body failures,
+  - centralized response parsing with consistent error mapping.
+- Deployed hotfix files directly to production host paths and restarted:
+  - `1pdb-api`, `1pdb-api-bn`, and `pm2` process `whatsapp-cc`.
+
+### Key Decisions
+- Prioritized fail-fast acknowledgement (`202 queued`) for bridge HTTP ingress so CC API calls do not block on WhatsApp network jitter.
+- Used limited, explicit Koios fallback combinations instead of broad exception masking to keep RCA visibility while restoring relay compatibility.
+
+### Files Modified
+- `whatsapp-bridge/whatsapp-customer-care.js`
+- `acdb-api/sparkmeter_control.py`
+- `SESSION_LOG.md`
+
+### Verification
+- Python syntax check passed:
+  - `python3 -m py_compile acdb-api/sparkmeter_control.py`
+- Lint check reported no diagnostics on modified files.
+- Post-deploy service health checks passed:
+  - `systemctl is-active 1pdb-api 1pdb-api-bn` => active
+  - `pm2 status whatsapp-cc` => online after restart
+
+## Session 2026-05-29 [202605290521] (Deterministic classifier as primary production mode)
+
+### What Was Done
+- Changed WhatsApp bridge classification strategy in `whatsapp-customer-care.js` so **deterministic local rules** are the default production mode (`CC_CLASSIFIER_MODE=deterministic` by default).
+- Kept OpenClaw as optional mode only (`CC_CLASSIFIER_MODE=openclaw`) with guarded fallback back to deterministic on any failure.
+- Removed embedded default Moonshot/OpenClaw API key from source code; now only reads `MOONSHOT_API_KEY` from environment when explicitly using OpenClaw mode.
+- Added startup log line `Classifier mode: <mode>` for operational visibility.
+- Deployed updated bridge script to production path `/home/ubuntu/whatsapp-logger/whatsapp-customer-care.js` and restarted `pm2` app `whatsapp-cc`.
+
+### Key Decisions
+- Production should not depend on paid token balance for core customer-care continuity; paid AI is now explicitly optional.
+- Deterministic classifier uses conservative bilingual templates and account-first gating for unknown customers to reduce false ticket creation.
+
+### Files Modified
+- `whatsapp-bridge/whatsapp-customer-care.js`
+- `SESSION_LOG.md`
+
+### Verification
+- JavaScript syntax check passed:
+  - `node --check whatsapp-bridge/whatsapp-customer-care.js`
+- Lint diagnostics: none.
+- Runtime logs after restart show:
+  - `Classifier mode: deterministic`
+
+## Session 2026-05-28 [202605281357] (1Meter OTA identity/wifi execution pass)
+
+### What Was Done
+- Implemented runtime device identity abstraction in `onepwr-aws-mesh`:
+  - added `main/identity/device_identity.{h,c}` for thing name, Wi-Fi, TLS material, versioning, provisioned flag, and backup/restore state in NVS.
+  - switched MQTT client-id and topic users from direct `CONFIG_GRI_THING_NAME` coupling to runtime identity getters.
+- Added first-boot and claim-style commissioning plumbing:
+  - local API endpoints `GET /v1/provision/status` and `POST /v1/provision/bootstrap`,
+  - MQTT claim request/response path (`oneMeter/bootstrap/claim/request` and response topic keyed by bootstrap id).
+- Added remote rotation channel task `main/tasks/device_control/device_control.c`:
+  - Wi-Fi rotation via `oneMeter/<thing>/cfg/network` with monotonic version checks and rollback-on-apply-failure.
+  - identity/cert rotation via `oneMeter/<thing>/cfg/identity` with backup+restore path and reboot activation.
+- Updated operational docs/runbooks for universal-image workflow:
+  - `scripts/FLASH.md` now documents post-flash commissioning and remote rotation topics.
+  - `Docs/1meter-technical-overview.md` updated for runtime identity model.
+  - added `Docs/field/OTA_IDENTITY_WIFI_PILOT.md` with phased pilot gates.
+
+### Key Decisions
+- Keep compile-time values as fallback only, with runtime NVS values taking precedence for thing identity, Wi-Fi, and optional TLS keypair.
+- Use strict monotonic version checks for remote updates to avoid stale config replay.
+- Treat cert/identity activation as an explicit controlled reboot event with backup metadata available for rollback command paths.
+
+### Files Modified
+- `onepwr-aws-mesh/main/CMakeLists.txt`
+- `onepwr-aws-mesh/main/main.c`
+- `onepwr-aws-mesh/main/identity/device_identity.h`
+- `onepwr-aws-mesh/main/identity/device_identity.c`
+- `onepwr-aws-mesh/main/networking/wifi/app_wifi.h`
+- `onepwr-aws-mesh/main/networking/wifi/app_wifi.c`
+- `onepwr-aws-mesh/main/networking/mqtt/core_mqtt_agent_manager.c`
+- `onepwr-aws-mesh/main/networking/mqtt/core_mqtt_agent_manager_config.h`
+- `onepwr-aws-mesh/main/networking/http/local_api_server.h`
+- `onepwr-aws-mesh/main/networking/http/local_api_server.c`
+- `onepwr-aws-mesh/main/tasks/device_control/device_control.h`
+- `onepwr-aws-mesh/main/tasks/device_control/device_control.c`
+- `onepwr-aws-mesh/main/tasks/onemeter_relay_cmd/onemeter_relay_cmd.c`
+- `onepwr-aws-mesh/main/tasks/ota_diag/ota_diag.c`
+- `onepwr-aws-mesh/main/tasks/ota_over_mqtt_demo/ota_over_mqtt_demo_config.h`
+- `onepwr-aws-mesh/scripts/FLASH.md`
+- `onepwr-aws-mesh/Docs/1meter-technical-overview.md`
+- `onepwr-aws-mesh/Docs/field/OTA_IDENTITY_WIFI_PILOT.md`
+- `SESSION_LOG.md`
+
+### Verification
+- Cursor lint pass on edited firmware module path returned no diagnostics:
+  - `ReadLints(paths=[".../onepwr-aws-mesh/main"])`
+- Manual source-level checks performed for new MQTT topics/endpoints:
+  - `cfg/network`, `cfg/identity`, bootstrap claim topics, and local `/v1/provision/*` routes.
+
+### Follow-up (same session): dedicated EC2 build validation + docs clarity
+- Built firmware directly on the centralized build EC2 (`13.245.142.186`) using ESP-IDF at `/opt/1meter-firmware/esp-idf`.
+- First build attempt surfaced missing submodules/cert assets in an isolated worktree; after syncing submodules + cert files, build completed successfully.
+- Applied a compile-surfaced fix in `main/networking/http/local_api_server.c`: corrected `httpd_start` argument order to `httpd_start(&server, &config)`.
+- Rebuilt on the same host after the fix; build completed successfully (binary generated, partition size check passed).
+- Updated firmware-build documentation to make the centralized host and paths explicit and remove stale host references:
+  - `onepwr-aws-mesh/Docs/build/CI.md`
+  - `onepwr-aws-mesh/Docs/SOP-1meter-ota-setup.md`
+  - `onepwr-aws-mesh/scripts/install_self_hosted_runner.sh`
+  - `onepwr-aws-mesh/scripts/build_per_thing.sh`
+
 ## Session 2026-05-27 [202605271253] (Gensite Capacity Discovery Sync from OEM APIs)
 
 ### What Was Done
