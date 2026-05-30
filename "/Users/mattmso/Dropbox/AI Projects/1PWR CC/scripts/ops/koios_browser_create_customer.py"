@@ -1,0 +1,304 @@
+"""Create a Koios customer via browser automation (Playwright).
+
+The Koios API has a server-side bug: POST /api/v1/customers returns HTTP 201
+with a UUID, but the customer is never actually persisted (404 on all subsequent
+access). The web UI creates customers correctly, so we automate the browser.
+
+Usage:
+  python3 koios_browser_create_customer.py <account_number> <name> <site_code> [--meter SERIAL] [--phone PHONE]
+
+Requires: playwright (pip install playwright && playwright install chromium)
+Env: KOIOS_WEB_EMAIL, KOIOS_WEB_PASSWORD (per-country variants supported)
+"""
+import argparse
+import json
+import os
+import re
+import sys
+import time
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Create Koios customer via browser automation")
+    parser.add_argument("account_number")
+    parser.add_argument("name")
+    parser.add_argument("site_code", help="Site code (MAS, KET, LSB, GBO, SAM, etc.)")
+    parser.add_argument("--meter", help="Meter serial to attach after creation")
+    parser.add_argument("--phone", help="Phone number")
+    parser.add_argument("--headless", action="store_true", default=True, help="Run headless (default)")
+    parser.add_argument("--no-headless", dest="headless", action="store_false", help="Show browser for debugging")
+    parser.add_argument("--capture-network", action="store_true", help="Capture and print network requests for debugging")
+    args = parser.parse_args()
+
+    account_number = args.account_number.strip().upper()
+    site_code = args.site_code.strip().upper()
+
+    # Per-country credential resolution
+    cc = "BN" if site_code in ("GBO", "SAM") else "LS"
+    email = os.environ.get(f"KOIOS_WEB_EMAIL_{cc}") or os.environ.get("KOIOS_WEB_EMAIL", "")
+    password = os.environ.get(f"KOIOS_WEB_PASSWORD_{cc}") or os.environ.get("KOIOS_WEB_PASSWORD", "")
+    if not email or not password:
+        print("ERROR: KOIOS_WEB_EMAIL and KOIOS_WEB_PASSWORD must be set", file=sys.stderr)
+        sys.exit(1)
+
+    base_url = os.environ.get("KOIOS_BASE_URL", "https://www.sparkmeter.cloud")
+
+    # Org IDs per country
+    ORG_IDS = {
+        "LS": "1cddcb07-6647-40aa-aaaa-70d762922029",
+        "BN": "0123589c-7f1f-4eb4-8888-d8f8aa706ea4",
+    }
+    org_id = ORG_IDS.get(cc, ORG_IDS["LS"])
+
+    # Service area display names (as they appear in the dropdown)
+    service_area_names = {
+        "KET": "KET", "LSB": "LSB", "MAS": "MAS", "MAT": "MAT",
+        "SEH": "SEH", "SHG": "SHG", "TLH": "TLH", "RIB": "RIB",
+        "TOS": "TOS", "GBO": "GBO", "SAM": "SAM",
+    }
+    sa_name = service_area_names.get(site_code, site_code)
+
+    from playwright.sync_api import sync_playwright
+
+    captured_requests = []
+
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch(headless=args.headless)
+        context = browser.new_context(viewport={"width": 1280, "height": 900})
+        page = context.new_page()
+
+        if args.capture_network:
+            def log_request(request):
+                captured_requests.append({
+                    "url": request.url,
+                    "method": request.method,
+                    "post_data": request.post_data,
+                })
+            page.on("request", log_request)
+
+        try:
+            # Step 1: Login
+            print(f"Logging into {base_url} ({cc})...", file=sys.stderr)
+            page.goto(f"{base_url}/login", wait_until="networkidle", timeout=30000)
+            page.fill("input[name=email]", email)
+            page.fill("input[name=password]", password)
+            page.click("button[type=submit]")
+            page.wait_for_timeout(8000)
+            print(f"   Landed on: {page.url}", file=sys.stderr)
+
+            # Step 2: Navigate to portfolio
+            portfolio_url = f"{base_url}/portfolio/{org_id}/"
+            if org_id not in page.url:
+                print(f"   Navigating to portfolio: {portfolio_url}", file=sys.stderr)
+                page.goto(portfolio_url, wait_until="networkidle", timeout=20000)
+                page.wait_for_timeout(5000)
+
+            # Step 3: Switch to customer view
+            print("   Switching to customer view...", file=sys.stderr)
+            for _ in range(3):
+                try:
+                    page.eval_on_selector_all("span", """els => {
+                        for (const el of els) {
+                            if (el.textContent.trim() === 'Customers' && el.offsetParent) {
+                                el.click(); return true;
+                            }
+                        }
+                        return false;
+                    }""")
+                except Exception:
+                    pass
+                page.wait_for_timeout(4000)
+                btn = page.query_selector("button[data-test='add-new-customers-button']")
+                if btn:
+                    print("   Customer view active", file=sys.stderr)
+                    break
+
+            # Step 4: Open "Add New Customer" modal
+            print("   Opening Add New Customer modal...", file=sys.stderr)
+            for _ in range(3):
+                try:
+                    page.eval_on_selector(
+                        "button[data-test='add-new-customers-button']", "el => el.click()"
+                    )
+                except Exception:
+                    pass
+                page.wait_for_timeout(4000)
+                title = page.query_selector(".modal-card-title")
+                if title and title.is_visible():
+                    print(f"   Modal open: {title.text_content().strip()}", file=sys.stderr)
+                    break
+            else:
+                raise Exception("Could not open Add New Customer modal")
+
+            page.wait_for_timeout(2000)
+
+            # Step 5: Fill Step 1 - Customer Details
+            print(f"   Filling: {args.name} / {account_number} / {sa_name}", file=sys.stderr)
+
+            # Service Area - multiselect dropdown
+            page.eval_on_selector(
+                "input[placeholder='Enter or select service area']",
+                "el => { el.focus(); el.click(); }"
+            )
+            page.wait_for_timeout(500)
+            page.eval_on_selector(
+                "input[placeholder='Enter or select service area']",
+                f"el => {{ el.value = '{sa_name}'; el.dispatchEvent(new Event('input', {{bubbles: true}})); }}"
+            )
+            page.wait_for_timeout(2000)
+
+            # Click the matching option in dropdown
+            page.eval_on_selector_all("*", f"""els => {{
+                for (const el of els) {{
+                    if (el.textContent.trim() === '{sa_name}' && el.children.length === 0 && el.offsetParent !== null) {{
+                        let parent = el;
+                        while (parent && !parent.matches('li, [role=option], .multiselect__option, div[class*=option]')) {{
+                            parent = parent.parentElement;
+                        }}
+                        if (parent) {{ parent.click(); return true; }}
+                        el.click(); return true;
+                    }}
+                }}
+                return false;
+            }}""")
+            page.wait_for_timeout(1000)
+
+            # Customer Name
+            page.eval_on_selector(
+                "input[placeholder='Enter new customer name']",
+                f"el => {{ el.value = '{args.name}'; el.dispatchEvent(new Event('input', {{bubbles: true}})); }}"
+            )
+
+            # Customer Code
+            page.eval_on_selector(
+                "input[placeholder='Enter unique customer code']",
+                f"el => {{ el.value = '{account_number}'; el.dispatchEvent(new Event('input', {{bubbles: true}})); }}"
+            )
+
+            # Phone (optional)
+            phone = args.phone or ""
+            if phone:
+                page.eval_on_selector(
+                    "input[placeholder='0000 000 0000']",
+                    f"el => {{ el.value = '{phone}'; el.dispatchEvent(new Event('input', {{bubbles: true}})); }}"
+                )
+
+            page.wait_for_timeout(1000)
+
+            # Step 6: Click Next → Step 2 (Meter Details)
+            print("   Advancing to Step 2 (meter details)...", file=sys.stderr)
+            page.eval_on_selector("button[data-test='modal-next-button']", "el => el.click()")
+            page.wait_for_timeout(4000)
+
+            # Step 7: Click Next → Step 3 (Summary) - skip meter for now
+            print("   Advancing to Step 3 (summary)...", file=sys.stderr)
+            for _ in range(3):
+                try:
+                    page.eval_on_selector("button[data-test='modal-next-button']", "el => el.click()")
+                except Exception:
+                    pass
+                page.wait_for_timeout(3000)
+                # Check if Confirm button is visible
+                confirm_btn = page.query_selector("button[data-test='modal-confirm-button']")
+                if confirm_btn and confirm_btn.is_visible():
+                    print("   On confirmation step", file=sys.stderr)
+                    break
+
+            # Step 8: Click Confirm to create the customer
+            print("   Confirming creation...", file=sys.stderr)
+            page.eval_on_selector("button[data-test='modal-confirm-button']", "el => el.click()")
+            page.wait_for_timeout(6000)
+
+            # Step 9: Check for success
+            success = False
+            customer_id = ""
+            current_url = page.url
+
+            # Check URL for customer ID pattern
+            if "/customers/" in current_url:
+                match = re.search(r'/customers/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})', current_url)
+                if match:
+                    customer_id = match.group(1)
+                    success = True
+                    print(f"   Customer ID from URL: {customer_id}", file=sys.stderr)
+
+            # Check page for success indicators
+            if not success:
+                page_text = page.content()
+                # Look for a UUID in the page
+                uuid_match = re.search(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', page_text)
+                if uuid_match:
+                    customer_id = uuid_match.group(0)
+                    success = True
+                    print(f"   Customer ID from page: {customer_id}", file=sys.stderr)
+
+                # Look for success messages
+                if re.search(r'(?:created|success|saved)', page_text, re.IGNORECASE):
+                    success = True
+                    print("   Success message found on page", file=sys.stderr)
+
+            # Check if we're on customer detail/profile page
+            if not success and "/customers/" in current_url:
+                success = True
+                print(f"   Redirected to customer page: {current_url}", file=sys.stderr)
+
+            # Step 10: Attach meter if requested
+            if args.meter and customer_id:
+                print(f"   Attaching meter {args.meter}...", file=sys.stderr)
+                try:
+                    page.goto(
+                        f"{base_url}/portfolio/{org_id}/customers/{customer_id}",
+                        wait_until="networkidle", timeout=15000
+                    )
+                    page.wait_for_timeout(3000)
+                    # Look for meter assignment
+                    for sel in [
+                        "button:has-text('Assign Meter')",
+                        "a:has-text('Meter')",
+                        "button:has-text('Edit')",
+                    ]:
+                        try:
+                            page.click(sel, timeout=3000)
+                            break
+                        except Exception:
+                            continue
+                    # Fill meter serial
+                    page.fill("input[name='serial']", args.meter)
+                    page.click("button[type='submit']")
+                    page.wait_for_timeout(3000)
+                except Exception as e:
+                    print(f"   Meter attach warning: {e}", file=sys.stderr)
+
+            # Print network requests if debugging
+            if args.capture_network:
+                print("\n=== Captured Network Requests ===", file=sys.stderr)
+                for req in captured_requests:
+                    if any(x in req["url"] for x in ["customer", "Customer", "api/v1", "sm/"]):
+                        print(f"\n{req['method']} {req['url']}", file=sys.stderr)
+                        if req["post_data"]:
+                            print(f"  Data: {req['post_data'][:500]}", file=sys.stderr)
+
+            # Output result as JSON
+            result = {
+                "success": success,
+                "account_number": account_number,
+                "sm_customer_id": customer_id,
+                "url": current_url if success else "",
+            }
+            print(json.dumps(result))
+
+        except Exception as e:
+            try:
+                page.screenshot(path="/tmp/koios_create_error.png")
+                print(f"Error screenshot saved to /tmp/koios_create_error.png", file=sys.stderr)
+            except Exception:
+                pass
+            print(f"ERROR: {e}", file=sys.stderr)
+            print(json.dumps({"success": False, "error": str(e)}))
+
+        finally:
+            browser.close()
+
+
+if __name__ == "__main__":
+    main()

@@ -39,7 +39,7 @@ export default function GenSiteListPage() {
         <div>
           <h1 className="text-2xl font-semibold">Generation sites</h1>
           <p className="text-sm text-gray-500">
-            Per-site dashboards backed by inverter vendor APIs and portal scrapers.
+            Per-site dashboards with OEM-agnostic telemetry channels normalized into 1PDB.
           </p>
         </div>
         <Link

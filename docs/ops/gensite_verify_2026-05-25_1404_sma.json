@@ -1,0 +1,74 @@
+{
+  "generated_at_utc": "2026-05-25T12:06:58.152259+00:00",
+  "rows": [
+    {
+      "backend": "sunny_portal",
+      "country": "LS",
+      "credential_id": 10,
+      "discovered_equipment_count": 0,
+      "discovered_site_id": "",
+      "site_code": "BOB",
+      "site_id_on_vendor_before": "",
+      "site_name": "Bobete",
+      "vendor": "sma",
+      "verified_utc": "2026-05-25T12:06:58.145586+00:00",
+      "verify_message": "SMA Sunny Portal adapter is scheduled for Phase 2 (PIH rollout). Credentials are stored encrypted; live scrape is not wired yet.",
+      "verify_ok": "no",
+      "write_results": "yes"
+    },
+    {
+      "backend": "sunny_portal",
+      "country": "LS",
+      "credential_id": 11,
+      "discovered_equipment_count": 0,
+      "discovered_site_id": "",
+      "site_code": "MAN",
+      "site_id_on_vendor_before": "",
+      "site_name": "Manamaneng",
+      "vendor": "sma",
+      "verified_utc": "2026-05-25T12:06:58.147894+00:00",
+      "verify_message": "SMA Sunny Portal adapter is scheduled for Phase 2 (PIH rollout). Credentials are stored encrypted; live scrape is not wired yet.",
+      "verify_ok": "no",
+      "write_results": "yes"
+    },
+    {
+      "backend": "sunny_portal",
+      "country": "LS",
+      "credential_id": 12,
+      "discovered_equipment_count": 0,
+      "discovered_site_id": "",
+      "site_code": "MET",
+      "site_id_on_vendor_before": "",
+      "site_name": "Methalaneng",
+      "vendor": "sma",
+      "verified_utc": "2026-05-25T12:06:58.150063+00:00",
+      "verify_message": "SMA Sunny Portal adapter is scheduled for Phase 2 (PIH rollout). Credentials are stored encrypted; live scrape is not wired yet.",
+      "verify_ok": "no",
+      "write_results": "yes"
+    },
+    {
+      "backend": "sunny_portal",
+      "country": "LS",
+      "credential_id": 13,
+      "discovered_equipment_count": 0,
+      "discovered_site_id": "",
+      "site_code": "NKU",
+      "site_id_on_vendor_before": "",
+      "site_name": "Ha Nkau",
+      "vendor": "sma",
+      "verified_utc": "2026-05-25T12:06:58.152242+00:00",
+      "verify_message": "SMA Sunny Portal adapter is scheduled for Phase 2 (PIH rollout). Credentials are stored encrypted; live scrape is not wired yet.",
+      "verify_ok": "no",
+      "write_results": "yes"
+    }
+  ],
+  "totals": {
+    "credentials": 4,
+    "failed": 4,
+    "ok": 0
+  },
+  "vendors": [
+    "sma"
+  ],
+  "write_results": true
+}

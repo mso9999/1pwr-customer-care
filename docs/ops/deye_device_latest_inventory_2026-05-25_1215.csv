@@ -1,0 +1,16 @@
+deviceSn,deviceType,latest_points,latest_ok,latest_error
+2508215430BM01,BATTERY,0,no,no_deviceDataList_rows
+2508215405,INVERTER,105,yes,
+13101000DC180074,BATTERY,0,no,no_deviceDataList_rows
+2508215405BM01,BATTERY,0,no,no_deviceDataList_rows
+13101000DC180071,BATTERY,0,no,no_deviceDataList_rows
+D257258348E0,COLLECTOR,0,no,no_deviceDataList_rows
+D257258373F0,COLLECTOR,0,no,no_deviceDataList_rows
+2401228421,INVERTER,85,yes,
+2740461151,COLLECTOR,0,no,no_deviceDataList_rows
+2202144213,INVERTER,85,yes,
+2337105481,COLLECTOR,0,no,no_deviceDataList_rows
+2508215430,INVERTER,105,yes,
+2202144226,INVERTER,85,yes,
+2302230378,INVERTER,85,yes,
+2202144244,INVERTER,85,yes,

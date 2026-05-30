@@ -1,0 +1,546 @@
+account_number,first_name,last_name,phone,balance_kwh,site,platform,has_active_meter,bulk_excluded,category
+0005BVW,XXX,XXX,0,-7739.18,BVW,koios,True,True,EXCLUDED
+0001BVW,Matt,Orosz,0,2286.98,BVW,koios,False,True,EXCLUDED
+0226MAS,Tseliso,Mokoshoka,57186654,202.4,MAS,koios,False,False,"INVESTIGATE: has balance, no active meter"
+0227MAS,Tseliso,Mokoshoka,102325192922,102.0,MAS,koios,False,False,"INVESTIGATE: has balance, no active meter"
+0327MAK,Mateboho,Moroalo,53783153,99.8,MAK,thundercloud,False,False,"INVESTIGATE: has balance, no active meter"
+0261MAS,Napo,Mohale,57562670,40.0,MAS,koios,False,False,"INVESTIGATE: has balance, no active meter"
+0263MAS,Full,Gospel Church,58106241,40.0,MAS,koios,False,False,"INVESTIGATE: has balance, no active meter"
+0358MAK,Rethabile,Mokeka,50183488,40.0,MAK,thundercloud,False,False,"INVESTIGATE: has balance, no active meter"
+0001,Pitso,Thabang,0,0.0,,koios,False,True,EXCLUDED
+0001FSI,Hatlane,Thabang,0,0.0,FSI,koios,False,False,zero_or_near_zero_balance
+0001GYZ,Matt,Orosz,0,0.0,GYZ,koios,False,False,zero_or_near_zero_balance
+0001MTK,Thabang,Moalosi,0,0.0,MTK,koios,False,False,zero_or_near_zero_balance
+0001PTA,Mampolokeng,Pita,0,0.0,PTA,koios,False,False,zero_or_near_zero_balance
+0001RTE,Nt. Moshoeshoe,Molikuoa,0,0.0,RTE,koios,False,False,zero_or_near_zero_balance
+0001TOS,Malemohang,Lechela,58575724,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0002BVW,clown,bozo,0,0.0,BVW,koios,False,True,EXCLUDED
+0002FSI,Nt. Teboho,Ramolapong,0,0.0,FSI,koios,False,False,zero_or_near_zero_balance
+0002MTK,Yemba,Shungu,0,0.0,MTK,koios,False,False,zero_or_near_zero_balance
+0002PTA,Thabiso,Masienyane,0,0.0,PTA,koios,False,False,zero_or_near_zero_balance
+0002RTE,Ma Lekonyana,Machemane,0,0.0,RTE,koios,False,False,zero_or_near_zero_balance
+0002SEH,Maosia,Motia,26659322223,0.0,SEH,koios,True,False,"LOW: active meter, near-zero balance"
+0002TOS,Lehlohonolo,Qolo,57464444,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0003BVW,Matt,Orosz,0,0.0,BVW,koios,False,True,EXCLUDED
+0003FSI,Ma Nthoto,Ramaqele,0,0.0,FSI,koios,False,False,zero_or_near_zero_balance
+0003MTK,Yemba,Shungu,0,0.0,MTK,koios,False,False,zero_or_near_zero_balance
+0003PTA,Tseliso,Senthebane,0,0.0,PTA,koios,False,False,zero_or_near_zero_balance
+0003RTE,Ma Lekonyana,Machemane,0,0.0,RTE,koios,False,False,zero_or_near_zero_balance
+0003TOS,Maatisang,Mafura,58521713,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0004BVW,TESTFIRSTNAME,TESTLASTNAME,0,0.0,BVW,koios,False,True,EXCLUDED
+0004FSI,Paul Marabe,,0,0.0,FSI,koios,False,False,zero_or_near_zero_balance
+0004MTK,Maseutoli,Morebojane,0,0.0,MTK,koios,False,False,zero_or_near_zero_balance
+0004PTA,Tseliso,Senthebane,0,0.0,PTA,koios,False,False,zero_or_near_zero_balance
+0004RTE,Tsolo,Nkopane,0,0.0,RTE,koios,False,False,zero_or_near_zero_balance
+0004SEH,Thapelo,Tsiu,26658537980,0.0,SEH,koios,True,False,"LOW: active meter, near-zero balance"
+0004TOS,Mabobojane,Letsie,59778297,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0005MTK,Mapoloko,Napo,0,0.0,MTK,koios,False,False,zero_or_near_zero_balance
+0005RTE,Nt.Motia,Phiri,0,0.0,RTE,koios,False,False,zero_or_near_zero_balance
+0005TOS,Mabonang,Mafura,53572459,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0006MTK,Nt. Koenya,Mathibela,0,0.0,MTK,koios,False,False,zero_or_near_zero_balance
+0006RTE,Nt.Tsietsi,Hlalele,0,0.0,RTE,koios,False,False,zero_or_near_zero_balance
+0006SEH,Tseliso,Baholo,26657020930,0.0,SEH,koios,True,False,"LOW: active meter, near-zero balance"
+0006TOS,Makhauta,Nkuatsana,57022048,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0007TOS,Makhotsang,Lipholo,57014406,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0008TLH,Tanki,Tsie,26659022148,0.0,TLH,koios,True,False,"LOW: active meter, near-zero balance"
+0008TOS,Mamolai,Rateleki,53743987,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0009TLH,Maamohelang,Lepheaana,26663761060,0.0,TLH,koios,True,False,"LOW: active meter, near-zero balance"
+0009TOS,Mamontseng,Lipholo,,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0010TOS,Mankaleso,Chambo,57475534,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0011TOS,Matelang,Maphasa,58511386,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0012SEH,Thuso,Morethi,59474377,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0012TOS,Mautloang,Maphasa,50021040,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0013SEH,Tsepang,Sefefo,57182060,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0013TLH,Sele,Morena,26650627377,0.0,TLH,koios,True,False,"LOW: active meter, near-zero balance"
+0013TOS,Masenate,Mafura,58519882,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0014SEH,Ts'eliso,Baholo,56146424,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0014TOS,Mathuso,Tanki,57467255,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0015SEH,Mapola,Mapola,50364042,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0015TOS,Matsokolo,Kaloli,59210094,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0016SEH,Machaea,Mokherenyane,57261957,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0016SHG,Teboho,Mafoea,0,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0016TOS,Matoka,Pinyane,59688504,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0017LSB,Maleka,Mathibeli,26658422459,0.0,LSB,koios,True,False,"LOW: active meter, near-zero balance"
+0017MAS,Mammoneng,Moreki,26657935896,0.0,MAS,koios,True,False,"LOW: active meter, near-zero balance"
+0017SEH,Matheko,Makhaola,58414642,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0017TOS,Nofest,Chambo,51459380,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0018SEH,Mamanehella,Mohale,63848330,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0018TLH,Lepheane,Pholo,26656472311,0.0,TLH,koios,True,False,"LOW: active meter, near-zero balance"
+0018TOS,Nofest,Chambo,59202712,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0019LSB,Maleka,Mathibeli,26658422459,0.0,LSB,koios,True,False,"LOW: active meter, near-zero balance"
+0019SEH,Mavuka Primary,School,58509804,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0019TOS,Nonembile,Chambo,56187972,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0020SEH,Nomacose,Debese,59506584,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0020TOS,Nonishene,Peete,58355647,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0021TOS,Puleng,Mohale,57499060,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0022SEH,Mamathibane,Thoola,57604760,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0022SHG,Retselisitsoe,Nthibeli,26657750343,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0022TOS,Mojalefa,Mdona,56838475,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0023SEH,Makhopolo,Pakisi,58599508,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0023TOS,Nonondise,Chambo,57501668,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0024SEH,Likonelo,Nkholise,59933539,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0024TOS,Nophumzile,Chambo,58810531,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0025LSB,Maleka,Mathibeli,26658422459,0.0,LSB,koios,True,False,"LOW: active meter, near-zero balance"
+0025MAS,Mamotheo,Khusu,26657705326,0.0,MAS,koios,True,False,"LOW: active meter, near-zero balance"
+0025SHG,Mapholiso,Moteane,26651787619,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0025TOS,Nophumzile,Chambo,58810531,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0026LSB,Maleka,Mathibeli,26658422459,0.0,LSB,koios,True,False,"LOW: active meter, near-zero balance"
+0026SHG,Marorisang,Qamo,26659566400,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0026TOS,Thabang,Mafura,57282139,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0027LSB,Maleka,Mathibeli,26658422459,0.0,LSB,koios,True,False,"LOW: active meter, near-zero balance"
+0027MAS,Mamotheo,Khusu,26657705326,0.0,MAS,koios,True,False,"LOW: active meter, near-zero balance"
+0027SEH,Mabula,Malikhetho,58599508,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0027TOS,Nophumzile,Chambo,58810531,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0028SEH,Taane,Pakisi,57312958,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0028TLH,Mokete,Khama,26658537466,0.0,TLH,koios,True,False,"LOW: active meter, near-zero balance"
+0028TOS,Noandile,Qolo,59414147,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0029KET,Malineo,Letsie,26659114025,0.0,KET,koios,True,False,"LOW: active meter, near-zero balance"
+0029SEH,Moeketsi,Pakisi,6366067126657308586,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0029SHG,Marorisang,Qamo,26659566400,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0029TOS,Motsamai,Ntlai,59753719,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0030SEH,Mpesi,Tseetsa,50551824,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0030TLH,Maphomolo,Chabana,26657075328,0.0,TLH,koios,True,False,"LOW: active meter, near-zero balance"
+0030TOS,Simon,Mathakhoe,58065905,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0031MAS,Makhathala,Phatsoane,26656717504,0.0,MAS,koios,True,False,"LOW: active meter, near-zero balance"
+0031SEH,Thabiso,Tsiu,56265972,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0031TOS,Simon,Mathakhoe,58065909,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0032SEH,Matsiliso,Molia,59586228,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0032TOS,Thabo,Maphasa,57054456,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0033SEH,Khaile,Pakisi,57471263,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0033TLH,Moeketsi,Khama,26651788830,0.0,TLH,koios,True,False,"LOW: active meter, near-zero balance"
+0033TOS,Pita,Maphasa,57447518,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0034SEH,Torike,Hulane,64111100,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0034TOS,Novuyisile,Polaki,58536677,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0035SEH,Retselisitsoe,Tau,56775810,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0035TOS,Zwelithini,Qolo,56409054,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0036MAS,Retselisitsoe,Moreki,26659044520,0.0,MAS,koios,True,False,"LOW: active meter, near-zero balance"
+0036SEH,Matsoanelo,Mosala,63660672,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0036TOS,Sechaba,Ntlai,56103608,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0037SEH,Mamathibane,Thoola,57604760,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0037TLH,Malulang,Sepheka,26657875290,0.0,TLH,koios,True,False,"LOW: active meter, near-zero balance"
+0037TOS,Nosakhumzi,Qolo,58827633,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0038SEH,Nthako,Monamatha,57586602,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0038TOS,Samkele,Fudumele,57588911,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0039SEH,Khotso,Brown,59715523,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0039TOS,Zwelithini,Qolo,56409054,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0040SEH,Lilahloane,Sello,58551259,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0040SHG,Supermarket,Gooder,26658126927,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0040TOS,Masalang,Vivi,56077405,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0041SEH,Malilemo,Mapola,57234317,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0041SHG,Mpho,Kose,26656583733,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0041TOS,Maphasa,Maphasa,57354952,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0042SEH,Matumelo,Hoodi,63660939,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0042TLH,Ts'abo,Lengoasa,27734832212,0.0,TLH,koios,True,False,"LOW: active meter, near-zero balance"
+0042TOS,Malesala,Mafura,58922605,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0043SEH,Mamatiase,Maseka,50655312,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0043TLH,Retselisitsoe,Makaka,26658799881,0.0,TLH,koios,True,False,"LOW: active meter, near-zero balance"
+0043TOS,Malillo,Mpapa,58568648,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0044SEH,Mamanehella,Mohale,63848330,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0044TOS,Malebatla,Valashea,58599455,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0045SEH,Salang,Poko,57006058,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0045TLH,Malipholo,Letsela,26656746377,0.0,TLH,koios,True,False,"LOW: active meter, near-zero balance"
+0045TOS,Maselemo,Nyiangintsimbi,59146098,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0046TLH,Tsoibila,Motloli,26657231960,0.0,TLH,koios,True,False,"LOW: active meter, near-zero balance"
+0046TOS,Ntlokotsi,Matlama,57608934,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0047SEH,Makhopolo,Pakisi,58599508,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0047TOS,Lesenya,Bolofo,59792876,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0048SEH,Lekhetho,Mokoma,57888640,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0048TOS,Nthateng,Maphasa,58051744,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0049SEH,Mamaamokela,Motlomelo,50364066,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0049TOS,Relebohile,Pinyane,58180951,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0050SEH,Lekhetho,Mokoma,57888640,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0050TOS,Samson,Nyangintsimbi,58543852,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0051SEH,Monyane,Thoola,57604760,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0051TLH,Mpho,Makoti,26659199618,0.0,TLH,koios,True,False,"LOW: active meter, near-zero balance"
+0051TOS,Moshoeshoe,Maphasa,57593199,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0052SEH,Matiiesetso,Mohale,57665918,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0052TLH,Mahlomola,Maliba,26651853634,0.0,TLH,koios,True,False,"LOW: active meter, near-zero balance"
+0052TOS,Manepang,Maphasa,58511386,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0053MAT,Moeti,Mateke,26668173813,0.0,MAT,koios,True,False,"LOW: active meter, near-zero balance"
+0053SEH,Malikopo,Mohapi,63622786,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0053TOS,Mafilimone,Matlama,57750012,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0054SEH,Mamolemo,Ntsatsi,59209531,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0054TOS,Lebohang,Lents'a,57798331,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0055MAS,Mateboho,Semethe,0,0.0,MAS,koios,True,False,"LOW: active meter, near-zero balance"
+0055TOS,Maleshoane,Maphasa,57354952,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0056SEH,Mamolemo,Ntsatsi,59209531,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0056TOS,Lisebo,Lipholo,59311953,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0057SEH,Mamolemo,Ntsatsi,59209531,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0057TOS,Mpekho,Chambo,57442262,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0058SEH,Mamolemo,Ntsatsi,59209531,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0058TLH,Makhahliso,Lepheana,26653022862,0.0,TLH,koios,True,False,"LOW: active meter, near-zero balance"
+0058TOS,Marelebohile,Lipholo,59311953,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0059MAS,Ntsabeng,Ramone,26659724584,0.0,MAS,koios,True,False,"LOW: active meter, near-zero balance"
+0059MAT,Makoro,Makau,26663479777,0.0,MAT,koios,True,False,"LOW: active meter, near-zero balance"
+0059SEH,Mamolemo,Ntsatsi,59209531,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0059TOS,Matumo,Nyiangintsimbi,59679083,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0060SEH,Mamolemo,Ntsatsi,59209531,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0060TLH,Sera,Setjama,26658084150,0.0,TLH,koios,True,False,"LOW: active meter, near-zero balance"
+0060TOS,Mamohlakoana,Sekoati,57092671,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0061SEH,Xolane,Voezana,63109369,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0061TLH,Mosito,Chabana,26658415860,0.0,TLH,koios,True,False,"LOW: active meter, near-zero balance"
+0061TOS,Zebuzele,Sekoati,58010106,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0062SEH,Mamolemo,Ntsatsi,59209531,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0062TOS,Sechaba,Ntlai,56103608,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0063SEH,Lekhetho,Mokoma,57888640,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0063TOS,Matokelo,Maphasa,57224213,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0064SEH,Matumelo,Hoodi,63660939,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0064TOS,Matokelo,Maphasa,57225213,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0065SEH,Maphakiso,Hlekiso,59413685,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0065TOS,Masokolang,Maisa,57224213,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0066SEH,Moeketsi,Trom,63649510,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0066TOS,Macaswell,Falatsa,57972951,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0067SEH,Mathakane,Sehale,63061673,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0067TOS,Makhauta,Nkuatsana,57022048,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0068SEH,Tumelo,Mohapi,59912260,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0068TOS,TEST,TOSING,57196420,0.0,TOS,koios,True,False,"LOW: active meter, near-zero balance"
+0069MAT,Mataha,Moloantoa,26662112241,0.0,MAT,koios,True,False,"LOW: active meter, near-zero balance"
+0069SEH,Moiloa,Khomari,53999885,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0069TOS,TOS,TEST 2,57196420,0.0,TOS,koios,True,False,"LOW: active meter, near-zero balance"
+0070SEH,Maboleli,Mapola,57190808,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0070TOS,Cecelia,Sofonia,58093149,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0071MAS,Tseko,Letsohla,0,0.0,MAS,koios,True,False,"LOW: active meter, near-zero balance"
+0071SEH,Lisebo,Mahanyane,56724930,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0071TLH,Manteseng,Mahlola,26657147430,0.0,TLH,koios,True,False,"LOW: active meter, near-zero balance"
+0071TOS,Maatisang,Mafura,58821713,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0072SEH,Matsekiso,Ramone,56211812,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0072TLH,Tebello,Mabea,26663271054,0.0,TLH,koios,True,False,"LOW: active meter, near-zero balance"
+0072TOS,Makatleho,Nkuatsana,58187023,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0073SEH,Puleng,Ralekuku,63990882,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0073TOS,Marelebohile,Mafura,57189061,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0074SEH,Thabo,Mapola,57577638,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0074SHG,Sehong Hong,Post Office,26657750343,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0074TLH,Maletlatsa,Khama,26658180728,0.0,TLH,koios,True,False,"LOW: active meter, near-zero balance"
+0074TOS,Masenate,Mafura,58519882,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0075KET,Seabata,Seutloali,26656696494,0.0,KET,koios,True,False,"LOW: active meter, near-zero balance"
+0075SEH,Thabang,Lerothi,58577144,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0075TLH,Manthatisi,Khama,26658180728,0.0,TLH,koios,True,False,"LOW: active meter, near-zero balance"
+0075TOS,Masenate,Mafura,58519882,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0076MAT,Malokisa,Feka,26663224532,0.0,MAT,koios,True,False,"LOW: active meter, near-zero balance"
+0076SEH,Busang,Tefo,58418725,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0076TOS,Noechene,Nokoa,58503737,0.0,TOS,koios,False,False,zero_or_near_zero_balance
+0077SEH,Mzimkhulu,Debese,68380028,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0077TLH,Lipholo,Letsela,26656995222,0.0,TLH,koios,True,False,"LOW: active meter, near-zero balance"
+0079MAT,Malisebo,Mokhethi,26663326197,0.0,MAT,koios,True,False,"LOW: active meter, near-zero balance"
+0079SEH,Hlomphang,Motlomelo,57950405,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0080MAS,Pholoana,Matsemela,26653695345,0.0,MAS,koios,True,False,"LOW: active meter, near-zero balance"
+0080SEH,KANANELO,KOENEHELO,56187706,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0080TLH,Tsabo,Lengoasa,26659036741,0.0,TLH,koios,True,False,"LOW: active meter, near-zero balance"
+0081SEH,Khereng,Nchane,57261957,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0082MAS,Mareithabetse,Semethe,26657832204,0.0,MAS,koios,True,False,"LOW: active meter, near-zero balance"
+0082SEH,Limpho,Sehahle,50747473,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0083SEH,MAISA,KIIBE,58423133,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0084SEH,'MAITUMELENG,MONAMATHA,57588302,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0085MAS,Makutloano,Mokone,26656240419,0.0,MAS,koios,True,False,"LOW: active meter, near-zero balance"
+0085SEH,'Maitumeleng,Monamatha,56727522,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0086SEH,Masebueng,Makhaola,57588780,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0087SEH,Makhau,Fantisi,58912124,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0088SEH,Makopano,Manamoleli,50364024,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0089SEH,Malikhetho,Mabula,58599508,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0090SEH,Mamohau,Mohale,57483044,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0091SEH,Mamotselisi,Mokherenyane,57036345,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0092SEH,Mamotselisi,Mokherenyane,57036345,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0093SEH,'Mapali,Lethola,56265173,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0094SEH,Marets'epile,Ts'iu,50223687,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0094TLH,Monnamoholo,Badela,26659408438,0.0,TLH,koios,True,False,"LOW: active meter, near-zero balance"
+0095KET,Letele,Khasemeng,26659411554,0.0,KET,koios,True,False,"LOW: active meter, near-zero balance"
+0095SEH,Masekoati,Sekoati,58541121,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0095SHG,SHG Police,Office,26658054482,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0096SEH,Mathabiso,Mokherenyane,63660561,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0097KET,Mothusi,Khasemeng,26650181569,0.0,KET,koios,True,False,"LOW: active meter, near-zero balance"
+0097MAT,Setumo,Phothane,26667270573,0.0,MAT,koios,True,False,"LOW: active meter, near-zero balance"
+0097SEH,Matsepang,Sefefo,63660828,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0098SEH,Molefi,Mapola,56522011,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0099SEH,Moremoholo,Monamoleli,58355570,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0100SEH,Moremoholo,Monamoleli,58355570,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0101KET,Lepheana,Rashaba,26659611654,0.0,KET,koios,True,False,"LOW: active meter, near-zero balance"
+0101SEH,Neo,Ts'eeke,58797569,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0102MAT,Makau,Refuoe,26662192356,0.0,MAT,koios,True,False,"LOW: active meter, near-zero balance"
+0102SEH,Nkemeleng,Monamatha,57466841,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0103SEH,Nthafe,Khate,59322943,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0104SEH,Paballo,Mohapi,63686771,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0106SEH,Pusetso,Lebusetsa,56471565,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0107KET,Matjalane,Phafoli,26658511865,0.0,KET,koios,True,False,"LOW: active meter, near-zero balance"
+0107SEH,Pusetso,Lebusetsa,56471565,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0108SEH,Retlatsitsoe,Tseetsa,57983353,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0109SEH,Salang,Poko,57006058,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0110KET,Thabiso,Mohapi,26662279222,0.0,KET,koios,True,False,"LOW: active meter, near-zero balance"
+0110SEH,Sanki,Thoola,57942375,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0111KET,Malisebo,Sethobane,0,0.0,KET,koios,True,False,"LOW: active meter, near-zero balance"
+0111SEH,Sello,Moletsane,57779413,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0112SEH,Taeli,Mapola,57405606,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0113SEH,Thabang,Lerothi,58577144,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0114SEH,Tsebonyane,Mapola,62858641,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0114SHG,Matsepa,Mothobi,26659535662,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0116SEH,Tsebonyane,Mapola,62858641,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0117SEH,Ts'eliso,Raphoto,63690857,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0118SEH,Tumane,Thoola,56514660,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0118SHG,Neo,Kanetsi,26659108814,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0119SEH,Nts'iuoa,Koele,58901286,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0120SEH,Ts'epo,Tlali,59035902,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0121SEH,Thaka-Banna,Nyokana,57588780,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0122SEH,Resource,Centre,51999346,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0123SEH,Moramang,Mohale,57958715,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0124SEH,Mavuka Primary,School,53081618,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0125SEH,Mavuka Primary,School,57285369,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0126SEH,Mavuka High,School,53081618,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0127SEH,Mavuka High,School,53081618,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0128SEH,Mavuka High School,Office,53081618,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0129SEH,Ts'iliso,Motia,50791073,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0130SEH,Ts'iliso,Motia,50791073,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0131KET,Matlali,Mohapi,26659102768,0.0,KET,koios,True,False,"LOW: active meter, near-zero balance"
+0131SEH,Ts'iliso,Motia,50791073,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0132SEH,Ts'iliso,Motia,50791073,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0133SEH,Coop,Lesotho,62912637,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0134SEH,Mavuka Primary,School,50165781,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0135SEH,Mavuka,Primary,53081618,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0136MAT,Mamoletsane,Molupe,0,0.0,MAT,koios,True,False,"LOW: active meter, near-zero balance"
+0136SEH,Mavuka Primary,School,58568143,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0137KET,Boiketlo,MinistryofAgriculturefoodsecurityandnutrition,26658498147,0.0,KET,koios,True,False,"LOW: active meter, near-zero balance"
+0137SEH,Mavuka Primary,School Office,50165781,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0138SEH,Mavuka,Primary,53081618,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0139SEH,Phallang,Moletsane,59456773,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0140SEH,Mamalebanye,Mohale,57019663,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0141SEH,Moeketsi,Pakisi,57308586,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0142MAK,Makeletso,Lejakane,0,0.0,MAK,thundercloud,True,False,"LOW: active meter, near-zero balance"
+0142MAS,Themkose,Paepae,26659946552,0.0,MAS,koios,True,False,"LOW: active meter, near-zero balance"
+0142MAT,Mokhoabo,Thapelo,26662459354,0.0,MAT,koios,True,False,"LOW: active meter, near-zero balance"
+0142SEH,Moeketsi,Pakisi,57308586,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0143SEH,Moeketsi,Pakisi,57308586,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0144SEH,Moeketsi,Pakisi,57308586,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0145SEH,Moeketsi,Pakisi,57308586,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0146SEH,Mamothepane,Mohale,56177248,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0147SEH,Makhau,Fantisi,58912124,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0148KET,KETANE,LRMIS,26659712784,0.0,KET,koios,True,False,"LOW: active meter, near-zero balance"
+0148SEH,Khotso,Brown,59715523,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0149KET,Malisebo,Sethobane,26656867489,0.0,KET,koios,True,False,"LOW: active meter, near-zero balance"
+0149SEH,Khotso,Brown,59715523,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0150SEH,Khotso,Brown,59715523,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0151KET,Mofao,Mofao,26659524489,0.0,KET,koios,True,False,"LOW: active meter, near-zero balance"
+0151SEH,Khotso,Brown,59715523,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0152MAS,Mampho,Khalala,26656341387,0.0,MAS,koios,True,False,"LOW: active meter, near-zero balance"
+0152SEH,Mamathibane,Thoola,57604760,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0153SEH,ST Philics,Church,57604760,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0154KET,Relebeletse,Ntsene,0,0.0,KET,koios,True,False,"LOW: active meter, near-zero balance"
+0154SEH,ST Philics Church,Office,57604760,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0155MAS,Matsotang,Khahlane,26650664557,0.0,MAS,koios,True,False,"LOW: active meter, near-zero balance"
+0155SEH,Monyane,Thoola,57044835,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0156SEH,Mavuka High school,Staff Room,53081618,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0157SEH,Mamathibane,Thoola,57604760,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0158SEH,Mamathibane,Thoola,57604760,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0159SEH,Mamathibane,Thoola,57604760,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0160KET,Tholang,Ntsau,0,0.0,KET,koios,True,False,"LOW: active meter, near-zero balance"
+0160SEH,Mamathibane,Thoola,57604760,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0161SEH,Mamathibane,Thoola,57604760,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0162SEH,Mamathibane,Thoola,57604760,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0163SEH,Mavuka High school,Block 8&9,53081618,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0164SEH,Motuba,Mahanyane,57240536,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0165SEH,Mamahloko,Manyo,59650970,0.0,SEH,koios,False,False,zero_or_near_zero_balance
+0166SHG,Mokoto,malakanyane,26657396617,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0167KET,Matseko,Lebeko,26668687606,0.0,KET,koios,True,False,"LOW: active meter, near-zero balance"
+0167MAS,Lebohang,Pepenene,26658188719,0.0,MAS,koios,True,False,"LOW: active meter, near-zero balance"
+0171SHG,Nobongile,Kolobetso,26659419380,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0175MAS,Matjekelane,Seme,26657074478,0.0,MAS,koios,True,False,"LOW: active meter, near-zero balance"
+0176MAS,Lehlohonolo,Makhetha,26650694799,0.0,MAS,koios,True,False,"LOW: active meter, near-zero balance"
+0177MAS,Masethole,Hlakanyane,26651925519,0.0,MAS,koios,True,False,"LOW: active meter, near-zero balance"
+0177SHG,SHG Local Court,House1,26658448384,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0178MAT,Makhabane,Moshoeshoe,26662274461,0.0,MAT,koios,True,False,"LOW: active meter, near-zero balance"
+0182MAS,Mantsotiseng,Khalala,26650132440,0.0,MAS,koios,True,False,"LOW: active meter, near-zero balance"
+0183MAT,Makhapung,Wigia,26663466677,0.0,MAT,koios,True,False,"LOW: active meter, near-zero balance"
+0192MAS,Matsobo,Mahlahlela,26656393630,0.0,MAS,koios,True,False,"LOW: active meter, near-zero balance"
+0194SHG,Mohatanya,Selomi,26659421178,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0195SHG,Mohatanya,Selomi,26659421178,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0196SHG,Makoanyane,Mokhesi,26653815844,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0197MAT,Makhathatso,Molupe,26663043553,0.0,MAT,koios,True,False,"LOW: active meter, near-zero balance"
+0199SHG,Cothazele,Paepae,26659150665,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0200MAS,Phakiso,Ramone,26656139888,0.0,MAS,koios,True,False,"LOW: active meter, near-zero balance"
+0200SHG,Cothazele,Paepae,26659150665,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0201SHG,Cothazele,Paepae,26659150665,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0202SHG,Cothazele,Paepae,26659150665,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0204MAS,Mathato,Mathabela,57805241,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0204SHG,Cothazele,Paepae,59150665,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0205MAS,Mathato,Mathabela,57805241,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0206MAS,Mathato,Phiela,57923147,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0207MAS,Zabalese,Mohlekoa,58044650,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0208MAS,Matsokolo,Lebitsa,58679828,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0209MAS,Tsotang,Makeka,59419184,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0210MAS,Masabelo,Mokane,58695839,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0211MAS,Pitso,Lekhotla,59335764,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0212MAS,Maphakathe,Kehlane,57824160,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0213MAS,Matsepang,Khophooha,59419184,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0214MAS,Mamafoli,Makaba,57483305,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0215MAS,Maselloane,Khonyane,58329603,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0215MAT,Kabelo,Khabane,26667301409,0.0,MAT,koios,True,False,"LOW: active meter, near-zero balance"
+0216MAS,Serame,Khonyane,59419184,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0217MAS,Mamotebang,Ramone,58692953,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0218MAS,Mamokheseng,Theko,58362725,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0219MAS,Mamoliehi,Morethi,59419184,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0220MAS,Mamoliehi,Morethi,59419184,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0221MAS,Mateboho,Khonyane,51455984,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0222MAS,Lebohang,Motau,59419184,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0223MAS,Matsotang,K'hehlane,50664557,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0224MAS,Matelang,Motokoa,59419184,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0224MAT,Mapolao,Aumane,0,0.0,MAT,koios,True,False,"LOW: active meter, near-zero balance"
+0225MAS,Ntlelene,Qhola,53176116,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0228MAS,Mantsane,Khonyane,59473102,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0228SHG,Malerato,Putsoe,26666301512,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0229MAS,Assemblies of God,Church,58529630,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0230MAS,Mantsane,Khonyane,59473102,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0231MAS,Tselisehang,Maseru,57228075,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0231SHG,Shg,Airport,26656876276,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0232MAS,Mamonaheng,Khonyane,59477102,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0233MAS,Marethabile,Lekhotla,59335764,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0234MAS,Matsokolo,Mokeka,57923147,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0235MAS,Mathabelo,Lebitsa,51466545,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0236MAK,Kekeletso,Ramotsoto,26657971009,0.0,MAK,thundercloud,True,False,"LOW: active meter, near-zero balance"
+0236MAS,Matemoho,Makaba,56688217,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0237MAS,Lipholo,Lekhotla,57156241,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0238MAS,Makhabo,Mokoshoka,50959461,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0239MAS,Tsepo,Motau,58466988,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0240MAS,Khulenyane,Makaba,59724622,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0241MAS,Maneo,Makaba,57410911,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0242MAK,Puleng,Baleni,26662840082,0.0,MAK,thundercloud,True,False,"LOW: active meter, near-zero balance"
+0242MAS,Tsolo,Motokoa,56012429,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0243MAK,Makeneuoe,Letsoho,26656602699,-0.0,MAK,thundercloud,True,False,"LOW: active meter, near-zero balance"
+0243MAS,Tumo,Jane,,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0243SHG,Tumo,Aporele,26658063976,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0244MAS,Sephethephethe,Qhola,51466533,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0245MAS,Mamoshoshoe,Makhatha,,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0246MAS,Lebohang,Pepenene,57684037,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0247MAS,Mamohlalefi,Makaba,56688217,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0248MAK,Hiki,Mocase,26650183464,0.0,MAK,thundercloud,True,False,"LOW: active meter, near-zero balance"
+0248MAS,Thato,Makaba,57712861,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0249MAK,Mamootisa,Mocase,26657876974,0.0,MAK,thundercloud,True,False,"LOW: active meter, near-zero balance"
+0249MAS,Mmamonareng,Matheka,56458096,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0250MAS,Matseko,Mohlahlela,50998584,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0250SHG,Mabokang,Monne,26659365877,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0251MAS,Thato,Khanyane,57188773,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0252MAS,Mamohale,Mohale,63988081,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0253MAK,Lerato,Mokeka,26656602699,0.0,MAK,thundercloud,True,False,"LOW: active meter, near-zero balance"
+0253MAS,Zekane,Mokane,58695839,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0254MAS,Fusi,Khonyane,58106241,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0255MAS,Matjekelane,Seme,58128696,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0256MAS,Kholoang,Mosika,50332883,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0257MAS,Moeketsi,Sebothe,56583185,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0258MAS,Maneo,Khonyane,59432598,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0259MAK,Itumeleng,Moroalo,26663399307,0.0,MAK,thundercloud,True,False,"LOW: active meter, near-zero balance"
+0259MAS,Makutloano,Makaba,57712861,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0260MAS,Mamoeketsi,Sebothe,58445427,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0262MAK,Lebohang,Moroalo,26657761327,0.0,MAK,thundercloud,True,False,"LOW: active meter, near-zero balance"
+0262MAS,Zekane,Mokane,58695839,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0264MAS,Ndlandla,Mmokoane,56688217,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0265MAS,Nkhala,Makhetha,53430427,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0266MAS,Andile,Mokane,57485305,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0267MAS,Mzoame,Matheka,56458096,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0268MAK,Matsolo,Mosiuoa,26662840082,0.0,MAK,thundercloud,True,False,"LOW: active meter, near-zero balance"
+0268MAS,'Mamohale,Mohale,63988081,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0268MAT,Mosito,Mokoena,0,0.0,MAT,koios,True,False,"LOW: active meter, near-zero balance"
+0269MAS,Matsepang,Khophocha,59419184,0.0,MAS,koios,False,False,zero_or_near_zero_balance
+0272MAK,Mpho,Pheko,26658527737,0.0,MAK,thundercloud,True,False,"LOW: active meter, near-zero balance"
+0272MAT,Ntja,Moloantoa,26668205223,0.0,MAT,koios,True,False,"LOW: active meter, near-zero balance"
+0276MAT,Maamohelang,Moreki,0,0.0,MAT,koios,True,False,"LOW: active meter, near-zero balance"
+0277MAK,Retselisitsoe,Pheko,26656474449,0.0,MAK,thundercloud,True,False,"LOW: active meter, near-zero balance"
+0279MAT,Bokang,Ncholu,26662836221,0.0,MAT,koios,True,False,"LOW: active meter, near-zero balance"
+0279SHG,Kali,Maqoto,26650095688,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0282MAT,Tsepang,Tekane,0,0.0,MAT,koios,True,False,"LOW: active meter, near-zero balance"
+0286SHG,Mafooa,Tsiki,26659205156,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0287MAK,Manthabeleng,Mosala,0,0.0,MAK,thundercloud,True,False,"LOW: active meter, near-zero balance"
+0290MAK,Mothetsi,Lerata,0,0.0,MAK,thundercloud,True,False,"LOW: active meter, near-zero balance"
+0293SHG,Maitumeleng,Ramonyahane,26657115977,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0294MAK,Mathato,Rapuleng,26659020758,0.0,MAK,thundercloud,True,False,"LOW: active meter, near-zero balance"
+0295MAK,Matseliso,Moroalo,0,0.0,MAK,thundercloud,True,False,"LOW: active meter, near-zero balance"
+0295SHG,Monaheng,Hlekiso,26656465183,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0296MAK,Mathabiso,Chabeli,57683117,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0299MAK,Katiso,Joele,56002278,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0300MAK,Katiso,Joele,56002278,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0302MAK,Lomile,Joele,59316798,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0304MAK,Mamalakia,Mosala,59919945,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0305MAK,Mamotheba,Mohapi,57526464,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0306MAK,Maseabata,Ayob,59384760,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0307MAK,Masupha,Masupha,57354409,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0309MAK,Mateboho,Joele,56414817,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0311MAK,Matlotliso,Tamanyane,57420815,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0312MAK,Matolle,Mosebo,58480250,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0313MAK,Matseliso,Mothetsi,59410292,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0314MAK,Mosala,Mosala,59928159,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0315MAK,Nawabally,Kader,58457526,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0316MAK,Pitso,Peshoane,59228158,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0317MAK,Sehlooho,Sole,58028952,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0318MAK,Selloane,Motsamai,58162752,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0319MAK,Tauhali,Hlobelo,62445096,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0320MAK,Tauhali,Hlobelo,59043579,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0321MAK,Teboho,Lehlokoanyane,58421302,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0321SHG,StaffRoom10,Sehonghong High School,26658580909,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0324MAK,Tsiu David,Mosala,59664336,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0325MAK,Ts'eliso,Joele,58700311,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0326MAK,Malebohang,Pheko,58088688,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0326SHG,Cothazele,Paepae,0,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0327SHG,Tsepang,Lebitsa,26658400977,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0329MAK,Lebabo,Mafiakhomo,56188084,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0330MAK,Malefu,Koloi,59028403,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0332MAK,Tebello,Mocase,59364371,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0333MAK,Linkeng,Mokoma,58588771,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0334MAK,Mareka,Mosala,58889210,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0335MAK,Ntsoaki,Makhonofane,63399424,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0335SHG,Rapelang,Maliele,26656516280,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0336MAK,Makhotso,Shale,,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0337MAK,Mamaitin,Maitin,58003080,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0338MAK,Mamohlapisi,Polaki,63912400,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0339MAK,Montoetsana,Baleni,59695199,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0339SHG,Tlokotsi,Lebitsa,26651929238,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0340MAK,Manyaniso,Pheko,63572729,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0340SHG,Mantsehiseng,Kotseli,26659191558,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0341MAK,Matebello,Mocase,59777494,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0342MAK,Mateboho,Mofothi,57679298,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0343MAK,Mateele,Chabeli,,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0344MAK,Mathabiso,Ramafikeng,,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0345MAK,Matsepang,Pheko,,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0345SHG,Mantsehiseng,Kotseli,26659191558,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0346MAK,Moeketsi,Joele,59096364,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0347MAK,Molefi,Thejane,,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0347SHG,Khojane,Kotseli,26657129411,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0348MAK,Puleng,Mokoena,56602699,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0348SHG,Molise,Mahasele,26657401349,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0349MAK,Sello,Mokeka,,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0350MAK,Velase,Pheko,56920510,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0350SHG,Lehana,Khemisi,26657401349,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0351MAK,Vikie,Pheko,63399383,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0351SHG,Matau,Moketa,26656605169,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0352MAK,Mabohlokoa,Motsoasele,53875683,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0352SHG,Tokelo,Kotseli,26651928870,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0353MAK,Malefetsane,Takane,56350179,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0353SHG,Matsiu,Tsiu,26659902130,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0354MAK,Malehloibi,Pheko,56239533,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0354SHG,Boipuso,Kotseli,26650776981,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0355MAK,Maseabata,Moroalo,,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0355SHG,Letsekha,Letsekha,26659413902,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0356MAK,Maseiso,Takane,56350179,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0356SHG,Matanki,Makana,26653815898,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0357MAK,Mathuso,Motseki,56239533,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0357SHG,Moleleki,Machoba,26659721030,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0358SHG,Chabana,Lebitsa,26658339063,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0359MAK,Seabata,Pheko,58781943,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0359SHG,Maphumulani,Mphehloa,26656516280,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0360MAK,Seabata,Pheko,58781943,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0360SHG,Mamolefi,Khehloane,26657294145,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0361MAK,Selemo,Mocase,57131819,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0361SHG,Masehloho,Kotseli,26659112851,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0362MAK,Tanki,Makhonofane,57141627,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0362SHG,Rantsetse,Pitso,26653792240,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0363MAK,Tsiu,Mosala,59664336,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0363SHG,Matseliso,Mosiuoa,26658821794,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0364MAK,Maseabata,Mohapi,57739555,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0364SHG,Khojane,Kotseli,26657129411,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0365MAK,Motse-oa-banna,Mahlaku,57739555,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0365SHG,Molise,Mahasele,26657401349,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0366MAK,Fokothi,Mocase,,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0366SHG,Lithakong,Moketa,26653975697,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0367MAK,Rantsulube,Mosala,57181378,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0367SHG,Motjako,Makhula,26659417835,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0368MAK,Tlali,Moroalo,56161094,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0368SHG,Motjako,Makhula,26659417835,0.0,SHG,koios,True,False,"LOW: active meter, near-zero balance"
+0369MAK,Mapapali,Motseki,56239533,0.0,MAK,thundercloud,False,False,zero_or_near_zero_balance
+0369SHG,Mathe,Letsie,68588450,0.0,SHG,koios,False,False,zero_or_near_zero_balance
+4322MAT,Malokisa,Feka,63224532,0.0,MAT,koios,False,False,zero_or_near_zero_balance
+4323MAT,Mokoto,Lethaha,68202403,0.0,MAT,koios,False,False,zero_or_near_zero_balance
+4324MAT,Mosebi,Mokhethi,67191919,0.0,MAT,koios,False,False,zero_or_near_zero_balance

@@ -1,0 +1,2 @@
+verified_utc,credential_id,country,site_code,site_name,vendor,backend,site_id_on_vendor_before,verify_ok,verify_message,discovered_site_id,discovered_equipment_count,write_results
+2026-05-25T14:04:25.713470+00:00,15,BN,SAM,Sam,deye,deyecloud,2401228421,no,Solarman adapter implementation is scheduled for Phase 1 step 4 (after Victron is proven end-to-end on GBO). Schema accepted — credentials will be stored encrypted.,,0,yes

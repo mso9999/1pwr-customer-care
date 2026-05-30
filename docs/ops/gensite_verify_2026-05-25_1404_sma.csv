@@ -1,0 +1,5 @@
+verified_utc,credential_id,country,site_code,site_name,vendor,backend,site_id_on_vendor_before,verify_ok,verify_message,discovered_site_id,discovered_equipment_count,write_results
+2026-05-25T12:06:58.145586+00:00,10,LS,BOB,Bobete,sma,sunny_portal,,no,SMA Sunny Portal adapter is scheduled for Phase 2 (PIH rollout). Credentials are stored encrypted; live scrape is not wired yet.,,0,yes
+2026-05-25T12:06:58.147894+00:00,11,LS,MAN,Manamaneng,sma,sunny_portal,,no,SMA Sunny Portal adapter is scheduled for Phase 2 (PIH rollout). Credentials are stored encrypted; live scrape is not wired yet.,,0,yes
+2026-05-25T12:06:58.150063+00:00,12,LS,MET,Methalaneng,sma,sunny_portal,,no,SMA Sunny Portal adapter is scheduled for Phase 2 (PIH rollout). Credentials are stored encrypted; live scrape is not wired yet.,,0,yes
+2026-05-25T12:06:58.152242+00:00,13,LS,NKU,Ha Nkau,sma,sunny_portal,,no,SMA Sunny Portal adapter is scheduled for Phase 2 (PIH rollout). Credentials are stored encrypted; live scrape is not wired yet.,,0,yes

@@ -14,16 +14,17 @@ import json
 import logging
 import threading
 import time
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from models import CurrentUser
 from middleware import require_employee
 from customer_api import get_connection
 from country_config import _REGISTRY, ALL_KNOWN_SITES, CountryConfig
+from pr_lookup import list_portfolios
 
 logger = logging.getLogger("cc-api.analytics")
 
@@ -84,6 +85,14 @@ _GROUP_COL_CONSUMPTION: Dict[str, str] = {
     "customer_type": "COALESCE(NULLIF(UPPER(TRIM(c.customer_type)), ''), 'UNKNOWN')",
     "none":    "'All'",
 }
+
+_NORMALIZED_TYPE_SQL = (
+    "CASE "
+    "WHEN UPPER(TRIM(COALESCE(c.customer_type, ''))) IN ('HH1','HH2','HH3','HH') THEN 'HH' "
+    "WHEN NULLIF(UPPER(TRIM(COALESCE(c.customer_type, ''))), '') IS NULL THEN 'UNKNOWN' "
+    "ELSE UPPER(TRIM(c.customer_type)) "
+    "END"
+)
 
 # ---------------------------------------------------------------------------
 # Metric catalog
@@ -496,6 +505,66 @@ def _resolve_sites(country: Optional[str], sites: Optional[List[str]]) -> List[s
     return sorted(ALL_KNOWN_SITES)
 
 
+def _expand_customer_types(ctypes: Optional[List[str]]) -> List[str]:
+    """Normalize and expand customer-type aliases (HH family)."""
+    if not ctypes:
+        return []
+
+    expanded: List[str] = []
+    for ct in ctypes:
+        ct_upper = (ct or "").upper().strip()
+        if not ct_upper:
+            continue
+        if ct_upper == "HH":
+            expanded.append("HH")
+        elif ct_upper in ("HH1", "HH2", "HH3"):
+            expanded.append("HH")
+        else:
+            expanded.append(ct_upper)
+    return list(dict.fromkeys(expanded))
+
+
+def _resolve_portfolio_sites(portfolio_id: str) -> List[str]:
+    if not portfolio_id:
+        return []
+    portfolios = list_portfolios() or []
+    match = next((p for p in portfolios if p.get("id") == portfolio_id), None)
+    if not match:
+        raise HTTPException(400, f"Unknown portfolio_id: {portfolio_id}")
+    site_ids = [
+        str(s).upper().strip()
+        for s in (match.get("siteIds") or [])
+        if str(s).upper().strip() in ALL_KNOWN_SITES
+    ]
+    return sorted(list(dict.fromkeys(site_ids)))
+
+
+def _resolve_benchmark_sites(
+    *,
+    country: Optional[str],
+    sites: Optional[List[str]],
+    portfolio_id: Optional[str],
+    all_datasets: bool,
+) -> List[str]:
+    if all_datasets and portfolio_id:
+        raise HTTPException(400, "portfolio_id cannot be combined with all_datasets=true")
+
+    base_sites = sorted(ALL_KNOWN_SITES) if all_datasets else _resolve_sites(country, None)
+    if sites:
+        explicit = _resolve_sites(None, sites)
+        base_sites = [s for s in explicit if s in base_sites]
+
+    if portfolio_id:
+        portfolio_sites = _resolve_portfolio_sites(portfolio_id)
+        if not portfolio_sites:
+            raise HTTPException(400, "Selected portfolio has no recognized site mappings.")
+        base_sites = [s for s in base_sites if s in portfolio_sites]
+
+    if not base_sites:
+        raise HTTPException(400, "No sites resolved for the selected scope and filters.")
+    return sorted(list(dict.fromkeys(base_sites)))
+
+
 def _build_query(metric_id: str, filters: Dict[str, Any], group_by: str) -> Tuple[str, tuple]:
     """Build a parameterised SQL query for a metric.
 
@@ -521,26 +590,13 @@ def _build_query(metric_id: str, filters: Dict[str, Any], group_by: str) -> Tupl
     group_col = gcol_map[group_by]
 
     # --- customer type filter ---
-    ctypes = filters.get("customer_types", [])
+    ctypes = _expand_customer_types(filters.get("customer_types", []))
     ct_clause = ""
     ct_params: list = []
     if ctypes:
-        # Expand household aliases both ways.
-        # Some countries still store legacy "HH", while others use HH1/HH2/HH3.
-        expanded: List[str] = []
-        for ct in ctypes:
-            ct_upper = ct.upper().strip()
-            if ct_upper == "HH":
-                expanded.extend(["HH", "HH1", "HH2", "HH3"])
-            elif ct_upper in ("HH1", "HH2", "HH3"):
-                expanded.extend([ct_upper, "HH"])
-            else:
-                expanded.append(ct_upper)
-        if expanded:
-            deduped: List[str] = list(dict.fromkeys(expanded))
-            ph = ",".join(["%s"] * len(deduped))
-            ct_clause = f"AND UPPER(TRIM(c.customer_type)) IN ({ph})"
-            ct_params = deduped
+        ph = ",".join(["%s"] * len(ctypes))
+        ct_clause = f"AND {_NORMALIZED_TYPE_SQL} IN ({ph})"
+        ct_params = ctypes
 
     # --- date range ---
     # Snapshot metrics (funnel, customer counts) don't use date filters in their
@@ -638,6 +694,112 @@ class AnalyticsQueryRequest(BaseModel):
     filters: Dict[str, Any] = {}
     group_by: str = "none"
     time_series: bool = False
+
+
+class ConsumptionBenchmarkRequest(BaseModel):
+    period: Literal["day", "week", "month", "year"] = "month"
+    country: Optional[str] = None
+    sites: Optional[List[str]] = None
+    portfolio_id: Optional[str] = None
+    all_datasets: bool = False
+    customer_types: Optional[List[str]] = None
+    date_from: Optional[date] = Field(default=None, alias="from")
+    date_to: Optional[date] = Field(default=None, alias="to")
+
+    class Config:
+        populate_by_name = True
+
+
+class ConsumptionBenchmarkRow(BaseModel):
+    period_key: str
+    period_start: date
+    customer_type: str
+    total_kwh: float
+    connected_customers: int
+    avg_kwh_per_customer: float
+
+
+def _benchmark_period_meta(period: str) -> Tuple[str, str, str]:
+    if period == "day":
+        return ("day", "1 day", "to_char(p.period_start, 'YYYY-MM-DD')")
+    if period == "week":
+        return ("week", "1 week", "to_char(p.period_start, 'IYYY-\"W\"IW')")
+    if period == "year":
+        return ("year", "1 year", "to_char(p.period_start, 'YYYY')")
+    return ("month", "1 month", "to_char(p.period_start, 'YYYY-MM')")
+
+
+def _build_consumption_benchmark_sql(
+    *,
+    period: str,
+    resolved_sites: List[str],
+    customer_types: List[str],
+    date_from: date,
+    date_to: date,
+) -> Tuple[str, tuple]:
+    _, period_step, period_label_expr = _benchmark_period_meta(period)
+    site_placeholders = ",".join(["%s"] * len(resolved_sites))
+    type_clause = ""
+    type_params: List[Any] = []
+    if customer_types:
+        ph = ",".join(["%s"] * len(customer_types))
+        type_clause = f"AND {_NORMALIZED_TYPE_SQL} IN ({ph})"
+        type_params.extend(customer_types)
+
+    sql = f"""
+        WITH scoped_accounts AS (
+            SELECT DISTINCT
+                   a.account_number,
+                   {_NORMALIZED_TYPE_SQL} AS customer_type
+              FROM accounts a
+              JOIN customers c ON c.id = a.customer_id
+             WHERE c.community IN ({site_placeholders})
+               AND c.date_service_connected IS NOT NULL
+               AND c.date_service_terminated IS NULL
+               {type_clause}
+        ),
+        denominator AS (
+            SELECT customer_type, COUNT(DISTINCT account_number) AS connected_customers
+              FROM scoped_accounts
+             GROUP BY customer_type
+        ),
+        periods AS (
+            SELECT generate_series(
+                       date_trunc('{period}', %s::timestamp),
+                       date_trunc('{period}', %s::timestamp),
+                       interval '{period_step}'
+                   )::date AS period_start
+        ),
+        usage_by_period AS (
+            SELECT date_trunc('{period}', h.reading_hour)::date AS period_start,
+                   sa.customer_type,
+                   ROUND(COALESCE(SUM(h.kwh), 0)::numeric, 4) AS total_kwh
+              FROM hourly_consumption h
+              JOIN scoped_accounts sa ON sa.account_number = h.account_number
+             WHERE h.reading_hour >= %s::timestamp
+               AND h.reading_hour < (%s::timestamp + interval '1 day')
+             GROUP BY date_trunc('{period}', h.reading_hour)::date, sa.customer_type
+        )
+        SELECT {period_label_expr} AS period_key,
+               p.period_start,
+               d.customer_type,
+               ROUND(COALESCE(u.total_kwh, 0)::numeric, 4) AS total_kwh,
+               d.connected_customers,
+               CASE WHEN d.connected_customers > 0
+                    THEN ROUND((COALESCE(u.total_kwh, 0) / d.connected_customers)::numeric, 4)
+                    ELSE 0 END AS avg_kwh_per_customer
+          FROM periods p
+          CROSS JOIN denominator d
+          LEFT JOIN usage_by_period u
+                 ON u.period_start = p.period_start
+                AND u.customer_type = d.customer_type
+         ORDER BY p.period_start, d.customer_type
+    """
+    params: List[Any] = []
+    params.extend(resolved_sites)
+    params.extend(type_params)
+    params.extend([date_from, date_to, date_from, date_to])
+    return sql, tuple(params)
 
 
 # ---------------------------------------------------------------------------
@@ -801,3 +963,72 @@ def run_analytics_query(
 
     _set_cached(cache_key, response)
     return response
+
+
+@router.post("/consumption-benchmark")
+def run_consumption_benchmark(
+    req: ConsumptionBenchmarkRequest,
+    user: CurrentUser = Depends(require_employee),
+):
+    """Average consumption by customer type and period.
+
+    Denominator is all connected customers in scope (including zero-use accounts).
+    """
+    today = datetime.now(timezone.utc).date()
+    date_to = req.date_to or today
+    date_from = req.date_from
+    if not date_from:
+        if req.period == "day":
+            date_from = date_to - timedelta(days=29)
+        elif req.period == "week":
+            date_from = date_to - timedelta(days=7 * 11)
+        elif req.period == "year":
+            date_from = date(date_to.year - 4, 1, 1)
+        else:
+            date_from = (date_to.replace(day=1) - timedelta(days=330)).replace(day=1)
+
+    if date_from > date_to:
+        raise HTTPException(400, "date_from must be <= date_to")
+
+    resolved_sites = _resolve_benchmark_sites(
+        country=req.country,
+        sites=req.sites,
+        portfolio_id=req.portfolio_id,
+        all_datasets=req.all_datasets,
+    )
+    customer_types = _expand_customer_types(req.customer_types)
+    sql, params = _build_consumption_benchmark_sql(
+        period=req.period,
+        resolved_sites=resolved_sites,
+        customer_types=customer_types,
+        date_from=date_from,
+        date_to=date_to,
+    )
+
+    rows: List[ConsumptionBenchmarkRow] = []
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(sql, params)
+        for row in cur.fetchall():
+            rows.append(ConsumptionBenchmarkRow(
+                period_key=str(row[0]),
+                period_start=row[1],
+                customer_type=str(row[2]),
+                total_kwh=float(row[3] or 0),
+                connected_customers=int(row[4] or 0),
+                avg_kwh_per_customer=float(row[5] or 0),
+            ))
+
+    return {
+        "rows": [r.dict() for r in rows],
+        "filters_applied": {
+            "period": req.period,
+            "country": req.country,
+            "portfolio_id": req.portfolio_id,
+            "all_datasets": req.all_datasets,
+            "sites": resolved_sites,
+            "customer_types": customer_types,
+            "date_from": str(date_from),
+            "date_to": str(date_to),
+        },
+    }

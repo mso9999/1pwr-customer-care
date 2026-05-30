@@ -4,8 +4,10 @@ import { useCountry, COUNTRY_ROUTES, type CountryConfig } from '../contexts/Coun
 import {
   getAnalyticsMetrics,
   runAnalyticsQuery,
+  runConsumptionBenchmark,
   type AnalyticsQueryResponse,
   type AnalyticsMetricsCatalog,
+  type ConsumptionBenchmarkResponse,
 } from '../lib/api';
 import {
   ResponsiveContainer,
@@ -30,6 +32,7 @@ const BASIS_OPTIONS = [
   { value: 'customer_type', labelKey: 'basis.customerType', groupBy: 'customer_type' },
   { value: 'time', labelKey: 'basis.time', groupBy: 'month' },
   { value: 'overview', labelKey: 'basis.overview', groupBy: 'none' },
+  { value: 'benchmark', labelKey: 'basis.benchmark', groupBy: 'none' },
 ];
 
 // ── Helpers ──
@@ -167,7 +170,7 @@ function MultiSelect({
 
 export default function AnalyticsPage() {
   const { t } = useTranslation(['analytics', 'common']);
-  const { country, config } = useCountry();
+  const { country, config, portfolio, portfolios } = useCountry();
 
   // Catalog
   const [catalog, setCatalog] = useState<AnalyticsMetricsCatalog | null>(null);
@@ -193,6 +196,8 @@ export default function AnalyticsPage() {
   // Basis + time granularity
   const [basis, setBasis] = useState('site');
   const [timeGranularity, setTimeGranularity] = useState('month');
+  const [benchmarkPeriod, setBenchmarkPeriod] = useState<'day' | 'week' | 'month' | 'year'>('month');
+  const [benchmarkScope, setBenchmarkScope] = useState<'country' | 'portfolio' | 'all'>('country');
 
   // Derive group_by from basis
   const groupBy = useMemo(() => {
@@ -264,6 +269,7 @@ export default function AnalyticsPage() {
 
   // Query
   const [result, setResult] = useState<AnalyticsQueryResponse | null>(null);
+  const [benchmarkResult, setBenchmarkResult] = useState<ConsumptionBenchmarkResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -307,6 +313,40 @@ export default function AnalyticsPage() {
       setLoading(false);
     }
   }, [selectedMetrics, filterCountry, filterSites, filterCustomerTypes, filterDateFrom, filterDateTo, groupBy, basis]);
+
+  const runBenchmark = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const payload = {
+        period: benchmarkPeriod,
+        country: benchmarkScope === 'country' ? filterCountry : undefined,
+        sites: filterSites.length > 0 ? filterSites : undefined,
+        portfolio_id: benchmarkScope === 'portfolio' ? (portfolio?.id || undefined) : undefined,
+        all_datasets: benchmarkScope === 'all',
+        customer_types: filterCustomerTypes.length > 0 ? filterCustomerTypes : undefined,
+        from: filterDateFrom,
+        to: filterDateTo,
+      };
+      const res = await runConsumptionBenchmark(payload);
+      setBenchmarkResult(res);
+      setResult(null);
+    } catch (e: any) {
+      setError(e.message || t('benchmark.failed'));
+    } finally {
+      setLoading(false);
+    }
+  }, [
+    benchmarkPeriod,
+    benchmarkScope,
+    filterCountry,
+    filterSites,
+    filterCustomerTypes,
+    filterDateFrom,
+    filterDateTo,
+    portfolio?.id,
+    t,
+  ]);
 
   // Chart
   const [chartType, setChartType] = useState<'bar' | 'line'>('bar');
@@ -364,6 +404,29 @@ export default function AnalyticsPage() {
     return (catalog?.customer_types || []).map((ct) => ({ code: ct, label: ct }));
   }, [catalog]);
 
+  const benchmarkRows = benchmarkResult?.rows || [];
+  const benchmarkTypes = useMemo(
+    () => Array.from(new Set(benchmarkRows.map((r) => r.customer_type))),
+    [benchmarkRows],
+  );
+  const benchmarkChartData = useMemo(() => {
+    const byPeriod = new Map<string, Record<string, number | string>>();
+    for (const r of benchmarkRows) {
+      if (!byPeriod.has(r.period_key)) byPeriod.set(r.period_key, { period: r.period_key });
+      byPeriod.get(r.period_key)![r.customer_type] = r.avg_kwh_per_customer;
+    }
+    return Array.from(byPeriod.values());
+  }, [benchmarkRows]);
+  const benchmarkTableRows = useMemo(() => {
+    return benchmarkRows.map((r) => ({
+      period: r.period_key,
+      customer_type: r.customer_type,
+      connected_customers: r.connected_customers,
+      total_kwh: r.total_kwh,
+      avg_kwh_per_customer: r.avg_kwh_per_customer,
+    }));
+  }, [benchmarkRows]);
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
       <div>
@@ -404,6 +467,43 @@ export default function AnalyticsPage() {
             </select>
           </div>
         )}
+        {basis === 'benchmark' && (
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500">{t('benchmark.period')}</span>
+              <select
+                className="rounded border-gray-300 text-sm"
+                value={benchmarkPeriod}
+                onChange={(e) => setBenchmarkPeriod(e.target.value as 'day' | 'week' | 'month' | 'year')}
+              >
+                <option value="day">{t('benchmark.day')}</option>
+                <option value="week">{t('benchmark.week')}</option>
+                <option value="month">{t('benchmark.month')}</option>
+                <option value="year">{t('benchmark.year')}</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500">{t('benchmark.scope')}</span>
+              <select
+                className="rounded border-gray-300 text-sm"
+                value={benchmarkScope}
+                onChange={(e) => setBenchmarkScope(e.target.value as 'country' | 'portfolio' | 'all')}
+              >
+                <option value="country">{t('benchmark.scopeCountry')}</option>
+                <option value="portfolio">{t('benchmark.scopePortfolio')}</option>
+                <option value="all">{t('benchmark.scopeAll')}</option>
+              </select>
+            </div>
+            {benchmarkScope === 'portfolio' && (
+              <div className="text-xs text-gray-500">
+                {t('benchmark.selectedPortfolio')}: {portfolio?.name || t('common:allPortfolios')}
+                {portfolio == null && portfolios.length > 0 && (
+                  <span className="ml-1 text-amber-700">{t('benchmark.selectPortfolioHint')}</span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* ── Filter Bar ── */}
@@ -416,7 +516,9 @@ export default function AnalyticsPage() {
               className="mt-1 block w-full rounded border-gray-300 text-sm"
               value={filterCountry}
               onChange={(e) => { setFilterCountry(e.target.value); setFilterSites([]); }}
+              disabled={basis === 'benchmark' && benchmarkScope === 'all'}
             >
+              <option value="ALL">{t('allCountries')}</option>
               <option value="LS">Lesotho</option>
               <option value="BN">Benin</option>
             </select>
@@ -435,7 +537,7 @@ export default function AnalyticsPage() {
             onChange={setFilterCustomerTypes}
             allLabel={t('allCustomerTypes')}
           />
-          {basis === 'time' && (
+          {(basis === 'time' || basis === 'benchmark') && (
             <>
               <label className="block">
                 <span className="text-xs text-gray-500">{t('dateFrom')}</span>
@@ -461,9 +563,9 @@ export default function AnalyticsPage() {
       </div>
 
       {/* ── Metric Selector ── */}
-      {catalogLoading ? (
+      {basis !== 'benchmark' && catalogLoading ? (
         <div className="text-center py-4 text-gray-400">{t('common:loading')}</div>
-      ) : catalog ? (
+      ) : basis !== 'benchmark' && catalog ? (
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-medium text-gray-600">{t('selectMetrics')}</h2>
@@ -514,13 +616,89 @@ export default function AnalyticsPage() {
         </div>
       ) : null}
 
+      {basis === 'benchmark' && (
+        <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+          <h2 className="text-sm font-medium text-gray-600 mb-1">{t('benchmark.title')}</h2>
+          <p className="text-xs text-gray-500 mb-3">{t('benchmark.help')}</p>
+          <button
+            onClick={runBenchmark}
+            disabled={loading || (benchmarkScope === 'portfolio' && !portfolio?.id)}
+            className="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded hover:bg-blue-700 disabled:opacity-40 transition-colors"
+          >
+            {loading ? t('loading') : t('benchmark.run')}
+          </button>
+        </div>
+      )}
+
       {/* ── Error ── */}
       {error && (
         <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded">{error}</div>
       )}
 
+      {basis === 'benchmark' && benchmarkTableRows.length > 0 && (
+        <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100">
+            <h2 className="text-sm font-medium text-gray-600">{t('benchmark.results')}</h2>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-50 text-left text-gray-600">
+                <tr>
+                  <th className="px-4 py-2 font-medium">{t('benchmark.period')}</th>
+                  <th className="px-4 py-2 font-medium">{t('benchmark.customerType')}</th>
+                  <th className="px-4 py-2 font-medium text-right">{t('benchmark.connectedCustomers')}</th>
+                  <th className="px-4 py-2 font-medium text-right">{t('benchmark.totalKwh')}</th>
+                  <th className="px-4 py-2 font-medium text-right">{t('benchmark.avgKwhPerCustomer')}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {benchmarkTableRows.map((row, i) => (
+                  <tr key={`${row.period}-${row.customer_type}-${i}`} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 font-medium text-gray-800 whitespace-nowrap">{row.period}</td>
+                    <td className="px-4 py-2 text-gray-700">{row.customer_type}</td>
+                    <td className="px-4 py-2 text-right font-mono tabular-nums">{row.connected_customers.toLocaleString()}</td>
+                    <td className="px-4 py-2 text-right font-mono tabular-nums">{fmtValue(row.total_kwh, 'decimal2')}</td>
+                    <td className="px-4 py-2 text-right font-mono tabular-nums">{fmtValue(row.avg_kwh_per_customer, 'decimal2')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {basis === 'benchmark' && benchmarkChartData.length > 0 && (
+        <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+          <h2 className="text-sm font-medium text-gray-600 mb-3">{t('benchmark.chart')}</h2>
+          <ResponsiveContainer width="100%" height={400}>
+            <LineChart data={benchmarkChartData} margin={{ top: 5, right: 20, left: 0, bottom: 40 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+              <XAxis dataKey="period" tick={{ fontSize: 11 }} angle={-30} textAnchor="end" />
+              <YAxis tick={{ fontSize: 11 }} />
+              <Tooltip contentStyle={{ borderRadius: '8px', fontSize: '12px' }} />
+              <Legend />
+              {benchmarkTypes.map((ct, i) => (
+                <Line
+                  key={ct}
+                  type="monotone"
+                  dataKey={ct}
+                  stroke={COLORS[i % COLORS.length]}
+                  strokeWidth={2}
+                  dot={{ r: 3 }}
+                  name={ct}
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {basis === 'benchmark' && !loading && benchmarkResult && benchmarkTableRows.length === 0 && (
+        <div className="text-center py-12 text-gray-400">{t('benchmark.noData')}</div>
+      )}
+
       {/* ── Results Table ── */}
-      {result && tableRows.length > 0 && (
+      {basis !== 'benchmark' && result && tableRows.length > 0 && (
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
             <h2 className="text-sm font-medium text-gray-600">{t('results')}</h2>
@@ -577,12 +755,12 @@ export default function AnalyticsPage() {
         </div>
       )}
 
-      {result && tableRows.length === 0 && (
+      {basis !== 'benchmark' && result && tableRows.length === 0 && (
         <div className="text-center py-12 text-gray-400">{t('noData')}</div>
       )}
 
       {/* ── Chart ── */}
-      {chartData.length > 0 && result?.series && result.series.length > 0 && (
+      {basis !== 'benchmark' && chartData.length > 0 && result?.series && result.series.length > 0 && (
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-medium text-gray-600">{t('chart')}</h2>
@@ -644,7 +822,7 @@ export default function AnalyticsPage() {
       )}
 
       {/* ── Empty state ── */}
-      {!result && !loading && (
+      {!result && basis !== 'benchmark' && !loading && (
         <div className="text-center py-20 text-gray-400">
           <p className="text-lg mb-1">{t('noMetricsSelected')}</p>
         </div>

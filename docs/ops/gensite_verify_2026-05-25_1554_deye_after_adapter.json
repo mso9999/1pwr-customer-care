@@ -1,0 +1,29 @@
+{
+  "generated_at_utc": "2026-05-25T14:05:35.027900+00:00",
+  "rows": [
+    {
+      "backend": "deyecloud",
+      "country": "BN",
+      "credential_id": 15,
+      "discovered_equipment_count": 15,
+      "discovered_site_id": "2401228421",
+      "site_code": "SAM",
+      "site_id_on_vendor_before": "2401228421",
+      "site_name": "Sam",
+      "vendor": "deye",
+      "verified_utc": "2026-05-25T14:05:35.027874+00:00",
+      "verify_message": "Connected. Device '2401228421' found.",
+      "verify_ok": "yes",
+      "write_results": "yes"
+    }
+  ],
+  "totals": {
+    "credentials": 1,
+    "failed": 0,
+    "ok": 1
+  },
+  "vendors": [
+    "deye"
+  ],
+  "write_results": true
+}

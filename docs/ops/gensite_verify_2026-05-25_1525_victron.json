@@ -1,0 +1,29 @@
+{
+  "generated_at_utc": "2026-05-25T13:25:50.578365+00:00",
+  "rows": [
+    {
+      "backend": "vrm",
+      "country": "BN",
+      "credential_id": 14,
+      "discovered_equipment_count": 1,
+      "discovered_site_id": "",
+      "site_code": "GBO",
+      "site_id_on_vendor_before": "",
+      "site_name": "Gbo",
+      "vendor": "victron",
+      "verified_utc": "2026-05-25T13:25:50.578340+00:00",
+      "verify_message": "Authenticated to VRM. 1 installation(s) visible. Pick one and re-save with `site_id_on_vendor` set.",
+      "verify_ok": "yes",
+      "write_results": "yes"
+    }
+  ],
+  "totals": {
+    "credentials": 1,
+    "failed": 0,
+    "ok": 1
+  },
+  "vendors": [
+    "victron"
+  ],
+  "write_results": true
+}

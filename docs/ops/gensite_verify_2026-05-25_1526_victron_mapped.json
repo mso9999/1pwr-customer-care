@@ -1,0 +1,29 @@
+{
+  "generated_at_utc": "2026-05-25T13:28:25.193636+00:00",
+  "rows": [
+    {
+      "backend": "vrm",
+      "country": "BN",
+      "credential_id": 14,
+      "discovered_equipment_count": 1,
+      "discovered_site_id": "372788",
+      "site_code": "GBO",
+      "site_id_on_vendor_before": "372788",
+      "site_name": "Gbo",
+      "vendor": "victron",
+      "verified_utc": "2026-05-25T13:28:25.193611+00:00",
+      "verify_message": "Connected to VRM installation 'GBOWELE' (372788).",
+      "verify_ok": "yes",
+      "write_results": "yes"
+    }
+  ],
+  "totals": {
+    "credentials": 1,
+    "failed": 0,
+    "ok": 1
+  },
+  "vendors": [
+    "victron"
+  ],
+  "write_results": true
+}

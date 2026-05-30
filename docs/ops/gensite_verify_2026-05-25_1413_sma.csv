@@ -1,0 +1,5 @@
+verified_utc,credential_id,country,site_code,site_name,vendor,backend,site_id_on_vendor_before,verify_ok,verify_message,discovered_site_id,discovered_equipment_count,write_results
+2026-05-25T12:27:05.451082+00:00,10,LS,BOB,Bobete,sma,sunny_portal,,yes,Authenticated. 7 plant(s) visible. Set site_id_on_vendor to plantId/componentId.,6060012,7,yes
+2026-05-25T12:27:06.672447+00:00,11,LS,MAN,Manamaneng,sma,sunny_portal,,yes,Authenticated. 7 plant(s) visible. Set site_id_on_vendor to plantId/componentId.,6060012,7,yes
+2026-05-25T12:27:07.967217+00:00,12,LS,MET,Methalaneng,sma,sunny_portal,,yes,Authenticated. 7 plant(s) visible. Set site_id_on_vendor to plantId/componentId.,6060012,7,yes
+2026-05-25T12:27:09.185550+00:00,13,LS,NKU,Ha Nkau,sma,sunny_portal,,yes,Authenticated. 7 plant(s) visible. Set site_id_on_vendor to plantId/componentId.,6060012,7,yes

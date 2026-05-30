@@ -1,0 +1,7 @@
+site_name,inverter_sn_source,inverter_sn,api_visible,api_latest_points,notes
+KOTOKPA,screenshot,2508215405,yes,105,Matches API and producing data
+AGLAMINDJODJI,screenshot,2508215430,yes,105,Resolved after correcting logger SN to D257258373F0 (previous typo dropped digit 3)
+SAMIONTA,screenshot,2401228421,yes,85,Visible and producing data
+SAMIONTA,screenshot,2202144226,yes,85,Visible and producing data (state=3)
+SAMIONTA,screenshot,2302230378,yes,85,Visible and producing data (state=3)
+UNKNOWN,api_inventory_2026-05-25,2202144244,yes,85,Additional live inverter discovered in API inventory; site attribution pending confirmation

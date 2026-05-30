@@ -1,0 +1,74 @@
+{
+  "generated_at_utc": "2026-05-25T12:27:09.185571+00:00",
+  "rows": [
+    {
+      "backend": "sunny_portal",
+      "country": "LS",
+      "credential_id": 10,
+      "discovered_equipment_count": 7,
+      "discovered_site_id": "6060012",
+      "site_code": "BOB",
+      "site_id_on_vendor_before": "",
+      "site_name": "Bobete",
+      "vendor": "sma",
+      "verified_utc": "2026-05-25T12:27:05.451082+00:00",
+      "verify_message": "Authenticated. 7 plant(s) visible. Set site_id_on_vendor to plantId/componentId.",
+      "verify_ok": "yes",
+      "write_results": "yes"
+    },
+    {
+      "backend": "sunny_portal",
+      "country": "LS",
+      "credential_id": 11,
+      "discovered_equipment_count": 7,
+      "discovered_site_id": "6060012",
+      "site_code": "MAN",
+      "site_id_on_vendor_before": "",
+      "site_name": "Manamaneng",
+      "vendor": "sma",
+      "verified_utc": "2026-05-25T12:27:06.672447+00:00",
+      "verify_message": "Authenticated. 7 plant(s) visible. Set site_id_on_vendor to plantId/componentId.",
+      "verify_ok": "yes",
+      "write_results": "yes"
+    },
+    {
+      "backend": "sunny_portal",
+      "country": "LS",
+      "credential_id": 12,
+      "discovered_equipment_count": 7,
+      "discovered_site_id": "6060012",
+      "site_code": "MET",
+      "site_id_on_vendor_before": "",
+      "site_name": "Methalaneng",
+      "vendor": "sma",
+      "verified_utc": "2026-05-25T12:27:07.967217+00:00",
+      "verify_message": "Authenticated. 7 plant(s) visible. Set site_id_on_vendor to plantId/componentId.",
+      "verify_ok": "yes",
+      "write_results": "yes"
+    },
+    {
+      "backend": "sunny_portal",
+      "country": "LS",
+      "credential_id": 13,
+      "discovered_equipment_count": 7,
+      "discovered_site_id": "6060012",
+      "site_code": "NKU",
+      "site_id_on_vendor_before": "",
+      "site_name": "Ha Nkau",
+      "vendor": "sma",
+      "verified_utc": "2026-05-25T12:27:09.185550+00:00",
+      "verify_message": "Authenticated. 7 plant(s) visible. Set site_id_on_vendor to plantId/componentId.",
+      "verify_ok": "yes",
+      "write_results": "yes"
+    }
+  ],
+  "totals": {
+    "credentials": 4,
+    "failed": 0,
+    "ok": 4
+  },
+  "vendors": [
+    "sma"
+  ],
+  "write_results": true
+}

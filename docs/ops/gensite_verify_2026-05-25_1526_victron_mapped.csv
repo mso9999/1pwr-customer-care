@@ -1,0 +1,2 @@
+verified_utc,credential_id,country,site_code,site_name,vendor,backend,site_id_on_vendor_before,verify_ok,verify_message,discovered_site_id,discovered_equipment_count,write_results
+2026-05-25T13:28:25.193611+00:00,14,BN,GBO,Gbo,victron,vrm,372788,yes,Connected to VRM installation 'GBOWELE' (372788).,372788,1,yes

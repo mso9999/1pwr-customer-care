@@ -1,0 +1,29 @@
+{
+  "generated_at_utc": "2026-05-25T14:04:25.713497+00:00",
+  "rows": [
+    {
+      "backend": "deyecloud",
+      "country": "BN",
+      "credential_id": 15,
+      "discovered_equipment_count": 0,
+      "discovered_site_id": "",
+      "site_code": "SAM",
+      "site_id_on_vendor_before": "2401228421",
+      "site_name": "Sam",
+      "vendor": "deye",
+      "verified_utc": "2026-05-25T14:04:25.713470+00:00",
+      "verify_message": "Solarman adapter implementation is scheduled for Phase 1 step 4 (after Victron is proven end-to-end on GBO). Schema accepted \u2014 credentials will be stored encrypted.",
+      "verify_ok": "no",
+      "write_results": "yes"
+    }
+  ],
+  "totals": {
+    "credentials": 1,
+    "failed": 1,
+    "ok": 0
+  },
+  "vendors": [
+    "deye"
+  ],
+  "write_results": true
+}

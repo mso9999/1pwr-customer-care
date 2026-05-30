@@ -861,6 +861,16 @@ def daily_load_profiles(
         #    extend to meter_id via meters.account_number
         acct_type: Dict[str, str] = {}
         meter_type: Dict[str, str] = {}
+        diagnostics: Dict[str, Any] = {
+            "site_filter": site.upper() if site else None,
+            "customer_type_filter": customer_type.upper() if customer_type else None,
+            "typed_accounts": 0,
+            "mapped_meters": 0,
+            "meter_readings_rows_seen": 0,
+            "hourly_consumption_rows_seen": 0,
+            "meter_readings_query_error": None,
+            "hourly_consumption_query_error": None,
+        }
 
         site_filter_sql = ""
         site_params: tuple = ()
@@ -883,6 +893,7 @@ def daily_load_profiles(
                 continue
             if acct:
                 acct_type[acct] = ctype
+        diagnostics["typed_accounts"] = len(acct_type)
 
         # Map meter_ids to customer types via account_number
         if acct_type:
@@ -892,13 +903,16 @@ def daily_load_profiles(
                 acct = str(row[1] or "").strip()
                 if mid and acct in acct_type:
                     meter_type[mid] = acct_type[acct]
+        diagnostics["mapped_meters"] = len(meter_type)
 
         if not meter_type and not acct_type:
             return {
                 "profiles": [],
                 "chart_data": [],
                 "customer_types": [],
-                "note": "No customer type data found in meters table.",
+                "note": "No typed account mappings found for the selected filters.",
+                "error": "No typed account mappings found for daily load profile generation.",
+                "diagnostics": diagnostics,
             }
 
         # 2. Try meter_readings first (10-min interval power data)
@@ -920,6 +934,7 @@ def daily_load_profiles(
             )
 
             for row in cursor.fetchall():
+                diagnostics["meter_readings_rows_seen"] += 1
                 mid = str(row[0] or "").strip()
                 ctype = meter_type.get(mid)
                 if not ctype:
@@ -951,6 +966,7 @@ def daily_load_profiles(
 
         except Exception as e:
             logger.warning("meter_readings query failed: %s", e)
+            diagnostics["meter_readings_query_error"] = str(e)
 
         # 3. Also pull hourly_consumption for accounts not already covered
         #    by meter_readings. This is the primary data source for most LS
@@ -968,6 +984,7 @@ def daily_load_profiles(
                 (site.upper(),) if site else (),
             )
             for row in cursor.fetchall():
+                diagnostics["hourly_consumption_rows_seen"] += 1
                 acct = str(row[0] or "").strip()
                 if acct in mr_accounts:
                     continue
@@ -998,6 +1015,7 @@ def daily_load_profiles(
                 hc_source = True
         except Exception as e:
             logger.warning("hourly_consumption query failed: %s", e)
+            diagnostics["hourly_consumption_query_error"] = str(e)
 
         if hc_source:
             data_source = ("meter_readings+hourly_consumption"
@@ -1005,11 +1023,19 @@ def daily_load_profiles(
                            else "hourly_consumption")
 
         if not type_hour_kw:
+            note = "No meter interval data matched typed accounts for the selected filters."
+            if diagnostics["meter_readings_query_error"] and diagnostics["hourly_consumption_query_error"]:
+                note = (
+                    "Both meter_readings and hourly_consumption queries failed; "
+                    "Figure 11 cannot be generated."
+                )
             return {
                 "profiles": [],
                 "chart_data": [],
                 "customer_types": [],
-                "note": "No meter reading data found.",
+                "note": note,
+                "error": note,
+                "diagnostics": diagnostics,
             }
 
         # 4. Build 24-hour profiles
@@ -1052,6 +1078,7 @@ def daily_load_profiles(
             "data_source": data_source,
             "site_filter": site,
             "customer_type_filter": customer_type,
+            "diagnostics": diagnostics,
         }
 
 

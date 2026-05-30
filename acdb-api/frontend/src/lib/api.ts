@@ -3189,12 +3189,55 @@ export interface AnalyticsQueryRequest {
   time_series?: boolean;
 }
 
+export interface ConsumptionBenchmarkRequest {
+  period: 'day' | 'week' | 'month' | 'year';
+  country?: string;
+  sites?: string[];
+  portfolio_id?: string;
+  all_datasets?: boolean;
+  customer_types?: string[];
+  from?: string;
+  to?: string;
+}
+
+export interface ConsumptionBenchmarkRow {
+  period_key: string;
+  period_start: string;
+  customer_type: string;
+  total_kwh: number;
+  connected_customers: number;
+  avg_kwh_per_customer: number;
+}
+
+export interface ConsumptionBenchmarkResponse {
+  rows: ConsumptionBenchmarkRow[];
+  filters_applied: {
+    period: 'day' | 'week' | 'month' | 'year';
+    country?: string;
+    portfolio_id?: string;
+    all_datasets?: boolean;
+    sites: string[];
+    customer_types: string[];
+    date_from: string;
+    date_to: string;
+  };
+}
+
 export async function getAnalyticsMetrics(): Promise<AnalyticsMetricsCatalog> {
   return request('/analytics/metrics');
 }
 
 export async function runAnalyticsQuery(req: AnalyticsQueryRequest): Promise<AnalyticsQueryResponse> {
   return request('/analytics/query', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
+}
+
+export async function runConsumptionBenchmark(
+  req: ConsumptionBenchmarkRequest,
+): Promise<ConsumptionBenchmarkResponse> {
+  return request('/analytics/consumption-benchmark', {
     method: 'POST',
     body: JSON.stringify(req),
   });

@@ -1,7 +1,8 @@
 # Gensite poller — install, operate, troubleshoot
 
-> Status: ready-to-install. Ships as part of the backend rsync (both the
-> script and the systemd units). First target site is **GBO** (Victron VRM).
+> Status: production scheduler path is in place. This poller is the shared
+> telemetry ingest path for all generation vendors integrated in CC (Deye,
+> Victron, AlphaESS, and future vendors as adapters become ready).
 
 ## What it does
 
@@ -15,6 +16,25 @@
 - Routes alerts to the country-appropriate WhatsApp bridge using the
   existing `cc_bridge_notify.py` helper → CC phone + `1PWR LS - OnM Ticket
   Tracker` group (LS sites), or the BN equivalents.
+
+## OEM-agnostic UX metric contract
+
+The CC gensite dashboard is intentionally vendor-neutral. Adapters should map
+their native payloads into the normalized channels below so the same power-flow
+and time-series UX works for Deye, Victron, AlphaESS, and future vendors.
+
+| UX channel | Normalized field | Unit | Notes |
+|---|---|---|---|
+| PV power | `pv_kw` | kW | Sum across contributing equipment |
+| Load power | `ac_kw` | kW | Site AC output/load channel |
+| Battery power | `battery_kw` | kW | Signed convention per adapter is allowed; keep consistent per vendor |
+| Battery state-of-charge | `battery_soc_pct` | % | 0–100 |
+| Grid import/export power | `grid_kw` | kW | Positive/negative semantics can vary; keep adapter docs explicit |
+| Energy counter | `ac_kwh_total` | kWh | Monotonic lifetime counter where available |
+| Genset power (site flow tile) | derived from `ac_kw` on equipment with `kind/role` containing `genset` / `generator` / `diesel` | kW | Optional but strongly preferred for hybrid minigrids |
+
+If a vendor cannot supply a channel, return `NULL` rather than a guessed value.
+The dashboard is designed to degrade gracefully and still remain OEM-agnostic.
 
 ## One-time install on the CC host
 
@@ -63,7 +83,7 @@ First useful run requires:
 - `CC_CREDENTIAL_ENCRYPTION_KEY` set in `/opt/1pdb/.env`
   (see `docs/ops/gensite-credentials.md`)
 - At least one `site_credentials` row with a non-stub adapter
-  (currently: Victron only)
+  (vendor readiness is adapter-specific and may evolve per release)
 
 Without either, the poller logs the reason and exits 0 or 2.
 
@@ -96,14 +116,14 @@ should populate within 60–120 seconds of commissioning a site.
 
 | Aspect | Behaviour |
 |---|---|
-| Live cadence | Per-vendor: Victron 60 s, Solarman/Deye 5 min, Sinosoar 2 min, SMA 10 min |
+| Live cadence | Per-vendor defaults from `gensite_poller.py` (`VENDOR_LIVE_CADENCE`) |
 | Alarm cadence | 5 min for all vendors; only runs after a successful live poll |
 | Backoff on failure | Next poll delayed `cadence × min(2^consecutive_failures, 30)` seconds |
 | Offline alert | After `POLL_FAIL_ALERT_THRESHOLD` (default 3) consecutive failures; once only until recovery |
 | Recovery alert | Sent once when a credential succeeds after having alerted offline |
 | CRITICAL alarm alert | Sent once per unique `(equipment, vendor_code, raised_at)` |
 | State file | `/var/lib/cc-gensite-poll/state.json`, owned by `cc_api` via `StateDirectory=` in the unit |
-| Stub adapters | Sinosoar / Deye / SMA are skipped with a debug log until their adapter is implemented |
+| Stub adapters | Any adapter marked `implementation_status == 'stub'` is skipped with a debug log |
 
 ## Environment knobs
 

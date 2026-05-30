@@ -10,8 +10,8 @@ import {
   type GensiteCredentialSpec,
 } from '../lib/api';
 
-const EQUIPMENT_KINDS = ['inverter', 'bms', 'battery', 'pv_meter', 'load_meter', 'scada', 'other'];
-const EQUIPMENT_ROLES = ['grid_forming', 'pv_input', 'hybrid', 'storage', 'monitor'];
+const EQUIPMENT_KINDS = ['inverter', 'bms', 'battery', 'pv_meter', 'load_meter', 'genset', 'generator', 'grid_meter', 'scada', 'other'];
+const EQUIPMENT_ROLES = ['grid_forming', 'pv_input', 'hybrid', 'storage', 'monitor', 'genset', 'backup_generator'];
 
 export default function CommissionSitePage() {
   const navigate = useNavigate();

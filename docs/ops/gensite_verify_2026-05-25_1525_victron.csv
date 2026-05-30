@@ -1,0 +1,2 @@
+verified_utc,credential_id,country,site_code,site_name,vendor,backend,site_id_on_vendor_before,verify_ok,verify_message,discovered_site_id,discovered_equipment_count,write_results
+2026-05-25T13:25:50.578340+00:00,14,BN,GBO,Gbo,victron,vrm,,yes,Authenticated to VRM. 1 installation(s) visible. Pick one and re-save with `site_id_on_vendor` set.,,1,yes

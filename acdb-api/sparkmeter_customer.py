@@ -1,6 +1,11 @@
 """
 SparkMeter customer sync module — the CC → SM customer creation pipe.
 
+QUARANTINED NON-POLICY MODULE (for event-parity scope):
+- Valuable customer-provisioning work, but not part of current payment event-parity baseline.
+- Keep separate from parity PRs unless explicitly requested.
+- See docs/ops/non-policy-quarantine-registry.md.
+
 When a customer is registered in CC/1PDB, this module pushes the customer
 record to SparkMeter so the metering platform knows about them immediately.
 
@@ -31,6 +36,7 @@ Environment variables (set in /opt/1pdb/.env):
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
@@ -106,6 +112,18 @@ KOIOS_SERVICE_AREAS: Dict[str, str] = {
     "SAM": "43a81ea8-f5fd-4df3-ae6b-0b7f54a58fe2",
 }
 
+# Koios org IDs per country (for /sm/ web session endpoints)
+KOIOS_ORG_IDS: Dict[str, str] = {
+    "LS": "1cddcb07-6647-40aa-aaaa-70d762922029",
+    "BN": "0123589c-7f1f-4eb4-8888-d8f8aa706ea4",
+}
+
+
+def _koios_org_id(site_code: str) -> str:
+    """Return the Koios org UUID for a site code."""
+    cc = _site_to_country.get(site_code, "LS")
+    return KOIOS_ORG_IDS.get(cc, KOIOS_ORG_IDS["LS"])
+
 
 @dataclass
 class CustomerSyncResult:
@@ -136,9 +154,83 @@ def _koios_headers(site_code: str) -> dict:
     }
 
 
-def _koios_create_customer(
+# ---------------------------------------------------------------------------
+# Koios web session (email/password + CSRF login)
+# ---------------------------------------------------------------------------
+
+_koios_web_session: Optional[requests.Session] = None
+_koios_web_session_country: Optional[str] = None
+
+
+def _get_koios_web_session(site_code: str = "") -> Optional[requests.Session]:
+    """Return a Koios-web-authenticated session, or None if creds not configured.
+
+    Resolves credentials per-country: KOIOS_WEB_EMAIL_{CC} → KOIOS_WEB_EMAIL.
+    Caches one session per country so LS and BN can use different logins.
+    """
+    global _koios_web_session, _koios_web_session_country
+
+    cc = _site_to_country.get(site_code, "LS")
+    email = (
+        os.environ.get(f"KOIOS_WEB_EMAIL_{cc}")
+        or os.environ.get("KOIOS_WEB_EMAIL", "")
+    )
+    password = (
+        os.environ.get(f"KOIOS_WEB_PASSWORD_{cc}")
+        or os.environ.get("KOIOS_WEB_PASSWORD", "")
+    )
+    if not email or not password:
+        return None
+
+    # Return cached session if same country
+    if _koios_web_session is not None and _koios_web_session_country == cc:
+        return _koios_web_session
+
+    sess = requests.Session()
+    try:
+        r = sess.get(f"{KOIOS_BASE}/login", timeout=30)
+        r.raise_for_status()
+        csrf = re.search(r'name="csrf_token".*?value="([^"]+)"', r.text)
+        if not csrf:
+            logger.error("Koios web login: CSRF token not found")
+            return None
+        r = sess.post(
+            f"{KOIOS_BASE}/login",
+            data={
+                "csrf_token": csrf.group(1),
+                "email": email,
+                "password": password,
+            },
+            timeout=30,
+        )
+        if r.status_code != 200 or "/login" in r.url:
+            logger.error("Koios web login failed: HTTP %s", r.status_code)
+            return None
+        _koios_web_session = sess
+        _koios_web_session_country = cc
+        logger.info("Koios web session established for country=%s", cc)
+        return _koios_web_session
+    except Exception as e:
+        logger.error("Koios web login error: %s", e)
+        return None
+
+
+def _koios_web_create_customer(
     account_number: str, name: str, site_code: str, phone: Optional[str] = None,
 ) -> CustomerSyncResult:
+    """Create a Koios customer via web session auth (bypasses API key permission bug).
+
+    The Koios manage API key creates customers that return 201 but become immediately
+    inaccessible (404 on GET, not in code search). The web UI session has full user
+    permissions and creates properly accessible customers.
+    """
+    sess = _get_koios_web_session(site_code)
+    if not sess:
+        return CustomerSyncResult(
+            success=False, platform="koios",
+            error="KOIOS_WEB_EMAIL/PASSWORD not configured",
+        )
+
     service_area_id = KOIOS_SERVICE_AREAS.get(site_code)
     if not service_area_id:
         return CustomerSyncResult(
@@ -155,21 +247,20 @@ def _koios_create_customer(
         payload["phone_number"] = phone
 
     try:
-        r = requests.post(
+        r = sess.post(
             f"{KOIOS_BASE}/api/v1/customers",
             json=payload,
-            headers=_koios_headers(site_code),
             timeout=API_TIMEOUT,
         )
     except Exception as e:
-        logger.error("Koios customer create failed for %s: %s", account_number, e)
+        logger.error("Koios web customer create failed for %s: %s", account_number, e)
         return CustomerSyncResult(success=False, platform="koios", error=str(e))
 
     if r.status_code == 201:
         data = r.json().get("data", {})
         sm_id = data.get("id", "")
         logger.info(
-            "Koios customer created: %s -> %s (sm_id=%s)",
+            "Koios web customer created: %s -> %s (sm_id=%s)",
             account_number, name, sm_id,
         )
         return CustomerSyncResult(
@@ -178,10 +269,190 @@ def _koios_create_customer(
 
     errors = r.json().get("errors", [])
     error_msg = errors[0].get("title", str(errors)) if errors else f"HTTP {r.status_code}"
+    details = errors[0].get("details", "") if errors else ""
+
+    # Idempotent create: customer code already exists upstream.
+    if "already exists" in str(error_msg).lower() or "already exists" in str(details).lower():
+        existing = _koios_web_lookup_customer(account_number, site_code)
+        if existing:
+            existing_id = str(existing.get("id", ""))
+            logger.info(
+                "Koios web customer already exists for %s (sm_id=%s)",
+                account_number, existing_id,
+            )
+            return CustomerSyncResult(
+                success=True,
+                platform="koios",
+                sm_customer_id=existing_id or None,
+            )
+        logger.info("Koios web customer already exists for %s", account_number)
+        return CustomerSyncResult(success=True, platform="koios", skipped=True)
+
     logger.warning(
-        "Koios customer create failed for %s: %s", account_number, error_msg,
+        "Koios web customer create failed for %s: %s", account_number, error_msg,
     )
     return CustomerSyncResult(success=False, platform="koios", error=error_msg)
+
+
+def _koios_web_lookup_customer(account_number: str, site_code: str) -> Optional[dict]:
+    """Look up a customer via Koios web session /sm/ endpoints.
+
+    The public API /api/v1/customers?code= only returns customers with meters
+    attached. New customers without meters appear only in the /sm/ "unconfigured-
+    customers" list. This function checks both /sm/ endpoints to find any customer.
+    """
+    sess = _get_koios_web_session(site_code)
+    if not sess:
+        return None
+
+    org_id = _koios_org_id(site_code)
+
+    # Check configured customers first
+    try:
+        r = sess.get(
+            f"{KOIOS_BASE}/sm/organizations/{org_id}/customers",
+            params={"page": 1, "pageSize": 200},
+            timeout=API_TIMEOUT,
+        )
+        if r.status_code == 200:
+            for c in r.json().get("customers", []):
+                if c.get("code") == account_number:
+                    return c
+    except Exception as e:
+        logger.warning("Koios web configured-customer lookup error: %s", e)
+
+    # Check unconfigured customers
+    try:
+        r = sess.get(
+            f"{KOIOS_BASE}/sm/organizations/{org_id}/unconfigured-customers",
+            params={"page": 1, "pageSize": 200},
+            timeout=API_TIMEOUT,
+        )
+        if r.status_code == 200:
+            for c in r.json().get("customers", []):
+                if c.get("code") == account_number:
+                    return c
+    except Exception as e:
+        logger.warning("Koios web unconfigured-customer lookup error: %s", e)
+
+    return None
+
+
+def _koios_create_customer(
+    account_number: str, name: str, site_code: str, phone: Optional[str] = None,
+) -> CustomerSyncResult:
+    """Create a Koios customer — web session first, API key as fallback.
+
+    The Koios manage API key has a permission bug where customers are created
+    (HTTP 201) but immediately inaccessible. The web UI session creates properly
+    accessible customers, so we try that first.
+    """
+    # 1. Try web session (full permissions)
+    web_result = _koios_web_create_customer(account_number, name, site_code, phone)
+    if web_result.success:
+        return web_result
+    if web_result.error and "not configured" not in web_result.error:
+        logger.info(
+            "Koios web create failed for %s (%s), falling back to API key",
+            account_number, web_result.error,
+        )
+
+    # 2. Fall back to API key
+    service_area_id = KOIOS_SERVICE_AREAS.get(site_code)
+    if not service_area_id:
+        return CustomerSyncResult(
+            success=False, platform="koios",
+            error=f"No Koios service_area_id mapped for site '{site_code}'",
+        )
+
+    payload: dict = {
+        "name": name,
+        "code": account_number,
+        "service_area_id": service_area_id,
+    }
+    if phone:
+        payload["phone_number"] = phone
+
+    retries = 3
+    last_error = None
+    last_status = None
+    for attempt in range(retries):
+        try:
+            r = requests.post(
+                f"{KOIOS_BASE}/api/v1/customers",
+                json=payload,
+                headers=_koios_headers(site_code),
+                timeout=API_TIMEOUT,
+            )
+        except Exception as e:
+            logger.error(
+                "Koios API customer create failed for %s (attempt %d/%d): %s",
+                account_number, attempt + 1, retries, e,
+            )
+            last_error = str(e)
+            if attempt < retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+            return CustomerSyncResult(success=False, platform="koios", error=last_error)
+
+        last_status = r.status_code
+        if r.status_code == 201:
+            data = r.json().get("data", {})
+            sm_id = data.get("id", "")
+            logger.info(
+                "Koios API customer created: %s -> %s (sm_id=%s)",
+                account_number, name, sm_id,
+            )
+            return CustomerSyncResult(
+                success=True, platform="koios", sm_customer_id=str(sm_id),
+            )
+
+        if r.status_code in (502, 504):
+            last_error = f"HTTP {r.status_code} (attempt {attempt + 1}/{retries})"
+            logger.warning(
+                "Koios HTTP %d for %s, attempt %d/%d",
+                r.status_code, account_number, attempt + 1, retries,
+            )
+            if attempt < retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+            return CustomerSyncResult(success=False, platform="koios", error=last_error)
+
+        errors = r.json().get("errors", [])
+        error_msg = errors[0].get("title", str(errors)) if errors else f"HTTP {r.status_code}"
+        details = errors[0].get("details", "") if errors else ""
+
+        # "already exists" — find it via web lookup
+        if "already exists" in str(details).lower() or "already exists" in str(error_msg).lower():
+            logger.info(
+                "Koios customer %s already exists, searching via web session",
+                account_number,
+            )
+            existing = _koios_web_lookup_customer(account_number, site_code)
+            if existing:
+                existing_id = str(existing.get("id", ""))
+                logger.info(
+                    "Found existing Koios customer for %s: %s",
+                    account_number, existing_id,
+                )
+                return CustomerSyncResult(
+                    success=True, platform="koios",
+                    sm_customer_id=existing_id,
+                )
+            logger.warning(
+                "Koios customer %s already exists but could not be found",
+                account_number,
+            )
+
+        logger.warning(
+            "Koios API customer create failed for %s: %s", account_number, error_msg,
+        )
+        return CustomerSyncResult(success=False, platform="koios", error=error_msg)
+
+    return CustomerSyncResult(
+        success=False, platform="koios",
+        error=last_error or f"HTTP {last_status}",
+    )
 
 
 def _tc_create_customer(
@@ -290,16 +561,38 @@ def attach_koios_meter(
 
     body = {"serial": str(meter_serial).strip()}
     url = f"{KOIOS_BASE}/api/v1/customers/{uid}/meter"
-    try:
-        r = requests.put(
-            url,
-            json=body,
-            headers=_koios_headers(site),
-            timeout=API_TIMEOUT,
-        )
-    except Exception as e:
-        logger.error("Koios meter attach PUT failed for %s: %s", account_number, e)
-        return CustomerSyncResult(success=False, platform="koios", error=str(e))
+    retries = 3
+    last_error = None
+    for attempt in range(retries):
+        try:
+            r = requests.put(
+                url,
+                json=body,
+                headers=_koios_headers(site),
+                timeout=API_TIMEOUT,
+            )
+        except Exception as e:
+            logger.error(
+                "Koios meter attach PUT failed for %s (attempt %d/%d): %s",
+                account_number, attempt + 1, retries, e,
+            )
+            last_error = str(e)
+            if attempt < retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+            return CustomerSyncResult(success=False, platform="koios", error=last_error)
+
+        if r.status_code in (502, 504):
+            logger.warning(
+                "Koios meter attach HTTP %d for %s, attempt %d/%d",
+                r.status_code, account_number, attempt + 1, retries,
+            )
+            last_error = f"HTTP {r.status_code}"
+            if attempt < retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+            return CustomerSyncResult(success=False, platform="koios", error=last_error)
+        break
 
     if r.status_code in (200, 201, 204):
         logger.info("Koios meter attach OK: acct=%s meter=%s", account_number, meter_serial)
@@ -462,6 +755,8 @@ def lookup_sparkmeter_customer(account_number: str) -> Optional[dict]:
     """Check if a customer already exists in SparkMeter by account code.
 
     Returns the SM customer dict if found, None otherwise.
+    Tries API key first, falls back to web session (needed for customers
+    created via web UI or web session, which API key may not see).
     """
     site = _extract_site(account_number)
     if not site:
@@ -479,6 +774,7 @@ def lookup_sparkmeter_customer(account_number: str) -> Optional[dict]:
                 return customers[0] if customers else None
             return None
         elif site in KOIOS_SERVICE_AREAS:
+            # 1. Try API key lookup
             r = requests.get(
                 f"{KOIOS_BASE}/api/v1/customers",
                 headers=_koios_headers(site),
@@ -487,7 +783,34 @@ def lookup_sparkmeter_customer(account_number: str) -> Optional[dict]:
             )
             if r.status_code == 200:
                 data = r.json().get("data", [])
-                return data[0] if data else None
+                if data:
+                    return data[0]
+
+            # 2. Fall back to web session public API
+            web_sess = _get_koios_web_session(site)
+            if web_sess:
+                r2 = web_sess.get(
+                    f"{KOIOS_BASE}/api/v1/customers",
+                    params={"code": account_number},
+                    timeout=API_TIMEOUT,
+                )
+                if r2.status_code == 200:
+                    data2 = r2.json().get("data", [])
+                    if data2:
+                        logger.info(
+                            "SM customer %s found via web session (not visible to API key)",
+                            account_number,
+                        )
+                        return data2[0]
+
+            # 3. Check /sm/ endpoints for unconfigured customers (no meter yet)
+            cust = _koios_web_lookup_customer(account_number, site)
+            if cust:
+                logger.info(
+                    "SM customer %s found via /sm/ lookup (unconfigured)",
+                    account_number,
+                )
+                return cust
             return None
     except Exception as e:
         logger.warning("SM customer lookup failed for %s: %s", account_number, e)

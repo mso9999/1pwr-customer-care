@@ -62,8 +62,11 @@ try {
 // Conversation window (ms) - follow-ups within this window append to existing ticket
 var CONVERSATION_WINDOW_MS = 30 * 60 * 1000;   // 30 minutes
 
-// AI classification via OpenClaw
-var MOONSHOT_KEY = process.env.MOONSHOT_API_KEY || "sk-biRH9QEva0y9kJUoUpi7QLpTt6ZCtSUAwFMHWqbsZzKcnr3X";
+// Message classification mode:
+// - deterministic (default): local keyword rules, no paid dependency
+// - openclaw: paid external classifier (optional)
+var CLASSIFIER_MODE = (process.env.CC_CLASSIFIER_MODE || "deterministic").toLowerCase();
+var MOONSHOT_KEY = process.env.MOONSHOT_API_KEY || "";
 var AGENT_TIMEOUT = 30;
 var AGENT_EXEC_TIMEOUT = 40000;
 var AGENT_SESSION_PREFIX = process.env.AGENT_SESSION_PREFIX || "customer-care";
@@ -514,9 +517,119 @@ async function notifyTicketGroup(ticket, customerName, phone, accountNumber) {
 }
 
 // ============================================================
-// AI CLASSIFICATION (via OpenClaw)
+// Classification (deterministic default, OpenClaw optional)
 // ============================================================
-function classifyWithAI(customerInfo, messageText, conversationHistory) {
+function _bilingualReply(sesotho, english) {
+    return sesotho + "\n\n" + english;
+}
+
+function _extractAccountNumber(text) {
+    var m = (text || "").toUpperCase().match(/\b\d{3,6}[A-Z]{3}\b/);
+    return m ? m[0] : null;
+}
+
+function _containsAny(haystack, needles) {
+    for (var i = 0; i < needles.length; i++) {
+        if (haystack.indexOf(needles[i]) >= 0) return true;
+    }
+    return false;
+}
+
+function classifyDeterministic(customerInfo, messageText) {
+    var text = (messageText || "").trim();
+    var lower = text.toLowerCase();
+    var accountNumber = _extractAccountNumber(text);
+    var hasKnownCustomer = !!customerInfo;
+
+    var noPower = _containsAny(lower, [
+        "no power", "no electricity", "power is out", "outage", "blackout",
+        "ha hona motlakase", "ha ho motlakase", "motlakase ha o eo", "lefifi",
+    ]);
+    var equipmentFailure = _containsAny(lower, [
+        "smoke", "spark", "burn", "fire", "cable down", "pole down", "electroc",
+        "thothomela", "mollo",
+    ]);
+    var vegetation = _containsAny(lower, [
+        "tree", "branch", "vegetation", "bush", "sefate", "makala",
+    ]);
+    var meterIssue = _containsAny(lower, [
+        "meter", "relay", "disconnect", "reconnect", "trip", "breaker",
+        "token", "units", "not reading", "stuck", "e sa bale", "mitha",
+    ]);
+    var billing = _containsAny(lower, [
+        "payment", "paid", "mpesa", "m-pesa", "receipt", "credit", "balance",
+        "billing", "debt", "refund", "molaetsa", "tefo", "letefo",
+    ]);
+
+    var category = "general-inquiry";
+    var priority = "P3";
+    var needsTicket = false;
+    var askForInfo = false;
+
+    if (noPower) {
+        category = "no-power";
+        priority = "P1";
+        needsTicket = true;
+    } else if (equipmentFailure) {
+        category = "equipment-failure";
+        priority = "P1";
+        needsTicket = true;
+    } else if (meterIssue) {
+        category = "meter-issue";
+        priority = "P2";
+        needsTicket = true;
+    } else if (vegetation) {
+        category = "vegetation";
+        priority = "P3";
+        needsTicket = true;
+    } else if (billing) {
+        category = "billing";
+        priority = "P3";
+        needsTicket = false;
+    }
+
+    // Unknown customers need account details before ticket creation.
+    if (!hasKnownCustomer && !accountNumber) {
+        askForInfo = true;
+        needsTicket = false;
+    }
+
+    var reply;
+    if (askForInfo) {
+        reply = _bilingualReply(
+            "Kea leboha ka molaetsa oa hao. Ka kopo re fe nomoro ea ak'haonte ea 1PWR (mohlala: 0045MAK) kapa lebitso la motse hore re tsebe ho u thusa kapele.",
+            "Thank you for your message. Please share your 1PWR account number (for example: 0045MAK) or village name so we can help you quickly."
+        );
+    } else if (needsTicket) {
+        reply = _bilingualReply(
+            "Kea leboha ka tlaleho. Re tla bula tikete ea tlhokomelo hang-hang 'me sehlopha sa rona se tla latela haufinyane.",
+            "Thank you for the report. We will open a maintenance ticket immediately and our team will follow up shortly."
+        );
+    } else if (category === "billing") {
+        reply = _bilingualReply(
+            "Kea leboha. Re amohetse potso ea hao ea tefo mme sehlopha sa rona sa tlhokomelo ea bareki se tla netefatsa lintlha ebe se u araba.",
+            "Thank you. We have received your payment query and our customer care team will verify the details and respond."
+        );
+    } else {
+        reply = _bilingualReply(
+            "Kea leboha ha u ikopanya le 1PWR. Ka kopo hlalosa bothata ba hao ka botlalo hore re tle re u thuse.",
+            "Thank you for contacting 1PWR. Please describe your issue in more detail so we can assist you."
+        );
+    }
+
+    return {
+        needs_ticket: needsTicket,
+        category: category,
+        priority: priority,
+        site_id: "UNKNOWN",
+        fault_summary: text.slice(0, 180) || "Customer inquiry via WhatsApp",
+        customer_reply: reply,
+        ask_for_info: askForInfo,
+        account_number: accountNumber,
+    };
+}
+
+function classifyWithOpenClaw(customerInfo, messageText, conversationHistory) {
     return new Promise(function(resolve, reject) {
         var customerContext = "";
         if (customerInfo) {
@@ -641,6 +754,23 @@ function classifyWithAI(customerInfo, messageText, conversationHistory) {
             }
         });
     });
+}
+
+async function classifyWithAI(customerInfo, messageText, conversationHistory) {
+    // Deterministic classifier is production default (no paid dependency).
+    if (CLASSIFIER_MODE !== "openclaw") {
+        return classifyDeterministic(customerInfo, messageText);
+    }
+    if (!MOONSHOT_KEY) {
+        console.log("[AI] OpenClaw mode requested but MOONSHOT_API_KEY missing; using deterministic.");
+        return classifyDeterministic(customerInfo, messageText);
+    }
+    try {
+        return await classifyWithOpenClaw(customerInfo, messageText, conversationHistory);
+    } catch (err) {
+        console.error("[AI] OpenClaw failed, falling back deterministic:", err && err.message ? err.message : err);
+        return classifyDeterministic(customerInfo, messageText);
+    }
 }
 
 // ============================================================
@@ -1029,6 +1159,19 @@ function startInboundHttpServer() {
         console.log("[INBOUND] CC_BRIDGE_SECRET not set; inbound HTTP disabled.");
         return;
     }
+    function sendJson(res, status, payload) {
+        if (res.headersSent || res.writableEnded || res.destroyed) return;
+        res.statusCode = status;
+        res.setHeader("Content-Type", "application/json");
+        res.end(JSON.stringify(payload));
+    }
+
+    function sendText(res, status, text) {
+        if (res.headersSent || res.writableEnded || res.destroyed) return;
+        res.statusCode = status;
+        res.end(text || "");
+    }
+
     var server = http.createServer(function(req, res) {
         if (req.method !== "POST") {
             res.writeHead(404);
@@ -1047,16 +1190,14 @@ function startInboundHttpServer() {
         req.on("end", function() {
             var hdr = req.headers["x-bridge-secret"] || req.headers["X-Bridge-Secret"] || "";
             if (hdr !== secret) {
-                res.writeHead(401);
-                res.end("unauthorized");
+                sendText(res, 401, "unauthorized");
                 return;
             }
             var body = {};
             try {
                 body = JSON.parse(Buffer.concat(chunks).toString() || "{}");
             } catch (e) {
-                res.writeHead(400);
-                res.end("bad json");
+                sendText(res, 400, "bad json");
                 return;
             }
             // /broadcast: send body.text VERBATIM (no "[App / meter relay]" prefix)
@@ -1065,41 +1206,34 @@ function startInboundHttpServer() {
             if (isBroadcast) {
                 var text = (body && typeof body.text === "string") ? body.text : "";
                 if (!text) {
-                    res.writeHead(400);
-                    res.end("missing text");
+                    sendText(res, 400, "missing text");
                     return;
                 }
                 var jid = body.jid || TICKET_TRACKER_JID;
                 if (!jid || !sock) {
-                    res.statusCode = 503;
-                    res.setHeader("Content-Type", "application/json");
-                    res.end(JSON.stringify({ ok: false, reason: "wa_not_ready" }));
+                    sendJson(res, 503, { ok: false, reason: "wa_not_ready" });
                     return;
                 }
+                // Ack immediately so CC bridge clients don't block on WA network jitter.
+                sendJson(res, 202, { ok: true, queued: true, jid: jid, length: text.length });
                 sock.sendMessage(jid, { text: text }).then(function() {
-                    res.statusCode = 200;
-                    res.setHeader("Content-Type", "application/json");
-                    res.end(JSON.stringify({ ok: true, jid: jid, length: text.length }));
+                    console.log("[INBOUND-BCAST] Sent to " + jid + " len=" + text.length);
                 }).catch(function(e) {
-                    res.writeHead(500);
-                    res.end(e.message || "send failed");
+                    console.error("[INBOUND-BCAST-ERR]", e && e.message ? e.message : e);
                 });
                 return;
             }
             if (!TICKET_TRACKER_JID || !sock) {
-                res.statusCode = 503;
-                res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ ok: false, reason: "wa_not_ready" }));
+                sendJson(res, 503, { ok: false, reason: "wa_not_ready" });
                 return;
             }
             var text = buildCareInboundText(body);
+            // Ack immediately so /notify does not timeout under temporary WA lag.
+            sendJson(res, 202, { ok: true, queued: true });
             sock.sendMessage(TICKET_TRACKER_JID, { text: text }).then(function() {
-                res.statusCode = 200;
-                res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ ok: true }));
+                console.log("[INBOUND-NOTIFY] Sent relay/app message");
             }).catch(function(e) {
-                res.writeHead(500);
-                res.end(e.message || "send failed");
+                console.error("[INBOUND-NOTIFY-ERR]", e && e.message ? e.message : e);
             });
         });
     });
@@ -1303,6 +1437,7 @@ console.log("CC API: " + CC_API);
 console.log("Ticket tracker group: " + (TICKET_TRACKER_JID || "(will discover)"));
 console.log("Auth dir: " + AUTH_DIR);
 console.log("Conversation window: " + (CONVERSATION_WINDOW_MS / 60000) + " min");
+console.log("Classifier mode: " + CLASSIFIER_MODE);
 console.log("Active conversations loaded: " + Object.keys(conversations).length);
 console.log("");
 

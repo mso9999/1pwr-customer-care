@@ -9,12 +9,12 @@ import {
   getOMOverview, getCustomerStatsBySite, getCustomerGrowth,
   getConsumptionBySite, getSalesBySite, getCumulativeTrends,
   getAvgConsumptionTrend, getSiteOverview, getLoadCurvesByType,
-  getDailyLoadProfiles,
+  getDailyLoadProfiles, runConsumptionBenchmark,
 } from '../lib/api';
 import type {
   OMOverview, CustomerSiteStat, CustomerGrowthPoint,
   SiteConsumption, CumulativeTrend, AvgConsumptionTrend, SiteOverviewItem,
-  LoadCurve, LoadCurveResponse, LoadProfile, LoadProfileResponse,
+  LoadCurve, LoadCurveResponse, LoadProfile, LoadProfileResponse, ConsumptionBenchmarkRow,
 } from '../lib/api';
 import { useCountry } from '../contexts/CountryContext';
 import html2canvas from 'html2canvas';
@@ -25,6 +25,38 @@ const COLORS = [
   '#0891b2', '#be185d', '#65a30d', '#ea580c', '#4f46e5',
   '#0d9488', '#b91c1c',
 ];
+
+type QuarterRef = { year: number; quarter: number };
+const QUARTER_WINDOW_START: QuarterRef = { year: 2021, quarter: 1 };
+
+function parseQuarterLabel(label: string | null | undefined): QuarterRef | null {
+  const m = String(label || '').trim().match(/^(\d{4})\s*Q([1-4])$/i);
+  if (!m) return null;
+  return { year: Number(m[1]), quarter: Number(m[2]) };
+}
+
+function quarterOrdinal(q: QuarterRef): number {
+  return q.year * 4 + q.quarter;
+}
+
+function latestCompletedQuarter(today = new Date()): QuarterRef {
+  const year = today.getFullYear();
+  const month = today.getMonth() + 1;
+  const currentQuarter = Math.floor((month - 1) / 3) + 1;
+  if (currentQuarter === 1) return { year: year - 1, quarter: 4 };
+  return { year, quarter: currentQuarter - 1 };
+}
+
+function inQuarterWindow(
+  label: string | null | undefined,
+  start: QuarterRef,
+  end: QuarterRef,
+): boolean {
+  const q = parseQuarterLabel(label);
+  if (!q) return false;
+  const n = quarterOrdinal(q);
+  return n >= quarterOrdinal(start) && n <= quarterOrdinal(end);
+}
 
 // ---------------------------------------------------------------------------
 // oklch → hex resolver (html2canvas cannot parse oklch color functions)
@@ -202,7 +234,7 @@ function Figure({
 
 export default function OMReportPage() {
   const { t } = useTranslation(['omReport', 'common']);
-  const { config, country } = useCountry();
+  const { config, country, portfolio, portfolios } = useCountry();
   const currency = config?.currency || 'LSL';
   const siteCodes = Object.keys(config?.sites || {}).sort();
   const portfolioLabel = country === 'BN' ? 'Benin Minigrid Portfolio' : 'Sotho Minigrid Portfolio (SMP)';
@@ -228,10 +260,16 @@ export default function OMReportPage() {
   const [loadProfileTypes, setLoadProfileTypes] = useState<string[]>([]);
   const [loadProfileMeta, setLoadProfileMeta] = useState<LoadProfile[]>([]);
   const [loadProfileReadings, setLoadProfileReadings] = useState<number>(0);
+  const [loadProfileMessage, setLoadProfileMessage] = useState<string>('');
   const [profileSite, setProfileSite] = useState<string>('');
   const [profileType, setProfileType] = useState<string>('');
   const [allProfileTypes, setAllProfileTypes] = useState<string[]>([]);
   const [profileLoading, setProfileLoading] = useState(false);
+  const [benchmarkPeriod, setBenchmarkPeriod] = useState<'day' | 'week' | 'month' | 'year'>('month');
+  const [benchmarkScope, setBenchmarkScope] = useState<'country' | 'portfolio' | 'all'>('country');
+  const [benchmarkRows, setBenchmarkRows] = useState<ConsumptionBenchmarkRow[]>([]);
+  const [benchmarkLoading, setBenchmarkLoading] = useState(false);
+  const [benchmarkError, setBenchmarkError] = useState('');
 
   const figRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const setFigRef = useCallback((key: string) => (el: HTMLDivElement | null) => {
@@ -272,6 +310,7 @@ export default function OMReportPage() {
         setAllProfileTypes(lp.customer_types || []);
         setLoadProfileMeta(lp.profiles || []);
         setLoadProfileReadings(lp.total_readings || 0);
+        setLoadProfileMessage(lp.error || lp.note || '');
       } catch (e: any) {
         setError(e.message);
       } finally {
@@ -292,11 +331,13 @@ export default function OMReportPage() {
       setLoadProfileTypes(lp.customer_types || []);
       setLoadProfileMeta(lp.profiles || []);
       setLoadProfileReadings(lp.total_readings || 0);
+      setLoadProfileMessage(lp.error || lp.note || '');
     } catch {
       setLoadProfiles([]);
       setLoadProfileTypes([]);
       setLoadProfileMeta([]);
       setLoadProfileReadings(0);
+      setLoadProfileMessage('Failed to load meter interval data for Figure 11.');
     } finally {
       setProfileLoading(false);
     }
@@ -311,6 +352,41 @@ export default function OMReportPage() {
     setProfileType(ctype);
     reloadProfiles(profileSite, ctype);
   };
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadBenchmark() {
+      setBenchmarkLoading(true);
+      setBenchmarkError('');
+      try {
+        const res = await runConsumptionBenchmark({
+          period: benchmarkPeriod,
+          country: benchmarkScope === 'country' ? country : undefined,
+          portfolio_id: benchmarkScope === 'portfolio' ? (portfolio?.id || undefined) : undefined,
+          all_datasets: benchmarkScope === 'all',
+          from: '2025-01-01',
+          to: new Date().toISOString().slice(0, 10),
+        });
+        if (!cancelled) setBenchmarkRows(res.rows || []);
+      } catch (e: any) {
+        if (!cancelled) {
+          setBenchmarkRows([]);
+          setBenchmarkError(e?.message || t('omReport:benchmarkFailed'));
+        }
+      } finally {
+        if (!cancelled) setBenchmarkLoading(false);
+      }
+    }
+
+    if (benchmarkScope !== 'portfolio' || portfolio?.id) {
+      void loadBenchmark();
+    } else {
+      setBenchmarkRows([]);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [benchmarkPeriod, benchmarkScope, country, portfolio?.id, t]);
 
   const handleExportFigure = (key: string, title: string) => () => {
     const el = figRefs.current[key];
@@ -358,6 +434,17 @@ export default function OMReportPage() {
     kwh: Math.round(s.total_kwh),
   }));
 
+  const quarterWindowEnd = latestCompletedQuarter();
+  const growthWindowed = growth.filter((p) =>
+    inQuarterWindow(p.quarter, QUARTER_WINDOW_START, quarterWindowEnd),
+  );
+  const cumulativeWindowed = cumulative.filter((p) =>
+    inQuarterWindow(p.quarter, QUARTER_WINDOW_START, quarterWindowEnd),
+  );
+  const avgTrendWindowed = avgTrend.filter((p) =>
+    inQuarterWindow(p.quarter, QUARTER_WINDOW_START, quarterWindowEnd),
+  );
+
   const salesBarData = (sales as any[]).map((s: any) => ({
     name: s.site,
     fullName: s.name,
@@ -367,17 +454,51 @@ export default function OMReportPage() {
   const cumulativeMonotonic = (() => {
     let maxKwh = 0;
     let maxLsl = 0;
-    return cumulative.map((point) => {
+    return cumulativeWindowed.map((point) => {
       maxKwh = Math.max(maxKwh, point.cumulative_kwh);
       maxLsl = Math.max(maxLsl, point.cumulative_lsl);
       return { ...point, cumulative_kwh: maxKwh, cumulative_lsl: maxLsl };
     });
   })();
 
+  // Figure 14 readability: drop leading quarters before typed-load data starts.
+  // We keep internal gaps once data has started, but avoid showing long
+  // pre-commissioning stretches of all-zero stacked bars.
+  const quarterlyByTypeData = (() => {
+    const windowed = loadCurveQuarterly.filter((row) =>
+      inQuarterWindow(
+        String((row as Record<string, unknown>).quarter || ''),
+        QUARTER_WINDOW_START,
+        quarterWindowEnd,
+      ),
+    );
+    if (!windowed.length || !loadCurveTypes.length) return windowed;
+    const totals = windowed.map((row) => {
+      let sum = 0;
+      for (const ct of loadCurveTypes) {
+        const v = Number((row as Record<string, unknown>)[ct] ?? 0);
+        if (Number.isFinite(v)) sum += v;
+      }
+      return sum;
+    });
+    const firstNonZeroIdx = totals.findIndex((v) => v > 0);
+    if (firstNonZeroIdx <= 0) return windowed;
+    return windowed.slice(firstNonZeroIdx);
+  })();
+
   let _fig = 0;
   let _tbl = 0;
   const fig = () => ++_fig;
   const tbl = () => ++_tbl;
+  const benchmarkTypes = Array.from(new Set(benchmarkRows.map((r) => r.customer_type)));
+  const benchmarkChartData = (() => {
+    const byPeriod = new Map<string, Record<string, number | string>>();
+    for (const r of benchmarkRows) {
+      if (!byPeriod.has(r.period_key)) byPeriod.set(r.period_key, { period: r.period_key });
+      byPeriod.get(r.period_key)![r.customer_type] = r.avg_kwh_per_customer;
+    }
+    return Array.from(byPeriod.values());
+  })();
 
   return (
     <div>
@@ -499,7 +620,7 @@ export default function OMReportPage() {
       )}
 
       {/* Customer Growth Over Time */}
-      {growth.length > 0 && (
+      {growthWindowed.length > 0 && (
         <Figure
           id="fig-customer-growth"
           title={`${t('omReport:figure', { n: fig() })}: ${t('omReport:customerGrowth')}`}
@@ -508,7 +629,7 @@ export default function OMReportPage() {
           onExport={handleExportFigure('customer-growth', 'Customer_Growth')}
         >
           <ResponsiveContainer width="100%" height={350}>
-            <ComposedChart data={growth} margin={{ top: 5, right: 20, left: 0, bottom: 60 }}>
+            <ComposedChart data={growthWindowed} margin={{ top: 5, right: 20, left: 0, bottom: 60 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="quarter" angle={-35} textAnchor="end" tick={{ fontSize: 10 }} interval={0} />
               <YAxis yAxisId="left" tick={{ fontSize: 11 }} />
@@ -633,7 +754,7 @@ export default function OMReportPage() {
       )}
 
       {/* Quarterly Consumption */}
-      {cumulative.length > 0 && (
+      {cumulativeWindowed.length > 0 && (
         <Figure
           id="fig-quarterly-consumption"
           title={`${t('omReport:figure', { n: fig() })}: ${t('omReport:quarterlyConsumption')}`}
@@ -642,7 +763,7 @@ export default function OMReportPage() {
           onExport={handleExportFigure('quarterly-consumption', 'Quarterly_Consumption')}
         >
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={cumulative} margin={{ top: 5, right: 20, left: 0, bottom: 60 }}>
+            <BarChart data={cumulativeWindowed} margin={{ top: 5, right: 20, left: 0, bottom: 60 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="quarter" angle={-35} textAnchor="end" tick={{ fontSize: 10 }} interval={0} />
               <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => `${(v/1000).toFixed(0)}k`} />
@@ -657,7 +778,7 @@ export default function OMReportPage() {
       )}
 
       {/* Quarterly Sales */}
-      {cumulative.length > 0 && (
+      {cumulativeWindowed.length > 0 && (
         <Figure
           id="fig-quarterly-sales"
           title={`${t('omReport:figure', { n: fig() })}: ${t('omReport:quarterlySales')}`}
@@ -666,7 +787,7 @@ export default function OMReportPage() {
           onExport={handleExportFigure('quarterly-sales', 'Quarterly_Sales')}
         >
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={cumulative} margin={{ top: 5, right: 20, left: 0, bottom: 60 }}>
+            <BarChart data={cumulativeWindowed} margin={{ top: 5, right: 20, left: 0, bottom: 60 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="quarter" angle={-35} textAnchor="end" tick={{ fontSize: 10 }} interval={0} />
               <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => `${(v/1000).toFixed(0)}k`} />
@@ -681,7 +802,7 @@ export default function OMReportPage() {
       )}
 
       {/* Average Consumption Trend */}
-      {avgTrend.length > 0 && (
+      {avgTrendWindowed.length > 0 && (
         <Figure
           id="fig-avg-consumption"
           title={`${t('omReport:figure', { n: fig() })}: ${t('omReport:avgDailyConsumption')}`}
@@ -690,7 +811,7 @@ export default function OMReportPage() {
           onExport={handleExportFigure('avg-consumption', 'Avg_Consumption_Trend')}
         >
           <ResponsiveContainer width="100%" height={350}>
-            <ComposedChart data={avgTrend} margin={{ top: 5, right: 20, left: 0, bottom: 60 }}>
+            <ComposedChart data={avgTrendWindowed} margin={{ top: 5, right: 20, left: 0, bottom: 60 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="quarter" angle={-35} textAnchor="end" tick={{ fontSize: 10 }} interval={0} />
               <YAxis yAxisId="left" tick={{ fontSize: 11 }} label={{ value: t('omReport:kwhPerDayPerCustomer'), angle: -90, position: 'insideLeft', style: { fontSize: 10 } }} />
@@ -705,7 +826,7 @@ export default function OMReportPage() {
       )}
 
       {/* Average Sales Trend */}
-      {avgTrend.length > 0 && (
+      {avgTrendWindowed.length > 0 && (
         <Figure
           id="fig-avg-sales"
           title={`${t('omReport:figure', { n: fig() })}: ${t('omReport:avgDailyRevenue')}`}
@@ -714,7 +835,7 @@ export default function OMReportPage() {
           onExport={handleExportFigure('avg-sales', 'Avg_Sales_Trend')}
         >
           <ResponsiveContainer width="100%" height={350}>
-            <ComposedChart data={avgTrend} margin={{ top: 5, right: 20, left: 0, bottom: 60 }}>
+            <ComposedChart data={avgTrendWindowed} margin={{ top: 5, right: 20, left: 0, bottom: 60 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="quarter" angle={-35} textAnchor="end" tick={{ fontSize: 10 }} interval={0} />
               <YAxis yAxisId="left" tick={{ fontSize: 11 }} label={{ value: `${currency}/day/customer`, angle: -90, position: 'insideLeft', style: { fontSize: 10 } }} />
@@ -820,9 +941,116 @@ export default function OMReportPage() {
           </>
         ) : (
           <div className="text-center py-8 text-gray-400 text-sm">
-            {profileLoading ? t('omReport:loadingMeterData') : t('omReport:noMeterData')}
+            {profileLoading
+              ? t('omReport:loadingMeterData')
+              : (loadProfileMessage || t('omReport:noMeterData'))}
           </div>
         )}
+      </Figure>
+
+      <Figure
+        id="fig-consumption-benchmark-types"
+        title={`${t('omReport:figure', { n: fig() })}: ${t('omReport:benchmarkTitle')}`}
+        subtitle={t('omReport:benchmarkSubtitle')}
+        figureRef={setFigRef('consumption-benchmark-types')}
+        onExport={handleExportFigure('consumption-benchmark-types', 'Consumption_Benchmark_By_Type')}
+      >
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+          <label className="block">
+            <span className="text-xs text-gray-500">{t('omReport:benchmarkPeriod')}</span>
+            <select
+              className="mt-1 block w-full rounded border-gray-300 text-sm"
+              value={benchmarkPeriod}
+              onChange={(e) => setBenchmarkPeriod(e.target.value as 'day' | 'week' | 'month' | 'year')}
+            >
+              <option value="day">{t('omReport:benchmarkDay')}</option>
+              <option value="week">{t('omReport:benchmarkWeek')}</option>
+              <option value="month">{t('omReport:benchmarkMonth')}</option>
+              <option value="year">{t('omReport:benchmarkYear')}</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="text-xs text-gray-500">{t('omReport:benchmarkScope')}</span>
+            <select
+              className="mt-1 block w-full rounded border-gray-300 text-sm"
+              value={benchmarkScope}
+              onChange={(e) => setBenchmarkScope(e.target.value as 'country' | 'portfolio' | 'all')}
+            >
+              <option value="country">{t('omReport:benchmarkScopeCountry')}</option>
+              <option value="portfolio">{t('omReport:benchmarkScopePortfolio')}</option>
+              <option value="all">{t('omReport:benchmarkScopeAll')}</option>
+            </select>
+          </label>
+          <div className="md:col-span-2 flex items-end">
+            {benchmarkScope === 'portfolio' && (
+              <p className="text-xs text-gray-600">
+                {t('omReport:benchmarkPortfolioLabel')}: {portfolio?.name || t('common:allPortfolios')}
+                {!portfolio?.id && portfolios.length > 0 && (
+                  <span className="ml-1 text-amber-700">{t('omReport:benchmarkSelectPortfolioHint')}</span>
+                )}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {benchmarkError && (
+          <div className="mb-3 p-2 bg-red-50 border border-red-200 text-red-700 text-xs rounded">
+            {benchmarkError}
+          </div>
+        )}
+        {benchmarkLoading ? (
+          <div className="text-center py-8 text-gray-400 text-sm">{t('omReport:benchmarkLoading')}</div>
+        ) : benchmarkChartData.length > 0 ? (
+          <>
+            <ResponsiveContainer width="100%" height={320}>
+              <LineChart data={benchmarkChartData} margin={{ top: 5, right: 20, left: 0, bottom: 40 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="period" tick={{ fontSize: 11 }} angle={-30} textAnchor="end" />
+                <YAxis tick={{ fontSize: 11 }} label={{ value: t('omReport:avgKwhPerCustomer'), angle: -90, position: 'insideLeft', style: { fontSize: 10 } }} />
+                <Tooltip contentStyle={{ borderRadius: '8px', fontSize: '12px' }} />
+                <Legend />
+                {benchmarkTypes.map((ct, i) => (
+                  <Line
+                    key={ct}
+                    type="monotone"
+                    dataKey={ct}
+                    name={ct}
+                    stroke={COLORS[i % COLORS.length]}
+                    strokeWidth={2.2}
+                    dot={{ r: 2.5 }}
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+            <div className="mt-4 overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50 border-b">
+                  <tr>
+                    <th className="px-3 py-2 text-left font-medium text-gray-600">{t('omReport:benchmarkPeriod')}</th>
+                    <th className="px-3 py-2 text-left font-medium text-gray-600">{t('omReport:customerType')}</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">{t('omReport:benchmarkConnectedCustomers')}</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">{t('omReport:totalKwh')}</th>
+                    <th className="px-3 py-2 text-right font-medium text-gray-600">{t('omReport:avgKwhPerCustomer')}</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {benchmarkRows.map((r) => (
+                    <tr key={`${r.period_key}-${r.customer_type}`}>
+                      <td className="px-3 py-1.5">{r.period_key}</td>
+                      <td className="px-3 py-1.5">{r.customer_type}</td>
+                      <td className="px-3 py-1.5 text-right">{r.connected_customers.toLocaleString()}</td>
+                      <td className="px-3 py-1.5 text-right">{r.total_kwh.toLocaleString()}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{r.avg_kwh_per_customer.toFixed(3)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : (
+          <div className="text-center py-8 text-gray-400 text-sm">{t('omReport:benchmarkNoData')}</div>
+        )}
+        <p className="mt-3 text-xs text-gray-500">{t('omReport:benchmarkDenominatorNote')}</p>
       </Figure>
 
       {/* ================================================================ */}
@@ -926,7 +1154,7 @@ export default function OMReportPage() {
       )}
 
       {/* Quarterly consumption stacked by type */}
-      {loadCurveQuarterly.length > 0 && loadCurveTypes.length > 0 && (
+      {quarterlyByTypeData.length > 0 && loadCurveTypes.length > 0 && (
         <Figure
           id="fig-quarterly-by-type"
           title={`${t('omReport:figure', { n: fig() })}: ${t('omReport:quarterlyByType')}`}
@@ -935,7 +1163,7 @@ export default function OMReportPage() {
           onExport={handleExportFigure('quarterly-by-type', 'Quarterly_By_Type')}
         >
           <ResponsiveContainer width="100%" height={350}>
-            <BarChart data={loadCurveQuarterly} margin={{ top: 5, right: 20, left: 0, bottom: 60 }}>
+            <BarChart data={quarterlyByTypeData} margin={{ top: 5, right: 20, left: 0, bottom: 60 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis dataKey="quarter" angle={-35} textAnchor="end" tick={{ fontSize: 10 }} interval={0} />
               <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => v >= 1000 ? `${(v/1000).toFixed(0)}k` : String(Math.round(v))} />

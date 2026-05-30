@@ -1,9 +1,8 @@
 # Gensite commissioning & inverter telemetry
 
-> **Status:** Phase 1 scaffold — migration, credential store, commission wizard,
-> and Victron VRM adapter are live. Solarman (Deye), Sinosoar, and SMA Sunny
-> Portal adapters are stubs pending implementation in Phase 1 steps 4–6 and
-> Phase 2. Poller service is not yet deployed.
+> **Status:** Migration, credential store, commission wizard, poller path, and
+> core adapters are live for Victron, Deye (Solarman backend), Sinosoar, and
+> AlphaESS, and SMA Sunny Portal.
 
 ## Scope
 
@@ -21,14 +20,15 @@ Once both are in place, the gensite poller (Phase 1 step 7) will populate
 `inverter_readings` and `inverter_alarms`, which the `/gensite/{code}` page
 reads directly from 1PDB. Browsers **never** see credentials.
 
-## Vendor coverage (April 2026)
+## Vendor coverage (May 2026)
 
 | Vendor | Sites | Backend | Adapter status |
 |---|---|---|---|
 | Victron | GBO (BN) | VRM Portal REST API | **ready** |
-| Deye | LSB (LS), SAM (BN) | Solarman OpenAPI v2 | stub |
-| Sinosoar | ~14 LS minigrids | sinosoarcloud.com (JSON XHR scrape) | stub |
-| SMA | 7 PIH health centres (LS) | Sunny Portal session scrape | stub |
+| Deye | LSB (LS), SAM (BN) and BN portfolio logger rollout | Solarman OpenAPI v2 | **ready** |
+| Sinosoar | LS minigrids on Sinosoar cloud | sinosoarcloud.com (JSON XHR scrape + CAPTCHA OCR) | **ready** |
+| SMA | 7 PIH health centres (LS) | Sunny Portal Keycloak + UI API (`energybalance`) | **ready** |
+| AlphaESS | pilot/expanding | sgcloud.alphaess.com API | **ready** |
 
 ## Commissioning a new site (operator flow)
 
@@ -79,9 +79,9 @@ Every write path records a `cc_mutations` row with `metadata.kind` of
 
 ## What doesn't exist yet
 
-- **Poller service** (`cc-gensite-poll.timer`) that fills `inverter_readings`
-  every ~60 s. Without it, the dashboard's live tiles stay at "—" after
-  commissioning. Next deliverable after Victron end-to-end is proven.
+- **SMA alarms**: `verify`, `fetch_live`, and `fetch_day` are implemented.
+  `fetch_alarms` remains conservative/no-op until a stable timestamped SMA
+  alarm endpoint is confirmed.
 - **Alarms**: `inverter_alarms` table exists; `fetch_alarms()` is stubbed
   on every adapter. Wired into WhatsApp (CC phone + `1PWR LS - OnM Ticket
   Tracker` group) via the existing `cc_bridge_notify.py` helper in Phase 2.

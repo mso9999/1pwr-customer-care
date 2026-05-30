@@ -1,0 +1,10 @@
+verified_utc,credential_id,country,site_code,site_name,vendor,backend,site_id_on_vendor_before,verify_ok,verify_message,discovered_site_id,discovered_equipment_count,write_results
+2026-05-25T11:45:39.176533+00:00,2,LS,KET,Ketane,sinosoar,sinosoarcloud,102,no,CAPTCHA OCR produced no 4-char result,,0,yes
+2026-05-25T11:45:40.900563+00:00,1,LS,MAK,Ha Makebe,sinosoar,sinosoarcloud,103,no,unexpected: VerifyResult.__init__() got an unexpected keyword argument 'extra_patch',,0,yes
+2026-05-25T11:45:41.563602+00:00,4,LS,MAS,Mashai,sinosoar,sinosoarcloud,99,no,CAPTCHA OCR produced no 4-char result,,0,yes
+2026-05-25T11:45:42.658679+00:00,3,LS,MAT,Matsoaing,sinosoar,sinosoarcloud,101,no,unexpected: VerifyResult.__init__() got an unexpected keyword argument 'extra_patch',,0,yes
+2026-05-25T11:45:43.385968+00:00,9,LS,SEB,Sebapala,sinosoar,sinosoarcloud,104,no,CAPTCHA OCR produced no 4-char result,,0,yes
+2026-05-25T11:45:44.370995+00:00,6,LS,SEH,Sehlabathebe,sinosoar,sinosoarcloud,97,no,unexpected: VerifyResult.__init__() got an unexpected keyword argument 'extra_patch',,0,yes
+2026-05-25T11:45:45.447272+00:00,5,LS,SHG,Sehonghong,sinosoar,sinosoarcloud,99,no,unexpected: VerifyResult.__init__() got an unexpected keyword argument 'extra_patch',,0,yes
+2026-05-25T11:45:46.490516+00:00,7,LS,TLH,Tlhanyaku,sinosoar,sinosoarcloud,95,no,unexpected: VerifyResult.__init__() got an unexpected keyword argument 'extra_patch',,0,yes
+2026-05-25T11:45:47.644982+00:00,8,LS,TOS,Tosing,sinosoar,sinosoarcloud,104,no,unexpected: VerifyResult.__init__() got an unexpected keyword argument 'extra_patch',,0,yes

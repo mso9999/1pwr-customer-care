@@ -1,0 +1,5 @@
+site_name,country,logger_sn,tracker_station_name,tracker_station_id,api_device_list_seen,api_latest_nonempty,api_latest_points,api_latest_error,api_device_id,api_device_type,api_device_model,verified_utc
+KOTOKPA,BN,D257258348E0,KOTOKPA,62193608,yes,no,0,no_deviceDataList_rows,,COLLECTOR,,2026-05-25T10:17:18.227445+00:00
+AGLAMINDJODJI,BN,D257258373F0,AGLAMINDJODJI,62193625,yes,no,0,no_deviceDataList_rows,,COLLECTOR,,2026-05-25T10:17:18.539117+00:00
+SAMIONTA,BN,2740461151,SAMIONTA,62193626,yes,no,0,no_deviceDataList_rows,,COLLECTOR,,2026-05-25T10:17:18.865924+00:00
+LSB,LS,2337105481,LSB,62193627,yes,no,0,no_deviceDataList_rows,,COLLECTOR,,2026-05-25T10:17:19.228186+00:00

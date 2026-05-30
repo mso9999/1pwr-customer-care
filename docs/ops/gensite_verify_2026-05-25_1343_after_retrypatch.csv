@@ -1,0 +1,10 @@
+verified_utc,credential_id,country,site_code,site_name,vendor,backend,site_id_on_vendor_before,verify_ok,verify_message,discovered_site_id,discovered_equipment_count,write_results
+2026-05-25T11:48:40.773665+00:00,2,LS,KET,Ketane,sinosoar,sinosoarcloud,102,no,Sinosoar CAPTCHA rejected: Incorrect captcha,,0,yes
+2026-05-25T11:48:41.869154+00:00,1,LS,MAK,Ha Makebe,sinosoar,sinosoarcloud,103,yes,Connected to Sinosoar project 'Ha Makebe (MAK)'.,103,8,yes
+2026-05-25T11:48:42.859474+00:00,4,LS,MAS,Mashai,sinosoar,sinosoarcloud,99,yes,Connected to Sinosoar project 'MAS-SHG(mashai_sehonghong)..'.,99,8,yes
+2026-05-25T11:48:43.826527+00:00,3,LS,MAT,Matsoaing,sinosoar,sinosoarcloud,101,yes,Connected to Sinosoar project 'MAT(Matsoaing)'.,101,8,yes
+2026-05-25T11:48:44.845536+00:00,9,LS,SEB,Sebapala,sinosoar,sinosoarcloud,104,yes,Connected to Sinosoar project 'Tosing + Sebapala'.,104,8,yes
+2026-05-25T11:48:47.006722+00:00,6,LS,SEH,Sehlabathebe,sinosoar,sinosoarcloud,97,yes,Connected to Sinosoar project 'SEH( Sehlaba Thebe)'.,97,8,yes
+2026-05-25T11:48:48.105175+00:00,5,LS,SHG,Sehonghong,sinosoar,sinosoarcloud,99,yes,Connected to Sinosoar project 'MAS-SHG(mashai_sehonghong)..'.,99,8,yes
+2026-05-25T11:48:49.264108+00:00,7,LS,TLH,Tlhanyaku,sinosoar,sinosoarcloud,95,yes,Connected to Sinosoar project 'TLH(Tlhanyaku)'.,95,8,yes
+2026-05-25T11:48:51.142979+00:00,8,LS,TOS,Tosing,sinosoar,sinosoarcloud,104,yes,Connected to Sinosoar project 'Tosing + Sebapala'.,104,8,yes

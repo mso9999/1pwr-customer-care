@@ -1,0 +1,5 @@
+verified_utc,credential_id,country,site_code,site_name,vendor,backend,site_id_on_vendor_before,verify_ok,verify_message,discovered_site_id,discovered_equipment_count,write_results
+2026-05-25T12:27:55.581664+00:00,10,LS,BOB,Bobete,sma,sunny_portal,6202555,yes,Connected to SMA plant '1PWR_HC_Bobete'.,6202555,7,yes
+2026-05-25T12:27:56.902688+00:00,11,LS,MAN,Manamaneng,sma,sunny_portal,6360299,yes,Connected to SMA plant '1PWR_HC_Manamaneng'.,6360299,7,yes
+2026-05-25T12:27:58.121867+00:00,12,LS,MET,Methalaneng,sma,sunny_portal,6727482,yes,Connected to SMA plant '1PWR_HC_Methalaneng'.,6727482,7,yes
+2026-05-25T12:27:59.347055+00:00,13,LS,NKU,Ha Nkau,sma,sunny_portal,6060012,yes,Connected to SMA plant '1PWR_HC_Nkau'.,6060012,7,yes

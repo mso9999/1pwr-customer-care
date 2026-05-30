@@ -164,114 +164,111 @@ def _koios_headers(country_code: str) -> dict:
 
 def _koios_disconnect(meter_serial: str, country_code: str) -> ControlResult:
     """Disconnect a SparkMeter via the Koios v1 API."""
-    payload = {"meter_serial": meter_serial}
-    try:
-        r = requests.post(
-            f"{KOIOS_BASE}/api/v1/meters/disconnect",
-            json=payload,
-            headers=_koios_headers(country_code),
-            timeout=API_TIMEOUT,
-        )
-    except requests.RequestException as e:
-        logger.error("Koios disconnect request failed for %s: %s", meter_serial, e)
-        return ControlResult(
-            success=False, platform="koios", action="disconnect", error=str(e),
-        )
-
-    if not r.content:
-        ok = 200 <= r.status_code < 300
-        return ControlResult(
-            success=ok, platform="koios", action="disconnect",
-            error=None if ok else f"HTTP {r.status_code} (empty body)",
-        )
-
-    try:
-        body = r.json()
-    except ValueError:
-        snippet = (r.text or "")[:400]
-        logger.warning("Koios non-JSON HTTP %d for disconnect %s: %s",
-                       r.status_code, meter_serial, snippet)
-        return ControlResult(
-            success=False, platform="koios", action="disconnect",
-            error=f"HTTP {r.status_code} (invalid JSON body)",
-        )
-
-    errors = body.get("errors")
-    if errors:
-        err = errors[0].get("title", str(errors)) if isinstance(errors, list) else str(errors)
-        logger.warning("Koios rejected disconnect for %s: %s", meter_serial, err)
-        return ControlResult(
-            success=False, platform="koios", action="disconnect", error=err,
-        )
-
-    ok = 200 <= r.status_code < 300
-    if not ok:
-        detail = body.get("detail")
-        msg = str(detail) if detail else f"HTTP {r.status_code}"
-        return ControlResult(
-            success=False, platform="koios", action="disconnect", error=msg,
-        )
-
-    return ControlResult(
-        success=True, platform="koios", action="disconnect",
-        raw_response=body.get("data") or {},
-    )
+    return _koios_relay_control("disconnect", meter_serial, country_code)
 
 
 def _koios_reconnect(meter_serial: str, country_code: str) -> ControlResult:
     """Reconnect a SparkMeter via the Koios v1 API."""
-    payload = {"meter_serial": meter_serial}
-    try:
-        r = requests.post(
-            f"{KOIOS_BASE}/api/v1/meters/reconnect",
-            json=payload,
-            headers=_koios_headers(country_code),
-            timeout=API_TIMEOUT,
-        )
-    except requests.RequestException as e:
-        logger.error("Koios reconnect request failed for %s: %s", meter_serial, e)
-        return ControlResult(
-            success=False, platform="koios", action="reconnect", error=str(e),
-        )
+    return _koios_relay_control("reconnect", meter_serial, country_code)
 
-    if not r.content:
-        ok = 200 <= r.status_code < 300
+
+def _koios_parse_control_response(
+    action: str, meter_serial: str, response: requests.Response,
+) -> ControlResult:
+    """Parse Koios relay-control response using tolerant rules."""
+    if not response.content:
+        ok = 200 <= response.status_code < 300
         return ControlResult(
-            success=ok, platform="koios", action="reconnect",
-            error=None if ok else f"HTTP {r.status_code} (empty body)",
+            success=ok, platform="koios", action=action,
+            error=None if ok else f"HTTP {response.status_code} (empty body)",
         )
 
     try:
-        body = r.json()
+        body = response.json()
     except ValueError:
-        snippet = (r.text or "")[:400]
-        logger.warning("Koios non-JSON HTTP %d for reconnect %s: %s",
-                       r.status_code, meter_serial, snippet)
+        snippet = (response.text or "")[:400]
+        logger.warning(
+            "Koios non-JSON HTTP %d for %s %s: %s",
+            response.status_code, action, meter_serial, snippet,
+        )
         return ControlResult(
-            success=False, platform="koios", action="reconnect",
-            error=f"HTTP {r.status_code} (invalid JSON body)",
+            success=False, platform="koios", action=action,
+            error=f"HTTP {response.status_code} (invalid JSON body)",
         )
 
     errors = body.get("errors")
     if errors:
         err = errors[0].get("title", str(errors)) if isinstance(errors, list) else str(errors)
-        logger.warning("Koios rejected reconnect for %s: %s", meter_serial, err)
-        return ControlResult(
-            success=False, platform="koios", action="reconnect", error=err,
-        )
+        logger.warning("Koios rejected %s for %s: %s", action, meter_serial, err)
+        return ControlResult(success=False, platform="koios", action=action, error=err)
 
-    ok = 200 <= r.status_code < 300
+    ok = 200 <= response.status_code < 300
     if not ok:
         detail = body.get("detail")
-        msg = str(detail) if detail else f"HTTP {r.status_code}"
-        return ControlResult(
-            success=False, platform="koios", action="reconnect", error=msg,
-        )
+        msg = str(detail) if detail else f"HTTP {response.status_code}"
+        return ControlResult(success=False, platform="koios", action=action, error=msg)
 
     return ControlResult(
-        success=True, platform="koios", action="reconnect",
-        raw_response=body.get("data") or {},
+        success=True, platform="koios", action=action,
+        raw_response=body.get("data") or body or {},
     )
+
+
+def _koios_relay_control(action: str, meter_serial: str, country_code: str) -> ControlResult:
+    """
+    Control SparkMeter relay via Koios.
+
+    Koios orgs can expose relay control on slightly different method/path/payload
+    combinations, so we try the canonical v1 route first, then controlled fallbacks.
+    """
+    verb = action.lower().strip()
+    if verb not in ("disconnect", "reconnect"):
+        return ControlResult(
+            success=False, platform="koios", action=verb or "unknown",
+            error=f"Unsupported relay action '{action}'",
+        )
+
+    headers = _koios_headers(country_code)
+    attempts = [
+        ("POST", f"{KOIOS_BASE}/api/v1/meters/{verb}", {"meter_serial": meter_serial}),
+        ("POST", f"{KOIOS_BASE}/api/v1/meters/{verb}", {"serial": meter_serial}),
+        ("POST", f"{KOIOS_BASE}/api/v1/meters/{meter_serial}/{verb}", None),
+        ("PUT", f"{KOIOS_BASE}/api/v1/meters/{meter_serial}/{verb}", None),
+    ]
+
+    last_error = "Koios relay request failed"
+    for method, url, payload in attempts:
+        try:
+            r = requests.request(
+                method=method,
+                url=url,
+                json=payload,
+                headers=headers,
+                timeout=API_TIMEOUT,
+            )
+        except requests.RequestException as e:
+            logger.warning("Koios %s attempt %s %s failed for %s: %s",
+                           verb, method, url, meter_serial, e)
+            last_error = str(e)
+            continue
+
+        parsed = _koios_parse_control_response(verb, meter_serial, r)
+        if parsed.success:
+            if (method, url, payload) != attempts[0]:
+                logger.info(
+                    "Koios %s succeeded via fallback (%s %s) for %s",
+                    verb, method, url, meter_serial,
+                )
+            return parsed
+
+        last_error = parsed.error or last_error
+        # If request shape is wrong, try fallback shapes.
+        if r.status_code in (400, 404, 405, 415, 422):
+            continue
+        # For auth/permission/server issues, further shape retries are unlikely to help.
+        break
+
+    return ControlResult(success=False, platform="koios", action=verb, error=last_error)
 
 
 # ---------------------------------------------------------------------------

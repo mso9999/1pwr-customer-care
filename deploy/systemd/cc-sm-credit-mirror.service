@@ -1,0 +1,19 @@
+[Unit]
+Description=Incremental SM->CC historical credit mirror (LS + BN when configured)
+Wants=network-online.target postgresql.service
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+User=cc_api
+Group=cc_api
+WorkingDirectory=/opt/cc-portal/backend
+EnvironmentFile=/opt/1pdb/.env
+EnvironmentFile=-/etc/default/cc-sm-credit-mirror
+Environment=PYTHONPATH=/opt/cc-portal/backend:/opt/cc-portal/backend/scripts/ops
+ExecStart=/opt/cc-portal/backend/venv/bin/python /opt/cc-portal/backend/scripts/ops/run_sm_credit_mirror_incremental.py
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cc-sm-credit-mirror
+TimeoutStartSec=900
+

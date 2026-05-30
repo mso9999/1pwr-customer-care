@@ -2,6 +2,11 @@
 """
 Backfill 1PDB customer payments from Lesotho M-Pesa / EcoCash merchant exports.
 
+QUARANTINED NON-POLICY TOOL:
+- This script is currently treated as targeted repair tooling, not event-parity baseline.
+- Use only under explicit ops direction with dry-run review first.
+- Keep out of parity PRs unless explicitly scoped.
+
 Reads finance export files (CSV / XLSX / TXT), resolves accounts with the same
 Remark-first / phone-fallback rules as SMS ingest, deduplicates against existing
 1PDB rows, and optionally inserts missing payments as ``source = merchant_export``.
@@ -236,6 +241,10 @@ def _fuzzy_already_credited(
         SELECT 1 FROM transactions
         WHERE account_number = %s
           AND is_payment = true
+          AND (
+                COALESCE(kwh_value, 0) > 0
+                OR payment_category IN ('connection_fee', 'readyboard_fee')
+          )
           AND transaction_amount BETWEEN %s AND %s
           AND transaction_date BETWEEN %s AND %s
         LIMIT 1
@@ -295,6 +304,88 @@ def _source_table_tag(payment: NormalizedPayment) -> str:
     return f"mm:{receipt}:r{payment.source_row}"[:50]
 
 
+def _has_credited_kwh_payment(
+    conn,
+    account_number: str,
+    amount: float,
+    paid_at: datetime,
+) -> bool:
+    window_start = paid_at - timedelta(hours=24)
+    window_end = paid_at + timedelta(hours=24)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT 1
+        FROM transactions
+        WHERE account_number = %s
+          AND is_payment = true
+          AND COALESCE(kwh_value, 0) > 0
+          AND transaction_amount BETWEEN %s AND %s
+          AND transaction_date BETWEEN %s AND %s
+        LIMIT 1
+        """,
+        (account_number, amount - 0.01, amount + 0.01, window_start, window_end),
+    )
+    return cur.fetchone() is not None
+
+
+def _insert_repair_credit(
+    conn,
+    payment: NormalizedPayment,
+    *,
+    source_table: str,
+    apply: bool,
+) -> dict[str, Any]:
+    from balance_engine import record_payment_kwh
+
+    meter_id = _resolve_meter(conn, payment.account_number)
+    rate = _get_tariff_rate(conn, payment.account_number)
+    repair_ref = f"hist_repair:{payment.external_id or source_table}"[:120]
+
+    result: dict[str, Any] = {
+        "outcome": "would_repair_credit",
+        "category": "electricity",
+        "account_number": payment.account_number,
+        "amount": payment.amount,
+        "external_id": payment.external_id,
+        "paid_at": payment.paid_at.isoformat(),
+        "resolution_method": payment.resolution_method,
+        "source_file": payment.source_file,
+        "source_row": payment.source_row,
+        "repair_reference": repair_ref,
+    }
+    if not apply:
+        return result
+
+    dup = _payment_ref_taken(conn, repair_ref)
+    if dup:
+        result["outcome"] = "skipped_duplicate_repair_ref"
+        result["reason"] = f"repair_ref exists on txn {dup[0]}"
+        return result
+
+    txn_id, _, _ = record_payment_kwh(
+        conn,
+        payment.account_number,
+        meter_id,
+        payment.amount,
+        rate,
+        source=SOURCE,
+        timestamp=payment.paid_at,
+        payment_reference=repair_ref,
+    )
+    _annotate_transaction(
+        conn,
+        txn_id,
+        source_table=source_table,
+        payer_phone=payment.payer_phone,
+        details_text=payment.details_text,
+        payment_category="electricity",
+    )
+    result["outcome"] = "inserted_repair_credit"
+    result["transaction_id"] = txn_id
+    return result
+
+
 def _annotate_transaction(
     conn,
     txn_id: int,
@@ -349,6 +440,7 @@ def _insert_payment(
     payment: NormalizedPayment,
     *,
     apply: bool,
+    classification: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     from balance_engine import (
         record_fee_transaction,
@@ -357,7 +449,11 @@ def _insert_payment(
 
     source_table = _source_table_tag(payment)
     note = f"merchant export {payment.source_file}"
-    classification = _classify_payment_for_backfill(conn, payment.account_number, payment.amount)
+    classification = classification or _classify_payment_for_backfill(
+        conn,
+        payment.account_number,
+        payment.amount,
+    )
     category = classification["category"]
     meter_id = _resolve_meter(conn, payment.account_number)
     rate = _get_tariff_rate(conn, payment.account_number)
@@ -450,6 +546,13 @@ def process_payments(
         if not payment.account_number:
             rows.append({**base, "outcome": "unmatched_account", "reason": payment.resolution_reason})
             continue
+        source_table = _source_table_tag(payment)
+        classification = _classify_payment_for_backfill(
+            conn,
+            payment.account_number,
+            payment.amount,
+        )
+        category = str(classification.get("category") or "electricity")
 
         if payment.external_id:
             conflict = _conflict_for_reference(
@@ -466,10 +569,32 @@ def process_payments(
                 continue
 
         if _fuzzy_already_credited(conn, payment.account_number, payment.amount, payment.paid_at):
+            if (
+                category == "electricity"
+                and not _has_credited_kwh_payment(
+                    conn,
+                    payment.account_number,
+                    payment.amount,
+                    payment.paid_at,
+                )
+            ):
+                repaired = _insert_repair_credit(
+                    conn,
+                    payment,
+                    source_table=source_table,
+                    apply=apply,
+                )
+                rows.append({**base, **repaired})
+                continue
             rows.append({**base, "outcome": "skipped_fuzzy_duplicate", "account_number": payment.account_number})
             continue
 
-        inserted = _insert_payment(conn, payment, apply=apply)
+        inserted = _insert_payment(
+            conn,
+            payment,
+            apply=apply,
+            classification=classification,
+        )
         rows.append({**base, **inserted})
     return rows
 

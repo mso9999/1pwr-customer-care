@@ -1,0 +1,7 @@
+site_name,country,logger_sn,deye_station_name,deye_station_id,logger_added_utc,ui_online_status,api_device_list_seen,api_latest_nonempty,last_verified_utc,owner,status,notes,escalation_ticket
+KOTOKPA,BN,D257258348E0,KOTOKPA,62193608,2026-05-25T08:17:00Z,yes,yes,yes,2026-05-25T10:17:18Z,ops,done,Re-verified: logger is visible in device/list; collector latest endpoint empty but site inverter telemetry is live (2508215405),
+AGLAMINDJODJI,BN,D257258373F0,AGLAMINDJODJI,62193625,2026-05-25T08:50:00Z,yes,yes,yes,2026-05-25T10:17:18Z,ops,done,Corrected logger SN (previous typo D25725837F0). Re-verified logger visibility; inverter 2508215430 remains live,
+SAMIONTA,BN,2740461151,SAMIONTA,62193626,2026-05-25T08:18:00Z,yes,yes,yes,2026-05-25T10:17:19Z,ops,done,Re-verified logger visibility; site inverter telemetry remains live (2401228421 / 2202144226 / 2302230378),
+LSB,LS,2337105481,LSB,62193627,2026-05-25T09:10:00Z,yes,yes,yes,2026-05-25T10:17:19Z,ops,done,Registered via API device/register using gatewaySn=2337105481 and deviceSn=2202144213; re-verified logger visibility and inverter latest data,
+TEST-BENIN,BN,,TEST-BENIN,62193614,,,,2026-05-25T10:17:19Z,ops,blocked,Station exists in Deye station/list but no bound devices; treat as non-production placeholder pending cleanup,
+TEST-LESOTHO,LS,,TEST-LESOTHO,62193615,,,,2026-05-25T10:17:19Z,ops,blocked,Station exists in Deye station/list but no bound devices; treat as non-production placeholder pending cleanup,

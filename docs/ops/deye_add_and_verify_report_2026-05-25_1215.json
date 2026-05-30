@@ -1,0 +1,73 @@
+{
+  "add_loggers_mode": true,
+  "add_results": [],
+  "api_base": "https://eu1-developer.deyecloud.com",
+  "company_id": "10396086",
+  "device_list_count": 15,
+  "generated_at_utc": "2026-05-25T10:17:19.228217+00:00",
+  "report_rows": [
+    {
+      "api_device_id": "",
+      "api_device_list_seen": "yes",
+      "api_device_model": "",
+      "api_device_type": "COLLECTOR",
+      "api_latest_error": "no_deviceDataList_rows",
+      "api_latest_nonempty": "no",
+      "api_latest_points": 0,
+      "country": "BN",
+      "logger_sn": "D257258348E0",
+      "site_name": "KOTOKPA",
+      "tracker_station_id": "62193608",
+      "tracker_station_name": "KOTOKPA",
+      "verified_utc": "2026-05-25T10:17:18.227445+00:00"
+    },
+    {
+      "api_device_id": "",
+      "api_device_list_seen": "yes",
+      "api_device_model": "",
+      "api_device_type": "COLLECTOR",
+      "api_latest_error": "no_deviceDataList_rows",
+      "api_latest_nonempty": "no",
+      "api_latest_points": 0,
+      "country": "BN",
+      "logger_sn": "D257258373F0",
+      "site_name": "AGLAMINDJODJI",
+      "tracker_station_id": "62193625",
+      "tracker_station_name": "AGLAMINDJODJI",
+      "verified_utc": "2026-05-25T10:17:18.539117+00:00"
+    },
+    {
+      "api_device_id": "",
+      "api_device_list_seen": "yes",
+      "api_device_model": "",
+      "api_device_type": "COLLECTOR",
+      "api_latest_error": "no_deviceDataList_rows",
+      "api_latest_nonempty": "no",
+      "api_latest_points": 0,
+      "country": "BN",
+      "logger_sn": "2740461151",
+      "site_name": "SAMIONTA",
+      "tracker_station_id": "62193626",
+      "tracker_station_name": "SAMIONTA",
+      "verified_utc": "2026-05-25T10:17:18.865924+00:00"
+    },
+    {
+      "api_device_id": "",
+      "api_device_list_seen": "yes",
+      "api_device_model": "",
+      "api_device_type": "COLLECTOR",
+      "api_latest_error": "no_deviceDataList_rows",
+      "api_latest_nonempty": "no",
+      "api_latest_points": 0,
+      "country": "LS",
+      "logger_sn": "2337105481",
+      "site_name": "LSB",
+      "tracker_station_id": "62193627",
+      "tracker_station_name": "LSB",
+      "verified_utc": "2026-05-25T10:17:19.228186+00:00"
+    }
+  ],
+  "station_list_count": 7,
+  "station_list_error": "",
+  "tracker_csv": "/Users/mattmso/Dropbox/AI Projects/1PWR CC/docs/ops/deyecloud-logger-onboarding-tracker-2026-05-25.csv"
+}

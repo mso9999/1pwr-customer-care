@@ -55,7 +55,8 @@
         "On the Advances page, click 'New advance', pick the customer, type (connection or readyboard), repayment fraction (default 50%), monthly fee % (premium), and upload the signed contract — the contract upload is required.",
         "Once active, every electricity payment automatically siphons the repayment fraction toward the advance; the rest is credited as kWh. The ledger shows every grant, repayment, monthly fee accrual, contract replacement, and write-off.",
         "Open Customer Data for the affected account to see the Active Advances panel with progress bar; deep-link back to the Advances page to edit or replace the contract.",
-        "Recognised fee payments still flow through Payment Verification — the advance is only repaid by subsequent electricity payments, not by the matched fee."
+        "Recognised fee payments still flow through Payment Verification — the advance is only repaid by subsequent electricity payments, not by the matched fee.",
+        "When contract/debt credit is positive, use manual debt-credit decisions on Advances: either Convert Debt Credit (to kWh/SparkMeter) or Refund Debt Credit. The system does not auto-convert these credits."
       ]
     },
     "reporting": {
