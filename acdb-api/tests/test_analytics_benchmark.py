@@ -49,6 +49,15 @@ class TestBenchmarkSiteResolution(unittest.TestCase):
         )
         self.assertGreater(len(sites), 0)
 
+    def test_all_country_keyword_is_supported(self):
+        sites = analytics._resolve_benchmark_sites(
+            country="ALL",
+            sites=None,
+            portfolio_id=None,
+            all_datasets=False,
+        )
+        self.assertGreater(len(sites), 0)
+
     def test_portfolio_scope_intersects_sites(self):
         original = analytics.list_portfolios
         try:

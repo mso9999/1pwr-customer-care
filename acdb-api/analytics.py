@@ -496,6 +496,8 @@ def _resolve_sites(country: Optional[str], sites: Optional[List[str]]) -> List[s
 
     if country:
         cc = country.upper().strip()
+        if cc == "ALL":
+            return sorted(ALL_KNOWN_SITES)
         cfg = _REGISTRY.get(cc)
         if not cfg:
             raise HTTPException(400, f"Unknown country: {country}")
