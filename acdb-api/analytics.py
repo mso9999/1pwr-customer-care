@@ -723,12 +723,12 @@ class ConsumptionBenchmarkRow(BaseModel):
 
 def _benchmark_period_meta(period: str) -> Tuple[str, str, str]:
     if period == "day":
-        return ("day", "1 day", "to_char(p.period_start, 'YYYY-MM-DD')")
+        return ("day", "1 day", "YYYY-MM-DD")
     if period == "week":
-        return ("week", "1 week", "to_char(p.period_start, 'IYYY-\"W\"IW')")
+        return ("week", "1 week", "IYYY-\"W\"IW")
     if period == "year":
-        return ("year", "1 year", "to_char(p.period_start, 'YYYY')")
-    return ("month", "1 month", "to_char(p.period_start, 'YYYY-MM')")
+        return ("year", "1 year", "YYYY")
+    return ("month", "1 month", "YYYY-MM")
 
 
 def _build_consumption_benchmark_sql(
@@ -739,7 +739,7 @@ def _build_consumption_benchmark_sql(
     date_from: date,
     date_to: date,
 ) -> Tuple[str, tuple]:
-    _, period_step, period_label_expr = _benchmark_period_meta(period)
+    _, period_step, period_label_format = _benchmark_period_meta(period)
     site_placeholders = ",".join(["%s"] * len(resolved_sites))
     type_clause = ""
     type_params: List[Any] = []
@@ -752,18 +752,13 @@ def _build_consumption_benchmark_sql(
         WITH scoped_accounts AS (
             SELECT DISTINCT
                    a.account_number,
-                   {_NORMALIZED_TYPE_SQL} AS customer_type
+                   {_NORMALIZED_TYPE_SQL} AS customer_type,
+                   c.date_service_connected AS connected_on,
+                   c.date_service_terminated AS terminated_on
               FROM accounts a
               JOIN customers c ON c.id = a.customer_id
              WHERE c.community IN ({site_placeholders})
-               AND c.date_service_connected IS NOT NULL
-               AND c.date_service_terminated IS NULL
                {type_clause}
-        ),
-        denominator AS (
-            SELECT customer_type, COUNT(DISTINCT account_number) AS connected_customers
-              FROM scoped_accounts
-             GROUP BY customer_type
         ),
         periods AS (
             SELECT generate_series(
@@ -771,6 +766,26 @@ def _build_consumption_benchmark_sql(
                        date_trunc('{period}', %s::timestamp),
                        interval '{period_step}'
                    )::date AS period_start
+        ),
+        type_dimension AS (
+            SELECT DISTINCT customer_type
+              FROM scoped_accounts
+        ),
+        denominator_by_period AS (
+            SELECT p.period_start,
+                   td.customer_type,
+                   COUNT(DISTINCT sa.account_number) AS connected_customers
+              FROM periods p
+              CROSS JOIN type_dimension td
+              LEFT JOIN scoped_accounts sa
+                     ON sa.customer_type = td.customer_type
+                    AND sa.connected_on IS NOT NULL
+                    AND sa.connected_on < (p.period_start + interval '{period_step}')
+                    AND (
+                        sa.terminated_on IS NULL
+                        OR sa.terminated_on >= (p.period_start + interval '{period_step}')
+                    )
+             GROUP BY p.period_start, td.customer_type
         ),
         usage_by_period AS (
             SELECT date_trunc('{period}', h.reading_hour)::date AS period_start,
@@ -782,20 +797,19 @@ def _build_consumption_benchmark_sql(
                AND h.reading_hour < (%s::timestamp + interval '1 day')
              GROUP BY date_trunc('{period}', h.reading_hour)::date, sa.customer_type
         )
-        SELECT {period_label_expr} AS period_key,
-               p.period_start,
+        SELECT to_char(d.period_start, '{period_label_format}') AS period_key,
+               d.period_start,
                d.customer_type,
                ROUND(COALESCE(u.total_kwh, 0)::numeric, 4) AS total_kwh,
                d.connected_customers,
                CASE WHEN d.connected_customers > 0
                     THEN ROUND((COALESCE(u.total_kwh, 0) / d.connected_customers)::numeric, 4)
                     ELSE 0 END AS avg_kwh_per_customer
-          FROM periods p
-          CROSS JOIN denominator d
+          FROM denominator_by_period d
           LEFT JOIN usage_by_period u
-                 ON u.period_start = p.period_start
+                 ON u.period_start = d.period_start
                 AND u.customer_type = d.customer_type
-         ORDER BY p.period_start, d.customer_type
+         ORDER BY d.period_start, d.customer_type
     """
     params: List[Any] = []
     params.extend(resolved_sites)

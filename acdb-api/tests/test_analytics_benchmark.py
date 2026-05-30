@@ -86,7 +86,8 @@ class TestBenchmarkSqlBuilder(unittest.TestCase):
         )
         self.assertEqual(sql.count("%s"), len(params))
         self.assertIn("date_trunc('month'", sql)
-        self.assertIn("CROSS JOIN denominator", sql)
+        self.assertIn("denominator_by_period", sql)
+        self.assertIn("connected_on < (p.period_start + interval '1 month')", sql)
 
     def test_week_period_sql_shape(self):
         sql, _ = analytics._build_consumption_benchmark_sql(
