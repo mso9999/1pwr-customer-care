@@ -2,7 +2,7 @@
 
 Automated WhatsApp-based customer care for 1PWR minigrids. Customers message the
 CC phone via WhatsApp; an AI classifies the issue, looks up customer context
-through the CC API, creates an O&M ticket in uGridPlan when needed, replies in
+through the CC API, creates an O&M ticket in OM when needed, replies in
 bilingual Sesotho/English, and notifies operations via WhatsApp group and email.
 
 ## Status
@@ -30,7 +30,7 @@ Customer WhatsApp
        |
        +---> OpenClaw AI (classify message, generate bilingual reply)
        |
-       +---> uGridPlan API (create O&M ticket)
+       +---> OM API (create O&M ticket)
        |         |
        |         +---> Email notification
        |
@@ -47,8 +47,8 @@ Customer receives bilingual reply with ticket number
 3. The bridge filters duplicates, stale history, protocol messages, and echoes.
 4. The bridge looks up customer context through the CC API (`1PDB`-backed).
 5. OpenClaw classifies the message and drafts a bilingual reply.
-6. If ticket-worthy, the bridge creates a ticket in uGridPlan.
-7. uGridPlan dispatches notification workflows.
+6. If ticket-worthy, the bridge creates a ticket in OM.
+7. OM dispatches notification workflows.
 8. The bridge sends the customer reply and posts the tracker-group message.
 9. Follow-up messages within the conversation window are appended to the existing ticket.
 
@@ -74,9 +74,9 @@ ssh -i "/Users/mattmso/Dropbox/AI Projects/secrets/EOver.pem" ubuntu@<current-cc
 **Keys:** Use **`EOver.pem`** from **`/Users/mattmso/Dropbox/AI Projects/secrets`** (Dropbox-synced). Resolve `<current-cc-linux-host>` with **`aws ec2 describe-instances`** (see `CONTEXT.md`) or the `EC2_LINUX_HOST`
 deploy secret. Do not rely on historical hardcoded public IPs in older docs.
 
-### uGridPlan Host
+### O&M Host
 
-uGridPlan remains the O&M ticketing backend and planning system.
+OM remains the canonical O&M ticketing backend.
 
 | Item | Value |
 |------|-------|
@@ -101,7 +101,8 @@ Typical bridge configuration includes:
 
 ```text
 CC phone                = +266 58342168
-UGRIDPLAN_API           = https://dev.ugp.1pwrafrica.com/api  (or production)
+OM_API                  = https://om.1pwrafrica.com/api
+OM_API_KEY              = <service api key if required by OM>
 CC lookup API           = https://cc.1pwrafrica.com/api
 AUTH_DIR                = /home/ubuntu/whatsapp-logger/baileys_auth_cc
 STATE_FILE              = /home/ubuntu/whatsapp-logger/cc-state.json
@@ -211,24 +212,24 @@ Customer lookup should normalize phone numbers by:
 3. Stripping leading zeros
 4. Matching the normalized local form
 
-## 5. uGridPlan O&M Integration
+## 5. OM O&M Integration
 
-The bridge creates tickets in uGridPlan over HTTP.
+The bridge creates tickets in OM over HTTP.
 
 ### Integration Points
 
-- `POST /om/tickets` for corrective tickets
-- uGridPlan handles downstream notification workflows
-- CC and uGridPlan remain separate repos with API-level integration only
+- `POST /tickets` for corrective tickets
+- `POST /tickets/{ticket_ref}/comments` for follow-up messages
+- CC and OM remain separate repos with API-level integration only
 
 ### Environment Targeting
 
 | Setting | Staging | Production |
 |---------|---------|------------|
-| `UGRIDPLAN_API` | `https://dev.ugp.1pwrafrica.com/api` | `https://ugp.1pwrafrica.com/api` |
+| `OM_API` | staging OM API URL | `https://om.1pwrafrica.com/api` |
 
 Switching between staging and production should be done by changing the
-uGridPlan API target, not by reviving old ACCDB infrastructure.
+OM API target, not by reviving old ACCDB infrastructure.
 
 ## 6. Operations Guide
 
@@ -271,14 +272,14 @@ sudo systemctl status caddy
 | CC Bridge | `pm2 logs whatsapp-cc` |
 | CC message state | `/home/ubuntu/whatsapp-logger/` |
 | CC API | `journalctl -u 1pdb-api` |
-| uGridPlan | `journalctl -u ugridplan` on the uGridPlan host |
+| OM API | upstream OM API logs on the OM host |
 
 ### Testing Procedure
 
 1. Send a WhatsApp outage report to the CC phone.
 2. Confirm a bilingual reply arrives within about 30 seconds.
 3. Confirm a tracker-group message is posted.
-4. Confirm the ticket appears in the target uGridPlan environment.
+4. Confirm the ticket appears in the target OM environment.
 5. Confirm downstream notification behavior if that is part of the test scope.
 
 ### Troubleshooting
@@ -299,11 +300,11 @@ curl -s -m 5 http://localhost:8100/health
 sudo journalctl -u 1pdb-api --lines 100
 ```
 
-**uGridPlan ticket creation failing**
+**OM ticket creation failing**
 
-- Verify the configured `UGRIDPLAN_API`
+- Verify the configured `OM_API`
 - Check bridge logs for auth or timeout errors
-- Check uGridPlan service logs on the target host
+- Check OM service logs on the target host
 
 **OpenClaw refusal loop / non-JSON replies**
 

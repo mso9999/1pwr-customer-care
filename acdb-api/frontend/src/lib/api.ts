@@ -2387,19 +2387,29 @@ export async function listTickets(params: {
   if (params.site_code) qs.set('site_code', params.site_code);
   if (params.status) qs.set('status', params.status);
   if (params.search) qs.set('search', params.search);
-  return request(`/tickets?${qs}`);
+  return request(`/om-tickets?${qs}`);
 }
 
 export async function getTicket(id: number | string): Promise<Ticket> {
-  return request(`/tickets/${encodeURIComponent(id)}`);
+  return request(`/om-tickets/ref/${encodeURIComponent(id)}`);
 }
 
 export async function createTicket(data: Partial<Ticket>): Promise<{ status: string; id: number }> {
-  return request('/tickets', { method: 'POST', body: JSON.stringify(data) });
+  return request('/om-tickets', { method: 'POST', body: JSON.stringify(data) });
 }
 
 export async function updateTicket(id: number, data: Partial<Ticket>): Promise<{ status: string; id: number }> {
-  return request(`/tickets/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+  return request(`/om-tickets/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+}
+
+export async function addTicketComment(
+  id: number | string,
+  data: { user?: string; text: string },
+): Promise<{ status?: string; id?: number }> {
+  return request(`/om-tickets/${encodeURIComponent(id)}/comments`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
 }
 
 export async function downloadTicketsExcel(params: {
@@ -2410,7 +2420,7 @@ export async function downloadTicketsExcel(params: {
   if (params.status) qs.set('status', params.status);
   if (params.quarter) qs.set('quarter', params.quarter);
   const q = qs.toString();
-  return downloadFile(`/tickets/export${q ? `?${q}` : ''}`, 'Maintenance_Log.xlsx');
+  return downloadFile(`/om-tickets/export${q ? `?${q}` : ''}`, 'Maintenance_Log.xlsx');
 }
 
 // ---------------------------------------------------------------------------

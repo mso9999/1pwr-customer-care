@@ -3,6 +3,8 @@
   "subtitle": "Tickets de maintenance corrective (pannes) E&M",
   "downloadExcel": "Télécharger Excel",
   "newTicket": "Nouveau ticket",
+  "openFullPortal": "Ouvrir le portail O&M complet",
+  "viewInOm": "Voir dans O&M",
   "createTicket": "Créer un ticket",
   "saveChanges": "Enregistrer les modifications",
   "searchPlaceholder": "Rechercher des tickets…",

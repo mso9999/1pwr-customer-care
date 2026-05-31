@@ -3,6 +3,8 @@
   "subtitle": "O&M Corrective (Fault) Maintenance Tickets",
   "downloadExcel": "Download Excel",
   "newTicket": "New Ticket",
+  "openFullPortal": "Open Full O&M Portal",
+  "viewInOm": "View in O&M",
   "createTicket": "Create Ticket",
   "saveChanges": "Save Changes",
   "searchPlaceholder": "Search tickets...",

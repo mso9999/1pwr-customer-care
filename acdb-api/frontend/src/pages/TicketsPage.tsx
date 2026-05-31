@@ -9,6 +9,7 @@ import { useAuth } from '../contexts/AuthContext';
 const STATUSES = ['open', 'in_progress', 'resolved', 'pending'] as const;
 const PRIORITIES = ['P1', 'P2', 'P3', 'P4'] as const;
 const PAGE_SIZE = 25;
+const OM_PORTAL_BASE = 'https://om.1pwrafrica.com';
 
 function fmtDate(d: string | null | undefined): string {
   if (!d) return '--';
@@ -126,6 +127,12 @@ export default function TicketsPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const openOmTicket = (tk: Ticket) => {
+    const ref = tk.ugp_ticket_id || String(tk.id);
+    const url = `${OM_PORTAL_BASE}/tickets/${encodeURIComponent(ref)}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
 
   const startEdit = (tk: Ticket) => {
@@ -253,6 +260,12 @@ export default function TicketsPage() {
         </div>
         <div className="flex flex-wrap gap-2">
           <button
+            onClick={() => window.open(OM_PORTAL_BASE, '_blank', 'noopener,noreferrer')}
+            className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm font-medium hover:bg-indigo-700 transition flex items-center gap-1.5"
+          >
+            {t('tickets:openFullPortal', 'Open Full O&M Portal')}
+          </button>
+          <button
             onClick={handleExport}
             disabled={exporting}
             className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 disabled:opacity-50 transition flex items-center gap-1.5"
@@ -360,14 +373,22 @@ export default function TicketsPage() {
                 </td>
                 <td className="px-4 py-3 text-xs">{tk.duration || '--'}</td>
                 <td className="px-4 py-3" onClick={e => e.stopPropagation()}>
-                  {canWrite && (
+                  <div className="flex items-center gap-3">
+                    {canWrite && (
+                      <button
+                        onClick={() => startEdit(tk)}
+                        className="text-blue-600 hover:text-blue-800 text-xs font-medium"
+                      >
+                        {t('common:edit')}
+                      </button>
+                    )}
                     <button
-                      onClick={() => startEdit(tk)}
-                      className="text-blue-600 hover:text-blue-800 text-xs font-medium"
+                      onClick={() => openOmTicket(tk)}
+                      className="text-indigo-600 hover:text-indigo-800 text-xs font-medium"
                     >
-                      {t('common:edit')}
+                      {t('tickets:viewInOm', 'View in O&M')}
                     </button>
-                  )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -459,11 +480,27 @@ export default function TicketsPage() {
                 {tk.resolution_approach && <div><span className="font-semibold text-gray-500">{t('tickets:resolutionApproach')}:</span> <span className="text-gray-700">{tk.resolution_approach}</span></div>}
                 {tk.restoration_time && <div><span className="font-semibold text-gray-500">{t('tickets:restorationTime')}:</span> <span className="text-gray-700">{fmtDate(tk.restoration_time)}</span></div>}
                 {canWrite && (
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      onClick={e => { e.stopPropagation(); startEdit(tk); }}
+                      className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium"
+                    >
+                      {t('common:edit')}
+                    </button>
+                    <button
+                      onClick={e => { e.stopPropagation(); openOmTicket(tk); }}
+                      className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium"
+                    >
+                      {t('tickets:viewInOm', 'View in O&M')}
+                    </button>
+                  </div>
+                )}
+                {!canWrite && (
                   <button
-                    onClick={e => { e.stopPropagation(); startEdit(tk); }}
-                    className="mt-2 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium"
+                    onClick={e => { e.stopPropagation(); openOmTicket(tk); }}
+                    className="mt-2 px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium"
                   >
-                    {t('common:edit')}
+                    {t('tickets:viewInOm', 'View in O&M')}
                   </button>
                 )}
               </div>

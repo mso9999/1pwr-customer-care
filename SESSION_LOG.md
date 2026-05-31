@@ -5778,6 +5778,55 @@ Root cause: **Dual registration without synchronization**
 - Frontend typecheck passed:
   - `cd acdb-api/frontend && npx tsc -b --noEmit`
 
+## Session 2026-05-31 [202605310645] (OM-First Ticket SoT Implementation)
+
+### What Was Done
+- Implemented OM-first ticketing contract and CC proxy layer:
+  - added `acdb-api/om_tickets.py` with `/api/om-tickets/*` endpoints for list/get/create/update/comment/export,
+  - added structured upstream error mapping and basic retry for transient OM failures,
+  - forwarded service-to-service context headers (`X-OM-Source`, `X-CC-User-*`) for OM-side audit/authorization.
+- Wired proxy router into API bootstrap in `acdb-api/customer_api.py`.
+- Switched CC maintenance frontend to OM-backed flows:
+  - `acdb-api/frontend/src/lib/api.ts` ticket API methods now target `/om-tickets`,
+  - `acdb-api/frontend/src/pages/TicketsPage.tsx` now includes full O&M portal CTA and per-ticket “View in O&M” deep-link actions,
+  - added translation keys in `acdb-api/frontend/src/i18n/en/tickets.json` and `acdb-api/frontend/src/i18n/fr/tickets.json`.
+- Updated gensite alarm ticket creation path to create real OM tickets instead of local `wa_tickets` ownership:
+  - `acdb-api/gensite/router.py` now posts to OM `/tickets` and attaches returned canonical refs back to alarms.
+- Updated WhatsApp bridge canonical ticket flow:
+  - `whatsapp-bridge/whatsapp-customer-care.js` now creates tickets/comments against OM API (`OM_API`) and removes CC mirror writes.
+- Added migration guardrails to deprecate local write ownership in OM mode:
+  - `acdb-api/tickets.py` now rejects local create/update when `OM_TICKETS_SOURCE=om` (read-only compatibility remains for list/get/export).
+- Added contract doc `docs/om-ticket-api-contract.md` and refreshed architecture/ops docs:
+  - `acdb-api/CONTEXT.md`
+  - `docs/whatsapp-customer-care.md`
+
+### Key Decisions
+- Keep rollout controlled by `OM_TICKETS_SOURCE=om` and OM credentials env vars so cutover can be canaried.
+- Preserve compatibility data shapes in frontend while changing backend ownership to OM.
+- Use CC proxy for browser/UI paths to avoid frontend cross-origin/auth complexity.
+
+### Files Modified
+- `acdb-api/om_tickets.py`
+- `acdb-api/customer_api.py`
+- `acdb-api/tickets.py`
+- `acdb-api/gensite/router.py`
+- `acdb-api/frontend/src/lib/api.ts`
+- `acdb-api/frontend/src/pages/TicketsPage.tsx`
+- `acdb-api/frontend/src/i18n/en/tickets.json`
+- `acdb-api/frontend/src/i18n/fr/tickets.json`
+- `whatsapp-bridge/whatsapp-customer-care.js`
+- `docs/om-ticket-api-contract.md`
+- `acdb-api/CONTEXT.md`
+- `docs/whatsapp-customer-care.md`
+- `SESSION_LOG.md`
+
+### Verification
+- Backend syntax check passed:
+  - `python3 -m py_compile acdb-api/om_tickets.py acdb-api/gensite/router.py acdb-api/tickets.py`
+- Frontend production build passed:
+  - `cd acdb-api/frontend && npm run -s build -- --mode production`
+- Lint diagnostics on edited files returned no new errors via `ReadLints`.
+
 ## Session 2026-05-29 [202605290721] (SMS Ingest Parse + Cohort First Fee Date)
 
 ### What Was Done

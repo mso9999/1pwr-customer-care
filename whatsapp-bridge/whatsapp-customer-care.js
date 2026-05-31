@@ -14,7 +14,7 @@ const http = require("http");
 //   1. Receives WhatsApp message from customer
 //   2. Looks up customer in the CC API by phone number
 //   3. AI classifies: ticket-worthy or general inquiry
-//   4. If ticket-worthy: creates O&M ticket via ugridplan API
+//   4. If ticket-worthy: creates O&M ticket via OM API
 //   5. Replies with ticket number + acknowledgment
 //   6. Notifies WhatsApp group: "1PWR LS - OnM Ticket Tracker"
 //   7. ugridplan dispatches email to customercare.LS@1pwrafrica.com
@@ -36,6 +36,8 @@ var UGRIDPLAN_API = process.env.UGRIDPLAN_API || "https://ugp.1pwrafrica.com/api
 if (!process.env.UGRIDPLAN_API) {
     console.log("[WARN] UGRIDPLAN_API not set in env; using default: " + UGRIDPLAN_API);
 }
+var OM_API = process.env.OM_API || "https://om.1pwrafrica.com/api";
+var OM_API_KEY = process.env.OM_API_KEY || "";
 // Legacy env var name ACDB_API is still accepted for backward compatibility.
 var CC_API = process.env.CC_API || process.env.ACDB_API || "https://cc.1pwrafrica.com/api";
 
@@ -284,6 +286,9 @@ function apiRequest(url, method, body) {
         if (ugridplanToken && url.indexOf(UGRIDPLAN_API) === 0) {
             options.headers["Cookie"] = "access_token=" + ugridplanToken;
         }
+        if (OM_API_KEY && url.indexOf(OM_API) === 0) {
+            options.headers["X-API-Key"] = OM_API_KEY;
+        }
 
         var transport = parsed.protocol === "https:" ? https : http;
 
@@ -379,8 +384,6 @@ async function lookupCustomerByPhone(phone) {
 // TICKET CREATION
 // ============================================================
 async function createTicket(siteId, faultDescription, accountNumber, reportedBy, phone, classification, customerInfo) {
-    await ensureUgridplanAuth();
-
     classification = classification || {};
     customerInfo = customerInfo || null;
 
@@ -404,23 +407,12 @@ async function createTicket(siteId, faultDescription, accountNumber, reportedBy,
     }
 
     try {
-        var resp = await apiRequest(UGRIDPLAN_API + "/om/tickets", "POST", ticketData);
+        var resp = await apiRequest(OM_API + "/tickets", "POST", ticketData);
 
-        if (resp.status === 200 && resp.data && resp.data.success) {
-            var ticket = resp.data.ticket;
-            console.log("[TICKET] Created: " + ticket.ticket_id + " site=" + siteId);
-
-            mirrorTicketToCC(ticket, {
-                phone: phone,
-                accountNumber: accountNumber,
-                siteId: siteId,
-                faultDescription: faultDescription,
-                category: classification.category,
-                priority: classification.priority || "P3",
-                reportedBy: reportedBy,
-                customerInfo: customerInfo,
-            });
-
+        if ((resp.status === 200 || resp.status === 201) && resp.data) {
+            var ticket = resp.data.ticket || resp.data;
+            var ticketRef = ticket.ticket_id || ticket.ugp_ticket_id || ticket.id;
+            console.log("[TICKET] Created: " + ticketRef + " site=" + siteId);
             return ticket;
         } else {
             console.error("[TICKET] Creation failed:", JSON.stringify(resp.data).slice(0, 300));
@@ -432,45 +424,14 @@ async function createTicket(siteId, faultDescription, accountNumber, reportedBy,
     }
 }
 
-async function mirrorTicketToCC(ticket, ctx) {
-    try {
-        var customerId = null;
-        if (ctx.customerInfo && ctx.customerInfo.id) {
-            customerId = ctx.customerInfo.id;
-        }
-        var payload = {
-            ugp_ticket_id: ticket.ticket_id,
-            source: "whatsapp",
-            phone: ctx.phone || null,
-            customer_id: customerId,
-            account_number: ctx.accountNumber || null,
-            site_code: ctx.siteId || null,
-            fault_description: ctx.faultDescription || null,
-            category: ctx.category || null,
-            priority: ctx.priority || null,
-            reported_by: ctx.reportedBy || null,
-        };
-        var resp = await apiRequest(CC_API + "/tickets", "POST", payload);
-        if (resp.status === 200 && resp.data && resp.data.status === "ok") {
-            console.log("[CC-MIRROR] Ticket " + ticket.ticket_id + " mirrored to CC (id=" + resp.data.id + ")");
-        } else {
-            console.log("[CC-MIRROR] Mirror response: " + JSON.stringify(resp.data).slice(0, 200));
-        }
-    } catch(e) {
-        console.error("[CC-MIRROR] Failed (non-blocking): " + e.message);
-    }
-}
-
 async function addTicketComment(ticketId, user, text) {
-    await ensureUgridplanAuth();
-
     try {
         var resp = await apiRequest(
-            UGRIDPLAN_API + "/om/tickets/" + ticketId + "/comments",
+            OM_API + "/tickets/" + ticketId + "/comments",
             "POST",
             { user: user, text: text }
         );
-        if (resp.status === 200) {
+        if (resp.status === 200 || resp.status === 201) {
             console.log("[COMMENT] Added to " + ticketId);
             return true;
         }
@@ -489,7 +450,7 @@ async function notifyTicketGroup(ticket, customerName, phone, accountNumber) {
         return;
     }
 
-    var tid = ticket.ticket_id || "unknown";
+    var tid = ticket.ticket_id || ticket.ugp_ticket_id || ticket.id || "unknown";
     var site = ticket.site_id || "unknown";
     var priority = ticket.priority || "unset";
     var desc = (ticket.fault_description || "").slice(0, 200);
@@ -506,7 +467,7 @@ async function notifyTicketGroup(ticket, customerName, phone, accountNumber) {
         + "*Description:* " + desc + "\n"
         + "\n"
         + "View ticket: " + CC_API.replace("/api", "") + "\n"
-        + "View in ugridplan: " + UGRIDPLAN_API.replace("/api", "") + "\n";
+        + "View in O&M portal: " + OM_API.replace("/api", "") + "\n";
 
     try {
         await sock.sendMessage(TICKET_TRACKER_JID, { text: text });
@@ -1022,16 +983,17 @@ async function processQueue() {
 
             if (ticket) {
                 // Success - reply with ticket number (bilingual)
+                var ticketRef = ticket.ticket_id || ticket.ugp_ticket_id || ticket.id || "N/A";
                 var ticketReply = classification.customer_reply || "";
-                if (ticketReply && ticketReply.indexOf(ticket.ticket_id) < 0) {
-                    ticketReply = "Tikete ea hao *" + ticket.ticket_id + "* e thehiloe.\nYour ticket *" + ticket.ticket_id + "* has been created.\n\n" + ticketReply;
+                if (ticketReply && ticketReply.indexOf(ticketRef) < 0) {
+                    ticketReply = "Tikete ea hao *" + ticketRef + "* e thehiloe.\nYour ticket *" + ticketRef + "* has been created.\n\n" + ticketReply;
                 }
                 if (!ticketReply) {
-                    ticketReply = "Bothata ba hao bo ngolisitsoe e le tikete *" + ticket.ticket_id + "*. "
+                    ticketReply = "Bothata ba hao bo ngolisitsoe e le tikete *" + ticketRef + "*. "
                         + "Sehlopha sa rona sa ts'ebetso se tsebisitsoe 'me se tla latela haufinyane. "
                         + "U ka romela lintlha tse ling mona 'me li tla kenngoa tiketeng ea hao."
                         + "\n\n"
-                        + "Your issue has been logged as ticket *" + ticket.ticket_id + "*. "
+                        + "Your issue has been logged as ticket *" + ticketRef + "*. "
                         + "Our operations team has been notified and will follow up shortly. "
                         + "You can send additional details here and they will be added to your ticket.";
                 }
@@ -1044,7 +1006,7 @@ async function processQueue() {
 
                 // Track conversation
                 conversations[phone] = {
-                    ticket_id: ticket.ticket_id,
+                    ticket_id: ticketRef,
                     customer: customer,
                     last_msg: Date.now(),
                     created_at: Date.now(),

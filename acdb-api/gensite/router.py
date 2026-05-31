@@ -34,9 +34,11 @@ from __future__ import annotations
 import logging
 import csv
 import io
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
+import requests
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -52,6 +54,10 @@ from . import store
 logger = logging.getLogger("cc-api.gensite")
 
 router = APIRouter(prefix="/api/gensite", tags=["gensite"])
+OM_TICKETS_BASE_URL = os.environ.get("OM_TICKETS_BASE_URL", "https://om.1pwrafrica.com/api").rstrip("/")
+OM_TICKETS_API_KEY = os.environ.get("OM_TICKETS_API_KEY", "").strip()
+OM_TICKETS_BEARER_TOKEN = os.environ.get("OM_TICKETS_BEARER_TOKEN", "").strip()
+OM_TICKETS_TIMEOUT_SECONDS = float(os.environ.get("OM_TICKETS_TIMEOUT_SECONDS", "20"))
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +92,21 @@ def _require_crypto():
                 "See docs/ops/gensite-credentials.md."
             ),
         )
+
+
+def _om_headers(user: CurrentUser) -> Dict[str, str]:
+    headers = {
+        "Content-Type": "application/json",
+        "X-OM-Source": "cc-gensite",
+        "X-CC-User-Id": user.user_id,
+        "X-CC-User-Role": user.role,
+        "X-CC-User-Name": user.name or "",
+    }
+    if OM_TICKETS_API_KEY:
+        headers["X-API-Key"] = OM_TICKETS_API_KEY
+    if OM_TICKETS_BEARER_TOKEN:
+        headers["Authorization"] = f"Bearer {OM_TICKETS_BEARER_TOKEN}"
+    return headers
 
 
 def _try_log_mutation(user: CurrentUser, action: str, table: str, record_id: str,
@@ -866,56 +887,78 @@ def open_ugp_ticket_for_alarm(
             "message": "Alarm already linked to a ticket.",
         }
 
-    # Mirror into wa_tickets via the existing /api/tickets path (shares DB schema
-    # + Excel export conventions). We write directly to the ticket store rather
-    # than HTTP-looping through the CC API.
-    from customer_api import get_connection
-
     fault = req.fault_description or (alarm.get("vendor_msg") or alarm.get("vendor_code") or "Inverter alarm")
     ticket_name = f"{alarm['site_code']} — inverter alarm ({alarm.get('vendor_code') or 'N/A'})"
 
-    with get_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO wa_tickets
-                    (ugp_ticket_id, source, site_code, fault_description,
-                     category, priority, reported_by, ticket_name,
-                     failure_time, services_affected, status)
-                VALUES (%s, 'gensite', %s, %s, %s, %s, %s, %s, %s, %s, 'open')
-                RETURNING id, created_at
-                """,
-                (
-                    f"gensite-alarm-{alarm_id}",
-                    alarm["site_code"],
-                    fault,
-                    req.category,
-                    req.priority,
-                    user.user_id,
-                    ticket_name,
-                    alarm["raised_at"],
-                    req.services_affected,
-                ),
-            )
-            row = cur.fetchone()
-            conn.commit()
+    payload = {
+        "source": "gensite",
+        "site_code": alarm["site_code"],
+        "fault_description": fault,
+        "category": req.category,
+        "priority": req.priority,
+        "reported_by": user.user_id,
+        "ticket_name": ticket_name,
+        "failure_time": alarm.get("raised_at"),
+        "services_affected": req.services_affected,
+        "status": "open",
+        "metadata": {
+            "alarm_id": alarm_id,
+            "vendor_code": alarm.get("vendor_code"),
+            "vendor_msg": alarm.get("vendor_msg"),
+        },
+    }
 
-    ticket_pg_id = row[0]
-    ugp_ref = f"gensite-alarm-{alarm_id}"
-    store.attach_ugp_ticket(alarm_id, ugp_ref)
+    try:
+        om_resp = requests.post(
+            f"{OM_TICKETS_BASE_URL}/tickets",
+            json=payload,
+            headers=_om_headers(user),
+            timeout=OM_TICKETS_TIMEOUT_SECONDS,
+        )
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=503, detail=f"OM ticket API unavailable: {exc}")
+
+    if om_resp.status_code >= 400:
+        detail: Any = om_resp.text
+        try:
+            detail = om_resp.json()
+        except Exception:
+            pass
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "OM ticket creation failed for alarm",
+                "upstream_status": om_resp.status_code,
+                "upstream_detail": detail,
+            },
+        )
+
+    om_payload = om_resp.json() if om_resp.content else {}
+    ticket_ref = (
+        (om_payload.get("ticket") or {}).get("ticket_id")
+        or om_payload.get("ticket_id")
+        or om_payload.get("ugp_ticket_id")
+        or om_payload.get("id")
+        or f"alarm-{alarm_id}"
+    )
+    store.attach_ugp_ticket(alarm_id, str(ticket_ref))
     _try_log_mutation(
-        user, "create", "wa_tickets", str(ticket_pg_id),
+        user, "create", "om_tickets_proxy", str(ticket_ref),
         new_values={
             "source": "gensite",
             "site_code": alarm["site_code"],
             "ticket_name": ticket_name,
         },
-        metadata={"kind": "gensite_alarm_to_ticket", "alarm_id": alarm_id},
+        metadata={
+            "kind": "gensite_alarm_to_ticket",
+            "alarm_id": alarm_id,
+            "ticket_ref": str(ticket_ref),
+        },
     )
     return {
-        "ticket_pg_id": ticket_pg_id,
-        "ticket_id_ugp": ugp_ref,
+        "ticket_id_ugp": str(ticket_ref),
         "alarm_id": alarm_id,
         "site_code": alarm["site_code"],
+        "om_response": om_payload,
     }
 

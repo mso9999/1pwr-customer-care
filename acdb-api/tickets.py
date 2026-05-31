@@ -14,6 +14,7 @@ team's "O&M Corrective Maintenance Report" format.
 
 import io
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -25,6 +26,7 @@ from customer_api import get_connection
 from middleware import CurrentUser, require_employee
 
 logger = logging.getLogger("cc-api.tickets")
+OM_TICKETS_SOURCE = os.environ.get("OM_TICKETS_SOURCE", "legacy").strip().lower()
 
 router = APIRouter(prefix="/api/tickets", tags=["tickets"])
 
@@ -79,6 +81,14 @@ class TicketCreate(BaseModel):
 
 @router.post("")
 def create_ticket(body: TicketCreate, user: CurrentUser = Depends(require_employee)):
+    if OM_TICKETS_SOURCE == "om":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Local ticket creation is disabled. "
+                "Use /api/om-tickets (OM source-of-truth mode)."
+            ),
+        )
     ugp_id = body.ugp_ticket_id or ""
     with get_connection() as conn:
         cur = conn.cursor()
@@ -391,6 +401,14 @@ def update_ticket(
     body: TicketUpdate,
     user: CurrentUser = Depends(require_employee),
 ):
+    if OM_TICKETS_SOURCE == "om":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Local ticket updates are disabled. "
+                "Use /api/om-tickets (OM source-of-truth mode)."
+            ),
+        )
     changes = {k: v for k, v in body.dict(exclude_unset=True).items() if k in UPDATABLE}
     if not changes:
         raise HTTPException(status_code=400, detail="No fields to update")

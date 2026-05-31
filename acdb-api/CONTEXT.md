@@ -85,7 +85,8 @@ The `om_report.py` module provides quarterly operational metrics:
 ```text
 O&M Portal (om.1pwrafrica.com)
   ├─ Auth requests       → CC backend (this repo)
-  ├─ Ticket / O&M data   → uGridPlan backend
+  ├─ Ticket data         → OM Ticket API (source of truth)
+  │                        ↳ CC proxy: /api/om-tickets/*
   └─ Financial reports   → CC backend (`om_report.py`)
 ```
 
@@ -95,7 +96,7 @@ O&M Portal (om.1pwrafrica.com)
 |------|------|-----|
 | [1PDB](https://github.com/onepowerLS/1PDB) | Canonical schema, ingestion, runtime timers, and repair scripts | `1PDB` |
 | [om-portal](https://github.com/onepowerLS/om-portal) | Standalone O&M frontend that proxies auth and reporting to CC | `om.1pwrafrica.com` |
-| [uGridPlan](https://github.com/onepowerLS/uGridPlan) | O&M ticketing backend and planning tool | `ugp.1pwrafrica.com` |
+| [uGridPlan](https://github.com/onepowerLS/uGridPlan) | Planning and related O&M systems (no longer CC ticket write target) | `ugp.1pwrafrica.com` |
 
 ## Hosting and Deployment
 
