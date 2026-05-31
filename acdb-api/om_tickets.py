@@ -132,6 +132,14 @@ def _legacy_ticket_module():
     return tickets
 
 
+def _with_ticket_source(payload: Any, source: str):
+    if isinstance(payload, dict):
+        out = dict(payload)
+        out["ticket_source"] = source
+        return out
+    return payload
+
+
 @router.get("")
 def list_om_tickets(
     limit: int = Query(50, ge=1, le=500),
@@ -153,12 +161,12 @@ def list_om_tickets(
         }
         resp = _request_om(method="GET", path="/tickets", user=user, params=params)
         _raise_for_upstream_error(resp)
-        return _json_or_502(resp)
+        return _with_ticket_source(_json_or_502(resp), "om")
     except HTTPException as exc:
         if _allow_legacy_fallback() and exc.status_code >= 500:
             legacy = _legacy_ticket_module()
             logger.warning("OM list failed; using legacy tickets fallback: %s", exc.detail)
-            return legacy.list_tickets(
+            legacy_payload = legacy.list_tickets(
                 limit=limit,
                 offset=offset,
                 site_code=site_code,
@@ -167,6 +175,7 @@ def list_om_tickets(
                 search=search,
                 user=user,
             )
+            return _with_ticket_source(legacy_payload, "legacy_fallback")
         raise
 
 

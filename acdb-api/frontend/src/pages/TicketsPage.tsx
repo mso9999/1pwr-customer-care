@@ -161,6 +161,10 @@ export default function TicketsPage() {
   const total = data?.total ?? 0;
   const page = Math.floor(offset / PAGE_SIZE) + 1;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const ticketSource = data?.ticket_source;
+  const sourceBadgeCls = ticketSource === 'legacy_fallback'
+    ? 'bg-amber-100 text-amber-800 border-amber-200'
+    : 'bg-emerald-100 text-emerald-800 border-emerald-200';
 
   const Field = ({ label, field, type = 'text', rows }: {
     label: string; field: keyof Ticket; type?: string; rows?: number;
@@ -256,7 +260,16 @@ export default function TicketsPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-5">
         <div>
           <h1 className="text-xl sm:text-2xl font-bold text-gray-800">{t('tickets:title')}</h1>
-          <p className="text-sm text-gray-500 mt-0.5">{t('tickets:subtitle')}</p>
+          <div className="mt-0.5 flex items-center gap-2">
+            <p className="text-sm text-gray-500">{t('tickets:subtitle')}</p>
+            {ticketSource && (
+              <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold ${sourceBadgeCls}`}>
+                {ticketSource === 'legacy_fallback'
+                  ? t('tickets:sourceLegacyFallback', 'Source: Local fallback')
+                  : t('tickets:sourceOm', 'Source: OM')}
+              </span>
+            )}
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           <button

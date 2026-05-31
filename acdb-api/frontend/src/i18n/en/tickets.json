@@ -5,6 +5,8 @@
   "newTicket": "New Ticket",
   "openFullPortal": "Open Full O&M Portal",
   "viewInOm": "View in O&M",
+  "sourceOm": "Source: OM",
+  "sourceLegacyFallback": "Source: Local fallback",
   "createTicket": "Create Ticket",
   "saveChanges": "Save Changes",
   "searchPlaceholder": "Search tickets...",

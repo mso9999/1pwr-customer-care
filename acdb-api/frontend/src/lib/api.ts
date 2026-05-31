@@ -2375,6 +2375,7 @@ export interface TicketsResponse {
   tickets: Ticket[];
   total: number;
   count: number;
+  ticket_source?: 'om' | 'legacy_fallback' | string;
 }
 
 export async function listTickets(params: {
