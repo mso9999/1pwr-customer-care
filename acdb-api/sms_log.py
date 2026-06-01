@@ -62,23 +62,33 @@ def record_delivery_status(
         )
 
     phone = "".join(c for c in body.phone if c.isdigit())
+    if phone.startswith("00"):
+        phone = phone[2:]
+    suffix9 = phone[-9:] if phone else ""
+    suffix8 = phone[-8:] if phone else ""
 
     with get_connection() as conn:
         cur = conn.cursor()
         # Find the most recent row for this phone within a 10-min window
         cur.execute(
             """SELECT id FROM sms_outbound_log
-               WHERE phone_normalized LIKE %s
+               WHERE (
+                   phone_normalized = %s
+                   OR phone_normalized LIKE %s
+                   OR phone_normalized LIKE %s
+               )
                  AND sent_at >= NOW() - INTERVAL '10 minutes'
                ORDER BY sent_at DESC
                LIMIT 1""",
-            (f"%{phone[-9:]}",),
+            (phone, f"%{suffix9}", f"%{suffix8}"),
         )
         row = cur.fetchone()
         if not row:
             logger.warning(
-                "delivery-status: no recent sms_outbound_log row for phone suffix %s",
-                phone[-9:],
+                "delivery-status: no recent sms_outbound_log row for phone=%s suffix9=%s suffix8=%s",
+                phone,
+                suffix9,
+                suffix8,
             )
             return {"matched": False, "reason": "no recent log row for phone"}
 
