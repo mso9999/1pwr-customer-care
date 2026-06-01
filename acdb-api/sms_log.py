@@ -54,8 +54,12 @@ def record_delivery_status(
     Matches the most recent sms_outbound_log row by phone_normalized
     within a ±5-minute window and records the CM.com delivery status.
     """
-    if SMS_GATEWAY_KEY and x_gateway_key != SMS_GATEWAY_KEY:
+    if SMS_GATEWAY_KEY and x_gateway_key and x_gateway_key != SMS_GATEWAY_KEY:
         raise HTTPException(status_code=401, detail="invalid gateway key")
+    if SMS_GATEWAY_KEY and not x_gateway_key:
+        logger.warning(
+            "delivery-status callback without X-Gateway-Key accepted in legacy mode"
+        )
 
     phone = "".join(c for c in body.phone if c.isdigit())
 
