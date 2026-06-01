@@ -107,7 +107,12 @@ def compute_fee_then_advance_split(
     rb_rem = _dec(fee_debts.get("fee_debt_readyboard_remaining") or 0)
     total_debt = conn_rem + rb_rem
     half_cap = (amt * Decimal("0.5")).quantize(Decimal("0.01"))
-    fee_portion = min(half_cap, total_debt).quantize(Decimal("0.01"))
+    # If this payment exactly settles the remaining onboarding fee debt
+    # (e.g. 501+499 paid as one 1000 transfer), prioritize settling fees first.
+    if total_debt > 0 and abs(amt - total_debt) <= _FEE_EPS:
+        fee_portion = total_debt.quantize(Decimal("0.01"))
+    else:
+        fee_portion = min(half_cap, total_debt).quantize(Decimal("0.01"))
 
     fee_to_conn = Decimal("0")
     fee_to_rb = Decimal("0")

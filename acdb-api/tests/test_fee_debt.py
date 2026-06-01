@@ -56,3 +56,17 @@ def test_no_advance_no_debt_full_electricity():
     r = compute_fee_then_advance_split(99.5, debts, None)
     assert r["fee_repayment_portion"] == 0.0
     assert r["electricity_portion"] == 99.5
+
+
+def test_lump_sum_that_covers_all_fee_debt_is_fee_first():
+    debts = {
+        "fee_debt_connection_remaining": 501.0,
+        "fee_debt_readyboard_remaining": 499.0,
+        "acquires_1pwr_readyboard": True,
+    }
+    r = compute_fee_then_advance_split(1000.0, debts, None)
+    assert r["fee_repayment_portion"] == 1000.0
+    assert r["fee_to_connection"] == 501.0
+    assert r["fee_to_readyboard"] == 499.0
+    assert r["advance_portion"] == 0.0
+    assert r["electricity_portion"] == 0.0
