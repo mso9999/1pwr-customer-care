@@ -111,14 +111,36 @@ def send_gateway_sms(
         f"?message={quote(message)}&type={quote(sms_type)}&number={phone_normalized}"
     )
     try:
-        requests.get(url, timeout=20)
-        logger.info("Outbound SMS dispatched type=%s to %s", sms_type, phone_normalized)
+        resp = requests.get(url, timeout=20, allow_redirects=False)
+        # Treat non-2xx (including 3xx redirects) as gateway failures.
+        if not (200 <= resp.status_code < 300):
+            body_preview = (resp.text or "").strip().replace("\n", " ")[:240]
+            err = f"gateway_http_{resp.status_code}"
+            if body_preview:
+                err += f": {body_preview}"
+            logger.error(
+                "Outbound SMS gateway rejected type=%s to %s status=%s",
+                sms_type, phone_normalized, resp.status_code,
+            )
+            _log_sms(
+                sms_type=sms_type, phone_raw=str(phone_raw),
+                phone_normalized=phone_normalized, message=message,
+                success=False, error=err,
+                account_number=account_number, trigger_ctx=trigger,
+                gateway_url=url,
+            )
+            return False
+
+        logger.info(
+            "Outbound SMS dispatched type=%s to %s status=%s",
+            sms_type, phone_normalized, resp.status_code,
+        )
         _log_sms(
             sms_type=sms_type, phone_raw=str(phone_raw),
             phone_normalized=phone_normalized, message=message,
             success=True, error=None,
             account_number=account_number, trigger_ctx=trigger,
-            gateway_url=gateway_url,
+            gateway_url=url,
         )
         return True
     except Exception as exc:
