@@ -561,7 +561,7 @@ def attach_koios_meter(
 
     body = {"serial": str(meter_serial).strip()}
     url = f"{KOIOS_BASE}/api/v1/customers/{uid}/meter"
-    retries = 3
+    retries = 6
     last_error = None
     for attempt in range(retries):
         try:
@@ -591,6 +591,19 @@ def attach_koios_meter(
             if attempt < retries - 1:
                 time.sleep(2 ** attempt)
                 continue
+            return CustomerSyncResult(success=False, platform="koios", error=last_error)
+        if r.status_code == 404:
+            # Koios can lag right after customer creation; the id exists but is not
+            # immediately resolvable for meter attach. Retry before surfacing failure.
+            preview = (r.text or "")[:200].strip()
+            logger.warning(
+                "Koios meter attach HTTP 404 for %s, attempt %d/%d: %s",
+                account_number, attempt + 1, retries, preview,
+            )
+            if attempt < retries - 1:
+                time.sleep(2 ** attempt)
+                continue
+            last_error = "Resource Not Found"
             return CustomerSyncResult(success=False, platform="koios", error=last_error)
         break
 
