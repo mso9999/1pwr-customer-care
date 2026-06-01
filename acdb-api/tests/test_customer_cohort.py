@@ -67,6 +67,20 @@ class TestSiteResolution(unittest.TestCase):
 
 
 class TestQueryBuilder(unittest.TestCase):
+    class _SchemaAwareMockCursor:
+        def __init__(self, existing_columns: set[tuple[str, str]]):
+            self.existing_columns = existing_columns
+            self._last_exists_check: tuple[str, str] | None = None
+
+        def execute(self, _sql, params=None):
+            if params and len(params) == 2:
+                self._last_exists_check = (str(params[0]), str(params[1]))
+
+        def fetchone(self):
+            if self._last_exists_check is None:
+                return (False,)
+            return (self._last_exists_check in self.existing_columns,)
+
     def test_basic_query_no_filters(self):
         q = CohortQuery(filters=CohortFilters(country="LS"))
         sql, params = _build_query(q, count_only=False)
@@ -117,9 +131,35 @@ class TestQueryBuilder(unittest.TestCase):
 
     def test_not_metered_branches_in_sql(self):
         q = CohortQuery(filters=CohortFilters(country="LS"))
-        sql, _ = _build_query(q, count_only=False)
+        cur = self._SchemaAwareMockCursor(
+            {
+                ("customers", "cohort_status_override"),
+                ("customers", "fee_debt_connection_remaining"),
+                ("customers", "fee_debt_readyboard_remaining"),
+            }
+        )
+        sql, _ = _build_query(q, count_only=False, cursor=cur)
         self.assertIn("fully_paid_not_metered", sql)
         self.assertIn("partially_paid_not_metered", sql)
+        self.assertIn("fee_debt_connection_remaining", sql)
+        self.assertIn("fee_debt_readyboard_remaining", sql)
+
+    def test_not_paid_branch_respects_nonzero_fee_debt(self):
+        q = CohortQuery(filters=CohortFilters(country="LS"))
+        cur = self._SchemaAwareMockCursor(
+            {
+                ("customers", "cohort_status_override"),
+                ("customers", "fee_debt_connection_remaining"),
+                ("customers", "fee_debt_readyboard_remaining"),
+            }
+        )
+        sql, _ = _build_query(q, count_only=False, cursor=cur)
+        self.assertIn(
+            "COALESCE(pt.total_paid, 0) <= 0 "
+            "AND (COALESCE(c.fee_debt_connection_remaining, 0) + "
+            "COALESCE(c.fee_debt_readyboard_remaining, 0)) > 0.005",
+            sql,
+        )
 
     def test_status_filter_adds_in_clause(self):
         q = CohortQuery(

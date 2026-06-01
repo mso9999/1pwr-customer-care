@@ -315,13 +315,20 @@ def _cohort_status_case_sql(cursor) -> str:
         if has_fee_debt
         else "(c.payment_status_override = 'fully_paid' OR COALESCE(pt.total_paid, 0) >= %s)"
     )
+    not_paid_expr = (
+        "((COALESCE(pt.total_paid, 0) <= 0 "
+        "AND (COALESCE(c.fee_debt_connection_remaining, 0) + "
+        "COALESCE(c.fee_debt_readyboard_remaining, 0)) > 0.005) "
+        "OR c.payment_status_override = 'not_paid')"
+        if has_fee_debt
+        else "(COALESCE(pt.total_paid, 0) <= 0 OR c.payment_status_override = 'not_paid')"
+    )
     return f"""
                 CASE
                     WHEN {override} IS NOT NULL AND TRIM({override}) <> ''
                         THEN TRIM({override})
                     WHEN c.date_service_terminated IS NOT NULL THEN 'terminated'
-                    WHEN COALESCE(pt.total_paid, 0) <= 0
-                         OR c.payment_status_override = 'not_paid'
+                    WHEN ({not_paid_expr})
                         THEN 'not_paid'
                     WHEN ({fully_paid_expr})
                          AND ({not_metered})
