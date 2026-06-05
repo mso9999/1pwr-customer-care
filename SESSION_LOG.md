@@ -83,6 +83,34 @@
 - **Still server-side / not in this repo**: the BN importer change should be mirrored into the
   onepowerLS/1PDB repo. `monthly_transactions` still likely stale (financial metrics) — audit next.
 
+### Update (same day) — monthly_transactions (financial metrics) fixed
+- `monthly_transactions` was stale on both DBs (max `2026-04`; `transactions` runs to `2026-06`), so
+  Analytics ARPU / Total Revenue were stale (LS) or essentially empty (BN: only **18 rows**!).
+- Root causes:
+  - LS rebuild aborted on `null value in column "meter_id"` — ~24,096 (12%) of `transactions` have a
+    NULL `meter_id` but `monthly_transactions.meter_id` is NOT NULL. (It also sits *after* the
+    consumption rebuild in the same block, so the earlier consumption abort froze it too.)
+  - The running LS importer additionally joined `meters` by **account_number** (fan-out: one payment
+    multiplied across every meter the account ever had) and grouped by community (collision risk).
+  - BN never rebuilt `monthly_transactions` from the canonical `transactions` table at all — its
+    `import_benin.py` populated it from a separate, near-empty CSV path (18 rows) while
+    `import_transactions_bn.py` kept `transactions` current.
+- Fix: rebuild `monthly_transactions` from `transactions` with `COALESCE(meter_id,'')`, `meters`
+  joined by `meter_id`, grouped by `(account, meter, month)` with `MAX(community)`; BN also filters
+  `length(account_number) <= 10`.
+- Refreshed both DBs: LS 26,304 rows / `4,321,321.15` (was 20,912 / 3.03M / `2026-04`);
+  BN 2,539 rows / `9,110,264.78` (was 18 rows / 4.0M). BN GBO revenue now shows all months incl.
+  May `1,678,691.90` and June.
+
+### IMPORTANT — running importer ≠ repo copy
+- The LS sync runs **`/opt/1pdb/services/import_hourly.py`** (819-line server version), NOT this
+  repo's `acdb-api/import_hourly.py` (the git deploy only syncs to `/opt/cc-portal/backend/`, which
+  the timers do not run). All consumption + transactions rebuild fixes were applied **directly** to
+  `/opt/1pdb/services/import_hourly.py` (backup `*.bak.20260605T150842Z`) and
+  `/opt/1pdb/services/import_hourly_bn.py` (backup `*.bak.20260605T135607Z`). Canonical home is the
+  onepowerLS/1PDB repo — mirror these patches there. The repo `acdb-api/import_hourly.py` was also
+  updated for record/consistency but is not the production importer.
+
 ## Session 2026-05-29 [202605291043] (SMS Ingest Visible but CM Feed Missing)
 
 ### What Was Done

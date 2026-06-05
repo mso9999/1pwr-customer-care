@@ -734,22 +734,28 @@ def main():
 
         log.info("Rebuilding monthly_transactions from transaction data...")
         cur.execute("TRUNCATE monthly_transactions;")
+        # COALESCE(t.meter_id, '') — ~12% of transactions have a NULL meter_id
+        # (payments not tied to a specific meter), but monthly_transactions.meter_id
+        # is NOT NULL, so the unmodified INSERT aborted the whole aggregate block
+        # (which also froze monthly_transactions). Group by (account, meter, month)
+        # and take MAX(community) instead of grouping by community, so the
+        # idx_monthly_txn_unique (account, meter, year_month, source) key can never
+        # collide.
         cur.execute("""
             INSERT INTO monthly_transactions
                 (account_number, meter_id, year_month, kwh_vended,
                  amount_lsl, txn_count, community, source)
-            SELECT t.account_number, t.meter_id,
+            SELECT t.account_number, COALESCE(t.meter_id, ''),
                    TO_CHAR(t.transaction_date, 'YYYY-MM'),
                    SUM(COALESCE(t.kwh_value, 0)),
                    SUM(COALESCE(t.transaction_amount, 0)),
                    COUNT(*),
-                   COALESCE(m.community, ''),
+                   MAX(COALESCE(m.community, '')),
                    'import'::transaction_source
             FROM transactions t
             LEFT JOIN meters m ON t.meter_id = m.meter_id
-            GROUP BY t.account_number, t.meter_id,
-                     TO_CHAR(t.transaction_date, 'YYYY-MM'),
-                     m.community;
+            GROUP BY t.account_number, COALESCE(t.meter_id, ''),
+                     TO_CHAR(t.transaction_date, 'YYYY-MM');
         """)
         conn.commit()
         cur.execute("SELECT count(*) FROM monthly_transactions;")
