@@ -1,3 +1,42 @@
+## Session 2026-06-05 [202606050832] (Analytics Consumption Returns Zero Rows)
+
+### Symptom
+- Analytics Explorer returned 0 rows for `total_consumption_kwh` + `avg_consumption_kwh_day`.
+- Reproduced from prod logs: `analytics_query ... group_by=site/month country=BN sites=['GBO'] customer_types=['HH']` → `rows=0`.
+
+### Root Causes (two, compounding)
+1. **Date-default bug (code, all countries)** in `acdb-api/analytics.py::_build_query`. The
+   "trailing 12 months" default actually used `today.month - 1`, i.e. only the *previous month*
+   (e.g. June 2026 → `2026-05-01`). Any metric query without an explicit date range (basis
+   site/customer_type/overview) silently scoped to ~30 days. The deployed frontend (built
+   2026-06-01) does **not** send a date range for these bases (the date-sending code is only in
+   the local uncommitted `AnalyticsPage.tsx`), so the backend default always applied.
+   - Fix: `date_from = f"{today.year - 1}-{today.month:02d}-01"` (true 12-month trailing window).
+2. **Stale `monthly_consumption` (data/pipeline)**. Consumption metrics read the pre-aggregated
+   `monthly_consumption` table. Its max `year_month` is `2026-04` for BOTH `onepower_cc` (LS) and
+   `onepower_bj` (BN), while `hourly_consumption` is current to today. The monthly rebuild lives at
+   the tail of `import_hourly.py` (LS only; `import_hourly_bn.py` is server-side and has no rebuild)
+   and is skipped whenever the Koios sync exits early (rate limits / per-site runs). So with the 1-month
+   default window pointed at `2026-05/06`, every consumption query hit the empty tail → 0 rows.
+
+### Verification (read-only against prod, host ec2-13-245-142-186 / EOver.pem)
+- Exact reconstructed query with corrected window `2025-06..2026-06`, GBO + HH, returns
+  `GBO = 13,585.15 kWh` (was 0). LS all-sites 12mo also returns rows.
+- Raw `hourly_consumption` aggregation is correct but slow at LS scale (~11.4s/metric), confirming
+  `monthly_consumption` is the right (fast) source — it just needs to stay fresh.
+
+### Files Modified
+- `acdb-api/analytics.py` — fixed the 12-month date default.
+
+### What Next Session Should Know
+- The code fix resolves the reported zero-rows symptom (queries now return through the latest
+  aggregated month). **However, current/recent months (May/June 2026) stay invisible until
+  `monthly_consumption` is refreshed** for both DBs. Durable fix is server-side: ensure the monthly
+  aggregate rebuild runs after every consumption sync (move it out of the rate-limit-interruptible
+  tail of `import_hourly.py`, and add an equivalent rebuild to the server's `import_hourly_bn.py`).
+- Not yet deployed; backend change requires push to `main` (auto-deploy) + service restart (clears
+  the 300s analytics cache).
+
 ## Session 2026-05-29 [202605291043] (SMS Ingest Visible but CM Feed Missing)
 
 ### What Was Done
@@ -6077,3 +6116,427 @@ Root cause: **Dual registration without synchronization**
 ### Verification
 - Frontend typecheck passed:
   - `cd acdb-api/frontend && npx tsc -b --noEmit`
+
+## Session 2026-06-01 [202606011057] (SMS CM Callback Hardening + Matching RCA)
+
+### What Was Done
+- Confirmed SMS gateway host (`sms.1pwrafrica.com`) is accepting outbound submissions to CM.com (`http=200`, CM status `Accepted`) while CC callback auth and callback-row matching were drifting.
+- Patched `SMSComms/send.php` to:
+  - continue posting delivery-status callbacks even when `CC_GATEWAY_KEY` is missing (legacy mode),
+  - retry callback posts when CC responds with `{"matched":false}` to mitigate race timing.
+- Patched CC callback endpoint `acdb-api/sms_log.py` to:
+  - accept missing `X-Gateway-Key` in legacy mode when `SMS_GATEWAY_KEY` is configured (while still rejecting explicitly wrong keys),
+  - normalize callback numbers that arrive as `00...` international format before attempting DB matching,
+  - broaden phone matching (exact + 9/8-digit suffix fallback) for better gateway compatibility.
+- Verified live deploys on both repos and manually exercised probes from CC host to SMS host and back into `/api/sms/delivery-status`.
+
+### Key Decisions
+- Keep outbound send path latency-safe: bounded callback retries were retained (after testing showed overly long retries can exceed CC's 20s gateway timeout budget).
+- Prioritize root-cause fixes (callback auth drift + phone normalization mismatch + callback timing race) over adding more silent fallback behavior.
+
+### Files Modified
+- `acdb-api/sms_log.py`
+- `/Users/mattmso/Dropbox/AI Projects/SMSComms/send.php`
+- `SESSION_LOG.md`
+
+### Verification
+- `php -l /Users/mattmso/Dropbox/AI Projects/SMSComms/send.php`
+- `python3 -m py_compile acdb-api/sms_log.py`
+- Live deploy logs confirmed for SMSComms (`deploy.log`) and CC backend restart (`systemctl restart 1pdb-api`).
+- Probe sends from CC succeeded (`send_gateway_sms(...) == True`) after rollback of overlong retry window.
+
+## Session 2026-06-01 [202606011057] (Koios Commissioning Attach Retry Reliability)
+
+### What Was Done
+- Investigated production logs for CC commissioning failures on Koios sites and confirmed the key pattern:
+  - customer creation succeeds,
+  - immediate meter attach sometimes returns `Resource Not Found` / transient 404/504,
+  - operators then complete commissioning manually in Koios.
+- Patched `acdb-api/sparkmeter_customer.py` so `attach_koios_meter(...)` now:
+  - increases retry budget (`3 -> 6`),
+  - explicitly retries transient HTTP 404 after customer creation (eventual consistency window),
+  - keeps existing backoff and logging behavior.
+- Deployed by pushing commit `a66cd34` to `main` and verified updated code is present on the production host path `/opt/cc-portal/backend/sparkmeter_customer.py`.
+
+### Key Decisions
+- Treat post-create Koios 404 as transient, not terminal, for meter attach.
+- Keep the fix narrow to commissioning reliability (no behavioral changes to ThunderCloud path or payment-credit paths).
+
+### Files Modified
+- `acdb-api/sparkmeter_customer.py`
+- `SESSION_LOG.md`
+
+### Verification
+- `python3 -m py_compile acdb-api/sparkmeter_customer.py`
+- Production host runtime confirms patched file contents (`retries = 6` and 404 retry branch present).
+
+## Session 2026-06-01 [202606011545] (LS Drift Closure + Parity Timer Activation)
+
+### What Was Done
+- Ran a guarded LS reconciliation cycle on production to reduce existing CC↔SparkMeter drift while protecting against oversized net mutations:
+  - dry-run planned `1276` strict shared-cohort accounts with `417` auto-skipped by guardrails,
+  - apply run inserted guarded anchor seeds for `859` accounts (`anchors_applied=859`).
+- Immediately re-audited production and reduced `|delta| >= 0.5 kWh` drift from the prior bulk state into a remaining set of `418` high-risk accounts (mostly large/manual-history outliers requiring explicit review).
+- Identified the root recurring issue preventing robust convergence: parity timers existed in-repo but were not installed/enabled by the auto-deploy workflow.
+- Updated backend deploy workflow to install and enable parity-critical systemd timer pairs on each deploy:
+  - `cc-sm-credit-mirror.timer`
+  - `cc-ls-balance-audit.timer`
+  - existing `sms-reconcile.timer`
+  - also triggers a one-shot `cc-sm-credit-mirror.service` run post-deploy when present.
+- Added missing systemd unit files under `acdb-api/systemd/` so they are actually deployed to host with backend rsync.
+- Updated cutover runbook with explicit steady-state drift-prevention guardrails and timer ownership.
+
+### Key Decisions
+- Use guarded reconciliation as a controlled recovery tool now, while relying on watermarked SM->CC mirroring + daily audit timers as the durable prevention baseline.
+- Keep large residual deltas in manual-review scope instead of force-applying high-risk corrections.
+
+### Files Modified
+- `.github/workflows/deploy.yml`
+- `acdb-api/systemd/cc-sm-credit-mirror.service`
+- `acdb-api/systemd/cc-sm-credit-mirror.timer`
+- `acdb-api/systemd/cc-ls-balance-audit.service`
+- `acdb-api/systemd/cc-ls-balance-audit.timer`
+- `docs/ops/smp-1pdb-cutover.md`
+- `SESSION_LOG.md`
+
+### Verification
+- Production guarded reconcile dry-run/apply completed successfully on `cc.1pwrafrica.com`.
+- Production post-apply audit:
+  - `DRIFT DETECTED: 418 accounts exceed 0.50 kWh threshold` (down from prior broad drift set).
+- Repo lint/diagnostics check on touched files: no linter errors.
+
+## Session 2026-06-01 [202606011653] (Tiered LS Drift Closure to Residual Outliers)
+
+### What Was Done
+- Executed staged, guarded production reconciliation tiers to close remaining LS drift without unsafe bulk mutation:
+  - **Tier 300** (`max_net_change_kwh=300`): applied `286`, then drift reduced to `139`.
+  - **Tier 1000** (`max_net_change_kwh=1000`): applied `116`, then drift reduced to `23`.
+  - **Tier 2000** (`max_net_change_kwh=2000`): applied `12`, then drift reduced to `11`.
+  - **Final residual cleanup** (`--no-singular-seed`, `max_net_change_kwh=100`): applied `6`, then drift reduced to `5`.
+- During Tier 2000 dry-run, handled a transient Koios API stream failure (`ChunkedEncodingError`) by re-running successfully; no policy changes required.
+
+### Key Decisions
+- Used tiered net-change guardrails as explicit risk controls to avoid one-shot high-impact corrections.
+- For small residuals blocked by singular-seed reverse math, used `--no-singular-seed` to adjust only current residual delta while leaving historical seed stacks intact.
+- Left extreme outliers in manual RCA scope rather than forcing unbounded automated correction.
+
+### Residual Drift Accounts (>= 0.5 kWh)
+- `0125MAK` (`-41123.82 kWh`)
+- `0053SHG` (`+4902.19 kWh`)
+- `0096SHG` (`-2513.31 kWh`)
+- `0178MAK` (`-61.59 kWh`)
+- `0055MAS` (`-61.40 kWh`)
+
+### Verification
+- Final production audit:
+  - `DRIFT DETECTED: 5 accounts exceed 0.50 kWh threshold`.
+
+## Session 2026-06-01 [202606011821] (Residual LS Drift RCA + Final Convergence)
+
+### What Was Done
+- Ran focused RCA on the five residual drift accounts:
+  - `0125MAK`, `0053SHG`, `0096SHG`, `0178MAK`, `0055MAS`
+  - produced detailed source/ledger decomposition via `scripts/ops/rca_ls_balance_drift.py`.
+- Closed the three strict shared-cohort extreme outliers with a targeted guarded pass:
+  - `reconcile_seed_at_first_gap.py --strict-shared-cohort --no-singular-seed --max-net-change-kwh 50000`
+  - applied exactly `3` anchors (`0125MAK`, `0053SHG`, `0096SHG`).
+- Corrected two non-shared residual accounts (`0178MAK`, `0055MAS`) with explicit idempotent `balance_seed` inserts tagged:
+  - `manual_residual_20260601T2245Z:0178MAK`
+  - `manual_residual_20260601T2245Z:0055MAS`
+- Resolved one final transient singleton drift (`0019MAT`, `-0.52 kWh`) with a tiny guarded pass:
+  - `--strict-shared-cohort --no-singular-seed --max-net-change-kwh 10`
+  - applied `1` anchor.
+
+### Key Decisions
+- Used `--no-singular-seed` for residual closure so we corrected current deltas without reversing historical seed stacks.
+- Kept strict shared-cohort policy for major outlier corrections, then handled non-shared residuals explicitly and idempotently.
+
+### Verification
+- Final production LS parity check:
+  - `audit_ls_balances.py --check --threshold 0.5`
+  - Result: `OK: all 1912 accounts within 0.50 kWh threshold`.
+
+## Session 2026-06-02 [202606020610] (Commissioning Flow Hotfix for Koios/TOS)
+
+### What Was Done
+- Investigated O&M report of CC commissioning not flowing to Koios and isolated two backend/API blockers from production logs:
+  - `GET /api/onboarding/customer/{account}` hard-failing with `500` due schema drift (`accounts.survey_id` missing, then `meters.meter_serial` missing).
+  - `POST /api/commission/energize-upstream` returning `422` when upstream warning payload contained non-string values.
+- Implemented schema-compatible onboarding lookup in `onboarding_ops.py`:
+  - dynamically checks for `accounts.survey_id` and safely selects `NULL::text AS survey_id` when absent,
+  - dynamically checks for `meters.meter_serial` and falls back to `meters.meter_id AS meter_serial`.
+- Relaxed energize payload model in `commission.py`:
+  - `lines` changed from `List[Dict[str, str]]` to `List[Dict[str, Any]]` to accept mixed-value warning payloads emitted by UGP sync.
+- Hot-deployed patched files directly to production and restarted `1pdb-api`.
+- Verified runtime behavior on host:
+  - `_customer_for_account(..., "0076TOS")` now resolves successfully,
+  - `EnergizeUpstreamRequest` now accepts mixed numeric/string line payloads.
+
+### Key Decisions
+- Prefer code-level schema compatibility to restore operator flow immediately while avoiding a hard dependency on legacy migration state during incident response.
+- Treat browser-extension console noise (Bitwarden/SignalR port errors) as non-root-cause for this backend commissioning issue.
+
+### Verification
+- Production log traceback root cause confirmed and addressed (`UndefinedColumn` for `survey_id`/`meter_serial`).
+- Post-hotfix log scan shows no new onboarding/422 errors in the immediate window after restart.
+- Historical commissioning logs confirm Koios attach success for affected TOS accounts after retries (`0010TOS`, `0023TOS`, `0024TOS`, `0076TOS`, `0088TOS`).
+
+## Session 2026-06-02 [202606020726] (Pre-Commission Payments Allocate to Fee Debt First)
+
+### What Was Done
+- Updated fee allocation policy in `fee_debt.compute_fee_then_advance_split(...)`:
+  - if a customer is pre-commissioning (`customer_commissioned` false or no `date_service_connected`), payment allocation now prioritizes onboarding fee debt with no 50% cap.
+  - allocation order remains deterministic: connection fee debt first, then readyboard fee debt.
+- Extended `fetch_fee_debts(...)` to include commissioning-state fields used by allocation logic:
+  - `customer_commissioned`
+  - `date_service_connected`
+- Added regression tests in `acdb-api/tests/test_fee_debt.py` for:
+  - full fee-first behavior pre-commissioning
+  - spillover from connection debt into readyboard debt pre-commissioning
+
+### Key Decisions
+- Preserved existing 50%-cap behavior for legacy callers that do not provide commissioning flags.
+- Applied full fee-first policy only when commissioning-state fields are explicitly available, preventing unintended behavior changes in older call paths.
+
+### Verification
+- `PYTHONPATH=acdb-api python3 -m pytest acdb-api/tests/test_fee_debt.py` → `6 passed`.
+
+## Session 2026-06-02 [202606020940] (Assign/Commission Incident Hotfix: TOS + OM Pipeline)
+
+### What Was Done
+- Investigated O&M-reported frontend errors and isolated actionable backend causes:
+  1. `GET /api/om-report/pipeline` returned `404` because route was accidentally registered as `/api/om-report/api/om-report/pipeline`.
+  2. TOS assign/commission flow (`0071TOS`) intermittently failed to attach meter in Koios due stale/unconfigured customer UUID resolution (`404 Resource Not Found` from `/api/v1/customers/{id}/meter`).
+- Fixed OM route registration in `acdb-api/om_report.py`:
+  - changed decorator from `@router.get("/api/om-report/pipeline")` to `@router.get("/pipeline")`.
+- Hardened Koios attach in `acdb-api/sparkmeter_customer.py`:
+  - increased attach retry budget (`6 -> 8`),
+  - on attach `404`, re-resolves customer ID by account code and rebinds URL when UUID changes,
+  - adds one explicit second attach pass in `sync_sparkmeter_customer_and_meter(...)` for transient `HTTP 504` / `Resource Not Found` outcomes.
+- Hot-deployed `om_report.py` and `sparkmeter_customer.py` to production and restarted `1pdb-api`.
+
+### Verification
+- Endpoint check: `/api/om-report/pipeline` now exists (returns `401 Not authenticated` when unauthenticated, not `404`).
+- Targeted runtime retry for `0071TOS` after patch:
+  - `meter_attach.success = True`
+  - log confirms: `Koios meter attach OK: acct=0071TOS meter=SMRSD-04-0003067C`.
+
+## Session 2026-06-02 [202606021039] (SMS Credit Retry Queue RCA + MAK Drift Triage)
+
+### What Was Done
+- Investigated production reports of transaction received but incorrect/negative balance behavior and traced repeated SMS-credit failures to retry enqueue SQL, not payment ingestion:
+  - recurring production error: `psycopg2.errors.InvalidColumnReference: there is no unique or exclusion constraint matching the ON CONFLICT specification`.
+  - source identified in `sm_credit_retry.enqueue_sm_credit_retry(...)` using `ON CONFLICT (external_id)` against a partial unique index (`idx_sm_credit_retry_external`).
+- Implemented schema-safe retry enqueue in `acdb-api/sm_credit_retry.py`:
+  - replaced conflict-based upsert with deterministic update-then-insert logic for non-empty `external_id`,
+  - preserved plain insert path when `external_id` is blank,
+  - kept semantics identical (`status='pending'`, reset `next_retry_at`, carry `last_error`).
+- Hardened retry idempotency handling in `process_due_sm_credit_retries(...)`:
+  - treats upstream `"external_id has already been taken"` as terminal success (`status='done'`) to avoid endless retries when credit already exists upstream.
+- Hot-deployed `sm_credit_retry.py` to production (`/opt/cc-portal/backend/`) and restarted `1pdb-api` service successfully.
+- Backfilled known dropped SMS-credit txns (from the enqueue bug window) into `sm_credit_retry_queue` for replay with external-id idempotency keys.
+- Triage-checked the concrete MAK case from operator screenshot (`0173MAK`):
+  - SMS payment ingest and SM credit both logged as successful (`txn=4798115`, `M10.00`, thundercloud),
+  - meter readings show `power_kw=0` and flat `wh_reading` (no recent consumption),
+  - account history includes a large `balance_seed` correction (`-266.94`) from LS drift closure pass, indicating historical parity correction rather than current SMS-credit drop for this account.
+
+### Key Decisions
+- Fixed retry enqueue in code (schema-compatible) instead of relying only on index migration assumptions, so hotfix works immediately across partially migrated environments.
+- Treated browser extension console errors (`message channel closed`) as non-root-cause noise for this backend credit-path incident.
+
+### Verification
+- `python3 -m py_compile acdb-api/sm_credit_retry.py` passed locally before deployment.
+- Production service health after hot deploy: `systemctl is-active 1pdb-api` -> `active`.
+- Endpoint sanity re-check: `/api/om-report/pipeline` responds `401` unauthenticated (route exists; no `404` at origin API).
+- Retry-queue status after backfill/replay:
+  - idempotent duplicates auto-closed (`done`),
+  - remaining entries carry upstream-origin errors (`Bad Request` / transient `HTTP 50x`) and are retained for continued retry/triage.
+
+## Session 2026-06-03 [202606030744] (Commissioning Guardrail for SparkMeter Credit Retries)
+
+### What Was Done
+- Implemented a central commissioning/meter eligibility guard in `acdb-api/sm_credit_retry.py` so all SM-credit call paths (`ingest`, `payments`, `crud`, `advances`) inherit the same behavior.
+- Added account eligibility checks before immediate credit push:
+  - blocks credit attempts when customer is not commissioned or has no meter assignment.
+  - for blocked cases, queues as `failed` with machine-readable error prefix `blocked_uncommissioned:*` instead of `pending/retrying`.
+- Added retry queue re-open logic:
+  - `process_due_sm_credit_retries(...)` now scans blocked rows (`failed` + `blocked_uncommissioned:*`) and automatically re-opens them to `pending` once the account becomes eligible.
+- Preserved previous resilience behavior:
+  - schema-safe update/insert enqueue (no `ON CONFLICT` arbiter dependency),
+  - duplicate idempotency handling (`external_id has already been taken` => terminal `done`).
+- Hot-deployed updated `sm_credit_retry.py` to production and restarted `1pdb-api`.
+- Performed one-time production queue hygiene update:
+  - reclassified current uncommissioned/no-meter `pending/retrying` rows to `failed` with `blocked_uncommissioned:customer_not_commissioned_or_no_meter` to stop infinite churn.
+
+### Key Decisions
+- Kept the guardrail in the shared retry module (not route-specific) to eliminate drift across multiple payment ingress paths.
+- Used `failed` + prefixed error as the blocked state to avoid schema changes and remain compatible with existing queue status constraints.
+
+### Verification
+- Local syntax check passed: `python3 -m py_compile acdb-api/sm_credit_retry.py`.
+- Production service restarted healthy: `systemctl is-active 1pdb-api` -> `active`.
+- Post-cleanup retry queue snapshot:
+  - blocked/uncommissioned rows now in `failed` with explicit marker,
+  - remaining active retries are commissioned-path upstream errors (`HTTP 50x` / `Bad Request`) and can be triaged separately.
+
+## Session 2026-06-03 [202606030813] (Active Retry Queue Triage + Auto-Recovery Pass)
+
+### What Was Done
+- Executed focused triage on remaining active SM-credit retries and joined them to source transactions, commissioning state, and meter assignment.
+- Confirmed all remaining active rows had narrowed to:
+  - `0118KET` (multiple rows, persistent Koios `Bad Request` / 50x),
+  - `0061MAS` (single row, idempotent external_id already present upstream).
+- Ran targeted upstream checks:
+  - verified Koios external-id existence for `4873205` (`0061MAS`) and closed that queue row as `done`.
+  - diagnosed `0118KET` customer visibility/create state; created missing Koios customer successfully when omitting invalid phone payload.
+- Identified root cause of persistent `0118KET` failures: placeholder meter serial pattern (`meters.meter_id = ACCT-...`) causing upstream payment rejection.
+- Extended retry eligibility guard in `acdb-api/sm_credit_retry.py`:
+  - blocks retries when latest meter id is a placeholder (`ACCT-*`) with reason `blocked_uncommissioned:meter_serial_placeholder`.
+- Hot-deployed updated module to production and re-ran retry processor.
+- Reclassified remaining `0118KET` active rows to blocked-failed state (placeholder serial) and eliminated active queue churn.
+
+### Key Decisions
+- Treat `ACCT-*` meter IDs as non-creditable placeholders, not valid SparkMeter serials for payment push.
+- Close externally confirmed-idempotent rows (`external_id` found upstream) as `done` to prevent accidental double-credit retries.
+
+### Verification
+- Post-triage queue state: `done=19`, `failed=19`, `pending=0`, `retrying=0`.
+- Targeted row outcomes:
+  - `4873205` (`0061MAS`) -> `done`
+  - `4865855`, `4872150`, `4872286` (`0118KET`) -> `failed` with `blocked_uncommissioned:meter_serial_placeholder`.
+
+## Session 2026-06-03 [202606031052] (Analytics Transactions Time-Series Drilldown)
+
+### What Was Done
+- Added a dedicated analytics API for transaction time series:
+  - `POST /api/analytics/transactions-timeseries` in `acdb-api/analytics.py`.
+  - Supports granularity: `24h`, `day`, `week`, `month`.
+  - Supports aggregation/disaggregation breakdown: `none` (aggregate), `site`, `customer_type`, `country`, `portfolio`, `type` (payment category).
+  - Supports scoped filtering by `country`, `sites`, `portfolio_id`, `all_datasets`, `customer_types`, and date range (`from`/`to`).
+- Extended frontend API client (`acdb-api/frontend/src/lib/api.ts`) with typed request/response contracts and `runTransactionsTimeSeries(...)`.
+- Extended Analytics page UX (`acdb-api/frontend/src/pages/AnalyticsPage.tsx`):
+  - New basis: **Transactions Time Series**.
+  - New controls: granularity, breakdown, metric selector (amount vs transaction count), and run button.
+  - New chart/table rendering path for transaction series including CSV export.
+  - Keeps existing benchmark/metrics workflows isolated and clears stale result panels when switching query mode.
+- Added i18n copy for the new transactions workflow in:
+  - `acdb-api/frontend/src/i18n/en/analytics.json`
+  - `acdb-api/frontend/src/i18n/fr/analytics.json`
+
+### Key Decisions
+- Implemented transaction disaggregation as a first-class endpoint instead of overloading generic metrics query templates, because required dimensions (`portfolio`, `country`, `type`) and `24h` granularity are outside existing metric-group abstractions.
+- Returned both `tx_count` and `amount_total` per bucket/series so UI can toggle between volume and value without rerunning backend logic.
+
+### Verification
+- Backend syntax check passed: `python3 -m py_compile acdb-api/analytics.py`.
+- Frontend type-check passed: `cd acdb-api/frontend && npx tsc -b --noEmit`.
+- IDE lints on touched files reported no new diagnostics.
+
+## Session 2026-06-04 [202606040810] (CC Date Integrity + Koios Credit Eligibility Hardening)
+
+### What Was Done
+- Investigated the reported incident pattern ("wrong dates in CC" + "credited in CC but not Koios") and implemented guardrails in payment ingest/crediting paths.
+- Added timestamp sanity clamps to prevent future-dated payment rows from external clock drift:
+  - `acdb-api/ingest.py`: clamps gateway-derived SMS timestamp (`sms_received`) when it is materially in the future.
+  - `acdb-api/payments.py`: clamps webhook `payload.timestamp` when it is materially in the future.
+  - Both paths now log a warning and fall back to current UTC time instead of writing a future transaction timestamp.
+- Hardened ThunderCloud importer date integrity:
+  - `acdb-api/import_tc_transactions.py` now skips future-dated transaction payloads from upstream (`created > now + 1 day`) with explicit warning logs.
+- Reduced false-negative Koios credit blocking in retry guardrails:
+  - `acdb-api/sm_credit_retry.py` eligibility now distinguishes platform behavior by site suffix.
+  - For Koios sites, credit retries are no longer blocked solely due to placeholder/missing meter serial; Koios credits by `customer_code`.
+  - For ThunderCloud sites (MAK/LAB), existing stricter meter checks remain in force.
+- Improved customer-data transaction date parsing robustness:
+  - `acdb-api/crud.py` now handles additional legacy date formats and avoids ambiguous slash-date reinterpretation unless MM/DD is unambiguous.
+
+### Key Decisions
+- Treated future timestamps as data-integrity defects at ingest boundaries (fail-safe to `now`) rather than silently preserving implausible dates that pollute operational timelines.
+- Kept strict meter gating only where technically required (ThunderCloud), while allowing Koios flows to proceed based on commissioning/account eligibility.
+
+### Verification
+- Syntax checks passed:
+  - `python3 -m py_compile acdb-api/sm_credit_retry.py acdb-api/payments.py acdb-api/ingest.py acdb-api/import_tc_transactions.py acdb-api/crud.py`
+- Local DB runtime verification was not possible in this workspace because PostgreSQL connection was unavailable (`localhost:5432` refused).
+
+## Session 2026-06-04 [202606040925] (Direct 1PDB Access + Live RCA: Wrong Dates & Koios Credit Gap)
+
+### What Was Done
+- Established durable direct Postgres access from the workstation (CC DB only listens on the host's localhost; no local psql):
+  - New helper `scripts/ops/ccdb.sh` SSHes to the CC host and runs `psql` as postgres, streaming SQL over stdin to avoid nested-quoting fragility.
+  - Usage: `scripts/ops/ccdb.sh -c "..."` (LS), `--bn` for Benin, `-f file.sql`, or stdin pipe.
+  - Verified against `onepower_cc` + `onepower_bj` (PostgreSQL 16.14).
+- Issue B (credited in CC, not in Koios) — RCA + fix deployed:
+  - Live queue had 64 `failed` rows, all `blocked_uncommissioned:meter_serial_placeholder` on Koios sites whose accounts were commissioned but had placeholder `ACCT-*` meter ids.
+  - Koios credits by `customer_code`, so meter-serial gating was wrongly blocking valid Koios credits.
+  - Hot-deployed the relaxed `sm_credit_retry.py` (Koios sites no longer gated on placeholder/missing meter; ThunderCloud MAK/LAB stay strict), restarted `1pdb-api`, and reprocessed.
+  - Result: `done` 19 -> 55 (36 stuck credits pushed to Koios). Remaining 19 `failed` are genuinely uncommissioned (TOS/SEH/MAK), 10 `retrying` are transient Koios 502/504/Bad Request.
+- Issue A (CC reporting wrong dates) — RCA confirmed against source, NO data mutated (per ops choice):
+  - A single bulk import on 2026-05-12 14:18:59 inserted 11,082 `portal` rows from M-Pesa/EcoCash merchant exports; 945 are future-dated (e.g. 2026-12-03), matching the customer-visible wrong dates.
+  - Root cause: merchant exports use US `M/D/YYYY` (confirmed in source file, e.g. `1/31/2026`), but `acdb-api/merchant_export_parser.py::_parse_datetime` tried `%d/%m/%Y` before `%m/%d/%Y`, transposing every date whose day and month are both <= 12 (e.g. `1/7/2026` -> Jul 1). Day>12 disambiguates and parsed correctly.
+  - Fixed parser ordering (try `%m/%d` before `%d/%m` for slash dates; `%d/%m` retained as fallback for day-first strings). Verified: `1/7/2026` -> Jan 7; `31/1/2026` -> Jan 31.
+
+### Key Decisions
+- Built reusable direct-DB tooling rather than one-off SSH commands, since DB access is core to RCA scope.
+- Hot-deployed only the credit-gating fix (clear-cut, validated by live data); deferred the date-repair UPDATE pending source-grounded plan + approval.
+
+### What Next Session Should Know
+- Date repair is feasible source-grounded: 11,041/11,082 batch rows carry the M-Pesa receipt (payment_reference) and all carry `mm:<receipt>:rN` source_table, so correct dates can be re-derived per receipt by re-parsing the source files at `/Users/mattmso/Dropbox/1PWR/1PWR Financial Records/mobile money records`.
+- IMPORTANT: do NOT blindly swap day<=12 rows — xlsx exports may have delivered correct `datetime` cells (not transposed). The safe repair re-parses source and updates only rows whose stored date differs from the re-derived value. Take a backup first.
+- The parser fix (`merchant_export_parser.py`) and earlier session's ingest/payments timestamp clamps + crud date parsing are committed-to-disk but NOT yet deployed via main; coordinate a deploy.
+
+### Verification
+- `scripts/ops/ccdb.sh` smoke test OK; live RCA queries executed successfully.
+- `python3 -m py_compile acdb-api/merchant_export_parser.py` passed; parse-behavior unit checks confirmed corrected mapping.
+- Production `1pdb-api` active after hot deploy; retry queue progressed 19 -> 55 done.
+
+## Session 2026-06-04 [202606041201] (Applied Merchant Date-Transposition Repair)
+
+### What Was Done
+- Executed the source-grounded date repair on production `onepower_cc` (no dry-run, per ops request; full backup retained).
+- New tooling (committed to repo, deployed to host `/opt/cc-portal/backend`):
+  - `scripts/ops/build_merchant_date_map.py` — re-parses the original merchant exports with the FIXED parser and emits `receipt -> correct paid_at`.
+  - `scripts/ops/repair_merchant_date_transposition.py` — source-grounded repair. Fixes a row only when it matches the deterministic day<->month transposition signature; future-dated rows are swapped directly, non-future rows only when the source map confirms the swap. Writes every change to a backup table first; refuses to touch >75% of rows without `--force`.
+  - `scripts/ops/rollback_merchant_date_transposition.sql` — one-shot revert from the backup table (only reverts rows still holding the repaired value, so later legitimate edits are preserved).
+- Built the map on host against `/home/ubuntu/mm-backfill-data/mobile-money-records` (1,277 files): `unique_receipts=39,898` (10,330 same-day time-only conflicts, handled safely by the swap-confirmation logic).
+- Applied repair: **portal=1,211 rows** (596 future-dated + 615 source-confirmed), **balance_seed=404 rows** re-anchored. 538 ambiguous past-dated rows intentionally left untouched (not source-confirmable).
+- Backup table: `transactions_date_repair_20260604` (1,615 rows: 1,211 portal + 404 seed) with old + new timestamps.
+
+### Verification
+- Future-dated payment rows: **945 -> 0**; max payment `transaction_date` now = today, none in the future.
+- Spot check: receipt `081LWPW4YF77` (0011TLH) corrected `2026-11-01` -> `2026-01-11`.
+- Backup row counts confirmed (portal 1,211, balance_seed 404).
+
+### Rollback
+- Full revert: `scripts/ops/ccdb.sh -f scripts/ops/rollback_merchant_date_transposition.sql`.
+
+### Still Pending (next deploy)
+- Code fixes are on disk + hot-deployed to host but NOT yet shipped via `main`:
+  `merchant_export_parser.py` (date order), `sm_credit_retry.py` (Koios gating),
+  `ingest.py` / `payments.py` (future-timestamp clamps), `import_tc_transactions.py`,
+  `crud.py` (date parsing). Coordinate a `main` deploy so the GitHub-Actions runtime matches the host hotfixes.
+
+## Session 2026-06-04 [202606040721] (Transactions Time Series: Electricity-Only Metric Toggle)
+
+### What Was Done
+- Extended transactions time-series backend aggregation in `acdb-api/analytics.py` to compute and return `amount_electricity` per bucket/series row.
+- Implemented electricity amount calculation with a root-cause-safe fallback:
+  - uses `transactions.electricity_portion` when present,
+  - falls back to full `transaction_amount` only for rows explicitly categorized as `payment_category='electricity'`.
+- Updated frontend API typings in `acdb-api/frontend/src/lib/api.ts` to include `amount_electricity` on `TransactionsTimeSeriesRow`.
+- Updated Analytics UI in `acdb-api/frontend/src/pages/AnalyticsPage.tsx`:
+  - metric selector now supports `amount_total`, `amount_electricity`, and `tx_count`,
+  - chart plotting path supports the new electricity metric,
+  - transactions table now includes a dedicated electricity amount column,
+  - CSV export now includes `amount_electricity`.
+- Added i18n labels for the new toggle in:
+  - `acdb-api/frontend/src/i18n/en/analytics.json`
+  - `acdb-api/frontend/src/i18n/fr/analytics.json`
+
+### Key Decisions
+- Returned both total and electricity-only amounts in the same response so users can toggle metrics instantly in UI without rerunning or adding endpoint-level mode flags.
+- Avoided masking category semantics: non-electricity categories only contribute to `amount_electricity` when an explicit `electricity_portion` exists.
+
+### Verification
+- Backend syntax check passed: `python3 -m py_compile acdb-api/analytics.py`.
+- Frontend type-check passed: `cd acdb-api/frontend && npx tsc -b --noEmit`.
+- IDE lints on touched files reported no new diagnostics.

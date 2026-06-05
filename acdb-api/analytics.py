@@ -567,6 +567,28 @@ def _resolve_benchmark_sites(
     return sorted(list(dict.fromkeys(base_sites)))
 
 
+def _site_to_country_map() -> Dict[str, str]:
+    mapping: Dict[str, str] = {}
+    for cc, cfg in _REGISTRY.items():
+        for site_code in cfg.site_abbrev.keys():
+            mapping[str(site_code).upper()] = cc
+    return mapping
+
+
+def _portfolio_site_map() -> Dict[str, List[str]]:
+    site_map: Dict[str, List[str]] = {}
+    for p in (list_portfolios() or []):
+        pname = str(p.get("name") or p.get("id") or "Unassigned").strip() or "Unassigned"
+        for site in (p.get("siteIds") or []):
+            site_code = str(site or "").upper().strip()
+            if not site_code:
+                continue
+            site_map.setdefault(site_code, []).append(pname)
+    for site_code, names in list(site_map.items()):
+        site_map[site_code] = sorted(list(dict.fromkeys(names)))
+    return site_map
+
+
 def _build_query(metric_id: str, filters: Dict[str, Any], group_by: str) -> Tuple[str, tuple]:
     """Build a parameterised SQL query for a metric.
 
@@ -613,13 +635,15 @@ def _build_query(metric_id: str, filters: Dict[str, Any], group_by: str) -> Tupl
     )
 
     if has_date_placeholders and not date_from:
-        # Default to trailing 12 months for financial/consumption metrics
+        # Default to a trailing 12-month window for financial/consumption
+        # metrics: the same month one year earlier, anchored to the first of
+        # the month (e.g. 2026-06 -> 2025-06-01). The previous implementation
+        # used ``today.month - 1`` which only reached back a single month,
+        # so any query without an explicit date range (site / customer_type /
+        # overview groupings) silently scoped to ~30 days and returned no rows
+        # whenever the monthly aggregate had any lag.
         date_to = today.strftime("%Y-%m-%d")
-        # 12 months ago, first of month
-        if today.month == 1:
-            date_from = f"{today.year - 1}-12-01"
-        else:
-            date_from = f"{today.year}-{today.month - 1:02d}-01"
+        date_from = f"{today.year - 1}-{today.month:02d}-01"
 
     date_from_month = date_from[:7] if date_from else "2020-01"
     date_to_month = date_to[:7] if date_to else today.strftime("%Y-%m")
@@ -700,6 +724,28 @@ class AnalyticsQueryRequest(BaseModel):
 
 class ConsumptionBenchmarkRequest(BaseModel):
     period: Literal["day", "week", "month", "year"] = "month"
+    country: Optional[str] = None
+    sites: Optional[List[str]] = None
+    portfolio_id: Optional[str] = None
+    all_datasets: bool = False
+    customer_types: Optional[List[str]] = None
+    date_from: Optional[date] = Field(default=None, alias="from")
+    date_to: Optional[date] = Field(default=None, alias="to")
+
+    class Config:
+        populate_by_name = True
+
+
+class TransactionsTimeSeriesRequest(BaseModel):
+    granularity: Literal["24h", "day", "week", "month"] = "day"
+    breakdown: Literal[
+        "none",
+        "site",
+        "customer_type",
+        "country",
+        "portfolio",
+        "type",
+    ] = "none"
     country: Optional[str] = None
     sites: Optional[List[str]] = None
     portfolio_id: Optional[str] = None
@@ -1039,6 +1085,168 @@ def run_consumption_benchmark(
         "rows": [r.dict() for r in rows],
         "filters_applied": {
             "period": req.period,
+            "country": req.country,
+            "portfolio_id": req.portfolio_id,
+            "all_datasets": req.all_datasets,
+            "sites": resolved_sites,
+            "customer_types": customer_types,
+            "date_from": str(date_from),
+            "date_to": str(date_to),
+        },
+    }
+
+
+@router.post("/transactions-timeseries")
+def run_transactions_timeseries(
+    req: TransactionsTimeSeriesRequest,
+    user: CurrentUser = Depends(require_employee),
+):
+    """Transaction time series with optional disaggregation."""
+    today = datetime.now(timezone.utc).date()
+    date_to = req.date_to or today
+    if req.date_from:
+        date_from = req.date_from
+    else:
+        if req.granularity == "24h":
+            date_from = date_to
+        elif req.granularity == "day":
+            date_from = date_to - timedelta(days=30)
+        elif req.granularity == "week":
+            date_from = date_to - timedelta(days=7 * 12)
+        else:
+            date_from = (date_to.replace(day=1) - timedelta(days=360)).replace(day=1)
+
+    if date_from > date_to:
+        raise HTTPException(400, "date_from must be <= date_to")
+
+    resolved_sites = _resolve_benchmark_sites(
+        country=req.country,
+        sites=req.sites,
+        portfolio_id=req.portfolio_id,
+        all_datasets=req.all_datasets,
+    )
+    customer_types = _expand_customer_types(req.customer_types)
+
+    bucket_expr = {
+        "24h": "date_trunc('hour', t.transaction_date)",
+        "day": "date_trunc('day', t.transaction_date)",
+        "week": "date_trunc('week', t.transaction_date)",
+        "month": "date_trunc('month', t.transaction_date)",
+    }[req.granularity]
+
+    site_placeholders = ",".join(["%s"] * len(resolved_sites))
+    type_clause = ""
+    type_params: List[Any] = []
+    if customer_types:
+        ph = ",".join(["%s"] * len(customer_types))
+        type_clause = f"AND {_NORMALIZED_TYPE_SQL} IN ({ph})"
+        type_params.extend(customer_types)
+
+    sql = f"""
+        SELECT {bucket_expr} AS bucket_start,
+               COALESCE(NULLIF(UPPER(TRIM(c.community)), ''), 'UNKNOWN') AS site,
+               {_NORMALIZED_TYPE_SQL} AS customer_type,
+               COALESCE(NULLIF(LOWER(TRIM(t.payment_category)), ''), 'uncategorized') AS payment_category,
+               COUNT(*)::bigint AS tx_count,
+               ROUND(COALESCE(SUM(t.transaction_amount), 0)::numeric, 2) AS amount_total,
+               ROUND(
+                   COALESCE(
+                       SUM(
+                           CASE
+                               WHEN t.electricity_portion IS NOT NULL THEN t.electricity_portion
+                               WHEN COALESCE(NULLIF(LOWER(TRIM(t.payment_category)), ''), 'uncategorized') = 'electricity'
+                                   THEN t.transaction_amount
+                               ELSE 0
+                           END
+                       ),
+                       0
+                   )::numeric,
+                   2
+               ) AS amount_electricity
+          FROM transactions t
+          LEFT JOIN accounts a ON a.account_number = t.account_number
+          LEFT JOIN customers c ON c.id = a.customer_id
+         WHERE t.transaction_date >= %s::timestamp
+           AND t.transaction_date < (%s::timestamp + interval '1 day')
+           AND COALESCE(NULLIF(UPPER(TRIM(c.community)), ''), 'UNKNOWN') IN ({site_placeholders})
+           {type_clause}
+         GROUP BY 1,2,3,4
+         ORDER BY 1,2,3,4
+    """
+    params: List[Any] = [date_from, date_to]
+    params.extend(resolved_sites)
+    params.extend(type_params)
+
+    site_country = _site_to_country_map()
+    site_portfolios = _portfolio_site_map()
+
+    by_bucket: Dict[str, Dict[str, Dict[str, float]]] = {}
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(sql, tuple(params))
+        for row in cur.fetchall():
+            bucket_dt = row[0]
+            site = str(row[1] or "UNKNOWN")
+            ctype = str(row[2] or "UNKNOWN")
+            pcat = str(row[3] or "uncategorized")
+            tx_count = int(row[4] or 0)
+            amount = float(row[5] or 0)
+            amount_electricity = float(row[6] or 0)
+
+            if req.breakdown == "site":
+                key = site
+            elif req.breakdown == "customer_type":
+                key = ctype
+            elif req.breakdown == "country":
+                key = site_country.get(site, "UNKNOWN")
+            elif req.breakdown == "portfolio":
+                key = ", ".join(site_portfolios.get(site, ["Unassigned"]))
+            elif req.breakdown == "type":
+                key = pcat
+            else:
+                key = "All"
+
+            bucket_label = ""
+            if hasattr(bucket_dt, "strftime"):
+                if req.granularity == "24h":
+                    bucket_label = bucket_dt.strftime("%Y-%m-%d %H:00")
+                elif req.granularity == "day":
+                    bucket_label = bucket_dt.strftime("%Y-%m-%d")
+                elif req.granularity == "week":
+                    bucket_label = bucket_dt.strftime("%G-W%V")
+                else:
+                    bucket_label = bucket_dt.strftime("%Y-%m")
+            else:
+                bucket_label = str(bucket_dt)
+
+            bucket_entry = by_bucket.setdefault(bucket_label, {})
+            series_entry = bucket_entry.setdefault(
+                key,
+                {"tx_count": 0.0, "amount_total": 0.0, "amount_electricity": 0.0},
+            )
+            series_entry["tx_count"] += tx_count
+            series_entry["amount_total"] += amount
+            series_entry["amount_electricity"] += amount_electricity
+
+    rows: List[Dict[str, Any]] = []
+    series_keys: List[str] = []
+    for bucket in sorted(by_bucket.keys()):
+        for key in sorted(by_bucket[bucket].keys()):
+            series_keys.append(key)
+            rows.append({
+                "bucket": bucket,
+                "breakdown": key,
+                "tx_count": int(round(by_bucket[bucket][key]["tx_count"])),
+                "amount_total": round(by_bucket[bucket][key]["amount_total"], 2),
+                "amount_electricity": round(by_bucket[bucket][key]["amount_electricity"], 2),
+            })
+
+    return {
+        "rows": rows,
+        "series_keys": sorted(list(dict.fromkeys(series_keys))),
+        "filters_applied": {
+            "granularity": req.granularity,
+            "breakdown": req.breakdown,
             "country": req.country,
             "portfolio_id": req.portfolio_id,
             "all_datasets": req.all_datasets,
