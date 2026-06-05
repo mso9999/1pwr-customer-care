@@ -78,6 +78,25 @@
 - Daily `cc-ls-balance-audit.timer` continues monitoring; forward fixes prevent new echoes so this
   should not re-accumulate. Backup tables retained for rollback.
 
+### CRITICAL follow-up insight — the bigger driver is INCOMPLETE CONSUMPTION IMPORT
+- User RCA: SparkMeter relay enforces consumption ≤ credits (cuts off at zero), so Koios is the
+  PHYSICAL truth and a real negative balance is impossible. CC's upward drift therefore means CC is
+  missing data.
+- `0014MAS` consumption coverage is only **~71%** of hours (16,069 / ~22,600 over 31 months);
+  **2025-12 and 2026-01 are ~3% (essentially missing)**, several other months 45–90%. The unimported
+  consumption (~400 kWh) ≈ the divergence. So CC over-states balance because it never imported
+  consumption the meter actually metered.
+- Two root causes of CC>Koios: (1) payment **echoes** (~17k kWh, FIXED) and (2) **consumption import
+  gaps** (~36k of the −53k fleet delta, NOT fixed). The coverage-audit tooling
+  (`audit_coverage_gaps.py`, `cc-coverage-snapshot.timer`, upstream-recon) already detects these.
+- **Order problem with the re-anchor just executed:** seeds = Koios − CC(gappy) baked the consumption
+  gaps in. Balances now match Koios, BUT CC consumption data is still incomplete (also under-reports
+  consumption analytics), and **backfilling consumption later would double-subtract** (drive balances
+  negative) unless we RE-ANCHOR AGAIN after the backfill.
+- Durable plan (pending decision): (a) backfill consumption gaps from Koios (`import_hourly.py
+  --no-skip` over deficient cells), (b) re-anchor again post-backfill, (c) weekly `--no-skip`
+  catch-up + coverage-trend alarm to stop new gaps. This also fixes the consumption analytics gaps.
+
 ## Session 2026-06-05 [202606050832] (Analytics Consumption Returns Zero Rows)
 
 ### Symptom
