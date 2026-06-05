@@ -28,14 +28,37 @@
 ### Files Modified
 - `acdb-api/analytics.py` — fixed the 12-month date default.
 
-### What Next Session Should Know
-- The code fix resolves the reported zero-rows symptom (queries now return through the latest
-  aggregated month). **However, current/recent months (May/June 2026) stay invisible until
-  `monthly_consumption` is refreshed** for both DBs. Durable fix is server-side: ensure the monthly
-  aggregate rebuild runs after every consumption sync (move it out of the rate-limit-interruptible
-  tail of `import_hourly.py`, and add an equivalent rebuild to the server's `import_hourly_bn.py`).
-- Not yet deployed; backend change requires push to `main` (auto-deploy) + service restart (clears
-  the 300s analytics cache).
+### Deeper RCA — WHY monthly_consumption was frozen at 2026-04
+- The rebuild `TRUNCATE monthly_consumption; INSERT ... SELECT ... GROUP BY account, meter, month,
+  community` collided with the unique index `idx_monthly_cons_unique (account_number, meter_id,
+  year_month, source)` — community is NOT in the constraint. ~100 LS `(account, meter, month)` groups
+  carry >1 community label (a few mislabeled hourly rows, e.g. an account tagged both `MAK` and
+  `MAT`). The duplicate key aborted the whole INSERT, so the table stayed frozen at the last
+  successful rebuild. `uq_hourly_meter_hour (meter_id, reading_hour)` guarantees one row per
+  (meter, hour), so summing across the mislabels does NOT double-count.
+- Fix (in repo): `acdb-api/import_hourly.py` now groups by (account, meter, month) only, with
+  `SUM(kwh)` and `mode() WITHIN GROUP (ORDER BY community)` for the label. Collision-proof.
+
+### Actions taken
+- Committed + pushed the analytics date-default fix to `main` (auto-deploy).
+- Rebuilt `monthly_consumption` on BOTH prod DBs (read it back, totals match `hourly_consumption`):
+  - LS `onepower_cc`: 30,318 rows, now current to `2026-06` (was frozen `2026-04`).
+  - BN `onepower_bj`: 3,080 rows, now current to `2026-06`. GBO+HH 12-mo total now 10,217.92 kWh (was 0).
+- BN required excluding garbage account_numbers: BN `monthly_consumption.account_number` is
+  `varchar(10)` but BN `hourly_consumption` has 22 distinct junk account values up to 17 chars
+  (Koios meter-serials/`SMRSD-04-...` and malformed `004800SAMMMM`); none match a real `accounts`
+  row. Rebuild filters `length(account_number) <= 10`.
+
+### Follow-ups for next session (NOT yet done)
+- **BN importer** `import_hourly_bn.py` lives server-side (`/opt/1pdb/services/`), not in this repo.
+  It must apply the SAME collision-safe grouping + garbage filter so BN stays fresh automatically.
+  Consider widening BN `monthly_consumption.account_number` to match LS, or cleaning the 22 junk
+  account rows out of BN `hourly_consumption`.
+- **LS `monthly_transactions`** is likely stale by the same class of failure (rebuilt in the same
+  tail block); financial metrics (`arpu`, `total_revenue`) may also lag. Audit separately.
+- A few BN/LS `hourly_consumption` rows have epoch (`1970-01`) timestamps → harmless to analytics
+  (filtered by date + customers join) but worth cleaning.
+- Backend deploy clears the 300s analytics cache on service restart.
 
 ## Session 2026-05-29 [202605291043] (SMS Ingest Visible but CM Feed Missing)
 

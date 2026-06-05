@@ -694,15 +694,26 @@ def main():
     if not args.no_aggregate and not args.site:
         log.info("Rebuilding monthly_consumption from hourly data...")
         cur.execute("TRUNCATE monthly_consumption;")
+        # Group by (account, meter, month) only — NOT community. The unique
+        # constraint idx_monthly_cons_unique is (account_number, meter_id,
+        # year_month, source), so grouping by community as well collides
+        # whenever a meter/month carries more than one community label (data
+        # drift: a few mislabeled hourly rows, e.g. an account tagged both
+        # MAK and MAT). That collision made the whole TRUNCATE+INSERT abort and
+        # left monthly_consumption frozen. uq_hourly_meter_hour guarantees one
+        # row per (meter, hour), so SUM(kwh) never double-counts, and mode()
+        # picks the dominant community label for the (rare) conflicting groups.
         cur.execute("""
             INSERT INTO monthly_consumption
                 (account_number, meter_id, year_month, kwh, community, source)
             SELECT account_number, meter_id,
                    TO_CHAR(reading_hour, 'YYYY-MM'),
-                   SUM(kwh), community, 'import'::transaction_source
+                   SUM(kwh),
+                   mode() WITHIN GROUP (ORDER BY community),
+                   'import'::transaction_source
             FROM hourly_consumption
             GROUP BY account_number, meter_id,
-                     TO_CHAR(reading_hour, 'YYYY-MM'), community;
+                     TO_CHAR(reading_hour, 'YYYY-MM');
         """)
         conn.commit()
         cur.execute("SELECT count(*) FROM monthly_consumption;")
