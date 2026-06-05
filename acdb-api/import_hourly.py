@@ -694,26 +694,39 @@ def main():
     if not args.no_aggregate and not args.site:
         log.info("Rebuilding monthly_consumption from hourly data...")
         cur.execute("TRUNCATE monthly_consumption;")
-        # Group by (account, meter, month) only — NOT community. The unique
-        # constraint idx_monthly_cons_unique is (account_number, meter_id,
-        # year_month, source), so grouping by community as well collides
-        # whenever a meter/month carries more than one community label (data
-        # drift: a few mislabeled hourly rows, e.g. an account tagged both
-        # MAK and MAT). That collision made the whole TRUNCATE+INSERT abort and
-        # left monthly_consumption frozen. uq_hourly_meter_hour guarantees one
-        # row per (meter, hour), so SUM(kwh) never double-counts, and mode()
-        # picks the dominant community label for the (rare) conflicting groups.
+        # Two corrections vs the naive rebuild:
+        #
+        # 1) De-duplicate readings at (account, hour). The April-2026 meter
+        #    serial migration left ~20% of account-hours recorded under TWO
+        #    meter_id values (legacy numeric id + new SMRSD-... serial) with the
+        #    SAME kWh. Summing every row therefore double-counted consumption.
+        #    The inner query collapses to one reading per (account, hour) via
+        #    MAX(kwh) (the duplicates are equal; MAX is also robust to drift).
+        #
+        # 2) Group the monthly row by (account, month) only — NOT community or
+        #    raw meter_id. idx_monthly_cons_unique is (account_number, meter_id,
+        #    year_month, source); grouping by community (or a fanned-out meter
+        #    join) produced duplicate keys and aborted the whole INSERT, which is
+        #    what froze monthly_consumption. mode() keeps the dominant community
+        #    label and a single representative meter_id (serial preferred).
         cur.execute("""
             INSERT INTO monthly_consumption
                 (account_number, meter_id, year_month, kwh, community, source)
-            SELECT account_number, meter_id,
+            SELECT account_number,
+                   MAX(meter_id),
                    TO_CHAR(reading_hour, 'YYYY-MM'),
                    SUM(kwh),
                    mode() WITHIN GROUP (ORDER BY community),
                    'import'::transaction_source
-            FROM hourly_consumption
-            GROUP BY account_number, meter_id,
-                     TO_CHAR(reading_hour, 'YYYY-MM');
+            FROM (
+                SELECT account_number, reading_hour,
+                       MAX(kwh) AS kwh,
+                       MAX(meter_id) AS meter_id,
+                       mode() WITHIN GROUP (ORDER BY community) AS community
+                FROM hourly_consumption
+                GROUP BY account_number, reading_hour
+            ) dedup
+            GROUP BY account_number, TO_CHAR(reading_hour, 'YYYY-MM');
         """)
         conn.commit()
         cur.execute("SELECT count(*) FROM monthly_consumption;")

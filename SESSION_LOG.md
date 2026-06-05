@@ -60,6 +60,29 @@
   (filtered by date + customers join) but worth cleaning.
 - Backend deploy clears the 300s analytics cache on service restart.
 
+### Update (same day) — BN importer hardened, hourly export added, duplicate-meter double-count fixed
+- **BN importer hardened (server-side, `/opt/1pdb/services/import_hourly_bn.py`, backup
+  `*.bak.20260605T135607Z`)**: same collision-safe + dedup rebuild as LS. NOTE: this file is NOT in
+  this repo (canonical home is the onepowerLS/1PDB repo) — patched directly on the host.
+- **NEW finding — duplicate-meter double-count**: the Apr-2026 meter-serial migration left ~20% of
+  account-hours recorded under TWO `meter_id`s (legacy numeric + `SMRSD-...` serial) with identical
+  kWh. The naive `SUM(kwh)` rebuild double-counted those accounts (e.g. `0002GBO` 2026-05 = 16.887 vs
+  true 8.661). BN dup pairs = 216,573 / 1,065,333; LS dup pairs = 170,788. Fix: de-dup at
+  `(account, hour)` with `MAX(kwh)` in an inner query before the monthly `SUM`, in BOTH importers and
+  in the manual refresh. Validated: LS 2026-03 deduped `monthly_consumption` (11,061.06) == distinct-
+  hour sum, vs inflated naive 13,995.56.
+- **Re-ran deduped `monthly_consumption` refresh on both DBs**: LS 29,538 rows, BN 2,254 rows, both
+  current to `2026-06`. GBO+HH 12-mo now 9,261.65 kWh (deduped).
+- **NEW feature — hourly consumption CSV download**:
+  - Backend `GET /api/analytics/consumption-export` (`acdb-api/analytics.py`): streams
+    `hourly_consumption` as CSV via a server-side cursor, `DISTINCT ON (account, hour)` (serial meter
+    preferred), scoped by country/sites/customer_types/account + required date range (max 400 days),
+    UTC timestamps. Columns: reading_hour_utc, account_number, meter_id, site, customer_type, kwh.
+  - Frontend: `downloadHourlyConsumption` in `lib/api.ts` + a "Download Raw Hourly Consumption" card
+    on `AnalyticsPage.tsx` (own date range, reuses Country/Sites/Customer-Types filters), EN/FR i18n.
+- **Still server-side / not in this repo**: the BN importer change should be mirrored into the
+  onepowerLS/1PDB repo. `monthly_transactions` still likely stale (financial metrics) — audit next.
+
 ## Session 2026-05-29 [202605291043] (SMS Ingest Visible but CM Feed Missing)
 
 ### What Was Done

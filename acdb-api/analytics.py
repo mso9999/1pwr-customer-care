@@ -9,7 +9,9 @@ hardcoded whitelist.
 
 from __future__ import annotations
 
+import csv
 import hashlib
+import io
 import json
 import logging
 import threading
@@ -17,7 +19,8 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Literal, Optional, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from models import CurrentUser
@@ -1256,3 +1259,120 @@ def run_transactions_timeseries(
             "date_to": str(date_to),
         },
     }
+
+
+# Hard cap on the exportable window so a single request can't try to stream the
+# entire multi-year hourly table at once.
+_HOURLY_EXPORT_MAX_DAYS = 400
+
+
+@router.get("/consumption-export")
+def export_hourly_consumption(
+    country: Optional[str] = Query(None, description="Country code (LS/BN/ALL) for site resolution"),
+    sites: Optional[str] = Query(None, description="Comma-separated site codes (e.g. GBO,SAM)"),
+    customer_types: Optional[str] = Query(None, description="Comma-separated customer types (e.g. HH,SME)"),
+    account: Optional[str] = Query(None, description="Restrict to a single account number"),
+    date_from: str = Query(..., description="Start date YYYY-MM-DD (inclusive)"),
+    date_to: str = Query(..., description="End date YYYY-MM-DD (inclusive)"),
+    user: CurrentUser = Depends(require_employee),
+):
+    """Stream raw hourly consumption rows as CSV.
+
+    One row per ``(account, meter, reading hour)`` straight from
+    ``hourly_consumption`` (always current — not the monthly aggregate),
+    joined to ``accounts``/``customers`` so only real accounts are exported and
+    each row carries its site and customer type. Timestamps are UTC, matching
+    how the table is stored.
+    """
+    try:
+        df = datetime.strptime(date_from, "%Y-%m-%d").date()
+        dt = datetime.strptime(date_to, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(400, "date_from and date_to must be YYYY-MM-DD")
+    if df > dt:
+        raise HTTPException(400, "date_from must be <= date_to")
+    if (dt - df).days > _HOURLY_EXPORT_MAX_DAYS:
+        raise HTTPException(
+            400,
+            f"Date range too large (>{_HOURLY_EXPORT_MAX_DAYS} days). Narrow the window.",
+        )
+
+    site_list = _resolve_sites(country, [s for s in (sites or "").split(",") if s.strip()] or None)
+    ctypes = _expand_customer_types(
+        [c for c in (customer_types or "").split(",") if c.strip()]
+    )
+
+    site_placeholders = ",".join(["%s"] * len(site_list))
+    where = [
+        "h.reading_hour >= %s::timestamp",
+        "h.reading_hour < (%s::timestamp + interval '1 day')",
+        f"c.community IN ({site_placeholders})",
+    ]
+    params: List[Any] = [str(df), str(dt), *site_list]
+    if ctypes:
+        ph = ",".join(["%s"] * len(ctypes))
+        where.append(f"{_NORMALIZED_TYPE_SQL} IN ({ph})")
+        params.extend(ctypes)
+    if account and account.strip():
+        where.append("h.account_number = %s")
+        params.append(account.strip())
+
+    # DISTINCT ON (account, hour) collapses the duplicate readings left by the
+    # meter-serial migration (same account-hour recorded under both a legacy id
+    # and an SMRSD-... serial). meter_id DESC prefers the serial; this keeps the
+    # export one clean row per account per hour instead of double rows.
+    sql = f"""
+        SELECT DISTINCT ON (h.account_number, h.reading_hour)
+               h.reading_hour, h.account_number, h.meter_id,
+               c.community, c.customer_type, h.kwh
+          FROM hourly_consumption h
+          JOIN accounts a ON a.account_number = h.account_number
+          JOIN customers c ON c.id = a.customer_id
+         WHERE {' AND '.join(where)}
+         ORDER BY h.account_number, h.reading_hour, h.meter_id DESC
+    """
+
+    logger.info(
+        "consumption_export country=%s sites=%s types=%s account=%s %s..%s",
+        country, site_list, ctypes, account, df, dt,
+    )
+
+    def _rows():
+        with get_connection() as conn:
+            # Server-side (named) cursor streams rows instead of buffering the
+            # whole result set in memory.
+            cur = conn.cursor(name="cc_hourly_export")
+            cur.itersize = 5000
+            cur.execute(sql, tuple(params))
+            buf = io.StringIO()
+            writer = csv.writer(buf)
+            writer.writerow(
+                ["reading_hour_utc", "account_number", "meter_id",
+                 "site", "customer_type", "kwh"]
+            )
+            yield buf.getvalue()
+            buf.seek(0); buf.truncate(0)
+            for row in cur:
+                ts = row[0]
+                writer.writerow([
+                    ts.isoformat() if hasattr(ts, "isoformat") else (ts or ""),
+                    row[1] or "",
+                    row[2] or "",
+                    row[3] or "",
+                    row[4] or "",
+                    row[5] if row[5] is not None else "",
+                ])
+                if buf.tell() > 65536:
+                    yield buf.getvalue()
+                    buf.seek(0); buf.truncate(0)
+            if buf.tell():
+                yield buf.getvalue()
+            cur.close()
+
+    fname_country = (country or "all").lower()
+    filename = f"hourly-consumption_{fname_country}_{df}_{dt}.csv"
+    return StreamingResponse(
+        _rows(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

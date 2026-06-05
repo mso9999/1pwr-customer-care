@@ -5,9 +5,12 @@ import {
   getAnalyticsMetrics,
   runAnalyticsQuery,
   runConsumptionBenchmark,
+  runTransactionsTimeSeries,
+  downloadHourlyConsumption,
   type AnalyticsQueryResponse,
   type AnalyticsMetricsCatalog,
   type ConsumptionBenchmarkResponse,
+  type TransactionsTimeSeriesResponse,
 } from '../lib/api';
 import {
   ResponsiveContainer,
@@ -31,6 +34,7 @@ const BASIS_OPTIONS = [
   { value: 'site', labelKey: 'basis.site', groupBy: 'site' },
   { value: 'customer_type', labelKey: 'basis.customerType', groupBy: 'customer_type' },
   { value: 'time', labelKey: 'basis.time', groupBy: 'month' },
+  { value: 'transactions', labelKey: 'basis.transactions', groupBy: 'none' },
   { value: 'overview', labelKey: 'basis.overview', groupBy: 'none' },
   { value: 'benchmark', labelKey: 'basis.benchmark', groupBy: 'none' },
 ];
@@ -198,6 +202,39 @@ export default function AnalyticsPage() {
   const [timeGranularity, setTimeGranularity] = useState('month');
   const [benchmarkPeriod, setBenchmarkPeriod] = useState<'day' | 'week' | 'month' | 'year'>('month');
   const [benchmarkScope, setBenchmarkScope] = useState<'country' | 'portfolio' | 'all'>('country');
+  const [txnGranularity, setTxnGranularity] = useState<'24h' | 'day' | 'week' | 'month'>('day');
+  const [txnBreakdown, setTxnBreakdown] = useState<
+    'none' | 'site' | 'customer_type' | 'country' | 'portfolio' | 'type'
+  >('site');
+  const [txnMetric, setTxnMetric] = useState<'amount_total' | 'amount_electricity' | 'tx_count'>('amount_total');
+
+  // Raw hourly consumption export (own date range, defaults to last 30 days)
+  const [exportFrom, setExportFrom] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().slice(0, 10);
+  });
+  const [exportTo, setExportTo] = useState(new Date().toISOString().slice(0, 10));
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState('');
+
+  const runHourlyExport = useCallback(async () => {
+    setExporting(true);
+    setExportError('');
+    try {
+      await downloadHourlyConsumption({
+        date_from: exportFrom,
+        date_to: exportTo,
+        country: filterCountry || undefined,
+        sites: filterSites.length > 0 ? filterSites : undefined,
+        customer_types: filterCustomerTypes.length > 0 ? filterCustomerTypes : undefined,
+      });
+    } catch (e: any) {
+      setExportError(e.message || 'Export failed');
+    } finally {
+      setExporting(false);
+    }
+  }, [exportFrom, exportTo, filterCountry, filterSites, filterCustomerTypes]);
 
   // Derive group_by from basis
   const groupBy = useMemo(() => {
@@ -270,6 +307,7 @@ export default function AnalyticsPage() {
   // Query
   const [result, setResult] = useState<AnalyticsQueryResponse | null>(null);
   const [benchmarkResult, setBenchmarkResult] = useState<ConsumptionBenchmarkResponse | null>(null);
+  const [txnResult, setTxnResult] = useState<TransactionsTimeSeriesResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -307,6 +345,8 @@ export default function AnalyticsPage() {
         ));
       }
       setResult(res);
+      setBenchmarkResult(null);
+      setTxnResult(null);
     } catch (e: any) {
       setError(e.message || 'Query failed');
     } finally {
@@ -331,6 +371,7 @@ export default function AnalyticsPage() {
       const res = await runConsumptionBenchmark(payload);
       setBenchmarkResult(res);
       setResult(null);
+      setTxnResult(null);
     } catch (e: any) {
       setError(e.message || t('benchmark.failed'));
     } finally {
@@ -339,6 +380,42 @@ export default function AnalyticsPage() {
   }, [
     benchmarkPeriod,
     benchmarkScope,
+    filterCountry,
+    filterSites,
+    filterCustomerTypes,
+    filterDateFrom,
+    filterDateTo,
+    portfolio?.id,
+    t,
+  ]);
+
+  const runTransactions = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const payload = {
+        granularity: txnGranularity,
+        breakdown: txnBreakdown,
+        country: filterCountry || undefined,
+        sites: filterSites.length > 0 ? filterSites : undefined,
+        portfolio_id: txnBreakdown === 'portfolio' ? (portfolio?.id || undefined) : undefined,
+        all_datasets: txnBreakdown === 'country' ? true : false,
+        customer_types: filterCustomerTypes.length > 0 ? filterCustomerTypes : undefined,
+        from: filterDateFrom,
+        to: filterDateTo,
+      } as const;
+      const res = await runTransactionsTimeSeries(payload);
+      setTxnResult(res);
+      setResult(null);
+      setBenchmarkResult(null);
+    } catch (e: any) {
+      setError(e.message || t('transactions.failed'));
+    } finally {
+      setLoading(false);
+    }
+  }, [
+    txnGranularity,
+    txnBreakdown,
     filterCountry,
     filterSites,
     filterCustomerTypes,
@@ -427,6 +504,24 @@ export default function AnalyticsPage() {
     }));
   }, [benchmarkRows]);
 
+  const txnChartData = useMemo(() => {
+    if (!txnResult?.rows?.length) return [];
+    const byBucket = new Map<string, Record<string, string | number>>();
+    for (const row of txnResult.rows) {
+      if (!byBucket.has(row.bucket)) byBucket.set(row.bucket, { bucket: row.bucket });
+      byBucket.get(row.bucket)![row.breakdown] = row[txnMetric];
+    }
+    return Array.from(byBucket.values());
+  }, [txnResult, txnMetric]);
+
+  const txnTableRows = useMemo(() => {
+    if (!txnResult?.rows?.length) return [];
+    return [...txnResult.rows].sort((a, b) => {
+      if (a.bucket === b.bucket) return a.breakdown.localeCompare(b.breakdown);
+      return a.bucket.localeCompare(b.bucket);
+    });
+  }, [txnResult]);
+
   return (
     <div className="max-w-7xl mx-auto px-4 py-6 space-y-6">
       <div>
@@ -504,6 +599,56 @@ export default function AnalyticsPage() {
             )}
           </div>
         )}
+        {basis === 'transactions' && (
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500">{t('transactions.granularity')}</span>
+              <select
+                className="rounded border-gray-300 text-sm"
+                value={txnGranularity}
+                onChange={(e) => setTxnGranularity(e.target.value as '24h' | 'day' | 'week' | 'month')}
+              >
+                <option value="24h">{t('transactions.g24h')}</option>
+                <option value="day">{t('transactions.day')}</option>
+                <option value="week">{t('transactions.week')}</option>
+                <option value="month">{t('transactions.month')}</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500">{t('transactions.breakdown')}</span>
+              <select
+                className="rounded border-gray-300 text-sm"
+                value={txnBreakdown}
+                onChange={(e) =>
+                  setTxnBreakdown(
+                    e.target.value as 'none' | 'site' | 'customer_type' | 'country' | 'portfolio' | 'type',
+                  )
+                }
+              >
+                <option value="none">{t('transactions.aggregated')}</option>
+                <option value="site">{t('transactions.bySite')}</option>
+                <option value="customer_type">{t('transactions.byCustomerType')}</option>
+                <option value="country">{t('transactions.byCountry')}</option>
+                <option value="portfolio">{t('transactions.byPortfolio')}</option>
+                <option value="type">{t('transactions.byType')}</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500">{t('transactions.metric')}</span>
+              <select
+                className="rounded border-gray-300 text-sm"
+                value={txnMetric}
+                onChange={(e) =>
+                  setTxnMetric(e.target.value as 'amount_total' | 'amount_electricity' | 'tx_count')
+                }
+              >
+                <option value="amount_total">{t('transactions.amountMetric')}</option>
+                <option value="amount_electricity">{t('transactions.electricityAmountMetric')}</option>
+                <option value="tx_count">{t('transactions.countMetric')}</option>
+              </select>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Filter Bar ── */}
@@ -537,7 +682,7 @@ export default function AnalyticsPage() {
             onChange={setFilterCustomerTypes}
             allLabel={t('allCustomerTypes')}
           />
-          {(basis === 'time' || basis === 'benchmark') && (
+          {(basis === 'time' || basis === 'benchmark' || basis === 'transactions') && (
             <>
               <label className="block">
                 <span className="text-xs text-gray-500">{t('dateFrom')}</span>
@@ -562,10 +707,53 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
+      {/* ── Raw hourly consumption download ── */}
+      <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+        <h2 className="text-sm font-medium text-gray-600 mb-1">{t('hourlyExport.title')}</h2>
+        <p className="text-xs text-gray-500 mb-3">{t('hourlyExport.help')}</p>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="block">
+            <span className="text-xs text-gray-500">{t('dateFrom')}</span>
+            <input
+              type="date"
+              className="mt-1 block rounded border-gray-300 text-sm"
+              value={exportFrom}
+              onChange={(e) => setExportFrom(e.target.value)}
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs text-gray-500">{t('dateTo')}</span>
+            <input
+              type="date"
+              className="mt-1 block rounded border-gray-300 text-sm"
+              value={exportTo}
+              onChange={(e) => setExportTo(e.target.value)}
+            />
+          </label>
+          <button
+            onClick={runHourlyExport}
+            disabled={exporting}
+            className="px-5 py-2 bg-emerald-600 text-white text-sm font-medium rounded hover:bg-emerald-700 disabled:opacity-40 transition-colors"
+          >
+            {exporting ? t('hourlyExport.downloading') : t('hourlyExport.download')}
+          </button>
+          <span className="text-xs text-gray-400">
+            {t('hourlyExport.scope', {
+              country: filterCountry || 'ALL',
+              sites: filterSites.length ? filterSites.join(', ') : t('allSites'),
+              types: filterCustomerTypes.length ? filterCustomerTypes.join(', ') : t('allCustomerTypes'),
+            })}
+          </span>
+        </div>
+        {exportError && (
+          <div className="mt-2 p-2 bg-red-50 border border-red-200 text-red-700 text-xs rounded">{exportError}</div>
+        )}
+      </div>
+
       {/* ── Metric Selector ── */}
-      {basis !== 'benchmark' && catalogLoading ? (
+      {basis !== 'benchmark' && basis !== 'transactions' && catalogLoading ? (
         <div className="text-center py-4 text-gray-400">{t('common:loading')}</div>
-      ) : basis !== 'benchmark' && catalog ? (
+      ) : basis !== 'benchmark' && basis !== 'transactions' && catalog ? (
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-medium text-gray-600">{t('selectMetrics')}</h2>
@@ -626,6 +814,20 @@ export default function AnalyticsPage() {
             className="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded hover:bg-blue-700 disabled:opacity-40 transition-colors"
           >
             {loading ? t('loading') : t('benchmark.run')}
+          </button>
+        </div>
+      )}
+
+      {basis === 'transactions' && (
+        <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+          <h2 className="text-sm font-medium text-gray-600 mb-1">{t('transactions.title')}</h2>
+          <p className="text-xs text-gray-500 mb-3">{t('transactions.help')}</p>
+          <button
+            onClick={runTransactions}
+            disabled={loading || (txnBreakdown === 'portfolio' && !portfolio?.id)}
+            className="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded hover:bg-blue-700 disabled:opacity-40 transition-colors"
+          >
+            {loading ? t('loading') : t('transactions.run')}
           </button>
         </div>
       )}
@@ -697,8 +899,125 @@ export default function AnalyticsPage() {
         <div className="text-center py-12 text-gray-400">{t('benchmark.noData')}</div>
       )}
 
+      {basis === 'transactions' && txnTableRows.length > 0 && (
+        <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
+          <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+            <h2 className="text-sm font-medium text-gray-600">{t('transactions.results')}</h2>
+            <button
+              onClick={() => {
+                if (!txnTableRows.length) return;
+                const headers = ['bucket', 'breakdown', 'tx_count', 'amount_total', 'amount_electricity'];
+                const csv = [
+                  headers.join(','),
+                  ...txnTableRows.map((row) => headers.map((h) => JSON.stringify((row as any)[h] ?? '')).join(',')),
+                ].join('\n');
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'transactions-timeseries.csv';
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50"
+            >
+              {t('exportCsv')}
+            </button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-gray-50 text-left text-gray-600">
+                <tr>
+                  <th className="px-4 py-2 font-medium">{t('transactions.bucket')}</th>
+                  <th className="px-4 py-2 font-medium">{t('transactions.series')}</th>
+                  <th className="px-4 py-2 font-medium text-right">{t('transactions.countMetric')}</th>
+                  <th className="px-4 py-2 font-medium text-right">{t('transactions.amountMetric')}</th>
+                  <th className="px-4 py-2 font-medium text-right">{t('transactions.electricityAmountMetric')}</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {txnTableRows.map((row, i) => (
+                  <tr key={`${row.bucket}-${row.breakdown}-${i}`} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 font-medium text-gray-800 whitespace-nowrap">{row.bucket}</td>
+                    <td className="px-4 py-2 text-gray-700">{row.breakdown}</td>
+                    <td className="px-4 py-2 text-right font-mono tabular-nums">{row.tx_count.toLocaleString()}</td>
+                    <td className="px-4 py-2 text-right font-mono tabular-nums">{fmtValue(row.amount_total, 'currency')}</td>
+                    <td className="px-4 py-2 text-right font-mono tabular-nums">{fmtValue(row.amount_electricity, 'currency')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {basis === 'transactions' && txnChartData.length > 0 && txnResult && (
+        <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-medium text-gray-600">{t('transactions.chart')}</h2>
+            <div className="flex gap-1">
+              <button
+                onClick={() => setChartType('bar')}
+                className={`px-3 py-1 text-xs rounded ${chartType === 'bar' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-100'}`}
+              >
+                {t('barChart')}
+              </button>
+              <button
+                onClick={() => setChartType('line')}
+                className={`px-3 py-1 text-xs rounded ${chartType === 'line' ? 'bg-blue-100 text-blue-700' : 'text-gray-500 hover:bg-gray-100'}`}
+              >
+                {t('lineChart')}
+              </button>
+            </div>
+          </div>
+          <ResponsiveContainer width="100%" height={420}>
+            {chartType === 'bar' ? (
+              <BarChart data={txnChartData} margin={{ top: 5, right: 20, left: 0, bottom: 40 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="bucket" tick={{ fontSize: 11 }} angle={-30} textAnchor="end" />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip contentStyle={{ borderRadius: '8px', fontSize: '12px' }} />
+                <Legend />
+                {txnResult.series_keys.map((key, i) => (
+                  <Bar
+                    key={key}
+                    dataKey={key}
+                    fill={COLORS[i % COLORS.length]}
+                    radius={[4, 4, 0, 0]}
+                    name={key}
+                  />
+                ))}
+              </BarChart>
+            ) : (
+              <LineChart data={txnChartData} margin={{ top: 5, right: 20, left: 0, bottom: 40 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                <XAxis dataKey="bucket" tick={{ fontSize: 11 }} angle={-30} textAnchor="end" />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip contentStyle={{ borderRadius: '8px', fontSize: '12px' }} />
+                <Legend />
+                {txnResult.series_keys.map((key, i) => (
+                  <Line
+                    key={key}
+                    type="monotone"
+                    dataKey={key}
+                    stroke={COLORS[i % COLORS.length]}
+                    strokeWidth={2}
+                    dot={{ r: 3 }}
+                    name={key}
+                  />
+                ))}
+              </LineChart>
+            )}
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {basis === 'transactions' && !loading && txnResult && txnTableRows.length === 0 && (
+        <div className="text-center py-12 text-gray-400">{t('transactions.noData')}</div>
+      )}
+
       {/* ── Results Table ── */}
-      {basis !== 'benchmark' && result && tableRows.length > 0 && (
+      {basis !== 'benchmark' && basis !== 'transactions' && result && tableRows.length > 0 && (
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
             <h2 className="text-sm font-medium text-gray-600">{t('results')}</h2>
@@ -755,12 +1074,12 @@ export default function AnalyticsPage() {
         </div>
       )}
 
-      {basis !== 'benchmark' && result && tableRows.length === 0 && (
+      {basis !== 'benchmark' && basis !== 'transactions' && result && tableRows.length === 0 && (
         <div className="text-center py-12 text-gray-400">{t('noData')}</div>
       )}
 
       {/* ── Chart ── */}
-      {basis !== 'benchmark' && chartData.length > 0 && result?.series && result.series.length > 0 && (
+      {basis !== 'benchmark' && basis !== 'transactions' && chartData.length > 0 && result?.series && result.series.length > 0 && (
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-medium text-gray-600">{t('chart')}</h2>
@@ -822,7 +1141,7 @@ export default function AnalyticsPage() {
       )}
 
       {/* ── Empty state ── */}
-      {!result && basis !== 'benchmark' && !loading && (
+      {!result && basis !== 'benchmark' && basis !== 'transactions' && !loading && (
         <div className="text-center py-20 text-gray-400">
           <p className="text-lg mb-1">{t('noMetricsSelected')}</p>
         </div>

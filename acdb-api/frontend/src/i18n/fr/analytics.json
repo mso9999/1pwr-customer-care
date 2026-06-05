@@ -6,6 +6,7 @@
     "site": "Par Site",
     "customerType": "Par Type de Client",
     "time": "Dans le Temps",
+    "transactions": "Série temporelle des transactions",
     "overview": "Vue d'Ensemble",
     "benchmark": "Référence de consommation",
     "timeGranularity": "Granularité :",
@@ -58,10 +59,44 @@
     "totalKwh": "kWh total",
     "avgKwhPerCustomer": "kWh moyen/client"
   },
+  "transactions": {
+    "title": "Série temporelle des transactions",
+    "help": "Analysez les transactions dans le temps, agrégées ou ventilées par site, type de client, portefeuille, pays ou type de transaction.",
+    "run": "Lancer la requête transactions",
+    "failed": "Échec de la requête de série temporelle des transactions.",
+    "results": "Résultats des transactions",
+    "chart": "Graphique des transactions",
+    "noData": "Aucune transaction ne correspond aux filtres actuels.",
+    "granularity": "Granularité",
+    "breakdown": "Ventilation",
+    "metric": "Mesure",
+    "g24h": "24 heures",
+    "day": "Journalier",
+    "week": "Hebdomadaire",
+    "month": "Mensuel",
+    "aggregated": "Agrégé (Tout)",
+    "bySite": "Par site",
+    "byCustomerType": "Par type de client",
+    "byCountry": "Par pays",
+    "byPortfolio": "Par portefeuille",
+    "byType": "Par type de transaction",
+    "amountMetric": "Montant",
+    "electricityAmountMetric": "Montant électricité",
+    "countMetric": "Nombre de transactions",
+    "bucket": "Période",
+    "series": "Série"
+  },
   "category": {
     "funnel": "Entonnoir client",
     "customer": "Base clients",
     "financial": "Finances",
     "consumption": "Consommation"
+  },
+  "hourlyExport": {
+    "title": "Télécharger la consommation horaire brute",
+    "help": "Exportez les relevés horaires en kWh (une ligne par compte, compteur et heure) au format CSV, selon les filtres Pays / Sites / Types de client ci-dessus. Horodatage en UTC. Plage maximale 400 jours.",
+    "download": "Télécharger le CSV",
+    "downloading": "Préparation du téléchargement...",
+    "scope": "Portée : {{country}} · sites : {{sites}} · types : {{types}}"
   }
 }

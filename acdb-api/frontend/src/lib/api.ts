@@ -3234,6 +3234,42 @@ export interface ConsumptionBenchmarkResponse {
   };
 }
 
+export interface TransactionsTimeSeriesRequest {
+  granularity: '24h' | 'day' | 'week' | 'month';
+  breakdown: 'none' | 'site' | 'customer_type' | 'country' | 'portfolio' | 'type';
+  country?: string;
+  sites?: string[];
+  portfolio_id?: string;
+  all_datasets?: boolean;
+  customer_types?: string[];
+  from?: string;
+  to?: string;
+}
+
+export interface TransactionsTimeSeriesRow {
+  bucket: string;
+  breakdown: string;
+  tx_count: number;
+  amount_total: number;
+  amount_electricity: number;
+}
+
+export interface TransactionsTimeSeriesResponse {
+  rows: TransactionsTimeSeriesRow[];
+  series_keys: string[];
+  filters_applied: {
+    granularity: '24h' | 'day' | 'week' | 'month';
+    breakdown: 'none' | 'site' | 'customer_type' | 'country' | 'portfolio' | 'type';
+    country?: string;
+    portfolio_id?: string;
+    all_datasets?: boolean;
+    sites: string[];
+    customer_types: string[];
+    date_from: string;
+    date_to: string;
+  };
+}
+
 export async function getAnalyticsMetrics(): Promise<AnalyticsMetricsCatalog> {
   return request('/analytics/metrics');
 }
@@ -3252,6 +3288,41 @@ export async function runConsumptionBenchmark(
     method: 'POST',
     body: JSON.stringify(req),
   });
+}
+
+export async function runTransactionsTimeSeries(
+  req: TransactionsTimeSeriesRequest,
+): Promise<TransactionsTimeSeriesResponse> {
+  return request('/analytics/transactions-timeseries', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
+}
+
+export async function downloadHourlyConsumption(params: {
+  date_from: string;
+  date_to: string;
+  country?: string;
+  sites?: string[];
+  customer_types?: string[];
+  account?: string;
+}): Promise<void> {
+  const qs = new URLSearchParams();
+  qs.set('date_from', params.date_from);
+  qs.set('date_to', params.date_to);
+  if (params.country) qs.set('country', params.country);
+  if (params.sites && params.sites.length) qs.set('sites', params.sites.join(','));
+  if (params.customer_types && params.customer_types.length) {
+    qs.set('customer_types', params.customer_types.join(','));
+  }
+  if (params.account) qs.set('account', params.account);
+  const scope = (params.sites && params.sites.length)
+    ? params.sites.join('-')
+    : (params.country || 'all');
+  return downloadFile(
+    `/analytics/consumption-export?${qs.toString()}`,
+    `hourly-consumption_${scope}_${params.date_from}_${params.date_to}.csv`,
+  );
 }
 
 // ── Customer Cohort ──────────────────────────────────────────────────

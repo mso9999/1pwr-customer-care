@@ -6,6 +6,7 @@
     "site": "By Site",
     "customerType": "By Customer Type",
     "time": "Over Time",
+    "transactions": "Transactions Time Series",
     "overview": "Overview",
     "benchmark": "Consumption Benchmark",
     "timeGranularity": "Granularity:",
@@ -58,10 +59,44 @@
     "totalKwh": "Total kWh",
     "avgKwhPerCustomer": "Avg kWh/customer"
   },
+  "transactions": {
+    "title": "Transactions Time Series",
+    "help": "Explore transactions over time aggregated or disaggregated by site, customer type, portfolio, country, or transaction type.",
+    "run": "Run Transactions Query",
+    "failed": "Transactions time series query failed.",
+    "results": "Transactions Results",
+    "chart": "Transactions Chart",
+    "noData": "No transactions match current filters.",
+    "granularity": "Granularity",
+    "breakdown": "Breakdown",
+    "metric": "Metric",
+    "g24h": "24 Hours",
+    "day": "Daily",
+    "week": "Weekly",
+    "month": "Monthly",
+    "aggregated": "Aggregated (All)",
+    "bySite": "By Site",
+    "byCustomerType": "By Customer Type",
+    "byCountry": "By Country",
+    "byPortfolio": "By Portfolio",
+    "byType": "By Transaction Type",
+    "amountMetric": "Amount",
+    "electricityAmountMetric": "Electricity Amount",
+    "countMetric": "Transaction Count",
+    "bucket": "Time Bucket",
+    "series": "Series"
+  },
   "category": {
     "funnel": "Customer Funnel",
     "customer": "Customer Base",
     "financial": "Financial",
     "consumption": "Consumption"
+  },
+  "hourlyExport": {
+    "title": "Download Raw Hourly Consumption",
+    "help": "Export hourly kWh readings (one row per account, meter, and hour) as CSV, using the Country / Sites / Customer Types filters above. Timestamps are UTC. Max range 400 days.",
+    "download": "Download CSV",
+    "downloading": "Preparing download...",
+    "scope": "Scope: {{country}} · sites: {{sites}} · types: {{types}}"
   }
 }
