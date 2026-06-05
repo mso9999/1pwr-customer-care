@@ -32,7 +32,13 @@ def main() -> int:
     ap.add_argument("--state-table", default="sm_credit_mirror_state")
     ap.add_argument("--bootstrap-days", type=int, default=30)
     ap.add_argument("--watermark-overlap-minutes", type=int, default=120)
-    ap.add_argument("--fuzzy-window-minutes", type=int, default=0)
+    # Default 10-minute fuzzy window so the mirror skips SparkMeter credits that
+    # are echoes of payments CC already booked (M-Pesa/portal → pushed to Koios →
+    # returned by the web-scrape, which does not expose our external_id). Without
+    # it, those echoes were inserted as duplicate `smhist:` payment rows and
+    # inflated CC balances vs Koios. Genuine external/manual SM credits (no CC
+    # counterpart for that account+amount within the window) still import.
+    ap.add_argument("--fuzzy-window-minutes", type=int, default=10)
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
