@@ -119,6 +119,19 @@
   3. Alternative hourly source to investigate: Koios **web CSV** daily reports (what BN uses) may
      expose finer-than-daily data even when the v2 API is degraded.
 
+### RESOLVED — hourly IS recoverable via `/api/v2/report` (the endpoint BN uses)
+- LS importer (`import_hourly.py`) uses `data/historical`, which has degraded to daily aggregates.
+- BN importer (`/opt/1pdb-bn/import_benin_hourly.py`) uses **`GET /api/v2/report`**
+  (`granularity=daily&type=readings&site_id&date`, same `X-API-KEY/SECRET`), which returns full
+  **15-minute heartbeats** (`heartbeat_start`, `kilowatt_hours`, `meter/customer/code`).
+- TESTED for LS MAS site_id `101c443e-...` date 2025-12-01 (a 3%-coverage gap day): returns
+  **14,933 rows = 97 intervals × 155 accounts**. So LS historical hourly gaps ARE fully recoverable.
+- Durable plan (CONFIRMED feasible): (1) backfill LS gaps from `/api/v2/report` (15-min → hourly,
+  upsert `hourly_consumption`), (2) rebuild monthly_consumption (deduped) + re-anchor LS again
+  (balances stay = Koios but now data-backed; seeds shrink), (3) switch the ongoing LS sync to the
+  `/api/v2/report` endpoint so the degraded `data/historical` no longer creates gaps. Generalize
+  `import_benin_hourly.py` to LS site IDs (or point LS at the report endpoint).
+
 ## Session 2026-06-05 [202606050832] (Analytics Consumption Returns Zero Rows)
 
 ### Symptom
