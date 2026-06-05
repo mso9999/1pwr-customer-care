@@ -1,3 +1,36 @@
+## Session 2026-06-05 [202606051100] (CC↔Koios balance divergence — RCA + durable fix)
+
+### Symptom
+- Account `0014MAS` (Lebeko Lebeko, MAS): CC balance **16.8 kWh / LSL 84.09**, Koios credit **LSL 19.30**
+  (~3.86 kWh). Recurring complaint of CC↔Koios divergence across the fleet.
+
+### Root cause — double-counted payments in CC (echo loop)
+- M-Pesa SMS payment → `ingest.py` inserts a `source='sms_gateway'` payment row **and** pushes the
+  credit to Koios (`credit_sparkmeter`, `external_id=str(txn_id)`).
+- The Koios daily-payment importer **`backfill_transactions.py`** then re-imports that same payment
+  as a `source='koios'` row. Its only dedup was `ON CONFLICT (source_table)` (idempotent against
+  itself) — it had **no awareness of the existing sms_gateway/portal row**. So every pushed payment
+  was booked twice. `balance_engine.get_balance_kwh` sums `kwh_value` of both → CC balance inflated
+  vs Koios.
+- Evidence: `0014MAS` has 13 koios rows each matching an sms_gateway payment (same acct+amount,
+  ~1 min apart). **Fleet-wide: 2,851 koios rows duplicate an sms_gateway payment (~21,909 kWh).**
+- The `import_tc_transactions.py` / `backfill_mak_transactions.py` (MAK) importers already had the
+  cross-source dedup ("skip if CC already booked acct+amount within 10 min"); it was **never ported**
+  to the LS Koios path. BN is unaffected (`import_transactions_bn.py`; BN dup count = 0, no SMS echo).
+
+### Durable forward fix (DONE)
+- Patched **`/opt/1pdb/services/backfill_transactions.py`** `insert_transactions()` to skip any Koios
+  payment when CC already has a payment for the same `(account, amount)` within 600s, before insert
+  (mirrors the proven MAK dedup). Backup `*.bak.20260605T151641Z`. Server-side file (1PDB repo), not
+  in this CC repo.
+
+### NOT yet done — historical cleanup (needs go-ahead; financial + interacts with balance_seed)
+- ~2,851 existing duplicate `koios` rows still inflate balances. Cleanup must account for the
+  `balance_seed` cutover rows (e.g. `0014MAS` seed −515.89 @ 2026-02-12) which already absorbed the
+  PRE-anchor over-count — deleting everything plus keeping the seed would over-correct. Plan: delete
+  post-anchor koios duplicates (or delete all dups + drop seeds) and re-anchor with the existing
+  `audit_ls_balances.py` / `cutover_ls_balances.py` tooling, then `--check`.
+
 ## Session 2026-06-05 [202606050832] (Analytics Consumption Returns Zero Rows)
 
 ### Symptom
