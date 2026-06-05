@@ -97,6 +97,28 @@
   --no-skip` over deficient cells), (b) re-anchor again post-backfill, (c) weekly `--no-skip`
   catch-up + coverage-trend alarm to stop new gaps. This also fixes the consumption analytics gaps.
 
+### BLOCKER discovered while attempting the backfill — Koios v2 only serves hourly briefly
+- `import_hourly.py --repair` / `--no-skip` for older dates (tested MAS 2025-12 and 2026-06-04 re-pull)
+  returns **"API degraded: N meters but only 1 hour - daily aggregates, skipping"**. Koios v2
+  `data/historical` serves true **hourly only for ~1–2 days**, then collapses to **daily aggregates**.
+- Consequence: **historical hourly gaps are NOT recoverable as hourly.** Gaps form when the daily
+  sync misses a day (rate limit / error); by retry time the hourly window has passed → importer skips
+  the daily-aggregate response → permanent hourly hole. This is the gap-formation mechanism.
+- Current import is HEALTHY (hourly captured for 2026-06-02/03/04: 2.8k/10.6k/9.9k rows); not a live
+  outage. So this is about missed-day gaps, not an ongoing stall.
+- Balances are already correctly anchored to Koios (re-anchor seeds absorb the unrecoverable gaps) —
+  given the data can't be recovered hour-by-hour, trusting Koios (physical truth) IS the right
+  balance outcome. No second re-anchor needed.
+- Revised durable plan:
+  1. **Prevention (key):** modify `import_hourly.py` so that when the API returns daily aggregates it
+     **ingests the daily total** (e.g., one synthetic hourly row / daily bucket) instead of skipping —
+     so a missed day still captures total consumption (balance stays correct; only hourly resolution
+     lost). Mirrors BN's `import_hourly_bn` daily-CSV binning. Also harden daily sync reliability.
+  2. Optional analytics recovery: backfill historical **daily** totals (not hourly) for the gap
+     months to improve monthly consumption analytics. Does NOT affect balance (already anchored).
+  3. Alternative hourly source to investigate: Koios **web CSV** daily reports (what BN uses) may
+     expose finer-than-daily data even when the v2 API is degraded.
+
 ## Session 2026-06-05 [202606050832] (Analytics Consumption Returns Zero Rows)
 
 ### Symptom
