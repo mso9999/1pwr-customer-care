@@ -132,6 +132,29 @@
   `/api/v2/report` endpoint so the degraded `data/historical` no longer creates gaps. Generalize
   `import_benin_hourly.py` to LS site IDs (or point LS at the report endpoint).
 
+### EXECUTED — full durable consumption fix (policy: backfill <=90 days, seed older)
+- **New importer** `scripts/ops/import_koios_report.py` (committed): pulls Koios `/api/v2/report`
+  15-min heartbeats, bins to hourly (UTC, verified), upserts `hourly_consumption`
+  `ON CONFLICT (meter_id, reading_hour) DO UPDATE`. Collapses to one row per (meter,hour) to avoid
+  ON CONFLICT cardinality errors (a meter serial can appear under two account codes in one hour).
+- **Backfilled last 90 days** (2026-03-07..2026-06-05) for all 8 LS Koios sites: MAS, TLH (154k),
+  SHG (643k), LSB (54k), SEH (17k), TOS (3k), MAT (568k), KET (300k). Coverage e.g. `0014MAS`
+  Mar 47%->83%, Apr 61%->99%, May 69%->94%. Fleet dup rate 0.05% (balance-safe via read-time dedup).
+- **Re-anchored again** (`cutover_ls_balances.py --apply --allow-negative-delta --cutover-tag
+  realign2_2026-06-05`; old `realign_2026-06-05` seeds backed up to `cc_seed_backup_realign2` and
+  dropped first). Post-cutover audit: **2 / 1922 accounts drift** (was 14). Seeds now represent only
+  the unrecovered >90-day gaps; recent months are backed by real data.
+- **Rebuilt `monthly_consumption`** (deduped) from the backfilled hourly -> 30,437 rows, current to
+  2026-06 (fixes the consumption analytics for the recent gap months too).
+- **Prevention (durable):** added Phase 2b to `/opt/1pdb/services/sync_consumption.sh` (backup
+  `*.bak.20260605T193034Z`) that runs `import_koios_report.py` over a trailing 3-day window every
+  15 min, so any day `data/historical` serves only daily aggregates is self-healed from
+  `/api/v2/report` before it ages out. `import_koios_report.py` deployed to `/opt/1pdb/services/`.
+- NOTE: `sync_consumption.sh` and the `/opt/1pdb/services/` copies are 1PDB-repo/server artifacts;
+  mirror the importer + Phase 2b there. The CC repo holds the canonical `scripts/ops/import_koios_report.py`.
+- Net: CC<->Koios divergence is resolved end-to-end — echoes prevented, balances anchored, recent
+  consumption real, older gaps seeded, and the gap-formation mechanism closed going forward.
+
 ## Session 2026-06-05 [202606050832] (Analytics Consumption Returns Zero Rows)
 
 ### Symptom
