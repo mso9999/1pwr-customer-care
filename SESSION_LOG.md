@@ -24,12 +24,44 @@
   (mirrors the proven MAK dedup). Backup `*.bak.20260605T151641Z`. Server-side file (1PDB repo), not
   in this CC repo.
 
-### NOT yet done — historical cleanup (needs go-ahead; financial + interacts with balance_seed)
-- ~2,851 existing duplicate `koios` rows still inflate balances. Cleanup must account for the
-  `balance_seed` cutover rows (e.g. `0014MAS` seed −515.89 @ 2026-02-12) which already absorbed the
-  PRE-anchor over-count — deleting everything plus keeping the seed would over-correct. Plan: delete
-  post-anchor koios duplicates (or delete all dups + drop seeds) and re-anchor with the existing
-  `audit_ls_balances.py` / `cutover_ls_balances.py` tooling, then `--check`.
+### Second echo source found + forward fix
+- Echoes come from TWO importers: `backfill_transactions.py` (`koios_csv:` source_table, ~2,017) and
+  the SM→CC mirror `import_sm_manual_credits.py` via `run_sm_credit_mirror_incremental.py`
+  (`smhist:`, ~236). The mirror ran with `--fuzzy-window-minutes 0` so it couldn't skip CC echoes
+  (web-scrape doesn't expose our `external_id`).
+- Forward fixes (DONE):
+  - `/opt/1pdb/services/backfill_transactions.py` — added cross-source dedup (skip if CC already has
+    acct+amount within 600s). Backup `*.bak.20260605T151641Z`. (1PDB-repo file; patch directly.)
+  - `scripts/ops/run_sm_credit_mirror_incremental.py` — default `--fuzzy-window-minutes` 0→10
+    (committed + pushed; deploys to `/opt/cc-portal/backend/scripts/ops/`).
+
+### Historical cleanup — ATTEMPTED, ROLLED BACK (seed entanglement)
+- Deleted 1,211 post-anchor `koios` echoes (backed up to table `cc_koios_echo_backup_20260605`) →
+  `0014MAS` went to **−112.58 kWh** (over-corrected). RCA: `balance_seed` rows encode MORE than echo
+  compensation — notably the **pre-import consumption gap** (e.g. `0014MAS` has `accdb` payments
+  predating CC's consumption history that starts 2023-12-15; without the seed, raw 1PDB ≈ +403 kWh).
+  So a partial echo delete with seeds kept → too low; dropping seeds + re-anchor with default
+  *skip-negative* → those accounts balloon to +400; only `--allow-negative-delta` re-seeds them
+  correctly (which can LOWER balances and needs finance sign-off per `smp-1pdb-cutover.md`).
+- **Rolled back** the 1,211-row delete (restored from backup); `0014MAS` back to 16.82 kWh. Forward
+  fixes remain.
+
+### Fleet audit (read-only, `audit_ls_balances.py`)
+- TOTAL `SM − 1PDB` over drifted accounts ≈ **−53,095 kWh** (CC > Koios fleet-wide). Composed of:
+  (a) ~17k kWh **echo over-count** (the bug — fixable), and (b) the rest = **consumption-import lag**
+  (Koios debits in real time; CC debits batch-imported hourly data ~1 day behind) + misc. Most
+  per-account deltas are ≤5 kWh.
+
+### Durable conclusion / recommendation
+- The **forward fixes are the durable solution** to the *recurring* divergence: no new echoes will
+  be created on any path (Koios CSV, SM mirror; MAK already had it; BN unaffected).
+- CC and Koios will always carry a small lag-based delta; **CC (`balance_engine`) is the canonical
+  customer-facing balance** (per CONTEXT) — do not chase sub-day parity.
+- Historical echo over-count (~17k kWh) remediation = full re-anchor: delete ALL echoes + drop seeds
+  + `cutover_ls_balances.py --apply --allow-negative-delta`, **with finance review of the preview
+  CSV** (it changes/lowers balances; must first confirm no legit CC-credits-missing-from-Koios via
+  the SM-credit retry queue). Left for a finance-gated session. Backup table
+  `cc_koios_echo_backup_20260605` retained.
 
 ## Session 2026-06-05 [202606050832] (Analytics Consumption Returns Zero Rows)
 
