@@ -63,6 +63,21 @@
   the SM-credit retry queue). Left for a finance-gated session. Backup table
   `cc_koios_echo_backup_20260605` retained.
 
+### Clean + realignment EXECUTED (user confirmed all legit credits are in both CC and Koios)
+- Backups (onepower_cc): `cc_echo_backup_realign` (2,260 echo rows / 17,612 kWh),
+  `cc_seed_backup_realign` (1,285 seed rows / −168,623 kWh). Also `cc_koios_echo_backup_20260605`.
+- Deleted echo duplicate payment rows + dropped old `balance_seed` rows for re-anchor-eligible
+  accounts only (valid `\d{4}[A-Z]{2,4}`, excluding 0500MAK/*BVW/*LAB/FAULTY*).
+- Re-anchored via `cutover_ls_balances.py --apply --allow-negative-delta --cutover-tag
+  realign_2026-06-05` → **1,394 fresh balance_seed rows** = SparkMeter − 1PDB per account.
+- Verification (`audit_ls_balances.py --check`): **only 14 / 1,390 accounts drift >0.5 kWh**
+  (was a −53,095 kWh fleet gap). `0014MAS` now 3.86 kWh = Koios LSL 19.30 exactly.
+- Residual 14 are post-snapshot drift (consumption accrued during the ~15-min run) + 3 outliers to
+  review manually: `0162SHG` (CC 90.5 vs SM 1.17), `0150MAK` (SM 49.98 vs CC ~0), `0207MAK`
+  (SM 17.95 vs CC ~0) — all received a realign seed; their SM balance moved after the snapshot.
+- Daily `cc-ls-balance-audit.timer` continues monitoring; forward fixes prevent new echoes so this
+  should not re-accumulate. Backup tables retained for rollback.
+
 ## Session 2026-06-05 [202606050832] (Analytics Consumption Returns Zero Rows)
 
 ### Symptom
