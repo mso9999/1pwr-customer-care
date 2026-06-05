@@ -129,10 +129,21 @@ def parse_hourly(raw_csv: str) -> dict[tuple[str, str, str], float]:
 def upsert(conn, community: str, hourly: dict, apply: bool) -> int:
     if not hourly:
         return 0
-    rows = [
-        (acct, serial, hour, round(kwh, 6), community)
-        for (acct, serial, hour), kwh in hourly.items()
-    ]
+    # The unique conflict key is (meter_id, reading_hour). If a meter_serial
+    # appears under more than one account in the same hour (mid-day reassignment
+    # / Koios data quirk), the batch would contain duplicate constrained values
+    # and ON CONFLICT DO UPDATE errors ("cannot affect row a second time").
+    # Collapse to one row per (serial, hour): sum total kWh on that meter-hour
+    # and attribute it to the account with the largest share.
+    agg: dict[tuple[str, str], dict] = {}
+    for (acct, serial, hour), kwh in hourly.items():
+        slot = agg.setdefault((serial, hour), {"kwh": 0.0, "by_acct": defaultdict(float)})
+        slot["kwh"] += kwh
+        slot["by_acct"][acct] += kwh
+    rows = []
+    for (serial, hour), slot in agg.items():
+        acct = max(slot["by_acct"].items(), key=lambda kv: kv[1])[0]
+        rows.append((acct, serial, hour, round(slot["kwh"], 6), community))
     if not apply:
         return len(rows)
     cur = conn.cursor()
