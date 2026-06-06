@@ -155,6 +155,26 @@
 - Net: CC<->Koios divergence is resolved end-to-end — echoes prevented, balances anchored, recent
   consumption real, older gaps seeded, and the gap-formation mechanism closed going forward.
 
+### MAK ThunderCloud outage + fairness review (later same day)
+- **MAK no-electricity report (TC-side, NOT our fix):** MAK ThunderCloud telemetry stopped at
+  ~14:00-14:15 UTC 2026-06-05 (1Meter `iot` prototypes kept reporting → it's the SparkMeter/TC side).
+  Credits are in CC and in TC's *customer* ledger, but offline meters can't receive them → relay Off
+  → no power. Fix is restoring MAK site/meter connectivity (SparkMeter side). CC balances are correct.
+- **MAK re-anchor reverted:** today's `realign/realign2` re-anchor ran *during* the TC outage (used
+  volatile outage-time TC values: 0163MAK read 41.66 vs 19.14). Reverted all MAK accounts to the
+  pre-outage **June-1 anchor** (`anchor_20260601T*` + `manual_residual_*`, 279 seeds, -77,914 kWh)
+  from `cc_seed_backup_realign`. 0163MAK now 44.14 kWh. Koios sites keep realign2 (correct).
+- **Fairness principle:** customer is owed (all electricity paid in kWh) - (kWh actually consumed);
+  never negative; positive credit must yield power. For MAK, CC cannot independently track
+  consumption (0163MAK shows only 223 kWh over 5y), so **ThunderCloud's meter ledger is the accurate
+  net balance for MAK** (when healthy); for Koios sites CC (now backfilled) is accurate.
+- **NULL-kWh electricity payment audit (fleet):** 12,245 portal "electricity" payments have
+  `kwh_value IS NULL` (1.12M LSL, 2019-2026). Conclusion: **no customer under-credited.** They are
+  (a) legacy/historical portal imports — pre-anchor, so absorbed by the SM-anchored balance_seed, and
+  (b) 538 `mm:` **merchant-backfill** audit rows (intentional null-kWh per `smp-1pdb-cutover.md`).
+  Balances stay correct because every account's seed = SM - CC. The null-kWh is by-design audit data,
+  not under-crediting. (Worth a future cleanup for CC ledger clarity, but no balance impact.)
+
 ## Session 2026-06-05 [202606050832] (Analytics Consumption Returns Zero Rows)
 
 ### Symptom
