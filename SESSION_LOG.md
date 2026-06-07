@@ -1,3 +1,26 @@
+## Session 2026-06-07 [202606071545] (GBO consumption history backfill)
+
+### Question
+- Does `GBO Hourly Consumption.csv` (Koios web export, name-keyed, 2024-06 → 2026-05) hold data not
+  in CC? **Yes** — CC's GBO `hourly_consumption` started 2025-07-31; the CSV had ~13 months
+  (Jun 2024 → Jul 2025, ~11.5k kWh) absent from CC, plus CC had an Oct-2025 hole (~0.8 kWh).
+
+### Resolution (policy: pull from Koios if available, else CSV)
+- Probed Koios `/api/v2/report` for GBO (BN keys): has data from **~2025-08** (2025-08-15 OK,
+  2025-07-15 = 404). So:
+  - **2025-08 → now:** pulled from Koios `import_koios_report.py --country BN --site GBO` (fixed the
+    Oct-2025 gap; full range refresh ran in background).
+  - **Jun 2024 → Jul 2025 (not in Koios):** backfilled from the CSV. Built name→account map from the
+    **Koios report itself** (same source as the CSV) across 11 sample days → matched **130/142
+    columns = 93.9% of pre-2025-08 kWh**; 12 unmatched are non-customer/commercial loads
+    (`CLIM GBO`, `TCHATCHABLOUKOU (URHC)`) + a few unmappable names. Inserted **291,455** hourly rows
+    into `onepower_bj.hourly_consumption` (source=koios, meter_id = Koios serial).
+- Tool committed: `scripts/ops/backfill_gbo_csv_consumption.py`.
+- Result: GBO coverage now **continuous Jun 2024 → Jun 2026**.
+- **No balance impact** — BN balances were seed-anchored to Koios on 2026-04-09; this is consumption
+  history/analytics only.
+- Follow-up: rebuild BN `monthly_consumption` after the Koios pass finishes (analytics).
+
 ## Session 2026-06-05 [202606051100] (CC↔Koios balance divergence — RCA + durable fix)
 
 ### Symptom
