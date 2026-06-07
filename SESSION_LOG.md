@@ -19,7 +19,21 @@
 - Result: GBO coverage now **continuous Jun 2024 → Jun 2026**.
 - **No balance impact** — BN balances were seed-anchored to Koios on 2026-04-09; this is consumption
   history/analytics only.
-- Follow-up: rebuild BN `monthly_consumption` after the Koios pass finishes (analytics).
+- Follow-up: rebuild BN `monthly_consumption` after the Koios pass finishes (analytics). DONE
+  (2,719→2,720 rows; GBO continuous Jun 2024 → Jun 2026).
+
+### SAM backfill (same pattern) — DONE
+- File `SAM - Consommation horaire Clients.xlsx` (sheet `consommation_horaire_par_client`) holds SAM
+  hourly Feb 2024 → Feb 2026 (59 customer columns). Koios has SAM only from ~2025-08 (404 before), so:
+  - **2025-08 → now:** Koios pull `import_koios_report --site SAM` (404,008 rows; fixed Oct-2025 gap
+    + Feb/Mar-2026 partials).
+  - **Feb 2024 → Jul 2025:** backfilled from the xlsx (converted to CSV, Koios-name-mapped: 56/59
+    columns; unmatched = `SAM POWERHOUSE`/`Sam climatiseur` facility loads + 0-kWh customer, all
+    correctly excluded). 221,098 rows into `onepower_bj.hourly_consumption`.
+- BN `monthly_consumption` rebuilt (2,720 rows). **SAM continuous Feb 2024 → Jun 2026.**
+- Backfill tool hardened: dedups by (account,hour), account-keyed meter_id (avoids ON CONFLICT
+  cardinality from duplicate spreadsheet timestamps / shared Koios serials).
+- No balance impact (BN seed-anchored to Koios 2026-04-09); consumption history/analytics only.
 
 ## Session 2026-06-05 [202606051100] (CC↔Koios balance divergence — RCA + durable fix)
 
