@@ -4,6 +4,7 @@ import csv, io, os, sys, unicodedata, collections, datetime
 import psycopg2, psycopg2.extras
 
 CSV="/tmp/gbo.csv"
+COMMUNITY="GBO"   # site code for inserted rows
 APPLY="--apply" in sys.argv
 
 def fix_enc(s):
@@ -124,7 +125,11 @@ def parse_dt(ts):
     return None
 
 CUTOFF=datetime.datetime(2025,8,1)
-rows=[]
+# Accumulate by (account, hour) so the batch has unique (meter_id, reading_hour):
+# the spreadsheet can contain duplicate timestamps, and meter_id is keyed to the
+# account_number (some accounts share a Koios serial), which would otherwise trip
+# "ON CONFLICT cannot affect row a second time".
+agg=collections.defaultdict(float)
 with open(CSV,newline='',encoding='latin-1') as f:
     r=csv.reader(f); next(r)
     for line in r:
@@ -138,8 +143,9 @@ with open(CSV,newline='',encoding='latin-1') as f:
             if not v: continue
             try: kwh=float(v)
             except ValueError: continue
-            mid=meter.get(acct) or acct
-            rows.append((acct, mid, hour, round(kwh,6), 'GBO'))
+            agg[(acct,hour)]+=kwh
+# meter_id = account_number (unique per account; balance/monthly dedup by account+hour)
+rows=[(acct, acct, hour, round(k,6), COMMUNITY) for (acct,hour),k in agg.items()]
 print(f"pre-2025-08 rows to insert: {len(rows)}")
 if rows:
     psycopg2.extras.execute_values(cur,
