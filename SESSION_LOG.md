@@ -43,6 +43,27 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-08 [202606081549] (BN leak cleanup + failed-push retry)
+
+### BN cleanup (applied)
+Deleted the leaked rows from `onepower_bj`:
+`DELETE FROM transactions WHERE payment_reference LIKE 'sm_manual_hist:%' AND account_number !~ '(GBO|SAM)$'`
+→ **1766 rows / 660 LS accounts removed** (387,165 XOF phantom). Verified GBO/SAM unchanged
+(204 accts before & after), LS-leak remaining = 0. Predicate pre-checked: it covered ALL
+leak (0 leak rows outside the pattern) and excluded the 6 legit GBO/SAM mirror credits.
+
+### Failed-push "retry" — RCA: not transient, nothing to push to
+Ran `process_due_sm_credit_retries` → `{processed:0}` (no-op). Inspected the 16 (24 rows):
+- **14 are `blocked_uncommissioned`** (customer_not_commissioned / no meter) — there is NO
+  meter on SparkMeter to receive the credit. Correctly parked; `_release_blocked_retries`
+  auto-pushes them once the account is commissioned. (Mostly TOS connection-fee/top-up
+  payments made pre-commissioning.)
+- **2 exhausted-invalid:** `0042TOS` (Bad Request ×20), `0118KET` (Bad Request / HTTP 504 ×20)
+  — likely invalid/missing Koios customer codes. **Need manual Koios check** (does the code
+  exist?). Not auto-retryable.
+- These were correctly EXCLUDED from the Koios re-anchor, so their CC credit is preserved
+  (not erased) and will flow to the meter when the account is commissioned / code fixed.
+
 ## Session 2026-06-08 [202606081527] (Koios LS re-anchor + BN leak root-cause fix)
 
 ### Koios LS re-anchor (applied)
