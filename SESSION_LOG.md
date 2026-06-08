@@ -43,6 +43,32 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-08 [202606081527] (Koios LS re-anchor + BN leak root-cause fix)
+
+### Koios LS re-anchor (applied)
+- Ran `audit_ls_balances --reconcile --apply --only-sites <15 Koios LS sites>
+  --exclude-accounts <16 failed-push>`. **142 balance_seed rows** inserted; POST-SEED all
+  in-scope within 0.5 kWh. Verified: 0242SHG 79.9→16.2, 0102KET 87.8→27.6, 0034MAS 27.9→0.25,
+  0027SHG 36→6.3 (all == SM).
+- **Excluded 16 accounts with pending/failed SM pushes** (0007TOS,0009TOS,0011TOS,0029SEH,
+  0037TOS,0038TOS,0039TOS,0042TOS,0052TOS,0055TOS,0059TOS,0067TOS,0068MAS,0073TOS,0075TOS,
+  0118KET): these have CC-only credit the meter never got — must be **re-pushed, not erased**.
+  Verified 0068MAS retained 3.52 kWh (not re-anchored to SM 0). FOLLOW-UP: retry their pushes.
+- Added `--exclude-accounts` to audit (apply/preview/check honor it).
+
+### BN cross-DB contamination — root cause found + FIXED (leak stopped)
+- RCA: `import_sm_manual_credits.fetch_koios_credits` used a single global `KOIOS_ORG_ID`
+  (=LS) for every country and never filtered by site, so the BN job (db=onepower_bj) mirrored
+  the **LS** Koios org's payments into the BN DB (660 LS accts / 1766 txns since ~2026-05-02).
+- Fix (commit 0e3c89f, deployed): org resolved per country
+  (`KOIOS_ORG_ID_{cc}`→`country_config.koios_org_id`→`KOIOS_ORG_ID`) + a site guard that
+  skips any account whose site isn't in the country. Verified: post-deploy BN mirror run
+  inserted **only GBO/SAM**; LS-leak txn count held at **1766** (no new leaks). Bonus: BN
+  mirror now actually imports real GBO/SAM credits.
+- **OPEN (needs sign-off):** delete the 660 pre-existing leaked LS accounts / 1766 txns from
+  `onepower_bj` (scoped: site∉{GBO,SAM} AND payment_reference LIKE 'sm_manual_hist:%'). They
+  are duplicates of LS Koios payments that belong in onepower_cc; real BN customers unaffected.
+
 ## Session 2026-06-08 [202606081457] (Koios LS drift RCA + BN audit)
 
 ### Koios LS drift RCA (145 drifted accts, read-only) — credit-side, not consumption
