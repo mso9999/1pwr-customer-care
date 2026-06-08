@@ -248,7 +248,8 @@ def print_report(results: list[tuple[str, float, float, float, str]], threshold:
     print()
 
 
-def _seed_candidates(results, threshold, only_sites):
+def _seed_candidates(results, threshold, only_sites, exclude_accounts=None):
+    exclude = {a.strip().upper() for a in (exclude_accounts or set())}
     out = []
     for row in results:
         account, _, _, delta, _ = row
@@ -258,12 +259,14 @@ def _seed_candidates(results, threshold, only_sites):
             continue
         if only_sites and _site_code(account) not in only_sites:
             continue
+        if account.strip().upper() in exclude:
+            continue
         out.append(row)
     return out
 
 
-def preview_seeds(results, threshold: float, only_sites=None) -> int:
-    seeds = _seed_candidates(results, threshold, only_sites)
+def preview_seeds(results, threshold: float, only_sites=None, exclude_accounts=None) -> int:
+    seeds = _seed_candidates(results, threshold, only_sites, exclude_accounts)
     if not seeds:
         print("No balance seeds needed - all accounts within threshold.")
         return 0
@@ -280,12 +283,12 @@ def preview_seeds(results, threshold: float, only_sites=None) -> int:
     return len(seeds)
 
 
-def apply_seeds(conn, results, threshold: float, only_sites=None) -> int:
+def apply_seeds(conn, results, threshold: float, only_sites=None, exclude_accounts=None) -> int:
     cur = conn.cursor()
     ts = datetime.now(timezone.utc)
     count = 0
     skipped = 0
-    seeds = _seed_candidates(results, threshold, only_sites)
+    seeds = _seed_candidates(results, threshold, only_sites, exclude_accounts)
     for account, _, _, delta, _ in seeds:
         rate = float(get_tariff_rate_for_site(_site_code(account)) or 0)
         amount = round(delta * rate, 4) if rate > 0 else 0.0
@@ -319,9 +322,16 @@ def main() -> int:
         "Bulk-excluded accounts (LAB test, BVW, 0500MAK Power House, FAULTY, malformed) are "
         "always skipped.",
     )
+    parser.add_argument(
+        "--exclude-accounts",
+        default="",
+        help="Comma-separated account numbers to skip when seeding (e.g. accounts with "
+        "pending/failed SM credit pushes whose CC-only credit must be re-pushed, not erased).",
+    )
     args = parser.parse_args()
 
     only_sites = {s.strip().upper() for s in args.only_sites.split(",") if s.strip()} or None
+    exclude_accounts = {s.strip().upper() for s in args.exclude_accounts.split(",") if s.strip()} or None
 
     if not DATABASE_URL:
         log.error("DATABASE_URL is required")
@@ -341,6 +351,7 @@ def main() -> int:
             row for row in results
             if abs(row[3]) >= threshold and not is_bulk_excluded_account(row[0])
             and (not only_sites or _site_code(row[0]) in only_sites)
+            and (not exclude_accounts or row[0].strip().upper() not in exclude_accounts)
         ]
         if drifted:
             log.warning(
@@ -373,17 +384,17 @@ def main() -> int:
                 "Applying balance seeds%s...",
                 f" (sites={sorted(only_sites)})" if only_sites else "",
             )
-            count = apply_seeds(conn, results, threshold, only_sites)
+            count = apply_seeds(conn, results, threshold, only_sites, exclude_accounts)
             log.info("Inserted %d balance_seed transactions", count)
             log.info("Verifying post-seed balances...")
             results2 = run_audit(conn)
-            drifted2 = _seed_candidates(results2, threshold, only_sites)
+            drifted2 = _seed_candidates(results2, threshold, only_sites, exclude_accounts)
             if drifted2:
                 log.warning("POST-SEED: %d in-scope accounts still drifted", len(drifted2))
             else:
                 log.info("POST-SEED: all in-scope accounts within threshold")
         else:
-            preview_seeds(results, threshold, only_sites)
+            preview_seeds(results, threshold, only_sites, exclude_accounts)
 
     conn.close()
     return 0

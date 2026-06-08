@@ -207,11 +207,27 @@ def _koios_web_login(session: requests.Session, country: str) -> None:
 
 
 def fetch_koios_credits(country: str, date_from: datetime, date_to: datetime) -> list[CreditRow]:
+    cc = (country or "LS").upper()
     session = requests.Session()
-    _koios_web_login(session, country)
-    org_id = os.environ.get("KOIOS_ORG_ID", "").strip()
+    _koios_web_login(session, cc)
+
+    # Org id MUST be country-specific. Previously this read a single global
+    # KOIOS_ORG_ID for every country, so the BN job (db=onepower_bj) pulled the LS
+    # org's payments and inserted LS accounts into the BN DB (RCA 2026-06-08). Resolve
+    # per country: KOIOS_ORG_ID_{cc} -> country_config.koios_org_id -> KOIOS_ORG_ID.
+    from country_config import get_country
+
+    cfg = get_country(cc)
+    org_id = (
+        os.environ.get(f"KOIOS_ORG_ID_{cc}")
+        or cfg.koios_org_id
+        or os.environ.get("KOIOS_ORG_ID", "")
+    ).strip()
     if not org_id:
-        raise RuntimeError("KOIOS_ORG_ID is required for Koios web payments import")
+        raise RuntimeError(f"Koios org id for {cc} is required (KOIOS_ORG_ID_{cc} / country_config)")
+    # Site guard: only mirror credits for accounts that belong to this country, so a
+    # misconfigured org/credential can never leak another country's data into this DB.
+    allowed_sites = {s.upper() for s in cfg.site_abbrev.keys()}
 
     # Build lookup maps from customer roster.
     customer_id_to_code: dict[str, str] = {}
@@ -290,6 +306,8 @@ def fetch_koios_credits(country: str, date_from: datetime, date_to: datetime) ->
                 account = _normalize_account(meter_serial_to_code.get(meter_id))
             if not account:
                 continue
+            if allowed_sites and _site_code(account) not in allowed_sites:
+                continue  # not a customer of this country's sites — never cross-insert
             ext = _str_from(item, ("external_id", "id", "payment_id"))
             kwh = _amount_from(item, ("energy", "kilowatt_hours", "kwh", "total_energy"))
             kwh_value = kwh if kwh > 0 else None
