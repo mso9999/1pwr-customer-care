@@ -462,6 +462,8 @@ integration, SMS gateway.
 
 **Onboarding a new country** (e.g. Zambia): follow `docs/sop-add-new-country.md` — `country_config.py`, dedicated DB + systemd service + Caddy route, frontend `COUNTRY_ROUTES`, Koios/org keys, SMS/payment parsers, and per-country WhatsApp bridge env (`CC_BRIDGE_NOTIFY_URL_<CC>`). A `ZM` `CountryConfig` placeholder (currency `ZMW`, dial `260`, `active=False`) is already registered for UEF/ZEDSI; flip `active=True` once `1pdb-api-zm` and the `/api/zm` Caddy route are live.
 
+**Cross-country data isolation (mandatory):** every multi-country job that writes into a country DB must (1) resolve org/credentials/DB **per country** via suffixed env (`KOIOS_ORG_ID_{CC}`, `KOIOS_WEB_EMAIL_{CC}`, `DATABASE_URL_{CC}`, …) + `country_config`, never a bare global, and (2) **site-guard** inserts to that country's `site_abbrev`. A single global `KOIOS_ORG_ID` in the BN mirror leaked ~660 LS accounts into `onepower_bj` (2026-06, fixed in `import_sm_manual_credits.py`). See the "Cross-country data isolation" section of `docs/sop-add-new-country.md`.
+
 ## Monthly Staff PIN (date-based, defense-in-depth on top of HR auth)
 
 CC employee login = `employee_id` (validated against the HR portal) **+** a shared **monthly staff PIN** computed from `YYYYMM / reverse(YYYYMM)` (first 4 significant digits). The PIN rotates at **00:00 UTC on the 1st of every month**.
