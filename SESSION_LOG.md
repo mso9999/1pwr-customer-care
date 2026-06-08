@@ -43,6 +43,39 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-08 [202606081200] (Post-deploy verify: CC↔SM drift RCA + fixes)
+
+### Question
+Team had shared CC-vs-Koios/TC discrepancy examples — does the freshness deploy fix them?
+
+### Findings (prod-verified via GET /api/payments/balance/{acct})
+Two bugs in the new live path, now fixed (commit 7771de4):
+1. **ThunderCloud `credit_balance` is currency, not kWh.** 0302MAK API returned 39.5 ==
+   console "Credit (ZAR) 39.525" @ 5 ZAR/kWh = **7.9 kWh**. `tc_lookup_balance` (and the
+   long-standing `audit_ls_balances`) treated it as kWh → **5x over-statement**. Now divide
+   by tariff. After fix: 0302MAK live = **7.889 kWh / 39.45 ZAR** (matches console).
+2. **Koios live lookup was failing → silent engine fallback.** 0034MAS/0014MAS returned
+   `balance_source=engine`. Root cause: the new read-key path could pair a read key with the
+   write secret. Now resolves creds via the proven `sparkmeter_customer._koios_headers`.
+   After fix: 0034MAS live **0.394 kWh** (was engine 27.9), 0014MAS live **4.668 kWh**
+   (matches Koios 4.68). Timeout bumped 10→15s.
+
+### Display now correct, but underlying ledger drift is REAL and unaddressed
+The freshness layer makes the **displayed** balance honest (meter's current credit), but the
+CC `balance_engine` value is still structurally off for many accounts (not 1-day lag):
+- 0034MAS: CC engine **27.9** vs meter **~0.4** kWh (~27 over)
+- 0302MAK: CC engine **23.5** vs meter **7.9** kWh (~15.6 over)
+- 0014MAS: CC engine **5.7** vs meter **4.7** kWh (~1, ≈ batch lag — the healthy case)
+Pattern: **CC over-counts vs SM** → over-credit (payment echo/double-count) and/or missing
+consumption (import gaps). The `audit_ls_balances` 5x TC bug also means past **MAK
+re-anchors may have seeded inflated balances** — a likely MAK root cause.
+
+### Next session should know / TODO (deeper RCA — data-changing, needs sign-off)
+- Decompose drift per account: CC payment-kWh vs SM lifetime credits; CC consumption vs SM.
+- Re-run corrected `audit_ls_balances` fleet-wide to size true drift (now that TC units fixed).
+- Consider a corrected MAK/LAB re-anchor (was anchored with 5x-inflated TC SM balances).
+- Watch echo-loop dedup + consumption-gap self-heal already deployed in prior sessions.
+
 ## Session 2026-06-07 [202606071545] (GBO consumption history backfill)
 
 ### Question
