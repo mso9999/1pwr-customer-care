@@ -60,6 +60,22 @@ from fee_debt import (
 from payment_verification import create_verification_entry
 
 logger = logging.getLogger("cc-api.ingest")
+MAX_FUTURE_SMS_TIMESTAMP_SKEW = timedelta(hours=12)
+
+
+def _sanitize_sms_timestamp(ts: datetime, now_utc: datetime | None = None) -> datetime:
+    """Clamp obviously bad future timestamps coming from gateway phones."""
+    now = now_utc or datetime.now(timezone.utc)
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    if ts > now + MAX_FUTURE_SMS_TIMESTAMP_SKEW:
+        logger.warning(
+            "SMS timestamp in future; clamping to now. raw=%s now=%s",
+            ts.isoformat(),
+            now.isoformat(),
+        )
+        return now
+    return ts
 
 # If true (default), push M-PESA payments recorded via /api/sms/incoming to SparkMeter/Koios
 # after 1PDB commit. Set false only if another system (e.g. legacy PHP) already credits SM
@@ -648,6 +664,15 @@ def _sms_ingest_credit_sm(
             account_number, txn_id, result.get("error"), result.get("queued_retry"),
         )
 
+    # Activity trigger: a payment just changed the balance — flag the account so the
+    # tiered scheduler re-pulls the meter's new credit promptly (best-effort).
+    try:
+        from balance_live import mark_account_due
+
+        mark_account_due(account_number)
+    except Exception:
+        pass
+
 
 def _parse_gateway_payment(content: str, sender: str = ""):
     """M-Pesa + EcoCash (LS) or MTN MoMo (BN) depending on COUNTRY_CODE."""
@@ -807,14 +832,16 @@ def _sms_incoming_process_raw(
                 rate_row = cur.fetchone()
                 rate = float(rate_row[0]) if rate_row else _default_tariff_fallback()
 
+                now_utc = datetime.now(timezone.utc)
                 try:
                     ts_ms = int(sms_received)
                     if ts_ms > 0:
                         ts = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
                     else:
-                        ts = datetime.now(timezone.utc)
+                        ts = now_utc
                 except (ValueError, TypeError, OSError):
-                    ts = datetime.now(timezone.utc)
+                    ts = now_utc
+                ts = _sanitize_sms_timestamp(ts, now_utc)
 
                 payer_phone = "".join(c for c in str(phone) if c.isdigit()) or str(phone)
 

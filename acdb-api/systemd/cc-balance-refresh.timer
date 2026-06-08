@@ -1,0 +1,13 @@
+[Unit]
+Description=Run the tiered balance refresh scheduler every 5 minutes
+
+[Timer]
+OnBootSec=6min
+OnUnitActiveSec=5min
+RandomizedDelaySec=20
+Unit=cc-balance-refresh.service
+AccuracySec=10s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

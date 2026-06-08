@@ -1,0 +1,17 @@
+[Unit]
+Description=Recompute per-account consumption rate (kWh/h) for balance freshness (LS + BN)
+Wants=network-online.target postgresql.service
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+User=cc_api
+Group=cc_api
+WorkingDirectory=/opt/cc-portal/backend
+EnvironmentFile=/opt/1pdb/.env
+Environment=PYTHONPATH=/opt/cc-portal/backend:/opt/cc-portal/backend/scripts/ops
+ExecStart=/opt/cc-portal/backend/venv/bin/python /opt/cc-portal/backend/scripts/ops/recompute_consumption_rate.py
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cc-balance-rate
+TimeoutStartSec=600

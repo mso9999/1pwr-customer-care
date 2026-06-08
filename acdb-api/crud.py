@@ -1483,8 +1483,8 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
         days_with_data = len(daily)
         avg_kwh_per_day = sum(daily.values()) / max(days_with_data, 1)
 
-        # Balance via full-history balance engine
-        from balance_engine import get_balance_kwh as _be_balance
+        # Balance via live-fresh resolver (SM meter balance when available, else engine).
+        from balance_live import get_display_balance as _be_balance
         from country_config import get_tariff_rate_for_site, get_currency_for_site
         import re as _re
         _be_raw, _ = _be_balance(conn, acct)
@@ -1774,13 +1774,36 @@ def employee_customer_data(
             dt_str = None
             if dt_raw is not None:
                 if isinstance(dt_raw, str):
-                    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d", "%m/%d/%Y"):
+                    raw = dt_raw.strip()
+                    for fmt in (
+                        "%Y-%m-%d %H:%M:%S",
+                        "%Y-%m-%d",
+                        "%Y-%m-%dT%H:%M:%S",
+                        "%d/%m/%Y %H:%M:%S",
+                        "%d/%m/%Y",
+                    ):
                         try:
-                            dt_parsed = datetime.strptime(dt_raw.strip(), fmt)
+                            dt_parsed = datetime.strptime(raw, fmt)
                             dt_str = (dt_parsed + _txn_offset).strftime("%Y-%m-%d %H:%M:%S")
                             break
                         except ValueError:
                             continue
+                    if dt_str is None and "/" in raw:
+                        # For slash-formatted legacy strings, only apply MM/DD parsing
+                        # when it is unambiguous. Ambiguous forms are left as-is.
+                        slash_date = raw.split(" ", 1)[0]
+                        parts = slash_date.split("/")
+                        if len(parts) == 3 and all(p.isdigit() for p in parts):
+                            p1 = int(parts[0])
+                            p2 = int(parts[1])
+                            if p2 > 12 and 1 <= p1 <= 12:
+                                for fmt in ("%m/%d/%Y %H:%M:%S", "%m/%d/%Y"):
+                                    try:
+                                        dt_parsed = datetime.strptime(raw, fmt)
+                                        dt_str = (dt_parsed + _txn_offset).strftime("%Y-%m-%d %H:%M:%S")
+                                        break
+                                    except ValueError:
+                                        continue
                 else:
                     if hasattr(dt_raw, "strftime"):
                         local_dt = dt_raw.replace(tzinfo=None) + _txn_offset if hasattr(dt_raw, 'tzinfo') and dt_raw.tzinfo else dt_raw
@@ -1914,8 +1937,8 @@ def employee_customer_data(
         days_with_data = len(daily)
         avg_kwh_per_day = sum(daily.values()) / max(days_with_data, 1)
 
-        # Balance via full-history balance engine
-        from balance_engine import get_balance_kwh as _be_balance
+        # Balance via live-fresh resolver (SM meter balance when available, else engine).
+        from balance_live import get_display_balance as _be_balance
         from country_config import get_tariff_rate_for_site, get_currency_for_site
         _be_raw, _ = _be_balance(conn, acct)
         balance_kwh = max(0, _be_raw)

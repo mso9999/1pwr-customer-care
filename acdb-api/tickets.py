@@ -118,6 +118,13 @@ def create_ticket(body: TicketCreate, user: CurrentUser = Depends(require_employ
         row = cur.fetchone()
         conn.commit()
         logger.info("Ticket created: id=%s site=%s", row[0], body.site_code)
+        if body.account_number:
+            try:
+                from balance_live import mark_account_due
+
+                mark_account_due(body.account_number)
+            except Exception:
+                pass
         return {
             "status": "ok",
             "id": row[0],

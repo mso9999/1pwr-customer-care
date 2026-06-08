@@ -13,7 +13,7 @@ but validated by a shared secret in the X-Gateway-Key header.
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import psycopg2
@@ -49,6 +49,7 @@ from sms_gateway_balance_rate import (
 )
 
 logger = logging.getLogger("cc-api.payments")
+MAX_FUTURE_TIMESTAMP_SKEW = timedelta(hours=12)
 
 router = APIRouter(prefix="/api/payments", tags=["payments"])
 
@@ -94,6 +95,21 @@ def _resolve_meter(conn, account_number: str, meter_id: Optional[str] = None) ->
     )
     row = cur.fetchone()
     return row[0] if row else ""
+
+
+def _sanitize_incoming_timestamp(ts: datetime, now_utc: Optional[datetime] = None) -> datetime:
+    """Clamp obviously bad future timestamps from external payloads."""
+    now = now_utc or datetime.now(timezone.utc)
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    if ts > now + MAX_FUTURE_TIMESTAMP_SKEW:
+        logger.warning(
+            "Payment timestamp in future; clamping to now. raw=%s now=%s",
+            ts.isoformat(),
+            now.isoformat(),
+        )
+        return now
+    return ts
 
 
 def _payment_ref_taken(conn, ref: str) -> Optional[tuple[int, str]]:
@@ -186,12 +202,14 @@ def payment_webhook(
     if not payload.account_number:
         raise HTTPException(status_code=400, detail="Account number required")
 
-    ts = datetime.now(timezone.utc)
+    now_utc = datetime.now(timezone.utc)
+    ts = now_utc
     if payload.timestamp:
         try:
             ts = datetime.fromisoformat(payload.timestamp.replace("Z", "+00:00"))
         except ValueError:
             pass
+    ts = _sanitize_incoming_timestamp(ts, now_utc)
 
     try:
         with get_connection() as conn:
@@ -750,7 +768,14 @@ def _account_numbers_for_phone(conn, phone: str) -> list[str]:
 
 
 def _balance_payload_for_conn(conn, account_number: str) -> dict:
-    balance_kwh, as_of = get_balance_kwh(conn, account_number)
+    # Activity-triggered freshness: a balance check refreshes the live SparkMeter
+    # value (TTL-gated, short timeout, safe fallback) so the customer sees the meter's
+    # current credit rather than yesterday's batch number. See balance_live.py.
+    from balance_live import get_display_balance_detail
+
+    detail = get_display_balance_detail(conn, account_number)
+    balance_kwh = detail["balance_kwh"]
+    as_of = detail["as_of"]
     rate = _get_tariff_rate(conn, account_number)
     return {
         "account_number": account_number,
@@ -758,6 +783,8 @@ def _balance_payload_for_conn(conn, account_number: str) -> dict:
         "balance_currency": round(balance_kwh * rate, 2),
         "tariff_rate": rate,
         "as_of": as_of.isoformat() if as_of else None,
+        "balance_source": detail["source"],
+        "balance_stale": detail["stale"],
     }
 
 

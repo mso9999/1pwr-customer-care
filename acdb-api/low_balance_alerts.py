@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from balance_engine import get_balance_kwh
+from balance_live import get_display_balance
 from country_config import COUNTRY
 from country_fees import get_low_balance_thresholds, get_sms_rate_limit_settings
 from customer_api import get_connection
@@ -101,7 +101,11 @@ def low_balance_tick(conn, *, dry_run: bool = False) -> dict[str, Any]:
             stats["skipped_no_phone"] += 1
             continue
 
-        bal_kwh, _ = get_balance_kwh(conn, account_number)
+        # Read the freshest balance we already have (live cache when the tiered
+        # scheduler / activity has refreshed it) WITHOUT forcing a per-account
+        # SparkMeter pull here — scanning every account would blow the Koios daily
+        # budget. refresh=False falls back to the engine balance when no live value.
+        bal_kwh, _ = get_display_balance(conn, account_number, refresh=False)
         rate = tariff_for_account(conn, account_number)
         bal_currency = bal_kwh * rate
 

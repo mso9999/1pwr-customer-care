@@ -1,3 +1,48 @@
+## Session 2026-06-08 [202606081011] (Proactive balance freshness)
+
+### What was done
+Built a freshness layer over the ~1-day Koios/ThunderCloud readings batch so a customer
+whose meter just hit zero no longer sees yesterday's positive balance. Refresh-only — no
+new SMS; existing balance checks + the low-balance alert job just read fresher values.
+Full design + ops in `docs/ops/proactive-balance-freshness.md`.
+
+- **Live lookups** (`acdb-api/sparkmeter_credit.py`): `koios_lookup_balance` (v1
+  `/customers?code` → credit ÷ tariff = kWh), `tc_lookup_balance` (v0 `/customer/{code}`,
+  `credit_balance` already kWh), `lookup_sm_balance` router. Read keys
+  (`KOIOS_API_KEY[_CC]`) + short `SM_BALANCE_LOOKUP_TIMEOUT` (10s).
+- **Cache + resolver** (`acdb-api/balance_live.py` + `migrations/040`): `account_balance_live`
+  cache, `refresh_balance_live()` (TTL-gated, own write conn so it never pollutes the
+  caller's txn, safe fallback), `get_display_balance()` (live when fresh else
+  `balance_engine`), `mark_account_due()`.
+- **Activity triggers**: switched `payments._balance_payload_for_conn` (SMS gateway +
+  `/balance`) and both `crud.py` dashboards to `balance_live`; `low_balance_alerts.py`
+  reads `get_display_balance(refresh=False)` (no fleet-wide pull — budget). `mark_account_due`
+  on SMS payment ingest + ticket creation (local + OM).
+- **Rate job** (`scripts/ops/recompute_consumption_rate.py` + `cc-balance-rate.timer`,
+  hourly): blended kWh/h = 0.6·(48h) + 0.4·(7d) into `balance_refresh_state`.
+- **Tiered scheduler** (`scripts/ops/balance_refresh_scheduler.py` +
+  `cc-balance-refresh.timer`, 5 min, `migrations/041`): projects balance forward at the
+  account's rate, assigns tier (>24h none / 12–24h 2h / 6–12h 1h / 1–6h 15m / ≤1h 5m),
+  pulls due accounts most-urgent-first within per-run + daily Koios budget caps.
+- **Deploy**: `deploy.yml` rsyncs the two new scripts and installs `cc-balance-rate` +
+  `cc-balance-refresh` timer pairs; migrations 040/041 auto-apply to onepower_cc + onepower_bj.
+
+### Key decisions
+- **Display value = SM meter balance** (not the planned CC-credit reconciliation): the v1
+  endpoint returns the balance directly, not lifetime credits, and the meter only honours
+  its own balance. `cc_balance_kwh` stored for drift. Documented in the runbook + code.
+- **Alerts don't trigger pulls** (refresh=False) to protect the Koios 30k/day budget; the
+  scheduler keeps near-depletion accounts fresh, alerts piggyback.
+- **Tier config per-DB** in `system_config` so LS/BN tune independently (country_fees pattern).
+
+### What next session should know
+- Nothing pulls fleet-wide on a hot path; everything is TTL-gated + budget-capped.
+- First few scheduler runs "bootstrap" consuming accounts with no cached balance
+  (`balance_refresh_bootstrap_per_run`, default 100/run) — coverage grows over a few runs.
+- Not yet done: surfacing `balance_source`/`balance_stale`/`as_of` in the frontend balance
+  UI (backend already returns them); an admin editor for the new `system_config` tier keys.
+- Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
+
 ## Session 2026-06-07 [202606071545] (GBO consumption history backfill)
 
 ### Question

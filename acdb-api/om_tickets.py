@@ -213,7 +213,17 @@ def create_om_ticket(
             json_body=body,
         )
         _raise_for_upstream_error(resp)
-        return _json_or_502(resp)
+        result = _json_or_502(resp)
+        # Activity trigger: a ticket on an account flags it for a prompt live balance pull.
+        acct = body.get("account_number") if isinstance(body, dict) else None
+        if acct:
+            try:
+                from balance_live import mark_account_due
+
+                mark_account_due(acct)
+            except Exception:
+                pass
+        return result
     except HTTPException as exc:
         if _allow_legacy_fallback() and exc.status_code >= 500:
             legacy = _legacy_ticket_module()

@@ -1,0 +1,13 @@
+[Unit]
+Description=Recompute consumption rate hourly (feeds the tiered balance scheduler)
+
+[Timer]
+OnBootSec=8min
+OnUnitActiveSec=1h
+RandomizedDelaySec=60
+Unit=cc-balance-rate.service
+AccuracySec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

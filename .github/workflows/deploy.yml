@@ -158,6 +158,16 @@ jobs:
             acdb-api/ \
             cc-deploy-ec2:/tmp/cc-backend/
 
+          # Sync parity ops scripts that currently live outside acdb-api/.
+          ssh -F "$HOME/.ssh/config" cc-deploy-ec2 "mkdir -p /tmp/cc-backend/scripts/ops"
+          rsync -avz \
+            -e "ssh -F $HOME/.ssh/config -o LogLevel=ERROR" \
+            scripts/ops/import_sm_manual_credits.py \
+            scripts/ops/run_sm_credit_mirror_incremental.py \
+            scripts/ops/recompute_consumption_rate.py \
+            scripts/ops/balance_refresh_scheduler.py \
+            cc-deploy-ec2:/tmp/cc-backend/scripts/ops/
+
           # Move to final location and set permissions
           # Script is POSIX sh (no `local`) so it works if SSH uses /bin/sh (dash).
           ssh -F "$HOME/.ssh/config" cc-deploy-ec2 << 'DEPLOY_SCRIPT'
@@ -253,14 +263,32 @@ jobs:
               exit 1
             fi
 
-            # Install SMS gateway reconciliation timer (runs every 15 min).
+            # Install backend systemd timers/services shipped with the repo.
+            # This includes parity-critical jobs such as:
+            # - cc-sm-credit-mirror.timer (SM -> CC external/manual credit mirror)
+            # - cc-ls-balance-audit.timer (daily drift detection)
+            # - sms-reconcile.timer (SMS delivery-status reconciliation)
             SYSD=/opt/cc-portal/backend/systemd
-            if [ -f "$SYSD/sms-reconcile.service" ]; then
-              sudo cp "$SYSD/sms-reconcile.service" /etc/systemd/system/
-              sudo cp "$SYSD/sms-reconcile.timer"   /etc/systemd/system/
-              sudo systemctl daemon-reload
-              sudo systemctl enable --now sms-reconcile.timer
-              echo "SMS reconcile timer installed"
+            install_timer_pair() {
+              _base="$1"
+              if [ -f "$SYSD/${_base}.service" ] && [ -f "$SYSD/${_base}.timer" ]; then
+                sudo cp "$SYSD/${_base}.service" /etc/systemd/system/
+                sudo cp "$SYSD/${_base}.timer"   /etc/systemd/system/
+                sudo systemctl daemon-reload
+                sudo systemctl enable --now "${_base}.timer"
+                echo "Installed and enabled ${_base}.timer"
+              else
+                echo "Skipping ${_base}: missing service/timer in ${SYSD}"
+              fi
+            }
+
+            for timer_base in sms-reconcile cc-sm-credit-mirror cc-ls-balance-audit cc-balance-rate cc-balance-refresh; do
+              install_timer_pair "$timer_base"
+            done
+
+            if [ -f /etc/systemd/system/cc-sm-credit-mirror.timer ]; then
+              sudo systemctl start cc-sm-credit-mirror.service || true
+              echo "Triggered one-shot cc-sm-credit-mirror.service after deploy"
             fi
 
             echo "Backend deployed"
