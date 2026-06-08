@@ -83,28 +83,9 @@ def _build_site_country_map() -> Tuple[Dict[str, str], Dict[str, Tuple[str, str]
 _site_to_country, _country_creds = _build_site_country_map()
 
 
-# Read keys (balance/customer lookups). Koios read keys have customer-read access
-# (LS uses KOIOS_API_KEY; BN uses KOIOS_API_KEY_BN). Fall back to the write keys.
-_GLOBAL_READ_KEY = os.environ.get("KOIOS_API_KEY", _GLOBAL_WRITE_KEY)
-_GLOBAL_READ_SECRET = os.environ.get("KOIOS_API_SECRET", _GLOBAL_WRITE_SECRET)
-
-
-def _build_read_creds() -> Dict[str, Tuple[str, str]]:
-    from country_config import _REGISTRY
-
-    out: Dict[str, Tuple[str, str]] = {}
-    for cc in _REGISTRY:
-        key = os.environ.get(f"KOIOS_API_KEY_{cc}", _GLOBAL_READ_KEY)
-        secret = os.environ.get(f"KOIOS_API_SECRET_{cc}", _GLOBAL_READ_SECRET)
-        out[cc] = (key, secret)
-    return out
-
-
-_country_read_creds = _build_read_creds()
-
 # Hot-path balance lookups use a short timeout (caller falls back to the 1PDB
 # batch balance if SparkMeter is slow/unreachable, so a balance check never hangs).
-BALANCE_LOOKUP_TIMEOUT = int(os.environ.get("SM_BALANCE_LOOKUP_TIMEOUT", "10"))
+BALANCE_LOOKUP_TIMEOUT = int(os.environ.get("SM_BALANCE_LOOKUP_TIMEOUT", "15"))
 
 
 # ---------------------------------------------------------------------------
@@ -418,27 +399,31 @@ def koios_lookup_payment(external_id: str, country_code: str = "LS") -> Optional
         return None
 
 
-def _koios_read_headers(country_code: str) -> dict:
-    key, secret = _country_read_creds.get(country_code, (_GLOBAL_READ_KEY, _GLOBAL_READ_SECRET))
-    return {"X-API-KEY": key, "X-API-SECRET": secret}
-
-
 def koios_lookup_balance(
     account_number: str, country_code: str = "LS", rate: Optional[float] = None
 ) -> Optional[dict]:
     """Return the meter's CURRENT credit balance from Koios v1 (near-real-time).
 
     ``GET /api/v1/customers?code=`` returns ``balances.credit.value`` (currency) and
-    the meter tariff; we convert to kWh. This is fresher than the ~1-day readings
-    batch. Returns ``{"balance_kwh", "balance_currency", "rate", "meter_serial",
-    "source"}`` or ``None`` (customer not found / lookup failed).
+    the meter tariff; we convert to kWh. Credentials are resolved via the proven
+    reader in ``sparkmeter_customer`` (``KOIOS_MANAGE_API_KEY_{cc}`` →
+    ``KOIOS_API_KEY_{cc}`` → ``KOIOS_API_KEY`` with matching secret) so this path
+    uses the exact same key/secret pair that already works for customer lookups.
+    Returns ``{"balance_kwh", "balance_currency", "rate", "meter_serial", "source"}``
+    or ``None`` (customer not found / not visible to API key / lookup failed).
+
+    ``country_code`` is accepted for signature stability but the headers are resolved
+    by site code (the credential map keys off site → country internally).
     """
+    from sparkmeter_customer import _koios_headers as _cust_koios_headers
+
     acct = (account_number or "").strip().upper()
+    site = _extract_site(acct)
     try:
         r = requests.get(
             f"{KOIOS_BASE}/api/v1/customers",
             params={"code": acct},
-            headers=_koios_read_headers(country_code),
+            headers=_cust_koios_headers(site),
             timeout=BALANCE_LOOKUP_TIMEOUT,
         )
         if r.status_code == 404:
@@ -472,11 +457,15 @@ def koios_lookup_balance(
         return None
 
 
-def tc_lookup_balance(account_code: str) -> Optional[dict]:
-    """Return the meter's current credit balance from ThunderCloud v0 (kWh).
+def tc_lookup_balance(account_code: str, rate: Optional[float] = None) -> Optional[dict]:
+    """Return the meter's current credit balance from ThunderCloud v0.
 
-    TC ``credit_balance`` is already in kWh (see audit_ls_balances). Single-customer
-    call. Returns ``{"balance_kwh", "meter_serial", "source"}`` or ``None``.
+    NOTE: TC ``credit_balance`` is in **currency** (the operator console labels it
+    "Credit (ZAR)"), not kWh — confirmed in prod (0302MAK API 39.5 == console
+    "Credit (ZAR) 39.525" at 5 ZAR/kWh = 7.9 kWh). So we divide by the tariff
+    ``rate`` to get kWh. Returns ``{"balance_kwh", "balance_currency", "rate",
+    "meter_serial", "source"}`` or ``None``. ``balance_kwh`` is ``None`` if no rate
+    is available (caller must supply the 1PDB tariff for the account).
     """
     token = _tc_get_token()
     if not token:
@@ -498,10 +487,17 @@ def tc_lookup_balance(account_code: str) -> Optional[dict]:
         if not customers:
             return None
         cust = customers[0]
-        credit_kwh = float(cust.get("credit_balance") or 0)
+        credit_currency = float(cust.get("credit_balance") or 0)
         meters = cust.get("meters") or []
         serial = meters[0].get("serial") if meters else None
-        return {"balance_kwh": round(credit_kwh, 4), "meter_serial": serial, "source": "thundercloud"}
+        balance_kwh = round(credit_currency / rate, 4) if rate and rate > 0 else None
+        return {
+            "balance_kwh": balance_kwh,
+            "balance_currency": round(credit_currency, 4),
+            "rate": rate,
+            "meter_serial": serial,
+            "source": "thundercloud",
+        }
     except Exception as e:
         logger.warning("TC balance lookup failed for %s: %s", acct, e)
         return None
@@ -510,16 +506,17 @@ def tc_lookup_balance(account_code: str) -> Optional[dict]:
 def lookup_sm_balance(account_number: str, rate: Optional[float] = None) -> Optional[dict]:
     """Route a per-customer live balance lookup to ThunderCloud (MAK/LAB) or Koios.
 
-    ``rate`` (currency/kWh) is used to convert Koios's currency balance to kWh when
-    the tariff isn't present in the response; pass the 1PDB tariff for the account.
-    Returns the lookup dict (kWh balance + source) or ``None``.
+    ``rate`` (currency/kWh) converts the platform's currency balance to kWh; pass the
+    1PDB tariff for the account. Both Koios and ThunderCloud return credit in
+    currency, so a rate is required to produce ``balance_kwh``. Returns the lookup
+    dict (kWh balance + source) or ``None``.
     """
     acct = (account_number or "").strip().upper()
     site = _extract_site(acct)
     if not site:
         return None
     if site in THUNDERCLOUD_SITES:
-        return tc_lookup_balance(acct)
+        return tc_lookup_balance(acct, rate=rate)
     country = _site_to_country.get(site)
     if not country:
         return None

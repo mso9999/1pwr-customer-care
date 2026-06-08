@@ -148,13 +148,17 @@ def fetch_thundercloud_balances() -> dict[str, tuple[float, float, float]]:
         site = _site_code(code)
         if site not in THUNDERCLOUD_SITES:
             continue
+        # ThunderCloud credit_balance is in CURRENCY (console labels it "Credit (ZAR)"),
+        # not kWh — confirmed in prod (0302MAK API 39.5 == console 39.525 ZAR @ 5/kWh =
+        # 7.9 kWh). Convert to kWh via the site tariff. (Prior code treated it as kWh and
+        # over-stated MAK/LAB SM balances ~5x; see proactive-balance-freshness RCA.)
         try:
-            credit_kwh = float(customer.get("credit_balance") or 0)
+            credit_currency = float(customer.get("credit_balance") or 0)
         except (TypeError, ValueError):
-            credit_kwh = 0.0
+            credit_currency = 0.0
         rate = float(get_tariff_rate_for_site(site) or 0)
-        credit_lsl = round(credit_kwh * rate, 4) if rate > 0 else 0.0
-        balances[code] = (round(credit_kwh, 4), credit_lsl, rate)
+        credit_kwh = round(credit_currency / rate, 4) if rate > 0 else 0.0
+        balances[code] = (credit_kwh, round(credit_currency, 4), rate)
     return balances
 
 
