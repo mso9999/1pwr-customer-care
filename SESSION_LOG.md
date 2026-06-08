@@ -43,6 +43,33 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-08 [202606081438] (MAK re-anchor: undo 5x currency-as-kWh inflation)
+
+### Fleet drift audit (corrected units, read-only)
+Ran corrected `audit_ls_balances.py` on prod (LS, 1923 accts): **421 drifted ≥0.5 kWh**.
+- ThunderCloud (MAK/LAB): 268 drifted, **255 CC-over**, mean 1PDB/SM ratio **4.76x** —
+  i.e. CC ledger ≈ 5x the meter. Root cause: a prior MAK re-anchor seeded CC from TC
+  `credit_balance` (currency) **as kWh** via the (now-fixed) 5x audit bug.
+- Koios (LS): 145 drifted, mixed (88 over / 57 under) — NOT a single cause (echo-loop
+  double-credits + consumption gaps + junk codes). Left for separate RCA.
+
+### Actions taken (data-changing, user-authorized)
+- **Shipped corrected audit via deploy** (commit 4ee1be5): `deploy.yml` now rsyncs
+  `audit_ls_balances.py` + `cutover_ls_common.py`, so the daily `cc-ls-balance-audit`
+  uses correct units. Added `--only-sites` + `is_bulk_excluded_account` to apply path so
+  re-anchors are scoped and skip LAB(test)/BVW/0500MAK(Power House)/FAULTY/malformed.
+- **MAK-only re-anchor applied** (`--reconcile --apply --only-sites MAK`): inserted
+  **264 balance_seed rows** (sum −9,115 kWh) bringing CC engine balances to SparkMeter.
+  POST-SEED verify: all in-scope MAK accounts within 0.5 kWh. Spot-check engine after:
+  0024MAK 996→**199.03**, 0152MAK 418→**83.51**, 0302MAK 23.5→**7.88**, 0029MAK 288→**57.71**
+  (all == SM). 0034MAS (Koios) unchanged 27.92 (correctly out of scope).
+
+### Notes / next session
+- LAB = test accounts (per owner) — excluded by `is_bulk_excluded_account` (LAB suffix).
+- **Daily `cc-ls-balance-audit --check` will now flag the ~145 Koios drifts** until Koios
+  is reconciled — expected. Do the Koios RCA (echo-loop vs gap) before any Koios re-anchor.
+- BN (`onepower_bj`) not yet audited with corrected units — pending.
+
 ## Session 2026-06-08 [202606081200] (Post-deploy verify: CC↔SM drift RCA + fixes)
 
 ### Question
