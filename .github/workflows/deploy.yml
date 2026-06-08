@@ -166,6 +166,8 @@ jobs:
             scripts/ops/run_sm_credit_mirror_incremental.py \
             scripts/ops/recompute_consumption_rate.py \
             scripts/ops/balance_refresh_scheduler.py \
+            scripts/ops/audit_ls_balances.py \
+            scripts/ops/cutover_ls_common.py \
             cc-deploy-ec2:/tmp/cc-backend/scripts/ops/
 
           # Move to final location and set permissions

@@ -248,8 +248,22 @@ def print_report(results: list[tuple[str, float, float, float, str]], threshold:
     print()
 
 
-def preview_seeds(results: list[tuple[str, float, float, float, str]], threshold: float) -> int:
-    seeds = [row for row in results if abs(row[3]) >= threshold]
+def _seed_candidates(results, threshold, only_sites):
+    out = []
+    for row in results:
+        account, _, _, delta, _ = row
+        if abs(delta) < threshold:
+            continue
+        if is_bulk_excluded_account(account):
+            continue
+        if only_sites and _site_code(account) not in only_sites:
+            continue
+        out.append(row)
+    return out
+
+
+def preview_seeds(results, threshold: float, only_sites=None) -> int:
+    seeds = _seed_candidates(results, threshold, only_sites)
     if not seeds:
         print("No balance seeds needed - all accounts within threshold.")
         return 0
@@ -266,18 +280,13 @@ def preview_seeds(results: list[tuple[str, float, float, float, str]], threshold
     return len(seeds)
 
 
-def apply_seeds(conn, results: list[tuple[str, float, float, float, str]], threshold: float) -> int:
+def apply_seeds(conn, results, threshold: float, only_sites=None) -> int:
     cur = conn.cursor()
     ts = datetime.now(timezone.utc)
     count = 0
     skipped = 0
-    for account, _, _, delta, _ in results:
-        if abs(delta) < threshold:
-            continue
-        if not VALID_ACCOUNT_RE.match(account):
-            log.warning("Skipping invalid account code: %s", account)
-            skipped += 1
-            continue
+    seeds = _seed_candidates(results, threshold, only_sites)
+    for account, _, _, delta, _ in seeds:
         rate = float(get_tariff_rate_for_site(_site_code(account)) or 0)
         amount = round(delta * rate, 4) if rate > 0 else 0.0
         cur.execute(
@@ -303,7 +312,16 @@ def main() -> int:
     parser.add_argument("--reconcile", action="store_true", help="Preview or apply balance_seed rows")
     parser.add_argument("--apply", action="store_true", help="Insert seeds (requires --reconcile)")
     parser.add_argument("--threshold", type=float, default=DRIFT_THRESHOLD_KWH)
+    parser.add_argument(
+        "--only-sites",
+        default="",
+        help="Comma-separated site codes to limit --check/--reconcile/--apply to (e.g. MAK). "
+        "Bulk-excluded accounts (LAB test, BVW, 0500MAK Power House, FAULTY, malformed) are "
+        "always skipped.",
+    )
     args = parser.parse_args()
+
+    only_sites = {s.strip().upper() for s in args.only_sites.split(",") if s.strip()} or None
 
     if not DATABASE_URL:
         log.error("DATABASE_URL is required")
@@ -322,6 +340,7 @@ def main() -> int:
         drifted = [
             row for row in results
             if abs(row[3]) >= threshold and not is_bulk_excluded_account(row[0])
+            and (not only_sites or _site_code(row[0]) in only_sites)
         ]
         if drifted:
             log.warning(
@@ -350,18 +369,21 @@ def main() -> int:
 
     if args.reconcile:
         if args.apply:
-            log.info("Applying balance seeds...")
-            count = apply_seeds(conn, results, threshold)
+            log.info(
+                "Applying balance seeds%s...",
+                f" (sites={sorted(only_sites)})" if only_sites else "",
+            )
+            count = apply_seeds(conn, results, threshold, only_sites)
             log.info("Inserted %d balance_seed transactions", count)
             log.info("Verifying post-seed balances...")
             results2 = run_audit(conn)
-            drifted2 = [row for row in results2 if abs(row[3]) >= threshold]
+            drifted2 = _seed_candidates(results2, threshold, only_sites)
             if drifted2:
-                log.warning("POST-SEED: %d accounts still drifted", len(drifted2))
+                log.warning("POST-SEED: %d in-scope accounts still drifted", len(drifted2))
             else:
-                log.info("POST-SEED: all accounts within threshold")
+                log.info("POST-SEED: all in-scope accounts within threshold")
         else:
-            preview_seeds(results, threshold)
+            preview_seeds(results, threshold, only_sites)
 
     conn.close()
     return 0
