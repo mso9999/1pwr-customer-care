@@ -43,6 +43,31 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-08 [202606081457] (Koios LS drift RCA + BN audit)
+
+### Koios LS drift RCA (145 drifted accts, read-only) — credit-side, not consumption
+Per-account decomposition (echo double-credit vs consumption import gap):
+- **echo_credit: 108 accts** — CC over-counts because mirror-source (`koios`) payments
+  echo a native (`portal`/`sms_gateway`) payment of the same amount within 24h
+  (double-credit). Consumption is COMPLETE for these (huge distinct reading-hours,
+  gap_d=0) → NOT an import-gap problem.
+- consumption_gap: 4 (mostly junk `0001BVW`). unexplained: 33 — dominated by junk
+  (`0005BVW` −7739, `FAULTY`); real unexplained small (likely partial-echo or CC-only
+  credit). Forward echo dedup already deployed (backfill_transactions cross-source dedup;
+  sm_credit_mirror --fuzzy-window-minutes=10), so historical inflation can be re-anchored
+  safely (won't immediately re-drift). **Pending sign-off** for a Koios re-anchor
+  (`audit_ls_balances --reconcile --apply --only-sites <koios sites>`).
+
+### BN audit (onepower_bj, corrected units XOF/160)
+- **Real BN customers (GBO/SAM, 204 accts): HEALTHY** — all drift <2 kWh (the 2026-04-09
+  Koios re-anchor + GBO/SAM backfill held). No BN re-anchor needed.
+- **Cross-DB contamination:** `onepower_bj.transactions` contains **660 LS-site accounts**
+  (SHG/MAS/KET/MAT/TLH/… — 1766 txns, **77,433 kWh** phantom payments incl. 0235SHG
+  1PDB 61,370 kWh) + 2 malformed (meter-serial-as-account, `nan`). These have no Koios BN
+  balance so the audit flags 672 "drifted" — but it's a DATA-HYGIENE issue, not BN balance
+  error. Needs its own RCA (how LS rows entered onepower_bj) + cleanup — **sign-off + RCA
+  required before deleting** (they carry transactions).
+
 ## Session 2026-06-08 [202606081438] (MAK re-anchor: undo 5x currency-as-kWh inflation)
 
 ### Fleet drift audit (corrected units, read-only)
