@@ -43,6 +43,21 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-08 [202606081629] (0042TOS / 0118KET push failure RCA)
+
+Both "Bad Request" failed-push accounts: customer EXISTS on Koios but has **no meter
+attached** (`meters=[]`) → Koios `POST /payments` rejects (Bad Request). Not a code/transient bug.
+- `0042TOS` (Malesala Mafura): CC commissioned, CC meter `SMRSD-04-0002605A` active, but that
+  meter is NOT linked to the customer on Koios. Fix: attach the meter to the customer in Koios,
+  then re-enqueue. CC credit held = 2.02 kWh.
+- `0118KET` (Mamohapi Nkaki): CC has only a PLACEHOLDER meter `ACCT-0118KET` (no real serial)
+  and Koios has no meter. Needs a real meter assigned (CC + Koios) first. CC credit held = 2.72 kWh.
+- Both `status='failed', last_error='Bad Request'` → `_release_blocked_retries` does NOT auto-reopen
+  these (only `blocked_uncommissioned`). After the meter is attached on Koios, ops must:
+  `UPDATE sm_credit_retry_queue SET status='pending', next_retry_at=NOW(), attempt_count=0
+   WHERE account_number IN ('0042TOS','0118KET');` then the retry processor delivers the credit.
+- Credit preserved in CC (excluded from re-anchor); customers not shorted.
+
 ## Session 2026-06-08 [202606081549] (BN leak cleanup + failed-push retry)
 
 ### BN cleanup (applied)
