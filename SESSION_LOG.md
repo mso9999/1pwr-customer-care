@@ -35,6 +35,25 @@
   cardinality from duplicate spreadsheet timestamps / shared Koios serials).
 - No balance impact (BN seed-anchored to Koios 2026-04-09); consumption history/analytics only.
 
+### 2026-06-08 — CORRECTION: the GBO/SAM backfill DID impact BN balances (now fixed)
+- Drift audit Mon AM found BN heavily drifted: GBO/SAM 1PDB balances gone deeply negative (e.g.
+  0016GBO 1PDB -1,610 vs Koios +4). RCA: the Sun consumption backfill ADDED ~10k kWh of pre-2025-08
+  consumption (+ the Koios pull filled 2025-08+ gaps), but the BN balance_seeds (2026-04-09) predated
+  that, so `balance = payments - consumption + seed` dropped by the added consumption. The earlier
+  "no balance impact" claim was WRONG — adding consumption requires a re-anchor (done for LS, missed
+  for BN).
+- Fix: re-anchored valid BN accounts to current Koios via `audit_bn_balances.py --reconcile --apply`
+  (its `apply_seeds` filters to `^\d{4}(GBO|SAM)$`, so garbage/leakage codes are skipped):
+  **157 balance_seed inserted, 652 invalid codes skipped.** Verified: 0016GBO 4.36=Koios, 0029GBO
+  38.15≈38.18, 0030GBO 182.19≈182.20.
+- LESSON: any consumption backfill MUST be followed by a balance re-anchor to SparkMeter (or the
+  seeds neutralized) so derived balances don't shift.
+- Residual: 652 BN "drift" rows are cross-DB leakage (LS SHG/MAT in onepower_bj) + meter-serial /
+  `nan` / bare-code garbage — no real-customer impact; separate hygiene cleanup.
+- LS drift (same audit): 326 customer accounts >0.5 kWh, real-customer net ≈ -51 kWh (negligible,
+  bidirectional lag + MAK outage recovery); the -42.8k total is the excluded 0500MAK powerhouse +
+  BVW merchants (never seeded). No echo regression.
+
 ## Session 2026-06-05 [202606051100] (CC↔Koios balance divergence — RCA + durable fix)
 
 ### Symptom
