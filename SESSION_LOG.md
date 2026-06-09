@@ -43,6 +43,19 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-09 [202606091053] (SAM earlier-history backfill from CSV)
+
+"SAM Hourly Consumption (1).csv" (wide, 57 name cols, 2023-06-11 → 2025-12-14) vs 1PDB:
+1PDB SAM started **2024-02-01**, so the CSV's **2023-08 → 2024-01** (~1,286 kWh) was new
+(Feb-2024+ already covered, and 1PDB runs to Jun 2026 so CSV adds nothing recent).
+- Generalized `backfill_gbo_csv_consumption.py` to env-driven (BACKFILL_CSV/SITE_CODE/
+  SITE_ID/CUTOFF) so it backfills any site without GBO hardcodes; CUTOFF guards existing rows.
+- Ran SAM with cutoff **2024-02-01**: 54/57 customer cols matched (unmatched = SAM POWERHOUSE,
+  Sam climatiseur, Total, and a FAGNON duplicate — all correctly excluded). Inserted
+  **269,784 hourly rows**; SAM now continuous **2023-06 → 2026-06**. 2024-02 unchanged (450.6).
+- Added new months to monthly_consumption (432 rows, 2023-06 → 2024-01).
+- Analytics/history only; no balance impact (BN seed-anchored).
+
 ## Session 2026-06-09 [202606090852] (Tariffs page: show thresholds in kWh + currency)
 
 Per O&M: LS/BN/ZM teams should see both units. Tariffs → Low balance SMS now shows the
