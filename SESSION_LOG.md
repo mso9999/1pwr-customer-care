@@ -43,6 +43,28 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-09 [202606090743] (Transactions "incorrect date" reminder — closed out)
+
+Team reminder (O&M) with a 0302MAK screenshot showing payments dated **15 Jun 2026**
+(future) at 00:00. Investigation:
+- **Screenshot is stale** (predates this week's fixes/re-anchor): current DB has 0302MAK
+  at 20 txns dated Apr 27 → Jun 8, **no future dates, no 00:00 rows**; not in the merchant
+  repair backup (it's a MAK/TC account, never had mm: rows). `15 Jun` (day=15) can't be the
+  day<=12 transposition anyway.
+- **DB-wide: 0 future-dated transactions.** Merchant (mm:) rows: 13,190 total, **0 future**,
+  max date 2026-05-12 (one-time backfill, nothing new). Repair backup = 1,615 rows. Repair
+  held.
+- **Root-cause fix was NOT in production.** `merchant_export_parser._parse_datetime` still
+  tried `%d/%m/%Y` before `%m/%d/%Y` in `main`; the corrected ordering existed only as an
+  **uncommitted local change**, and the repair/rollback tooling was **untracked**. Committed
+  + deployed (578a6b7); verified live on host (`%m/%d/%Y` now precedes `%d/%m/%Y`). So a
+  future merchant import can no longer re-introduce the transposition.
+- Committed tooling: `build_merchant_date_map.py`, `repair_merchant_date_transposition.py`,
+  `rollback_merchant_date_transposition.sql`, `ccdb.sh`.
+- Frontend `fmtTxnDate` (CustomerDataPage) has a minor naive-datetime→local tz nuance but
+  cannot shift a date by +7 days, so it is not the reported cause.
+- Ask team for a CURRENT example (account + screenshot) if wrong dates are still seen.
+
 ## Session 2026-06-08 [202606081629] (0042TOS / 0118KET push failure RCA)
 
 Both "Bad Request" failed-push accounts: customer EXISTS on Koios but has **no meter
