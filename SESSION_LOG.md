@@ -43,6 +43,13 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-09 [202606090852] (Tariffs page: show thresholds in kWh + currency)
+
+Per O&M: LS/BN/ZM teams should see both units. Tariffs → Low balance SMS now shows the
+currency equivalent next to each kWh threshold (view + live in edit), plus a `{sym}{rate}/kWh`
+caption. Backend `get_country_fees` returns `tariff_rate` (system_config 'tariff_rate' →
+country default). Symbols/rates: LS M@5, BN CFA@160, ZM K@5(placeholder). tsc green; deployed.
+
 ## Session 2026-06-09 [202606090751] (LS low-balance SMS: M10 threshold + Sesotho fix)
 
 O&M request. Done + deployed + verified:
