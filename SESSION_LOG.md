@@ -43,6 +43,27 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-09 [202606091558] (LS hourly_consumption de-duplication)
+
+Same dual-meter_id-convention RCA as BN, applied to LS (onepower_cc, ~17M rows, 3 sources):
+167,535 within-(account,hour,source) dup groups (Apr-2026 serial migration; identical kWh
+under serial- and account-keyed meter_id). LS REQUIRED a source-aware dedup: 4,284
+account-hours legitimately have >1 source (koios/thundercloud vs iot/1Meter) and the balance
+engine picks per-source by billing priority — those must NOT be collapsed.
+
+- **Patched server-side importers to account-keyed meter_id** (stop regeneration):
+  `/opt/1pdb/services/import_hourly.py` (koios) + `import_thundercloud.py` (TC), backups
+  `*.bak.20260609T200825Z`. (Non-repo importers — divergence noted.)
+- **Dedup within (account, hour, source) only** (txn; backup table
+  `hourly_consumption_dedup_bak_ls_20260609`, 335,665 rows): kept one account-keyed row per
+  group with kwh=MAX, **deleted 168,130 dup rows**. Verified: per-source MAX sum identical
+  pre/post (**4,419.832**) → balances unchanged; within-source dups now 0; multi-source
+  account-hours preserved at exactly **4,284**.
+- Spot-check balances next day consistent with normal activity (0024MAK 198.98, 0302MAK 15.21
+  after a top-up, 0242SHG 15.49, 0102KET 26.49, 0034MAS 7.77).
+- Both countries now on the unified account-keyed convention: export / raw download /
+  balance engine converge; no double-count trap remains.
+
 ## Session 2026-06-09 [202606091520] (BN hourly_consumption de-duplication)
 
 RCA: BN `hourly_consumption` had ~2 rows per (account,hour) — same Koios reading stored
