@@ -2853,6 +2853,8 @@ export interface CountryFees {
   currency: string;
   currency_symbol: string;
   country_code: string;
+  /** Country default tariff (currency/kWh) for showing kWh thresholds in currency too. */
+  tariff_rate: number;
 }
 
 export async function getCountryFees(): Promise<CountryFees> {

@@ -151,6 +151,9 @@ def get_country_fees(conn) -> dict:
         "currency": COUNTRY.currency,
         "currency_symbol": COUNTRY.currency_symbol,
         "country_code": COUNTRY.code,
+        # Country default tariff (currency/kWh) so the UI can show kWh thresholds with
+        # their currency equivalent (e.g. 2 kWh = M10 in LS, = CFA320 in BN).
+        "tariff_rate": _read_system_float(conn, "tariff_rate", COUNTRY.default_tariff_rate),
     }
 
 

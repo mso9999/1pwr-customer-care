@@ -194,6 +194,11 @@ function LowBalanceKwhCard() {
 
   if (!fees) return null;
 
+  const rate = fees.tariff_rate || 0;
+  const sym = fees.currency_symbol || '';
+  const inCurrency = (kwh: number) =>
+    rate > 0 && Number.isFinite(kwh) ? `≈ ${sym}${(kwh * rate).toFixed(2)}` : '';
+
   return (
     <div className="bg-white rounded-xl border p-5">
       <div className="flex items-center justify-between mb-3">
@@ -202,6 +207,9 @@ function LowBalanceKwhCard() {
             {t('tariff:lowBalance.title')}
           </h2>
           <p className="text-xs text-gray-400 mt-0.5">{t('tariff:lowBalance.subtitle')}</p>
+          {rate > 0 && (
+            <p className="text-xs text-gray-400 mt-0.5 tabular-nums">{sym}{rate}/kWh</p>
+          )}
         </div>
         {canEdit && !editing && (
           <button
@@ -228,12 +236,14 @@ function LowBalanceKwhCard() {
             <div className="mt-1 text-2xl font-bold text-gray-800 tabular-nums">
               {fees.low_balance_kwh_threshold.toFixed(1)} <span className="text-base text-gray-400">kWh</span>
             </div>
+            <div className="text-xs text-gray-500 tabular-nums">{inCurrency(fees.low_balance_kwh_threshold)}</div>
           </div>
           <div>
             <span className="text-xs text-gray-400 uppercase tracking-wide">{t('tariff:lowBalance.clear')}</span>
             <div className="mt-1 text-2xl font-bold text-gray-800 tabular-nums">
               {fees.low_balance_kwh_clear.toFixed(1)} <span className="text-base text-gray-400">kWh</span>
             </div>
+            <div className="text-xs text-gray-500 tabular-nums">{inCurrency(fees.low_balance_kwh_clear)}</div>
           </div>
           <div className="col-span-2">
             <span className="text-xs text-gray-400 uppercase tracking-wide">{t('tariff:lowBalance.maxPerDay')}</span>
@@ -254,6 +264,7 @@ function LowBalanceKwhCard() {
               onChange={e => setDraft({ ...draft, warn: Number(e.target.value) })}
               className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none"
             />
+            <span className="block mt-1 text-xs text-gray-500 tabular-nums">{inCurrency(draft.warn)}</span>
           </label>
           <label className="block">
             <span className="text-xs text-gray-500 uppercase tracking-wide">{t('tariff:lowBalance.clear')}</span>
@@ -265,6 +276,7 @@ function LowBalanceKwhCard() {
               onChange={e => setDraft({ ...draft, clear: Number(e.target.value) })}
               className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none"
             />
+            <span className="block mt-1 text-xs text-gray-500 tabular-nums">{inCurrency(draft.clear)}</span>
           </label>
           <label className="block col-span-2">
             <span className="text-xs text-gray-500 uppercase tracking-wide">{t('tariff:lowBalance.maxPerDay')}</span>
