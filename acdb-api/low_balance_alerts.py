@@ -36,10 +36,10 @@ def format_alert_message(account_number: str, balance_kwh: float, balance_curren
             f"Reste env. {balance_currency:.0f} {cur_code} "
             f"({balance_kwh:.1f} kWh). Rechargez vite."
         )
-    # Lesotho Sesotho (aligned with legacy SMSComms wording)
+    # Lesotho Sesotho (wording corrected per O&M request 2026-06-09)
     return (
-        f"Motlakase oa ntlo ea {account_number} o se o k'a fela haufi. "
-        f"O boloking bakeng sa M{balance_currency:.2f} ({balance_kwh:.1f} kWh)."
+        f"Motlakase oa ntlo ea {account_number} o se o ka fela haufi. "
+        f"Ho setse motlakase oa boleng ba M{balance_currency:.2f} ({balance_kwh:.1f} kWh)."
     )
 
 

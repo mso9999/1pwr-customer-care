@@ -99,8 +99,9 @@ LESOTHO = CountryConfig(
     display_name="Lesotho",
     default_connection_fee=501.0,
     default_readyboard_fee=499.0,
-    default_low_balance_kwh_threshold=10.0,
-    default_low_balance_kwh_clear=20.0,
+    # Warn at M10.00 (= 2 kWh @ 5 LSL/kWh), clear at M20.00 (per O&M 2026-06-09).
+    default_low_balance_kwh_threshold=2.0,
+    default_low_balance_kwh_clear=4.0,
 )
 
 BENIN = CountryConfig(
