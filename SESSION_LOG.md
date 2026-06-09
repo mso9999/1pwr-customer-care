@@ -43,6 +43,20 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-09 [202606091246] (BN: onboarded 9 missing Koios customers into CC)
+
+Created the 9 genuine Koios-only BN customers in CC (Koios->CC back-sync; codes + meters
+already on Koios so no SM push). Tool: `scripts/ops/onboard_missing_koios_accounts.py`
+(idempotent, dry-run/--apply). Created customer+account+meter for: 0024GBO BOCO Guy, 0041GBO
+ASSOGBA Alexis, 0046GBO ADAMOU Mohamed, 0047GBO ADAM Aboudoullah, 0062GBO AZALOU Robert,
+0063GBO ATCHASSOU Andre, 0119GBO AGBETOU Rachelle, 0138GBO IBRAHIM Youssouf, 0055SAM FORAGE.
+- Matched BN norm: customer_type='SME', customer_commissioned=False, date_service_connected=NULL,
+  country='Benin', meter role='primary' status='active'. Orphan txns now adopted (0055SAM 7,
+  0119GBO 7, 0024GBO 4, etc.).
+- FOLLOW-UP: BN team to formally COMMISSION these via the portal (fees + service date); confirm
+  0055SAM "FORAGE" classification (borehole/service vs SME). Test/junk Koios codes still pending
+  BN IT cleanup (see prior entry / BN IT message).
+
 ## Session 2026-06-09 [202606091219] (BN Koios ↔ CC customer reconciliation)
 
 Compared Koios BN roster (GBO+SAM) vs CC onepower_bj accounts. 156/169 valid in both.
