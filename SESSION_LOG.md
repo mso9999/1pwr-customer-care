@@ -43,6 +43,20 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-09 [202606090751] (LS low-balance SMS: M10 threshold + Sesotho fix)
+
+O&M request. Done + deployed + verified:
+- **Sesotho wording corrected** in `low_balance_alerts.format_alert_message` (LS branch):
+  old "o se o k'a fela haufi. O boloking bakeng sa M.. (.. kWh)" →
+  new "o se o ka fela haufi. Ho setse motlakase oa boleng ba M.. (.. kWh)".
+  (Only code copy; CSV hits were export logs.)
+- **LS low-balance threshold → M10.00**: `low_balance_kwh_threshold` 10→**2.0** kWh
+  (= M10 @ 5 LSL/kWh), `low_balance_kwh_clear` 20→**4.0** kWh (M20). Set live in
+  `onepower_cc.system_config` AND updated `country_config` LS seed defaults. Editable
+  going forward on the Tariffs page (`/tariffs` → Low balance SMS, in kWh).
+- Sample now: "Motlakase oa ntlo ea 0013SHG o se o ka fela haufi. Ho setse motlakase oa
+  boleng ba M8.00 (1.6 kWh)." BN message unchanged.
+
 ## Session 2026-06-09 [202606090743] (Transactions "incorrect date" reminder — closed out)
 
 Team reminder (O&M) with a 0302MAK screenshot showing payments dated **15 Jun 2026**
