@@ -176,19 +176,25 @@ def _parse_datetime(value: Any) -> datetime | None:
         dt = value
     else:
         text = str(value).strip()
+        # NOTE: Lesotho M-Pesa / EcoCash merchant exports use US ``M/D/YYYY``
+        # (confirmed from source files, e.g. ``1/31/2026``). ``%m/%d`` MUST be
+        # tried before ``%d/%m`` for slash dates, otherwise any date whose day
+        # and month are both <= 12 (e.g. ``1/7/2026`` = Jan 7) silently
+        # transposes to Jul 1. ``%d/%m`` is kept as a fallback so genuinely
+        # day-first strings (first component > 12) still parse.
         for fmt in (
             "%Y-%m-%d %H:%M:%S",
             "%Y-%m-%d %H:%M",
             "%Y-%m-%d",
-            "%d-%m-%Y %H:%M:%S",
-            "%d-%m-%Y %H:%M",
-            "%d-%m-%Y",
+            "%m/%d/%Y %H:%M:%S",
+            "%m/%d/%Y %H:%M",
+            "%m/%d/%Y",
             "%d/%m/%Y %H:%M:%S",
             "%d/%m/%Y %H:%M",
             "%d/%m/%Y",
-            "%m/%d/%Y %H:%M",
-            "%m/%d/%Y %H:%M:%S",
-            "%m/%d/%Y",
+            "%d-%m-%Y %H:%M:%S",
+            "%d-%m-%Y %H:%M",
+            "%d-%m-%Y",
         ):
             try:
                 dt = datetime.strptime(text, fmt)
