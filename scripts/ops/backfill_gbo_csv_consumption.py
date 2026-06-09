@@ -1,10 +1,26 @@
 #!/usr/bin/env python3
-"""Match GBO CSV customer-name columns to CC account numbers (and optionally backfill)."""
+"""Backfill wide, name-keyed Koios consumption CSVs into hourly_consumption.
+
+Matches customer-NAME columns to CC account numbers (via the Koios report for the site)
+and inserts pre-cutoff hourly rows. Site/CSV/cutoff are env-driven (BACKFILL_CSV,
+BACKFILL_SITE_CODE, BACKFILL_SITE_ID, BACKFILL_CUTOFF), so it works for any site
+(GBO, SAM, ...). Set BACKFILL_CUTOFF to the date 1PDB coverage already starts so existing
+rows are never overwritten. Add --apply to write (default = dry-run report only).
+Analytics/history only; no balance impact (BN is seed-anchored to Koios).
+"""
 import csv, io, os, sys, unicodedata, collections, datetime
 import psycopg2, psycopg2.extras
 
-CSV="/tmp/gbo.csv"
-COMMUNITY="GBO"   # site code for inserted rows
+# Parametrized via env so the same tool backfills any site (GBO/SAM/...):
+#   BACKFILL_CSV       path to the wide name-keyed CSV (default /tmp/gbo.csv)
+#   BACKFILL_SITE_CODE site code written to community/source rows (default GBO)
+#   BACKFILL_SITE_ID   Koios report site_id (koios_sites UUID) for the name map
+#   BACKFILL_CUTOFF    only insert rows strictly BEFORE this date (YYYY-MM-DD);
+#                      default 2025-08-01. Use the date 1PDB coverage already starts
+#                      so existing rows are never overwritten.
+CSV=os.environ.get("BACKFILL_CSV", "/tmp/gbo.csv")
+COMMUNITY=os.environ.get("BACKFILL_SITE_CODE", "GBO")   # site code for inserted rows
+CUTOFF=datetime.datetime.strptime(os.environ.get("BACKFILL_CUTOFF", "2025-08-01"), "%Y-%m-%d")
 APPLY="--apply" in sys.argv
 
 def fix_enc(s):
@@ -29,7 +45,7 @@ import requests
 base=os.environ.get("KOIOS_BASE_URL","https://www.sparkmeter.cloud")
 kk=os.environ.get("KOIOS_API_KEY_BN") or os.environ.get("KOIOS_WRITE_API_KEY_BN") or ""
 ks=os.environ.get("KOIOS_API_SECRET_BN") or os.environ.get("KOIOS_WRITE_API_SECRET_BN") or ""
-SITE="a23c334e-33f7-473d-9ae3-9e631d5336e4"
+SITE=os.environ.get("BACKFILL_SITE_ID", "a23c334e-33f7-473d-9ae3-9e631d5336e4")
 name2acct={}; acct_meter={}
 for d in ("2025-08-15","2025-09-15","2025-10-15","2025-11-15","2025-12-15",
           "2026-01-15","2026-02-15","2026-03-15","2026-04-15","2026-05-15","2026-05-30"):
@@ -87,14 +103,13 @@ def parse_dt0(ts):
             if a>12: return datetime.datetime(y,b,a,int(t.split(':')[0]),0)
     except Exception: pass
     return None
-CUT=datetime.datetime(2025,8,1)
 kwh_m=0.0; kwh_u=0.0
 with open(CSV,newline='',encoding='latin-1') as f:
     r=csv.reader(f); next(r)
     for line in r:
         if not line or not line[0].strip(): continue
         dt=parse_dt0(line[0])
-        if dt is None or dt>=CUT: continue
+        if dt is None or dt>=CUTOFF: continue
         for i in range(len(cols)):
             if i+1>=len(line): continue
             v=line[i+1].strip()
@@ -103,13 +118,13 @@ with open(CSV,newline='',encoding='latin-1') as f:
             except ValueError: continue
             if i in matched: kwh_m+=k
             else: kwh_u+=k
-print(f"pre-2025-08 kWh: matched={kwh_m:.1f}  unmatched={kwh_u:.1f}  coverage={100*kwh_m/(kwh_m+kwh_u or 1):.1f}%")
+print(f"pre-cutoff kWh: matched={kwh_m:.1f}  unmatched={kwh_u:.1f}  coverage={100*kwh_m/(kwh_m+kwh_u or 1):.1f}%")
 print("unmatched CSV columns:", "; ".join(unmatched_cols[:60]))
 
 if not APPLY:
     sys.exit(0)
 
-# Backfill pre-2025-08 only, for matched columns
+# Backfill rows before CUTOFF only, for matched columns
 def parse_dt(ts):
     ts=ts.strip()
     for fmt in ("%m/%d/%Y %H:%M:%S","%Y-%m-%d %H:%M:%S","%m/%d/%Y %H:%M","%Y-%m-%d %H:%M"):
@@ -124,7 +139,6 @@ def parse_dt(ts):
     except Exception: pass
     return None
 
-CUTOFF=datetime.datetime(2025,8,1)
 # Accumulate by (account, hour) so the batch has unique (meter_id, reading_hour):
 # the spreadsheet can contain duplicate timestamps, and meter_id is keyed to the
 # account_number (some accounts share a Koios serial), which would otherwise trip
@@ -146,7 +160,7 @@ with open(CSV,newline='',encoding='latin-1') as f:
             agg[(acct,hour)]+=kwh
 # meter_id = account_number (unique per account; balance/monthly dedup by account+hour)
 rows=[(acct, acct, hour, round(k,6), COMMUNITY) for (acct,hour),k in agg.items()]
-print(f"pre-2025-08 rows to insert: {len(rows)}")
+print(f"rows to insert (before cutoff {CUTOFF.date()}): {len(rows)}")
 if rows:
     psycopg2.extras.execute_values(cur,
         """INSERT INTO hourly_consumption (account_number, meter_id, reading_hour, kwh, community, source)
