@@ -43,6 +43,28 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-09 [202606091520] (BN hourly_consumption de-duplication)
+
+RCA: BN `hourly_consumption` had ~2 rows per (account,hour) — same Koios reading stored
+under TWO meter_id keys: serial (from ongoing `import_hourly_bn.py`, serial-keyed) AND
+account_number (from one-time `import_koios_report`/CSV backfills, account-keyed). Benign for
+deduped paths (export DISTINCT ON, balance engine MAX, monthly rebuild) but bloated the table
+2x and a naive un-deduped sum over-counted ~40% (e.g. Jan–May 2026 naive 68,276 vs deduped
+48,941 kWh). MAX vs DISTINCT-ON also disagreed ~0.1%.
+
+Fix (durable, account-keyed convention):
+- **Patched server-side `/opt/1pdb/services/import_hourly_bn.py`** to write `meter_id =
+  account_number` (was serial), so the daily importer stops creating serial duplicates.
+  Backup: `import_hourly_bn.py.bak.20260609T192442Z`. (Non-repo importer — divergence noted.)
+- **One-time dedup of BN `hourly_consumption`** (txn, backup table
+  `hourly_consumption_dedup_bak_20260609`, 2,022,728 rows): kept one account-keyed row per
+  (account,hour) with kwh=MAX, deleted 303,518 dup rows. **pre_sum == post_sum = 90,334.702 kWh**
+  (consumption/balances unchanged). dup_groups_remaining = 0.
+- VERIFIED: MAX / DISTINCT-ON / naive sums now all converge (48,941.4) — downloads, exports,
+  balance engine all agree; no more double-count trap.
+- NOTE: LS (onepower_cc) likely has the same dual-convention dups (import_hourly.py serial +
+  import_koios_report account) — not yet cleaned; offer pending.
+
 ## Session 2026-06-09 [202606091246] (BN: onboarded 9 missing Koios customers into CC)
 
 Created the 9 genuine Koios-only BN customers in CC (Koios->CC back-sync; codes + meters
