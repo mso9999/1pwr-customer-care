@@ -43,6 +43,24 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-09 [202606091219] (BN Koios ↔ CC customer reconciliation)
+
+Compared Koios BN roster (GBO+SAM) vs CC onepower_bj accounts. 156/169 valid in both.
+- **In Koios, NOT in CC (no account row):** 8 genuine GBO households (0024 BOCO Guy, 0041
+  ASSOGBA Alexis, 0046 ADAMOU Mohamed, 0047 ADAM Aboudoullah, 0062 AZALOU Robert, 0063
+  ATCHASSOU André, 0119 AGBETOU Rachelle, 0138 IBRAHIM Youssouf) + 0055SAM "FORAGE"
+  (borehole/service load). Several already have orphan CC txns (mirror booked payments w/o
+  an account). + 4 test-looking: 2235SAM "T", 2525SAM "Go", 4321SAM "test customer"(no meter),
+  4452GBO "Test Gbo 2". + 21 junk/test codes (TEST*, RETIRER, 0/00, malformed).
+- **"CC not in Koios" was a FALSE alarm:** authoritative per-code v1 lookups show those 13
+  ARE in Koios (the roster page fetch was incomplete). Their real state: meter assigned +
+  pushed to Koios but `customer_commissioned=False` / no service date — mid-onboarding,
+  not a push failure. Confirms commissioning + meter-assignment DO push to Koios
+  (commission.py → sync_sparkmeter_customer_and_meter).
+- ACTIONS: (1) onboarding list prepared for the 8 GBO households (+FORAGE) — pending method
+  (registration flow vs vetted back-sync). (2) Drafted FR/EN message for BN IT to validate
+  the test/odd codes + clean the 21 junk entries in Koios.
+
 ## Session 2026-06-09 [202606091053] (SAM earlier-history backfill from CSV)
 
 "SAM Hourly Consumption (1).csv" (wide, 57 name cols, 2023-06-11 → 2025-12-14) vs 1PDB:
