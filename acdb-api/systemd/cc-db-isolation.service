@@ -1,0 +1,17 @@
+[Unit]
+Description=Cross-country data isolation check (no foreign-site accounts per country DB)
+Wants=network-online.target postgresql.service
+After=network-online.target postgresql.service
+
+[Service]
+Type=oneshot
+User=cc_api
+Group=cc_api
+WorkingDirectory=/opt/cc-portal/backend
+EnvironmentFile=/opt/1pdb/.env
+Environment=PYTHONPATH=/opt/cc-portal/backend:/opt/cc-portal/backend/scripts/ops
+ExecStart=/opt/cc-portal/backend/venv/bin/python /opt/cc-portal/backend/scripts/ops/check_db_isolation.py --check
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cc-db-isolation
+TimeoutStartSec=300

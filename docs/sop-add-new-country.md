@@ -1,5 +1,7 @@
 # SOP: Adding a new country to Customer Care (e.g. Zambia)
 
+> **Admins:** for the business-side, in-portal walkthrough (tariffs, fees, low-balance thresholds, roles, verification), see the companion **[Admin Guide & Tutorial](admin-guide-country-setup.md)**. This SOP is the engineering procedure.
+
 This procedure extends the **multi-country architecture** described in `CONTEXT.md`: one PostgreSQL database and one FastAPI process per country, same codebase, unified frontend at `cc.1pwrafrica.com`. Use it when onboarding a new operating country (example: **Zambia, `ZM`**).
 
 **Principles**

@@ -168,6 +168,7 @@ jobs:
             scripts/ops/balance_refresh_scheduler.py \
             scripts/ops/audit_ls_balances.py \
             scripts/ops/cutover_ls_common.py \
+            scripts/ops/check_db_isolation.py \
             cc-deploy-ec2:/tmp/cc-backend/scripts/ops/
 
           # Move to final location and set permissions
@@ -284,7 +285,7 @@ jobs:
               fi
             }
 
-            for timer_base in sms-reconcile cc-sm-credit-mirror cc-ls-balance-audit cc-balance-rate cc-balance-refresh; do
+            for timer_base in sms-reconcile cc-sm-credit-mirror cc-ls-balance-audit cc-balance-rate cc-balance-refresh cc-db-isolation; do
               install_timer_pair "$timer_base"
             done
 

@@ -624,7 +624,8 @@ single source of truth behind the CC API.
 |----------|---------|
 | `README.md` | Architecture overview, auto-deploy, quick start |
 | `docs/whatsapp-customer-care.md` | Full WhatsApp bridge documentation, infrastructure, troubleshooting |
-| `docs/sop-add-new-country.md` | SOP: adding a new country (DB, API, frontend, bridge, deploy) |
+| `docs/sop-add-new-country.md` | SOP: adding a new country (DB, API, frontend, bridge, deploy) + cross-country data isolation rules |
+| `docs/admin-guide-country-setup.md` | Admin guide & tutorial: business-side country setup (tariffs, fees, thresholds, roles, verification) |
 | `docs/ops/manual-adjustment-sms-discrepancies.md` | Team instructions: manual Koios + 1PDB corrections after SMS misallocations |
 | `docs/ops/bn-sms-1pdb-gap.md` | Benin: CC API is ready; SMSComms-BN PHP must mirror to `/api/bn/sms/incoming` (not in this repo) |
 | `docs/ops/sms-gateway-cpanel-deploy.md` | **LS vs BN** manual cPanel deploy, archive-before-overwrite, two hosts |
