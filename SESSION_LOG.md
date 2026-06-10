@@ -43,6 +43,34 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-09 [202606092239] (UGP Benin CDF refresh — comprehensive through 2026-06)
+
+Reviewed UGP CDF creation code (`uGridPlan map_v3`: `tools/cdf_prep/build_benin_hourly_cdfs.py`,
+registry `data/cdf_library.json`, system card `docs/system_cards/cdf_library.md`) and rebuilt
+the Benin sources with comprehensive data. UGP commit `3b73a7b7` (local branch
+`chore/repo-consolidation-20260601`, NOT pushed — branch has unrelated in-flight work).
+
+- **Window 2025-01→2025-12 ⇒ 2025-01→2026-06**: pulled 467 day-files of 15-min readings from
+  Koios `/api/v2/report` (BN keys on CC host) into `export readings 2026/` (1.7GB, untracked).
+  This FILLED Sep/Oct-2025 (previously missing → flat all-ones CDFs in those months) and added
+  Dec-15-2025→Jun-2026. 7 scattered days 404'd (no data).
+- **Authoritative customer types from 1PDB**: exported `onepower_bj` account→type map
+  (`Benin Data/1pdb_customer_types.csv`, 181 accts) overlaid on census. n_customers:
+  HH 137→**171**, SME 23→**60**, CHU 6→**9**; records 1.9M→4.0M / 417k→1.1M / 103k→315k.
+- **Builder fixes**: multi-dir loading; cross-batch (meter,timestamp) dedup (caught 1.94M
+  overlap rows); **pandas `format='mixed'` timestamp fix** — 2026 API pulls use naive
+  timestamps vs ISO+tz in 2025 exports; without it pandas>=2 silently NaT-dropped the whole
+  2026 batch (first build's range stayed 2025 — caught by checking the log's Date range).
+- **Published to production** (ugp host 15.240.40.213, `/opt/ugridplan/app/data/`): backed up
+  JSON+NPZs (`*.bak.20260610`), shipped 3 NPZs, surgically merged ONLY the 3 benin entries
+  into prod `cdf_library.json` (registries differ: local `1pdb_hh_legacy` vs prod
+  `acdb_hh_legacy` — wholesale overwrite would have broken it). Loader is mtime-aware (no
+  restart needed). VERIFIED live: `/api/8760/cdf-library` returns period 2025-01→2026-06,
+  refreshed 2026-06-09 for all three.
+- Follow-ups: push UGP branch when its in-flight work settles; optionally run
+  `cdf_verification` (10-MC) on the three sources; consider migrating Benin CDFs into the
+  resumable CC-API refresh pipeline so future refreshes don't need manual report pulls.
+
 ## Session 2026-06-09 [202606092224] (1PDB services CI deploy — drift gap closed permanently)
 
 Added `.github/workflows/deploy-services.yml` to the **1PDB repo** (commit `345898e`): on push
