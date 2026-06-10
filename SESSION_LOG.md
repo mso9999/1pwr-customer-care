@@ -43,6 +43,20 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-10 [202606100839] (Register customer with known/legacy account number)
+
+O&M (Moletsane) request: some ACCDB-era accounts were never imported into 1PDB but
+customers already paid fees against them — need to register WITHOUT auto-generation.
+
+- `POST /api/customers/register` accepts optional `account_number`; wizard (Location step)
+  gained "Existing Account Number (optional)" (EN/FR). Blank = auto-generate (unchanged).
+- Validation: `^\d{4}[A-Z]{2,4}$`, suffix must match selected site, 409 if exists.
+  Mutation log records `manual_account_number=true`. Creating the account ADOPTS any
+  transactions already keyed to that number (the paid fees attach automatically).
+- Generator safety: next_account_number is MAX-based + collision walk-forward (mig 034),
+  so manual numbers (high or low) can't break auto-generation.
+- Commit 053b51d; tsc green; deploy green.
+
 ## Session 2026-06-10 [202606100800] (Low-balance alerts: exempt uncommissioned customers)
 
 O&M (Moletsane) report: message + M10 threshold correct, but uncommissioned customers (e.g.
