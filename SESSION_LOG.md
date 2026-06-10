@@ -43,6 +43,18 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-09 [202606092224] (1PDB services CI deploy — drift gap closed permanently)
+
+Added `.github/workflows/deploy-services.yml` to the **1PDB repo** (commit `345898e`): on push
+to main touching `services/**` it syntax-checks all .py/.sh, rsyncs to `/opt/1pdb/services`
+(staged via /tmp, **no --delete** so host-only files survive), restarts the sole daemon
+consumer (`prototype-sync.service`; everything else is oneshot timers), and verifies
+repo == host by sha256. Set `EC2_SSH_KEY`/`EC2_LINUX_HOST` secrets on onepowerLS/1PDB.
+First run (27249042696) green; verified host-only files (gap_fill.py, seed_balances.py,
+audit_bn_balances.py, backfill_all.sh, data/) intact and the account-keyed meter_id patch
+still in place post-deploy. **`/opt/1pdb/services` hotfixes should now be made in the 1PDB
+repo, not on the host** — CI keeps them in lockstep.
+
 ## Session 2026-06-09 [202606092007] (Server-side importer divergence RESOLVED — 1PDB repo)
 
 `/opt/1pdb/services` is controlled by the **1PDB repo** (`onepowerLS/1PDB`, local
