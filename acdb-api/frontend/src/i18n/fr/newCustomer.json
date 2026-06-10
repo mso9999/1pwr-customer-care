@@ -24,6 +24,8 @@
     "phonePlaceholder": "+266 …",
     "idPlaceholder": "Carte d'identité / Passeport",
     "site": "Site (Concession)",
+    "existingAccount": "Numéro de compte existant (optionnel)",
+    "existingAccountPlaceholder": "ex. 0286SHG — laisser vide pour générer automatiquement",
     "district": "District",
     "plotNumber": "N° de parcelle",
     "village": "Village / Adresse",

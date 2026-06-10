@@ -39,6 +39,7 @@ const steps: { title: string; description: string; fields: FieldDef[] }[] = [
     fields: [
       { key: '_ugp_picker', label: 'Import from uGridPlan', type: 'ugp_picker' },
       { key: 'community', label: 'Site (Concession)', type: 'select', options: [], required: true },
+      { key: 'account_number', label: 'Existing Account Number (optional)', placeholder: 'e.g. 0286SHG — leave blank to auto-generate' },
       { key: 'district', label: 'District', placeholder: 'e.g. Mafeteng' },
       { key: 'plot_number', label: 'Plot / Stand Number', placeholder: 'e.g. MAK 0001 HH' },
       { key: 'street_address', label: 'Village / Street Address', placeholder: 'Village or street name' },
@@ -388,6 +389,7 @@ export default function NewCustomerWizard() {
     phone: 'newCustomer:fields.phone',
     cell_phone_1: 'newCustomer:fields.cellPhone',
     community: 'newCustomer:fields.site',
+    account_number: 'newCustomer:fields.existingAccount',
     district: 'newCustomer:fields.district',
     plot_number: 'newCustomer:fields.plotNumber',
     street_address: 'newCustomer:fields.village',
@@ -400,6 +402,7 @@ export default function NewCustomerWizard() {
     phone: 'newCustomer:fields.phonePlaceholder',
     cell_phone_1: 'newCustomer:fields.phonePlaceholder',
     national_id: 'newCustomer:fields.idPlaceholder',
+    account_number: 'newCustomer:fields.existingAccountPlaceholder',
   };
 
   const stepTitleKeys = ['newCustomer:steps.personal', 'newCustomer:steps.location', 'newCustomer:steps.service'];
@@ -471,6 +474,7 @@ export default function NewCustomerWizard() {
         gender: form['gender']?.trim() || undefined,
         last_name: form['last_name']?.trim() || '',
         community: form['community']?.trim().toUpperCase() || '',
+        account_number: form['account_number']?.trim().toUpperCase() || undefined,
         phone: form['phone']?.trim() || undefined,
         cell_phone_1: form['cell_phone_1']?.trim() || undefined,
         national_id: form['national_id']?.trim() || undefined,

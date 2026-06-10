@@ -1046,6 +1046,8 @@ export interface CustomerRegistrationRequest {
   gender?: string;
   last_name: string;
   community: string;
+  /** Optional EXISTING account number (legacy ACCDB); leave unset to auto-generate. */
+  account_number?: string;
   phone?: string;
   cell_phone_1?: string;
   cell_phone_2?: string;

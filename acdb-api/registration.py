@@ -103,6 +103,10 @@ class CustomerCreateRequest(BaseModel):
     date_service_connected: Optional[str] = None
     meter_id: Optional[str] = None
     acquires_1pwr_readyboard: bool = False
+    # Optional EXISTING account number (legacy ACCDB accounts that were never imported
+    # but already carry payments). When provided, CC uses it instead of auto-generating;
+    # creating the account adopts any transactions already keyed to that number.
+    account_number: Optional[str] = None
 
 
 class BulkImportResult(BaseModel):
@@ -181,14 +185,47 @@ def register_customer(
     req: CustomerCreateRequest,
     user: CurrentUser = Depends(require_employee),
 ):
-    """Register a new customer with auto-generated account number."""
+    """Register a new customer.
+
+    Account number is auto-generated unless ``account_number`` is supplied (legacy
+    ACCDB accounts known to the field team — see O&M request 2026-06-10). Manual
+    numbers are validated for format, site match, and uniqueness.
+    """
     with _get_connection() as conn:
         cursor = conn.cursor()
         try:
             community = req.community.upper()
 
-            # Generate account number
-            account_number = generate_account_number(conn, community)
+            manual_account = (req.account_number or "").strip().upper()
+            if manual_account:
+                if not re.match(r"^\d{4}[A-Z]{2,4}$", manual_account):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Invalid account number '{manual_account}' — expected "
+                            "4 digits + site code (e.g. 0286SHG)"
+                        ),
+                    )
+                if not manual_account.endswith(community):
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Account number '{manual_account}' does not match the "
+                            f"selected site '{community}'"
+                        ),
+                    )
+                cursor.execute(
+                    "SELECT 1 FROM accounts WHERE account_number = %s LIMIT 1",
+                    (manual_account,),
+                )
+                if cursor.fetchone():
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Account number '{manual_account}' already exists",
+                    )
+                account_number = manual_account
+            else:
+                account_number = generate_account_number(conn, community)
 
             resolved_customer_type = _infer_customer_type(req.customer_type, req.plot_number)
             gender = _normalize_gender_for_storage(req.gender)
@@ -282,6 +319,7 @@ def register_customer(
                 "community": community,
                 "account_sequence": seq,
                 "created_by": user.user_id,
+                "manual_account_number": bool(manual_account),
             }
             log_mutation(
                 user,
