@@ -43,6 +43,17 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-09 [202606092007] (Server-side importer divergence RESOLVED — 1PDB repo)
+
+`/opt/1pdb/services` is controlled by the **1PDB repo** (`onepowerLS/1PDB`, local
+`/Users/mattmso/Dropbox/AI Projects/1PDB`; no CI — manual repo→host deploy). All five
+live-patched scripts had diverged from it. Back-ported live → repo (1PDB commit `4b9130e`):
+import_hourly.py / import_hourly_bn.py / import_thundercloud.py (account-keyed meter_id +
+rebuild hardening), backfill_transactions.py (echo dedup), sync_consumption.sh (Phase 2b),
+plus NEW import_koios_report.py (existed only on host). Verified repo == live byte-for-byte;
+compile/bash -n clean. The "non-repo importer divergence" notes from this week's entries are
+now closed — a redeploy of 1PDB services can no longer regress the meter_id/dedup/echo fixes.
+
 ## Session 2026-06-09 [202606091558] (LS hourly_consumption de-duplication)
 
 Same dual-meter_id-convention RCA as BN, applied to LS (onepower_cc, ~17M rows, 3 sources):
