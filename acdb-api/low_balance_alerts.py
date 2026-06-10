@@ -43,6 +43,25 @@ def format_alert_message(account_number: str, balance_kwh: float, balance_curren
     )
 
 
+def _exempt_uncommissioned(conn) -> bool:
+    """Whether to skip not-yet-commissioned customers (system_config, default ON).
+
+    Per O&M (2026-06-10, 0286SHG): customers who have not been commissioned must not
+    receive low-balance SMS. Default exempt. Benin keeps the legacy behavior via
+    ``low_balance_exempt_uncommissioned = 0`` because its ``customer_commissioned``
+    flags are not yet maintained (ALL BN customers are False); remove that override
+    once BN commissioning data is backfilled.
+    """
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT value FROM system_config WHERE key = 'low_balance_exempt_uncommissioned' LIMIT 1"
+    )
+    row = cur.fetchone()
+    if not row or row[0] is None or str(row[0]).strip() == "":
+        return True
+    return str(row[0]).strip().lower() not in ("0", "false", "no", "off")
+
+
 def low_balance_tick(conn, *, dry_run: bool = False) -> dict[str, Any]:
     """Scan active meter accounts; send/clear low-balance alerts. Returns stats."""
     from payments import _get_tariff_rate as tariff_for_account
@@ -53,9 +72,13 @@ def low_balance_tick(conn, *, dry_run: bool = False) -> dict[str, Any]:
     max_per_day = int(limits["low_balance_alert_max_per_day"])
     tz = ZoneInfo(COUNTRY.timezone)
     today_local = datetime.now(tz).date()
+    exempt_uncommissioned = _exempt_uncommissioned(conn)
 
+    commissioned_filter = (
+        "AND COALESCE(c.customer_commissioned, FALSE)" if exempt_uncommissioned else ""
+    )
     cur.execute(
-        """
+        f"""
         SELECT a.account_number,
                a.low_balance_alert_sent_at,
                COALESCE(
@@ -71,6 +94,7 @@ def low_balance_tick(conn, *, dry_run: bool = False) -> dict[str, Any]:
             SELECT 1 FROM meters m
             WHERE m.account_number = a.account_number AND m.status = 'active'
         )
+        {commissioned_filter}
         """
     )
     rows = cur.fetchall()
@@ -78,6 +102,7 @@ def low_balance_tick(conn, *, dry_run: bool = False) -> dict[str, Any]:
     stats: dict[str, Any] = {
         "warn_kwh": warn_kwh,
         "clear_kwh": clear_kwh,
+        "exempt_uncommissioned": exempt_uncommissioned,
         "low_balance_alert_max_per_day": max_per_day,
         "accounts_seen": len(rows),
         "cleared": 0,
