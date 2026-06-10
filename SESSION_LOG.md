@@ -43,6 +43,22 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-10 [202606100800] (Low-balance alerts: exempt uncommissioned customers)
+
+O&M (Moletsane) report: message + M10 threshold correct, but uncommissioned customers (e.g.
+0286SHG, plus the M0.00/negative-balance rows in the CM.com export) were receiving alerts.
+
+- `low_balance_alerts.low_balance_tick` scan now filters `COALESCE(customer_commissioned,
+  FALSE)` — gated by `system_config 'low_balance_exempt_uncommissioned'` (default ON).
+- LS effect (verified via SQL post-deploy): scan set 1,508 → **1,343**; 165 uncommissioned
+  exempted; **0286SHG excluded**. Commit 0cd8010, deploy green.
+- **BN explicitly set to '0' (legacy behavior)**: ALL 183 BN customers have
+  customer_commissioned=False (known data gap) — default-on would have silenced Benin's
+  active alert job (low-balance-alerts-bn.timer, 46 accounts alerted historically). Remove
+  the override once BN commissioning data is backfilled.
+- Note: full dry-run tick on host is slow (~30+ min: per-account engine balances); verified
+  via the scan-set SQL instead.
+
 ## Session 2026-06-09 [202606092239] (UGP Benin CDF refresh — comprehensive through 2026-06)
 
 Reviewed UGP CDF creation code (`uGridPlan map_v3`: `tools/cdf_prep/build_benin_hourly_cdfs.py`,
