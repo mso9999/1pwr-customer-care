@@ -43,6 +43,30 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-11 [202606110952] (Merchant backfill re-run + unmatched holding queue)
+
+Closed both merchant-ingestion gaps from the 0231MAK RCA (commit c31f5ba, deployed):
+- **Holding queue**: migration 042 `merchant_unmatched_payments` (receipt-unique; applied to
+  onepower_cc + onepower_bj, recorded in cc_schema_migrations). `merchant_unmatched.py`:
+  `park_unmatched_payment` + `claim_unmatched_for_account`. Registration now AUTO-CLAIMS
+  parked payments citing the new account number (own txn, best-effort; response includes
+  `claimed_payments`). Claims book fees via record_fee_transaction (+verification+fee-debt)
+  and electricity via record_historical_payment_transaction (**ledger-only, NO kWh** — so
+  re-anchored balances cannot drift).
+- **Backfill script hardening**: `--no-repair-credit` (forbids kWh repair credits — required
+  post-re-anchor) and `--park-unmatched`.
+- **Re-ran merchant backfill** (Apr–Jun 2026 export files, run ON HOST — tunnel run was
+  ~100x slower; 3.2MB subtree shipped to /tmp): **19 missed payments inserted (M5,888)**
+  incl. 0231MAK's 2nd payment (M30 elec, 24 May) and a readyboard fee (0074SEH);
+  **313 unmatched parked** (open M784k — NOTE: top items are internal treasury transfers
+  like "Transfer of funds from M-Pesa Account", not customer payments); 4,012 duplicate refs
+  + 1,776 fuzzy dups correctly skipped; 41 conflicts (ref already on a different account)
+  skipped for later review.
+- FOLLOW-UPS: (1) review the 41 conflict refs (possible misattributed bookings from phone
+  fallback); (2) consider a 'dismissed' state for treasury-transfer rows in the queue;
+  (3) merchant ingestion still depends on monthly export drops — consider a recurring
+  scheduled run when new export files land.
+
 ## Session 2026-06-11 [202606110904] (0231MAK missed merchant payment — booked + RCA)
 
 Follow-up on the legacy-account feature: Moletsane registered 0231MAK (Tankiso Potsane) but
