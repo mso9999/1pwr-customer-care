@@ -43,6 +43,22 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-11 [202606111216] (Parked-queue triage: 40 claimed, worklist delivered)
+
+Triaged the 305 open customer rows in merchant_unmatched_payments:
+- **128 of 137 referenced accounts ALREADY EXIST in CC** (the backfill-time resolver was
+  stricter than the reference text warranted). Bulk-claimed with a fuzzy-dup guard
+  (same acct+amount ±24h): **40 payments booked** (original dates/receipts; fees via full
+  fee path, electricity ledger-only) and **100 marked resolved-as-duplicate** (already
+  booked via SMS/other channels — nothing double-booked).
+- Queue now: 165 customer open + 8 treasury fenced.
+- **Deliverables for O&M** in `docs/ops/merchant-unmatched-2026-06/`:
+  `registration_worklist.csv` (9 refs = site-code TYPOS like 0034SEM→SEH, 0065KTE→KET —
+  verify, don't blind-register) + `no_reference_payments.csv` (155 payments, M15,694,
+  name/phone only — resolve by phone lookup) + README with per-row process.
+- NOTE: typo'd refs will NOT auto-claim when the corrected account is registered —
+  engineering must re-point those parked rows (flagged in README).
+
 ## Session 2026-06-11 [202606111205] (Treasury transfers ring-fenced from customer data)
 
 Per MSO: internal treasury movements must never pollute customer transaction datasets.
