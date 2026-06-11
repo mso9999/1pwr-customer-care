@@ -527,6 +527,8 @@ def process_payments(
     payments: list[NormalizedPayment],
     *,
     apply: bool,
+    allow_repair_credit: bool = True,
+    park_unmatched: bool = False,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for payment in payments:
@@ -544,7 +546,26 @@ def process_payments(
         }
 
         if not payment.account_number:
-            rows.append({**base, "outcome": "unmatched_account", "reason": payment.resolution_reason})
+            outcome = "unmatched_account"
+            if park_unmatched and apply and payment.external_id:
+                try:
+                    from merchant_unmatched import park_unmatched_payment
+
+                    if park_unmatched_payment(
+                        conn,
+                        receipt=payment.external_id,
+                        amount=payment.amount,
+                        paid_at=payment.paid_at,
+                        reference_text=payment.details_text,
+                        payer_phone=payment.payer_phone,
+                        site_hint=payment.site_hint,
+                        provider=payment.provider,
+                        source_file=payment.source_file,
+                    ):
+                        outcome = "parked_unmatched"
+                except Exception as exc:
+                    logger.warning("Could not park unmatched %s: %s", payment.external_id, exc)
+            rows.append({**base, "outcome": outcome, "reason": payment.resolution_reason})
             continue
         source_table = _source_table_tag(payment)
         classification = _classify_payment_for_backfill(
@@ -578,6 +599,15 @@ def process_payments(
                     payment.paid_at,
                 )
             ):
+                if not allow_repair_credit:
+                    # Repair credits ADD kWh; forbidden after balance re-anchors
+                    # (seeds already absorbed history — see 2026-06-08 sessions).
+                    rows.append({
+                        **base,
+                        "outcome": "skipped_repair_credit_disabled",
+                        "account_number": payment.account_number,
+                    })
+                    continue
                 repaired = _insert_repair_credit(
                     conn,
                     payment,
@@ -677,6 +707,16 @@ def main() -> int:
         action="store_true",
         help="Report only (default unless --apply is set)",
     )
+    parser.add_argument(
+        "--no-repair-credit",
+        action="store_true",
+        help="Never insert kWh repair credits (REQUIRED after balance re-anchors).",
+    )
+    parser.add_argument(
+        "--park-unmatched",
+        action="store_true",
+        help="Park unmatched payments in merchant_unmatched_payments for later claim.",
+    )
     args = parser.parse_args()
 
     apply = bool(args.apply)
@@ -733,7 +773,11 @@ def main() -> int:
         payments = collect_payments(
             args.root, conn, since=since, until=until, merchant_key=args.merchant_key,
         )
-        rows = process_payments(conn, payments, apply=apply)
+        rows = process_payments(
+            conn, payments, apply=apply,
+            allow_repair_credit=not args.no_repair_credit,
+            park_unmatched=args.park_unmatched,
+        )
         if apply:
             conn.commit()
             validation = validate_after_apply(conn)

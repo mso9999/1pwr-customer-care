@@ -350,6 +350,24 @@ def register_customer(
             req.first_name, req.last_name, account_number, user.user_id,
         )
 
+        # Claim any parked merchant-line payments that referenced this account number
+        # before it existed (see merchant_unmatched.py). Own transaction; best-effort.
+        claimed_payments: list = []
+        try:
+            from merchant_unmatched import claim_unmatched_for_account
+
+            claimed_payments = claim_unmatched_for_account(conn, account_number)
+            if claimed_payments:
+                conn.commit()
+            else:
+                conn.rollback()
+        except Exception as e:
+            logger.warning("Unmatched-payment claim failed for %s: %s", account_number, e)
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+
         sm_result = None
         try:
             full_name = f"{req.first_name} {req.last_name}".strip()
@@ -377,6 +395,8 @@ def register_customer(
             "last_name": req.last_name,
             "community": community,
         }
+        if claimed_payments:
+            response["claimed_payments"] = claimed_payments
         if sm_result:
             response["sm_sync"] = {
                 "success": sm_result.success,
