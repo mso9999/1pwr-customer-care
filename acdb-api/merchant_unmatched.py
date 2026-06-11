@@ -23,6 +23,21 @@ logger = logging.getLogger("cc-api.merchant-unmatched")
 
 _ACCOUNT_RE = re.compile(r"\b(\d{4}[A-Z]{2,4})\b")
 
+# Internal treasury movements present in merchant exports (org-level money handling,
+# NOT customer payments). Ring-fenced: parked as category='treasury', never claimable.
+_TREASURY_RE = re.compile(
+    r"transfer of funds from m-?pesa"
+    r"|control account"
+    r"|organi[sz]ation deposit"
+    r"|deposit of funds",
+    re.IGNORECASE,
+)
+
+
+def is_treasury_transfer(reference_text: str) -> bool:
+    """True if a merchant-export row is an internal org transfer, not a customer payment."""
+    return bool(_TREASURY_RE.search(reference_text or ""))
+
 
 def park_unmatched_payment(
     conn,
@@ -40,13 +55,14 @@ def park_unmatched_payment(
     receipt = (receipt or "").strip()
     if not receipt:
         return False
+    category = "treasury" if is_treasury_transfer(reference_text) else "customer"
     cur = conn.cursor()
     cur.execute(
         """
         INSERT INTO merchant_unmatched_payments
             (receipt, amount, paid_at, reference_text, payer_phone,
-             site_hint, provider, source_file)
-        SELECT %s, %s, %s, %s, %s, %s, %s, %s
+             site_hint, provider, source_file, category)
+        SELECT %s, %s, %s, %s, %s, %s, %s, %s, %s
         WHERE NOT EXISTS (
             SELECT 1 FROM merchant_unmatched_payments WHERE lower(receipt) = lower(%s)
         )
@@ -55,6 +71,7 @@ def park_unmatched_payment(
             receipt, round(float(amount), 2), paid_at,
             (reference_text or "")[:500], payer_phone or "",
             site_hint or "", provider or "", (source_file or "")[:200],
+            category,
             receipt,
         ),
     )
@@ -85,6 +102,7 @@ def claim_unmatched_for_account(conn, account_number: str) -> list[dict[str, Any
             SELECT id, receipt, amount, paid_at, reference_text
             FROM merchant_unmatched_payments
             WHERE resolved_at IS NULL
+              AND category = 'customer'   -- treasury rows are ring-fenced, never claimable
             ORDER BY paid_at
             """
         )
