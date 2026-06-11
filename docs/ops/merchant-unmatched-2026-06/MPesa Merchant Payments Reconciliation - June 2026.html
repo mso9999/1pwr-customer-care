@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="en" xml:lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>M-Pesa Merchant Payments — Reconciliation Summary</title>
+  <style>
+
+code{white-space: pre-wrap;}
+span.smallcaps{font-variant: small-caps;}
+div.columns{display: flex; gap: min(4vw, 1.5em);}
+div.column{flex: auto; overflow-x: auto;}
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+
+ul.task-list[class]{list-style: none;}
+ul.task-list li input[type="checkbox"] {
+font-size: inherit;
+width: 0.8em;
+margin: 0 0.8em 0.2em -1.6em;
+vertical-align: middle;
+}
+.display.math{display: block; text-align: center; margin: 0.5rem auto;}
+</style>
+  <link rel="stylesheet" href />
+</head>
+<body>
+<header id="title-block-header">
+<h1 class="title">M-Pesa Merchant Payments — Reconciliation Summary</h1>
+</header>
+<h1 id="m-pesa-merchant-payments-reconciliation-summary-for-the-team">M-Pesa
+Merchant Payments — Reconciliation Summary for the Team</h1>
+<p><strong>Date:</strong> 11 June 2026 · <strong>Scope:</strong>
+Lesotho, merchant-line (PayMerchant) payments, April–June 2026
+<strong>Prepared for:</strong> O&amp;M / Customer Care team</p>
+<hr />
+<h2 id="what-this-was-about">1. What this was about</h2>
+<p>Customers can pay us two ways on M-Pesa: the normal <strong>pay-bill
+SMS flow</strong> (which CC captures automatically) and the
+<strong>merchant line</strong> (“sent to One Power Lesotho Merchant”).
+Merchant-line payments do <strong>not</strong> reach our SMS system —
+they only enter CC when we import the monthly merchant statements. Two
+problems came together (found via Tankiso Potsane,
+<strong>0231MAK</strong>):</p>
+<ol type="1">
+<li>Payments made <strong>before</strong> the customer’s account existed
+in CC could not be matched, and were silently dropped.</li>
+<li>The merchant statement import had not been run since 12 May, so
+newer payments were missing.</li>
+</ol>
+<h2 id="what-has-been-recovered-no-action-needed">2. What has been
+recovered — no action needed</h2>
+<p>All recovered payments are booked with their <strong>original payment
+dates and M-Pesa receipt numbers</strong>, fees are verified and
+fee-debts cleared, and balances are unaffected (historical records
+only).</p>
+<table>
+<colgroup>
+<col style="width: 30%" />
+<col style="width: 40%" />
+<col style="width: 30%" />
+</colgroup>
+<thead>
+<tr>
+<th>Recovery step</th>
+<th style="text-align: right;">Payments</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Missed payments from statement re-import</td>
+<td style="text-align: right;">19 (M5,888)</td>
+<td>incl. 0231MAK’s M501 connection fee + M30 electricity</td>
+</tr>
+<tr>
+<td>Matched to existing accounts (bulk claim)</td>
+<td style="text-align: right;">40</td>
+<td>references cited accounts that already exist</td>
+</tr>
+<tr>
+<td>Site-code typo fixes (e.g. 0034SEM → 0034SEH)</td>
+<td style="text-align: right;">2 (M1,000)</td>
+<td>TORIKI HULANE’s connection + readyboard fee pair</td>
+</tr>
+<tr>
+<td>Matched by payer phone (unique match)</td>
+<td style="text-align: right;">10</td>
+<td>e.g. 8 × M200 to 0084SEH, M450 to 0098SEH</td>
+</tr>
+<tr>
+<td><strong>Total restored to customer accounts</strong></td>
+<td style="text-align: right;"><strong>71</strong></td>
+<td></td>
+</tr>
+<tr>
+<td>Confirmed already booked (no double credit)</td>
+<td style="text-align: right;">111</td>
+<td>verified against SMS/portal records</td>
+</tr>
+<tr>
+<td>Internal 1PWR treasury transfers — fenced off</td>
+<td style="text-align: right;">8 (M720,000)</td>
+<td>not customer money; excluded from all customer data</td>
+</tr>
+</tbody>
+</table>
+<h2 id="what-changed-in-the-system-permanent-fixes">3. What changed in
+the system (permanent fixes)</h2>
+<ul>
+<li><strong>Register-with-known-account-number</strong> is live in the
+New Customer wizard (Location step).</li>
+<li><strong>Unmatched merchant payments are no longer dropped</strong> —
+they are parked, and the moment an account with the referenced number is
+registered, the payment <strong>attaches automatically</strong> (fees
+verify and clear fee-debt by themselves).</li>
+<li>Internal treasury transfers are permanently excluded from customer
+datasets.</li>
+</ul>
+<p><strong>New best practice:</strong> when a customer says they paid on
+the merchant line but you can’t see the payment — register/verify their
+account number first; if the payment is in our parked queue it will
+attach by itself. If still missing, escalate with the M-Pesa receipt
+number.</p>
+<h2 id="what-we-need-from-you-2-short-tasks">4. What we need from you —
+2 short tasks</h2>
+<h3 id="task-a-3-payments-with-unclear-account-references-10-minutes">Task A
+— 3 payments with unclear account references (10 minutes)</h3>
+<p>These references don’t match any account, and the typo isn’t obvious
+enough to fix safely. Please confirm the correct account (call the
+customer if needed) and send it back; we’ll re-point the payment.</p>
+<table>
+<colgroup>
+<col style="width: 15%" />
+<col style="width: 15%" />
+<col style="width: 15%" />
+<col style="width: 21%" />
+<col style="width: 15%" />
+<col style="width: 15%" />
+</colgroup>
+<thead>
+<tr>
+<th>Reference written</th>
+<th>Payer name</th>
+<th>Phone</th>
+<th style="text-align: right;">Amount</th>
+<th>Paid on</th>
+<th>Likely intended</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0110MAP</td>
+<td>PHOMOLO NKHAULI</td>
+<td>26656169247</td>
+<td style="text-align: right;">M20</td>
+<td>20 May</td>
+<td>0110 at MAK / MAS / MAT?</td>
+</tr>
+<tr>
+<td>0287MAT</td>
+<td>lineo korotla</td>
+<td>26657153248</td>
+<td style="text-align: right;">M50</td>
+<td>9 Apr</td>
+<td>0287MAT doesn’t exist — digit typo?</td>
+</tr>
+<tr>
+<td>1101MAS</td>
+<td>TIISETSO MAHLEHLA</td>
+<td>26657469985</td>
+<td style="text-align: right;">M200</td>
+<td>15 May</td>
+<td>0101MAS? 0110MAS?</td>
+</tr>
+</tbody>
+</table>
+<h3 id="task-b-139-payments-with-no-account-in-the-reference-m12144">Task B
+— 139 payments with no account in the reference (M12,144)</h3>
+<p>These customers typed only their name (or nothing) as the M-Pesa
+reference, and their phone number doesn’t match any phone we have on
+file (or matches several customers). Largest first:</p>
+<table>
+<colgroup>
+<col style="width: 17%" />
+<col style="width: 17%" />
+<col style="width: 23%" />
+<col style="width: 23%" />
+<col style="width: 17%" />
+</colgroup>
+<thead>
+<tr>
+<th>Payer name</th>
+<th>Phone</th>
+<th style="text-align: right;">Payments</th>
+<th style="text-align: right;">Total</th>
+<th>Dates</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>moeketsi muso</td>
+<td>26658960278</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">M1,500</td>
+<td>4 Apr</td>
+</tr>
+<tr>
+<td>Thakabanna Nyokana</td>
+<td>26658881214</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">M1,000</td>
+<td>5 May</td>
+</tr>
+<tr>
+<td>RESITSUOE MOKOSHOKA</td>
+<td>26657670936</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">M1,000</td>
+<td>7 May</td>
+</tr>
+<tr>
+<td>MAKHAHLISO KHONYANE</td>
+<td>26658088812</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">M1,000</td>
+<td>11 May</td>
+</tr>
+<tr>
+<td>Phallang Moletsane</td>
+<td>26659456772</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">M1,000</td>
+<td>13 May</td>
+</tr>
+<tr>
+<td>Kananelo Potsane</td>
+<td>26659467293</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">M647</td>
+<td>1 Apr – 8 May</td>
+</tr>
+<tr>
+<td>ZABALESE MOHLEKOA</td>
+<td>26658044650</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">M501</td>
+<td>24 May</td>
+</tr>
+<tr>
+<td>MOREMOHOLO MONAMOLELI</td>
+<td>26658355570</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">M499</td>
+<td>19 May</td>
+</tr>
+<tr>
+<td>Monyane Thoola</td>
+<td>26657044835</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">M300</td>
+<td>22 May</td>
+</tr>
+<tr>
+<td>MATSEPO THIBINYANE</td>
+<td>26659522045</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">M300</td>
+<td>28 May</td>
+</tr>
+<tr>
+<td>…and 94 more payers</td>
+<td></td>
+<td style="text-align: right;">129 total</td>
+<td style="text-align: right;">M12,144 total</td>
+<td>full list: <code>no_reference_payments.csv</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>How to action:</strong> identify the customer’s account from
+the name (site staff usually know them). Then the <strong>fastest fix is
+to add/update the phone number on the customer’s profile in CC</strong>
+— once the phone is on file, tell us and we’ll re-run the matcher, which
+will book all of that payer’s parked payments automatically.
+Alternatively send us <code>receipt → account</code> pairs and we’ll
+book them directly.</p>
+<blockquote>
+<p>⚠ Note for the team: M501 / M499 amounts in this list are likely
+<strong>connection / readyboard fees</strong> from customers who may not
+be registered in CC at all yet — same situation as 0231MAK. Those should
+be prioritised, as the customer is probably waiting for a
+connection.</p>
+</blockquote>
+<h2 id="customer-facing-guidance-reduce-future-cases">5. Customer-facing
+guidance (reduce future cases)</h2>
+<p>When guiding customers to pay on the merchant line, ask them to put
+<strong>only their account number</strong> (e.g. <code>0231MAK</code>)
+in the M-Pesa reference — no names, no extra words, and to double- check
+the site letters. Wrong/missing references are the single cause of all
+of the above.</p>
+<hr />
+<p><em>Files: <code>registration_worklist.csv</code> (Task A),
+<code>no_reference_payments.csv</code> (Task B), both in
+<code>docs/ops/merchant-unmatched-2026-06/</code>. Engineering contact:
+MSO. Technical details in <code>SESSION_LOG.md</code> (2026-06-11
+entries).</em></p>
+</body>
+</html>
