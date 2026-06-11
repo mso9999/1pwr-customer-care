@@ -43,6 +43,20 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-11 [202606111205] (Treasury transfers ring-fenced from customer data)
+
+Per MSO: internal treasury movements must never pollute customer transaction datasets.
+- AUDIT: `transactions` (LS) contains ZERO treasury-pattern rows — historical leakage never
+  happened (treasury rows have no account reference, so the old backfill dropped them).
+  The only exposure was the new unmatched queue + future claims.
+- Migration 043 (both DBs, recorded): `merchant_unmatched_payments.category`
+  ('customer'|'treasury'), pattern backfill, claim index scoped to customer rows.
+- `merchant_unmatched.py`: `is_treasury_transfer()` (transfer of funds / control account /
+  organi[sz]ation deposit / deposit of funds); parking auto-tags; claims NEVER scan treasury.
+- Result (LS queue): **8 treasury rows / M720,000 fenced**; 305 genuine customer payments /
+  M64,153 remain claimable — incl. many "PayMerchant ... - 0290SHG"-style payments for
+  accounts not yet registered (will auto-claim on registration). Commit 23a1e96, deploy green.
+
 ## Session 2026-06-11 [202606110952] (Merchant backfill re-run + unmatched holding queue)
 
 Closed both merchant-ingestion gaps from the 0231MAK RCA (commit c31f5ba, deployed):
