@@ -43,6 +43,28 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-11 [202606110904] (0231MAK missed merchant payment — booked + RCA)
+
+Follow-up on the legacy-account feature: Moletsane registered 0231MAK (Tankiso Potsane) but
+the prior payment didn't attach. RCA from the customer's M-Pesa SMS: **M501 connection fee
+paid 2026-05-07 14:13 to the MERCHANT line (1179545), receipt 07SD2UDPQH0D, ref 0231MAK** —
+NOT an ACCDB-era record.
+
+- Why it was missing: merchant-line payments don't flow through the SMS gateway (confirmation
+  goes to the customer's phone). They're only captured by the operator-run merchant-export
+  backfill (`backfill_merchant_payments_from_exports.py`, mm: data through 2026-05-12) — and
+  at backfill time ref 0231MAK resolved to NO account (it didn't exist yet) →
+  `resolution_method='unmatched'` → **silently skipped**. Nothing in transactions/sms log/TC.
+- Booked via the same path as POST /api/payments/record fee branch, with the ORIGINAL
+  timestamp: txn **4984409**, connection_fee, ref 07SD2UDPQH0D, 2026-05-07 12:13Z.
+  `create_verification_entry` + `apply_fee_payment_category_to_debt` →
+  `connection_fee_paid=t`, `fee_debt_connection_remaining=0.00`. Verified.
+- **Systemic gaps (open):** (1) merchant-line payments have no live ingestion — only manual
+  export backfills; (2) unmatched merchant payments are dropped silently instead of parked
+  for re-resolution when the account is later created. Worth re-running the merchant backfill
+  (receipt-dedup'd) now that more accounts exist, and considering an unmatched-payments
+  holding queue.
+
 ## Session 2026-06-10 [202606100839] (Register customer with known/legacy account number)
 
 O&M (Moletsane) request: some ACCDB-era accounts were never imported into 1PDB but
