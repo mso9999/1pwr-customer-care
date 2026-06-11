@@ -1,5 +1,13 @@
 # Merchant unmatched-payments worklist — 2026-06-11
 
+> **UPDATE (same day, second pass):** alphabetical site-code typos and unique-phone
+> matches were resolved automatically (+12 claimed, +11 resolved-as-duplicate; e.g.
+> 0034SEM→0034SEH fee pair, 8×M200 to 0084SEH via phone). The CSVs below are refreshed.
+> Remaining manual work: **3 ambiguous refs** in `registration_worklist.csv` (0110MAP —
+> digit/letter ambiguity across MAK/MAS/MAT; 0287MAT — account doesn't exist, possible
+> digit typo; 1101MAS — digit typo) and **139 no-reference payments (M12,144)** where the
+> payer phone maps to zero or multiple CC accounts.
+
 Outcome of the merchant-export re-run + holding-queue triage (see `SESSION_LOG.md`
 2026-06-11 entries). State of the queue after automated claiming:
 

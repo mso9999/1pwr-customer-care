@@ -43,6 +43,22 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-11 [202606111316] (Typo + phone auto-claims on parked queue)
+
+Per MSO: fix ALPHABETICAL site-code typos (digits untouched) and claim via phone where a
+unique customer match exists. One-off host script (dry-run reviewed → apply):
+- Typo correction = anagram or 1-letter substitution of the site suffix, digits unchanged,
+  corrected account must EXIST; ties broken by payer phone, then payer-name overlap with
+  the customer name. (0027SGH resolved via name tie-break → duplicate of existing booking.)
+- Sibling-aware fuzzy guard: distinct merchant receipts booked in the same run never
+  suppress each other (8×M200 same-day to 0084SEH are distinct settled payments) — fuzzy
+  dedup still applies vs SMS/portal bookings.
+- APPLIED: **12 claimed** (incl. 0034SEM→0034SEH M501+M499 fee pair TORIKI HULANE; 8×M200
+  0084SEH + M450 0098SEH + M200 0239MAS via unique phone), **11 resolved-as-duplicate**,
+  5 ambiguous left. Queue: **142 customer open (M12,414)** + 8 treasury fenced.
+- Worklist refreshed (docs/ops/merchant-unmatched-2026-06): 3 ambiguous/digit-typo refs
+  (0110MAP, 0287MAT, 1101MAS) + 139 no-ref payments (M12,144, phone maps to 0/multi accts).
+
 ## Session 2026-06-11 [202606111216] (Parked-queue triage: 40 claimed, worklist delivered)
 
 Triaged the 305 open customer rows in merchant_unmatched_payments:
