@@ -1,4 +1,4 @@
 account_ref,payer_name_guess,phone,n_payments,total_lsl,first_paid,last_paid,receipts,status
-1101MAS,TIISETSO MAHLEHLA,26657469985,1,200.0,2026-05-15,2026-05-15,094VWWF4OQZ8,PENDING — awaiting O&M confirmation of correct account
+1101MAS,TIISETSO MAHLEHLA,26657469985,1,200.0,2026-05-15,2026-05-15,094VWWF4OQZ8,RESOLVED 2026-06-12 — ref was plot MAS 1101 HH = acct 0272MAS; txn 4360878 moved from 0102KET (was unallocated there) and booked as readyboard_fee; fee pair 501+499 complete
 0110MAP,PHOMOLO NKHAULI,26656169247,1,20.0,2026-05-20,2026-05-20,00OXGA1Z2UTY,RESOLVED 2026-06-12 — booked to 0110MAK (txn 4986242) per O&M
 0287MAT,lineo korotla,26657153248,1,50.0,2026-04-09,2026-04-09,010PHMZEYB6K,RESOLVED 2026-06-12 — auto-claimed on registration (txn 4986205)

@@ -43,6 +43,24 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-12 [202606120514] (Task A item 3: 1101MAS = plot number → 0272MAS)
+
+Final Task A answer from O&M: "1101MAS" in the M-Pesa ref was the **PLOT number**
+(MAS 1101 HH); the customer account is **0272MAS** (Matebello Maseru). The M200 (15 May)
+completes M800 (22 May) = M1000 = conn 501 + readyboard 499.
+- TWIST: receipt 094VWWF4OQZ8 was ALREADY booked 22 May to **0102KET** (Makubela Ntsene)
+  by the contracts SMS gateway via phone fallback (payer phone 26657469985 is on that
+  customer) — but with ALL portions zero (contract_unallocated, dead weight).
+- Fix (balance-neutral, dry-run→apply): moved txn 4360878 0102KET→0272MAS, category
+  readyboard_fee, fee portion 200, true paid date restored (15 May), provenance note in
+  sms_remark_raw, verification entry created. M800 txn 4944132 fee portion 501→800
+  (conn 501 + readyboard 299). Customer flags: readyboard acquired+paid, debts 0.
+  Verified: 0272MAS shows both txns, conn+rb paid; 0102KET no longer holds the ref.
+- LESSON for conflicts list: contracts-gateway phone-fallback can misattribute when one
+  person's phone is on another customer's record — the 41 conflict refs likely include
+  more of these (plot-number refs + shared phones).
+- registration_worklist.csv: all 3 Task A rows now RESOLVED.
+
 ## Session 2026-06-12 [202606120511] (Task A responses actioned — auto-claim proven in the wild)
 
 Moletsane's Task A answers:
