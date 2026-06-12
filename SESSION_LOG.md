@@ -43,6 +43,17 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-12 [202606120511] (Task A responses actioned — auto-claim proven in the wild)
+
+Moletsane's Task A answers:
+- **0287MAT**: team registered it in CC today and the **registration auto-claim worked
+  organically** — the parked M50 (receipt 010PHMZEYB6K, paid 9 Apr) booked itself
+  (txn 4986205) with no engineering involvement. First in-the-wild proof of the feature.
+- **0110MAP → 0110MAK** (per O&M): booked the parked M20 (receipt 00OXGA1Z2UTY, paid 20 May,
+  electricity, fuzzy-guarded) to 0110MAK as txn **4986242**.
+- **1101MAS** still pending O&M confirmation (M200, TIISETSO MAHLEHLA).
+- registration_worklist.csv updated with statuses.
+
 ## Session 2026-06-11 [202606111316] (Typo + phone auto-claims on parked queue)
 
 Per MSO: fix ALPHABETICAL site-code typos (digits untouched) and claim via phone where a
