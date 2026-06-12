@@ -2079,6 +2079,81 @@ export function verificationExportUrl(status: string, paymentType?: string): str
 }
 
 // ---------------------------------------------------------------------------
+// Merchant unmatched payments
+// ---------------------------------------------------------------------------
+
+export interface MerchantUnmatchedPhoneMatch {
+  account_number: string;
+  name: string;
+}
+
+export interface MerchantUnmatchedPayment {
+  id: number;
+  receipt: string;
+  amount: number;
+  paid_at: string;
+  reference_text: string;
+  payer_phone: string;
+  site_hint: string;
+  provider: string;
+  source_file: string;
+  parked_at: string;
+  resolved_at: string | null;
+  resolved_txn_id: number | null;
+  resolved_account: string | null;
+  category: 'customer' | 'treasury';
+  reference_accounts: string[];
+  existing_reference_accounts: string[];
+  phone_matches: MerchantUnmatchedPhoneMatch[];
+  already_booked: boolean;
+}
+
+export async function getUnmatchedPayments(params?: {
+  status?: string;
+  category?: string;
+  search?: string;
+}): Promise<{
+  payments: MerchantUnmatchedPayment[];
+  total: number;
+  open_customer_count: number;
+  open_customer_total: number;
+}> {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set('status', params.status);
+  if (params?.category) qs.set('category', params.category);
+  if (params?.search) qs.set('search', params.search);
+  const q = qs.toString();
+  return request(`/merchant-unmatched${q ? '?' + q : ''}`);
+}
+
+export async function claimUnmatchedPayment(
+  id: number,
+  account_number: string,
+): Promise<{ skipped?: boolean; account_number?: string; transaction_id?: number }> {
+  return request(`/merchant-unmatched/${id}/claim`, {
+    method: 'POST',
+    body: JSON.stringify({ account_number }),
+  });
+}
+
+export async function dismissUnmatchedPayment(
+  id: number,
+  account_number?: string,
+): Promise<{ dismissed: boolean }> {
+  return request(`/merchant-unmatched/${id}/dismiss`, {
+    method: 'POST',
+    body: JSON.stringify({ account_number: account_number || null }),
+  });
+}
+
+export function unmatchedPaymentsExportUrl(status: string, category: string): string {
+  const qs = new URLSearchParams({ status, category });
+  const token = getToken();
+  if (token) qs.set('token', token);
+  return `${getApiBase()}/merchant-unmatched/export?${qs}`;
+}
+
+// ---------------------------------------------------------------------------
 // Onboarding Pipeline
 // ---------------------------------------------------------------------------
 

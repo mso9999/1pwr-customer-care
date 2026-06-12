@@ -78,18 +78,174 @@ def park_unmatched_payment(
     return cur.rowcount > 0
 
 
-def claim_unmatched_for_account(conn, account_number: str) -> list[dict[str, Any]]:
-    """Book any parked payments whose reference cites *account_number*.
+def _has_existing_txn_for_receipt(cur, receipt: str) -> bool:
+    cur.execute(
+        """
+        SELECT 1 FROM transactions
+        WHERE lower(payment_reference) LIKE '%%' || lower(trim(%s)) LIMIT 1
+        """,
+        (receipt,),
+    )
+    return cur.fetchone() is not None
 
-    Called after account creation (registration). Best-effort: failures are logged,
-    never raised into the registration path. Returns a list of booked-payment dicts.
-    """
+
+def _book_parked_payment(
+    conn,
+    cur,
+    *,
+    row_id: int,
+    receipt: str,
+    amount: float,
+    paid_at: datetime,
+    account: str,
+) -> Optional[dict[str, Any]]:
+    """Book one parked payment onto *account*. Returns booking dict or None if skipped."""
     from balance_engine import record_fee_transaction, record_historical_payment_transaction
     from fee_classifier import classify_payment
     from fee_debt import apply_fee_payment_category_to_debt
     from payment_verification import create_verification_entry
     from payments import _get_tariff_rate, _resolve_meter
 
+    if _has_existing_txn_for_receipt(cur, receipt):
+        cur.execute(
+            """
+            UPDATE merchant_unmatched_payments
+            SET resolved_at = NOW(), resolved_account = %s
+            WHERE id = %s
+            """,
+            (account, row_id),
+        )
+        return None
+
+    amt = float(amount)
+    meter_id = _resolve_meter(conn, account)
+    cls = classify_payment(conn, account, amt)
+    category = cls["category"]
+    if category in ("connection_fee", "readyboard_fee"):
+        txn_id, _ = record_fee_transaction(
+            conn, account, meter_id, amt, category,
+            source="portal", timestamp=paid_at, payment_reference=receipt,
+        )
+        create_verification_entry(conn, txn_id, account, category, amt)
+        apply_fee_payment_category_to_debt(conn, account, category, amt)
+    else:
+        rate = _get_tariff_rate(conn, account)
+        txn_id, _ = record_historical_payment_transaction(
+            conn, account, meter_id, amt, rate,
+            source="portal", timestamp=paid_at, payment_reference=receipt,
+        )
+
+    cur.execute(
+        """
+        UPDATE merchant_unmatched_payments
+        SET resolved_at = NOW(), resolved_txn_id = %s, resolved_account = %s
+        WHERE id = %s
+        """,
+        (txn_id, account, row_id),
+    )
+    booking = {
+        "receipt": receipt,
+        "amount": amt,
+        "paid_at": paid_at.isoformat() if paid_at else None,
+        "category": category,
+        "transaction_id": txn_id,
+        "account_number": account,
+    }
+    logger.info(
+        "Claimed parked merchant payment %s (%.2f, %s) for %s -> txn %s",
+        receipt, amt, category, account, txn_id,
+    )
+    return booking
+
+
+def claim_unmatched_row(conn, row_id: int, account_number: str) -> dict[str, Any]:
+    """Manually link one open parked payment to an existing account."""
+    account = (account_number or "").strip().upper()
+    if not account:
+        raise ValueError("account_number is required")
+
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, receipt, amount, paid_at, reference_text, resolved_at, category
+        FROM merchant_unmatched_payments
+        WHERE id = %s
+        """,
+        (row_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        raise LookupError("Payment not found")
+    _id, receipt, amount, paid_at, _ref, resolved_at, category = row
+    if resolved_at is not None:
+        raise ValueError("Payment is already resolved")
+    if category != "customer":
+        raise ValueError("Treasury transfers cannot be linked to customer accounts")
+
+    cur.execute("SELECT 1 FROM accounts WHERE account_number = %s", (account,))
+    if not cur.fetchone():
+        raise LookupError(f"Account {account} does not exist")
+
+    booking = _book_parked_payment(
+        conn, cur,
+        row_id=_id, receipt=receipt, amount=float(amount),
+        paid_at=paid_at, account=account,
+    )
+    if booking is None:
+        return {
+            "id": _id,
+            "receipt": receipt,
+            "account_number": account,
+            "skipped": True,
+            "reason": "already_booked",
+        }
+    return {"id": _id, "skipped": False, **booking}
+
+
+def dismiss_unmatched_row(
+    conn,
+    row_id: int,
+    *,
+    account_number: Optional[str] = None,
+) -> dict[str, Any]:
+    """Mark a parked payment resolved without booking (already reconciled elsewhere)."""
+    account = (account_number or "").strip().upper() or None
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT id, receipt, resolved_at, category
+        FROM merchant_unmatched_payments
+        WHERE id = %s
+        """,
+        (row_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        raise LookupError("Payment not found")
+    _id, receipt, resolved_at, category = row
+    if resolved_at is not None:
+        raise ValueError("Payment is already resolved")
+    if category != "customer":
+        raise ValueError("Treasury rows are ring-fenced; dismiss is not applicable")
+
+    cur.execute(
+        """
+        UPDATE merchant_unmatched_payments
+        SET resolved_at = NOW(), resolved_account = COALESCE(%s, resolved_account)
+        WHERE id = %s
+        RETURNING receipt
+        """,
+        (account, row_id),
+    )
+    return {"id": _id, "receipt": receipt, "account_number": account, "dismissed": True}
+
+
+def claim_unmatched_for_account(conn, account_number: str) -> list[dict[str, Any]]:
+    """Book any parked payments whose reference cites *account_number*.
+
+    Called after account creation (registration). Best-effort: failures are logged,
+    never raised into the registration path. Returns a list of booked-payment dicts.
+    """
     account = (account_number or "").strip().upper()
     if not account:
         return []
@@ -116,64 +272,13 @@ def claim_unmatched_for_account(conn, account_number: str) -> list[dict[str, Any
 
     for row_id, receipt, amount, paid_at, _ref in candidates:
         try:
-            # Suffix match: O&M manual credits mirrored from SparkMeter carry prefixed
-            # references like 'sm_manual_hist:koios:<MPESA-RECEIPT>' (RCA 2026-06-12,
-            # 0287MAT double-book). Receipts are long enough that suffix match is safe.
-            cur.execute(
-                """
-                SELECT 1 FROM transactions
-                WHERE lower(payment_reference) LIKE '%%' || lower(trim(%s)) LIMIT 1
-                """,
-                (receipt,),
+            booking = _book_parked_payment(
+                conn, cur,
+                row_id=row_id, receipt=receipt, amount=float(amount),
+                paid_at=paid_at, account=account,
             )
-            if cur.fetchone():
-                cur.execute(
-                    """
-                    UPDATE merchant_unmatched_payments
-                    SET resolved_at = NOW(), resolved_account = %s
-                    WHERE id = %s
-                    """,
-                    (account, row_id),
-                )
-                continue
-
-            amt = float(amount)
-            meter_id = _resolve_meter(conn, account)
-            cls = classify_payment(conn, account, amt)
-            category = cls["category"]
-            if category in ("connection_fee", "readyboard_fee"):
-                txn_id, _ = record_fee_transaction(
-                    conn, account, meter_id, amt, category,
-                    source="portal", timestamp=paid_at, payment_reference=receipt,
-                )
-                create_verification_entry(conn, txn_id, account, category, amt)
-                apply_fee_payment_category_to_debt(conn, account, category, amt)
-            else:
-                rate = _get_tariff_rate(conn, account)
-                txn_id, _ = record_historical_payment_transaction(
-                    conn, account, meter_id, amt, rate,
-                    source="portal", timestamp=paid_at, payment_reference=receipt,
-                )
-
-            cur.execute(
-                """
-                UPDATE merchant_unmatched_payments
-                SET resolved_at = NOW(), resolved_txn_id = %s, resolved_account = %s
-                WHERE id = %s
-                """,
-                (txn_id, account, row_id),
-            )
-            booked.append({
-                "receipt": receipt,
-                "amount": amt,
-                "paid_at": paid_at.isoformat() if paid_at else None,
-                "category": category,
-                "transaction_id": txn_id,
-            })
-            logger.info(
-                "Claimed parked merchant payment %s (%.2f, %s) for %s -> txn %s",
-                receipt, amt, category, account, txn_id,
-            )
+            if booking:
+                booked.append(booking)
         except Exception as exc:
             logger.warning("Claim of parked payment %s for %s failed: %s", receipt, account, exc)
     return booked

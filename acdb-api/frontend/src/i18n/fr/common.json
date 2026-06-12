@@ -62,6 +62,7 @@
     "advances": "Avances",
     "recordPayment": "Enregistrer paiement",
     "verifyPayments": "Vérifier paiements",
+    "unmatchedPayments": "Paiements non rapprochés",
     "pipeline": "Pipeline",
     "onboardingDashboard": "Tableau d'intégration",
     "feeTraceReview": "File suivi des frais",

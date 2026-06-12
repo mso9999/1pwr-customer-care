@@ -30,6 +30,7 @@ import tablesEn from './en/tables.json';
 import assignMeterEn from './en/assignMeter.json';
 import recordPaymentEn from './en/recordPayment.json';
 import paymentVerificationEn from './en/paymentVerification.json';
+import unmatchedPaymentsEn from './en/unmatchedPayments.json';
 import customerDashboardEn from './en/customerDashboard.json';
 import myProfileEn from './en/myProfile.json';
 import programsEn from './en/programs.json';
@@ -66,6 +67,7 @@ import tablesFr from './fr/tables.json';
 import assignMeterFr from './fr/assignMeter.json';
 import recordPaymentFr from './fr/recordPayment.json';
 import paymentVerificationFr from './fr/paymentVerification.json';
+import unmatchedPaymentsFr from './fr/unmatchedPayments.json';
 import customerDashboardFr from './fr/customerDashboard.json';
 import myProfileFr from './fr/myProfile.json';
 import programsFr from './fr/programs.json';
@@ -111,6 +113,7 @@ i18n.use(initReactI18next).init({
       assignMeter: assignMeterEn,
       recordPayment: recordPaymentEn,
       paymentVerification: paymentVerificationEn,
+      unmatchedPayments: unmatchedPaymentsEn,
       customerDashboard: customerDashboardEn,
       myProfile: myProfileEn,
       programs: programsEn,
@@ -148,6 +151,7 @@ i18n.use(initReactI18next).init({
       assignMeter: assignMeterFr,
       recordPayment: recordPaymentFr,
       paymentVerification: paymentVerificationFr,
+      unmatchedPayments: unmatchedPaymentsFr,
       customerDashboard: customerDashboardFr,
       myProfile: myProfileFr,
       programs: programsFr,

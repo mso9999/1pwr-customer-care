@@ -62,6 +62,7 @@
     "advances": "Advances",
     "recordPayment": "Record Payment",
     "verifyPayments": "Verify Payments",
+    "unmatchedPayments": "Unmatched Payments",
     "pipeline": "Pipeline",
     "onboardingDashboard": "Onboarding dashboard",
     "feeTraceReview": "Fee trace queue",

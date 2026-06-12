@@ -43,7 +43,21 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
-## Session 2026-06-12 [202606120623] (Moletsane's double-credit question → audit, fix, register-match)
+## Session 2026-06-12 [202606121200] (Unmatched Payments portal page + Task B CSV refresh)
+
+### What was done
+- **Portal page** `/unmatched-payments` (Commerce nav): lists parked merchant-line payments,
+  shows phone/reference hints, lets O&M **Link** to an account or mark **Already reconciled**
+  (no booking). Suffix dedup on link prevents double-credit when receipt already in ledger.
+- **API** `GET/POST /api/merchant-unmatched/*` + CSV export; refactored booking into
+  `_book_parked_payment()` shared with registration auto-claim.
+- **Task B CSV regenerated** from production: `no_reference_payments.csv` now **41 rows
+  (M5,663)**; `RECON_SUMMARY_FOR_TEAM.md` updated with portal workflow.
+
+### What next session should know
+- Deploy to cc.1pwrafrica.com when ready (`npx tsc -b --noEmit` passes locally).
+- O&M can self-serve remaining Task B via the portal; treasury rows visible but not linkable.
+
 
 O&M flagged that ~98% of Task B payments were ALREADY manually credited (register:
 MANUAL CREDITS 2024.xlsx, twice-daily recon) — would linking double-credit?

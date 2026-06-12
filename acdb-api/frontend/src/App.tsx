@@ -33,6 +33,7 @@ import FinancingPage from './pages/FinancingPage';
 import AdvancesPage from './pages/AdvancesPage';
 import RecordPaymentPage from './pages/RecordPaymentPage';
 import PaymentVerificationPage from './pages/PaymentVerificationPage';
+import UnmatchedPaymentsPage from './pages/UnmatchedPaymentsPage';
 import PipelinePage from './pages/PipelinePage';
 import OnboardingDashboardPage from './pages/OnboardingDashboardPage';
 import FeeTraceReviewPage from './pages/FeeTraceReviewPage';
@@ -90,6 +91,7 @@ export default function App() {
             <Route path="advances" element={<ProtectedRoute requireEmployee><AdvancesPage /></ProtectedRoute>} />
             <Route path="record-payment" element={<ProtectedRoute requireEmployee><RecordPaymentPage /></ProtectedRoute>} />
             <Route path="payment-verification" element={<ProtectedRoute requireEmployee><PaymentVerificationPage /></ProtectedRoute>} />
+            <Route path="unmatched-payments" element={<ProtectedRoute requireEmployee><UnmatchedPaymentsPage /></ProtectedRoute>} />
             <Route path="pipeline" element={<ProtectedRoute requireEmployee><PipelinePage /></ProtectedRoute>} />
             <Route path="onboarding-dashboard" element={<ProtectedRoute requireEmployee><OnboardingDashboardPage /></ProtectedRoute>} />
             <Route path="fee-trace-review" element={<ProtectedRoute requireEmployee><FeeTraceReviewPage /></ProtectedRoute>} />

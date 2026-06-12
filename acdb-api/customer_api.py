@@ -305,6 +305,7 @@ from meter_lifecycle import router as meter_lifecycle_router, ensure_meter_assig
 from pr_lookup import router as portfolio_router
 from financing import router as financing_router
 from payment_verification import router as verification_router
+from merchant_unmatched_api import router as merchant_unmatched_router
 from tickets import router as tickets_router
 from customer_messages import router as customer_messages_router
 from gensite import router as gensite_router
@@ -350,6 +351,7 @@ app.include_router(meter_lifecycle_router)
 app.include_router(portfolio_router)
 app.include_router(financing_router)
 app.include_router(verification_router)
+app.include_router(merchant_unmatched_router)
 app.include_router(tickets_router)
 app.include_router(customer_messages_router)
 app.include_router(gensite_router)

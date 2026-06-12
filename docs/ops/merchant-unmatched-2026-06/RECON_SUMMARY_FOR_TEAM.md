@@ -58,10 +58,15 @@ re-point the payment.
 | 0287MAT | lineo korotla | 26657153248 | M50 | 9 Apr | 0287MAT doesn't exist — digit typo? |
 | 1101MAS | TIISETSO MAHLEHLA | 26657469985 | M200 | 15 May | 0101MAS? 0110MAS? |
 
-### Task B — 139 payments with no account in the reference (M12,144)
+### Task B — 41 payments with no account in the reference (M5,663)
 
 These customers typed only their name (or nothing) as the M-Pesa reference, and their phone
 number doesn't match any phone we have on file (or matches several customers). Largest first:
+
+**Update (12 Jun):** After cross-checking O&M's MANUAL-CREDITS-2024 register, **94 additional
+rows were closed without booking** (already reconciled). The queue is now **41 open payments
+(M5,663)**. Use the CC portal page **Unmatched Payments** (`/unmatched-payments`) to link or
+dismiss rows during routine recon — no need to wait on engineering.
 
 | Payer name | Phone | Payments | Total | Dates |
 |---|---|---:|---:|---|
@@ -75,13 +80,15 @@ number doesn't match any phone we have on file (or matches several customers). L
 | MOREMOHOLO MONAMOLELI | 26658355570 | 1 | M499 | 19 May |
 | Monyane Thoola | 26657044835 | 1 | M300 | 22 May |
 | MATSEPO THIBINYANE | 26659522045 | 1 | M300 | 28 May |
-| …and 94 more payers | | 129 total | M12,144 total | full list: `no_reference_payments.csv` |
+| …and 31 more payers | | 31 total | M5,663 total | full list: `no_reference_payments.csv` |
 
-**How to action:** identify the customer's account from the name (site staff usually know
-them). Then the **fastest fix is to add/update the phone number on the customer's profile
-in CC** — once the phone is on file, tell us and we'll re-run the matcher, which will book
-all of that payer's parked payments automatically. Alternatively send us
-`receipt → account` pairs and we'll book them directly.
+**How to action:** open **Unmatched Payments** in CC (`/unmatched-payments`). Identify the
+customer's account from the name (site staff usually know them). Either:
+- Enter the account and click **Link** (books with original date/receipt; suffix dedup prevents
+  double-credit if already in the ledger), or
+- Click **Already reconciled** if the payment was manually credited in SparkMeter/CC.
+Alternatively, add/update the phone on the customer profile — a unique phone match shows as a
+hint on the row.
 
 > ⚠ Note for the team: M501 / M499 amounts in this list are likely **connection /
 > readyboard fees** from customers who may not be registered in CC at all yet — same
