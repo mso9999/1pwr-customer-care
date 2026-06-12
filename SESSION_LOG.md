@@ -43,6 +43,29 @@ Full design + ops in `docs/ops/proactive-balance-freshness.md`.
   UI (backend already returns them); an admin editor for the new `system_config` tier keys.
 - Verify post-deploy: `systemctl list-timers 'cc-balance-*'`, `journalctl -u cc-balance-refresh`.
 
+## Session 2026-06-12 [202606120623] (Moletsane's double-credit question → audit, fix, register-match)
+
+O&M flagged that ~98% of Task B payments were ALREADY manually credited (register:
+MANUAL CREDITS 2024.xlsx, twice-daily recon) — would linking double-credit?
+
+- **Audit of all 71 booked claims** (wide ±7d window + suffix receipt match): exactly **1
+  true double-book** found — 0287MAT M50 auto-claim duplicated the smhist mirror row
+  `sm_manual_hist:koios:010PHMZEYB6K` (exact-match dedup missed the prefixed ref). UNWOUND
+  (txn 4986205 deleted + verification row; parked row re-pointed to twin 4480730). All other
+  claims clean (electricity claims are ledger-only/no kWh anyway — meter credit impossible
+  to duplicate by design).
+- **Dedup hardened** (commit 0c4a78a, deployed): claims now SUFFIX-match receipts
+  (`payment_reference LIKE '%'||receipt`) so smhist-prefixed manual credits always block
+  re-booking. 4 open rows auto-resolved by the same suffix rule.
+- **Register-driven bulk resolution**: parsed O&M's xlsx (23 monthly sheets, **2,579
+  receipt→account pairs**), matched against open parked rows: **94 matched (88 with a CC
+  twin txn) — resolved WITHOUT booking**. Task B: 139 → **41 open rows (M5,663)**.
+- Note: 0287MAT also shows PRE-EXISTING koios/smhist duplicate pairs (e.g. 2485979 vs
+  4480730 same M50/10kWh) — historical mirror duplication, absorbed by June-5 re-anchor;
+  flagged, not touched.
+- PROPOSED (awaiting MSO): portal "Unmatched Payments" page so O&M can see parked rows and
+  link/dismiss themselves during routine recon (kills the repetitive-work loop entirely).
+
 ## Session 2026-06-12 [202606120514] (Task A item 3: 1101MAS = plot number → 0272MAS)
 
 Final Task A answer from O&M: "1101MAS" in the M-Pesa ref was the **PLOT number**
