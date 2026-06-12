@@ -116,10 +116,13 @@ def claim_unmatched_for_account(conn, account_number: str) -> list[dict[str, Any
 
     for row_id, receipt, amount, paid_at, _ref in candidates:
         try:
+            # Suffix match: O&M manual credits mirrored from SparkMeter carry prefixed
+            # references like 'sm_manual_hist:koios:<MPESA-RECEIPT>' (RCA 2026-06-12,
+            # 0287MAT double-book). Receipts are long enough that suffix match is safe.
             cur.execute(
                 """
                 SELECT 1 FROM transactions
-                WHERE lower(trim(payment_reference)) = lower(trim(%s)) LIMIT 1
+                WHERE lower(payment_reference) LIKE '%%' || lower(trim(%s)) LIMIT 1
                 """,
                 (receipt,),
             )
