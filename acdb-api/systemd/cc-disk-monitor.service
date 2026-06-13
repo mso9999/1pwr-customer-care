@@ -1,0 +1,18 @@
+[Unit]
+Description=CC host disk-space monitor with WhatsApp alert
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=cc_api
+Group=cc_api
+WorkingDirectory=/opt/cc-portal/backend
+EnvironmentFile=/opt/1pdb/.env
+Environment=DISK_WARN_PCT=80
+Environment=DISK_EMERGENCY_PCT=90
+Environment=DISK_MONITOR_PATH=/
+Environment=DISK_STATE_FILE=/var/run/cc-disk-monitor.state
+ExecStart=/opt/cc-portal/backend/venv/bin/python3 /opt/cc-portal/backend/scripts/ops/disk_monitor.py
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cc-disk-monitor

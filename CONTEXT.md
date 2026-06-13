@@ -202,12 +202,19 @@ You can also use the **`EC2_LINUX_HOST`** value from GitHub Actions secrets (sam
 | CC API (LS) | `ssh ubuntu@<current-cc-linux-host> "sudo systemctl restart 1pdb-api"` |
 | CC API (BN) | `ssh ubuntu@<current-cc-linux-host> "sudo systemctl restart 1pdb-api-bn"` |
 
-### Backup and Restore (2026-04-01)
+### Disk health and monitoring (updated 2026-06-13)
+
+- **Root volume**: 116 GiB. Major consumers: DB base ~31 GB, local backups ~12 GB (3 days × ~6 GB/dump), journals <200 MB.
+- **Disk monitor**: `cc-disk-monitor.timer` (hourly) runs `scripts/ops/disk_monitor.py`. Sends WhatsApp broadcast at ≥80% (warning) and ≥90% (emergency) with remediation steps. State file at `/var/run/cc-disk-monitor.state` prevents repeat alerts within 6 h.
+- **`hourly_consumption` growth**: ~16 M rows/year at current fleet size. Table is 8.7 GB today and roughly doubles annually. **TODO**: time-partition this table like `meter_readings` (already yearly-partitioned) before it significantly impacts backup size and autovacuum cost. Target: implement partitioning when table hits 15 GB or next major schema session.
+- **autovacuum tuning** (migration `043`): `hourly_consumption` has `autovacuum_vacuum_cost_delay=20ms`, `scale_factor=0.01`. Prevents the "giant single vacuum WAL burst" failure mode that caused the 2026-06-13 disk-full crash.
+
+### Backup and Restore (2026-04-01, updated 2026-06-13)
 
 - Production CC host: `EOL` (`i-04291e12e64de36d7`, `af-south-1`). It is under the regional DLM/EBS snapshot policy via the `backup=yes` tag, but snapshots are only host-level DR.
 - Logical backups now run on the production host via:
   - systemd timer: `cc-postgres-backup.timer`
-  - env file: `/etc/default/cc-postgres-backup`
+  - env file: `/etc/default/cc-postgres-backup` — **`LOCAL_RETENTION_DAYS=3`** (reduced from 7 on 2026-06-13 after disk-full incident; S3 keeps 90 days)
   - script: `/usr/local/bin/cc_postgres_backup.sh`
 - Each run writes local artifacts under `/var/backups/1pwr-cc/<UTC timestamp>/` and uploads them to:
   - `s3://1pwr-cc-backups-758201218523-af-south-1/customer-care/ip-172-31-3-91/<UTC timestamp>/`
