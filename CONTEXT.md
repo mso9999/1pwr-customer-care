@@ -206,8 +206,8 @@ You can also use the **`EC2_LINUX_HOST`** value from GitHub Actions secrets (sam
 
 - **Root volume**: 116 GiB. Major consumers: DB base ~31 GB, local backups ~12 GB (3 days × ~6 GB/dump), journals <200 MB.
 - **Disk monitor**: `cc-disk-monitor.timer` (hourly) runs `scripts/ops/disk_monitor.py`. Sends WhatsApp broadcast at ≥80% (warning) and ≥90% (emergency) with remediation steps. State file at `/var/run/cc-disk-monitor.state` prevents repeat alerts within 6 h.
-- **`hourly_consumption` growth**: ~16 M rows/year at current fleet size. Table is 8.7 GB today and roughly doubles annually. **TODO**: time-partition this table like `meter_readings` (already yearly-partitioned) before it significantly impacts backup size and autovacuum cost. Target: implement partitioning when table hits 15 GB or next major schema session.
-- **autovacuum tuning** (migration `043`): `hourly_consumption` has `autovacuum_vacuum_cost_delay=20ms`, `scale_factor=0.01`. Prevents the "giant single vacuum WAL burst" failure mode that caused the 2026-06-13 disk-full crash.
+- **`hourly_consumption` partitioning** (migration `044`, 2026-06-13): Table is now RANGE-partitioned by year on `reading_hour`, mirroring `meter_readings`. Partitions: `legacy` (pre-2021), `2021`–`2026`, `2027`, `default`. Applied to both `onepower_cc` (17.3M rows) and `onepower_bj` (1.7M rows). Old table retained as `hourly_consumption_old` — drop after 24h observation. PK changed from `(id)` to `(id, reading_hour)` as required by PG range partitioning.
+- **autovacuum tuning** (migration `043`): all `hourly_consumption` leaf partitions have `autovacuum_vacuum_cost_delay=20ms`, `scale_factor=0.01`. Prevents the "giant single vacuum WAL burst" failure mode that caused the 2026-06-13 disk-full crash.
 
 ### Backup and Restore (2026-04-01, updated 2026-06-13)
 
