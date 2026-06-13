@@ -7408,4 +7408,34 @@ Root cause: **Dual registration without synchronization**
 ### Verification
 - Backend syntax check passed: `python3 -m py_compile acdb-api/analytics.py`.
 - Frontend type-check passed: `cd acdb-api/frontend && npx tsc -b --noEmit`.
+
+## Session 2026-06-13 [202606131200] (Disk-full recovery + hotfix commit + timer deploy)
+
+### What Was Done
+- **Root cause identified**: PostgreSQL 16 crashed at 08:57 UTC due to "No space left on device" writing WAL during autovacuum on `hourly_consumption`. Crash recovery also failed (WAL write needed), leaving the cluster down for ~3 hours.
+- **Disk freed**: `/var/backups/1pwr-cc/` held 8 daily dumps × ~6 GB = ~48 GB. Deleted 6 oldest (kept Jun 12 + Jun 13), vacuumed journals, cleared `/tmp`. Disk went from 100% → 60% (47 GB free).
+- **Backup retention patched**: `/etc/default/cc-postgres-backup` `LOCAL_RETENTION_DAYS` reduced from 7 to 3. S3 retains full history; local copies now cap at ~18 GB.
+- **Services restarted**: `postgresql@16-main`, `1pdb-api`, `1pdb-api-bn` all back to `active`. API health confirmed (1,894 customers, 199K+ transactions).
+- **Merchant mapping confirmed complete**: `apply_om_merchant_mappings.py` run on host — 290 rows already resolved by prior sessions; 23 pending (8 treasury transfers ring-fenced + 15 genuine no-match matching `remaining_open_payments.csv`). 005KL65H3G6K→0221LSB couldn't book because 0221LSB doesn't exist in CC.
+- **Hotfixes committed to `main`** (commit `ce9b2ac`): locked in all hot-deployed backend files — `sm_credit_retry.py`, `commission.py`, `fee_debt.py`, `import_tc_transactions.py`, `om_report.py`, `onboarding_ops.py`, `sparkmeter_customer.py`, `tests/test_fee_debt.py` — plus new systemd units, merchant ops CSVs, and SMP cutover doc updates.
+- **Timers deployed to production**:
+  - `cc-sm-credit-mirror.timer`: every 15 min, runs `run_sm_credit_mirror_incremental.py` (SM→1PDB external credit mirror). Now active.
+  - `cc-ls-balance-audit.timer`: daily at 06:00 UTC, runs `audit_ls_balances.py --check`. Next run Sun 06:00 UTC.
+
+### Key Decisions
+- Kept 2 most recent local backups rather than 1 to retain a same-day rollback point alongside yesterday's.
+- Did not touch `merchant_export_parser.py`, `ingest.py`, `payments.py`, or `crud.py` in this commit — those were already hot-deployed to the host and the GitHub Actions deploy will sync them on next push (they are not in git staging; check if still dirty on next session).
+
+### What Next Session Should Know
+- **Disk headroom**: ~47 GB free. With `LOCAL_RETENTION_DAYS=3` this should stay stable unless the DB grows significantly.
+- **SM credit retry queue**: `done=66`, `failed=26`. The 26 failed are a mix of genuinely uncommissioned accounts and prior blocked entries — not urgent, but worth reviewing after any new commissioning events.
+- **`cc-sm-credit-mirror` first run**: Timer fires every 15 min. Check `journalctl -u cc-sm-credit-mirror --since today` after first activation to confirm it's mirroring correctly.
+- **Still not committed**: `merchant_export_parser.py`, `ingest.py`, `payments.py`, `crud.py` — hot-deployed to host but not in git. They will be overwritten if GitHub Actions redeploys from `main`. Prioritise committing these next session.
+- **005KL65H3G6K**: M20 payment with no valid CC account for 0221LSB. Needs O&M to confirm correct account number before it can be claimed.
+
+### Verification
+- `curl https://cc.1pwrafrica.com/api/health` → `{"status":"ok","database":"postgresql",...}` ✓
+- `systemctl is-active 1pdb-api 1pdb-api-bn postgresql@16-main` → all `active` ✓
+- `systemctl list-timers` confirms `cc-sm-credit-mirror.timer` and `cc-ls-balance-audit.timer` scheduled ✓
+- Disk: 61% used, 47 GB free ✓
 - IDE lints on touched files reported no new diagnostics.
