@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily Lesotho SMP balance drift check
+
+[Timer]
+OnCalendar=*-*-* 06:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

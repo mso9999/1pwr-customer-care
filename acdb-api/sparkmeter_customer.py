@@ -561,7 +561,7 @@ def attach_koios_meter(
 
     body = {"serial": str(meter_serial).strip()}
     url = f"{KOIOS_BASE}/api/v1/customers/{uid}/meter"
-    retries = 6
+    retries = 8
     last_error = None
     for attempt in range(retries):
         try:
@@ -600,6 +600,17 @@ def attach_koios_meter(
                 "Koios meter attach HTTP 404 for %s, attempt %d/%d: %s",
                 account_number, attempt + 1, retries, preview,
             )
+            # Re-resolve customer id by account code. Some Koios flows return an
+            # id that is valid in /sm/ UI lists but not yet attachable on /api/v1.
+            refreshed = lookup_sparkmeter_customer(account_number)
+            refreshed_uid = str((refreshed or {}).get("id") or "").strip()
+            if refreshed_uid and refreshed_uid != uid:
+                logger.info(
+                    "Koios meter attach: refreshed customer id for %s: %s -> %s",
+                    account_number, uid, refreshed_uid,
+                )
+                uid = refreshed_uid
+                url = f"{KOIOS_BASE}/api/v1/customers/{uid}/meter"
             if attempt < retries - 1:
                 time.sleep(2 ** attempt)
                 continue
@@ -682,6 +693,24 @@ def sync_sparkmeter_customer_and_meter(
             uid = str(cr.sm_customer_id)
 
         att = attach_koios_meter(account_number, serial, customer_uuid=uid)
+        # If Koios is in a transient state (fresh customer id becomes attachable a
+        # bit later), perform one explicit second pass with a fresh id resolution.
+        if (
+            not att.success
+            and not att.skipped
+            and str(att.error or "") in {"HTTP 504", "Resource Not Found"}
+        ):
+            refreshed = lookup_sparkmeter_customer(account_number)
+            refreshed_uid = str((refreshed or {}).get("id") or "").strip() or uid
+            if refreshed_uid != uid:
+                logger.info(
+                    "Koios attach retry with refreshed id for %s: %s -> %s",
+                    account_number,
+                    uid,
+                    refreshed_uid,
+                )
+                uid = refreshed_uid
+            att = attach_koios_meter(account_number, serial, customer_uuid=uid)
         out["meter_attach"] = {
             "success": att.success,
             "skipped": att.skipped,

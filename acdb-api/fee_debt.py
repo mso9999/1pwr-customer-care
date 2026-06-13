@@ -42,7 +42,9 @@ def fetch_fee_debts(conn, customer_id: int, *, for_update: bool = False) -> dict
     cur.execute(
         f"""
         SELECT fee_debt_connection_remaining, fee_debt_readyboard_remaining,
-               COALESCE(acquires_1pwr_readyboard, false)
+               COALESCE(acquires_1pwr_readyboard, false),
+               COALESCE(customer_commissioned, false),
+               date_service_connected
           FROM customers
          WHERE id = %s
         {lock}
@@ -55,11 +57,15 @@ def fetch_fee_debts(conn, customer_id: int, *, for_update: bool = False) -> dict
             "fee_debt_connection_remaining": 0.0,
             "fee_debt_readyboard_remaining": 0.0,
             "acquires_1pwr_readyboard": False,
+            "customer_commissioned": False,
+            "date_service_connected": None,
         }
     return {
         "fee_debt_connection_remaining": float(row[0] or 0),
         "fee_debt_readyboard_remaining": float(row[1] or 0),
         "acquires_1pwr_readyboard": bool(row[2]),
+        "customer_commissioned": bool(row[3]),
+        "date_service_connected": row[4],
     }
 
 
@@ -107,9 +113,19 @@ def compute_fee_then_advance_split(
     rb_rem = _dec(fee_debts.get("fee_debt_readyboard_remaining") or 0)
     total_debt = conn_rem + rb_rem
     half_cap = (amt * Decimal("0.5")).quantize(Decimal("0.01"))
+    has_commissioning_flags = (
+        "customer_commissioned" in fee_debts
+        or "date_service_connected" in fee_debts
+    )
+    pre_commissioning = has_commissioning_flags and (
+        not bool(fee_debts.get("customer_commissioned"))
+        or not bool(fee_debts.get("date_service_connected"))
+    )
     # If this payment exactly settles the remaining onboarding fee debt
     # (e.g. 501+499 paid as one 1000 transfer), prioritize settling fees first.
-    if total_debt > 0 and abs(amt - total_debt) <= _FEE_EPS:
+    if pre_commissioning and total_debt > 0:
+        fee_portion = min(amt, total_debt).quantize(Decimal("0.01"))
+    elif total_debt > 0 and abs(amt - total_debt) <= _FEE_EPS:
         fee_portion = total_debt.quantize(Decimal("0.01"))
     else:
         fee_portion = min(half_cap, total_debt).quantize(Decimal("0.01"))

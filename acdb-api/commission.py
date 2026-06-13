@@ -787,7 +787,7 @@ def _resolve_ugp_survey_id(
 
 class EnergizeUpstreamRequest(BaseModel):
     site_code: str
-    lines: List[Dict[str, str]]
+    lines: List[Dict[str, Any]]
 
 
 @router.post("/api/commission/energize-upstream")

@@ -30,8 +30,17 @@ Do not bulk-seed when **1PDB > SM** until consumption ingest gaps are ruled out 
 | Cutover preview | `.../cutover_ls_balances.py --preview-csv /tmp/smp_cutover_preview.csv` |
 | Cutover apply | `.../cutover_ls_balances.py --apply --cutover-tag smp_cutover_YYYY-MM-DD` |
 | Post-cutover monitor | `audit_ls_balances.py --check` (systemd `cc-ls-balance-audit.timer`) |
+| External/manual SM credit mirror | `run_sm_credit_mirror_incremental.py` (systemd `cc-sm-credit-mirror.timer`) |
 
 Run as `cc_api` with `source /opt/1pdb/.env`.
+
+### Drift-prevention runtime guardrail
+
+- Keep `cc-sm-credit-mirror.timer` enabled (every 15 minutes) so SparkMeter-side
+  manual/external credits are mirrored into 1PDB with watermark-based idempotency.
+- Keep `cc-ls-balance-audit.timer` enabled (daily) as drift detection SLO.
+- If daily audit detects drift, run a guarded reconciliation workflow and review
+  large deltas that fail guardrails before any manual correction.
 
 ### ThunderCloud payment import after cutover
 

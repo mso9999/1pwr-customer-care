@@ -60,7 +60,31 @@ def _parse_date(value: str | None) -> date | None:
 def _customer_for_account(cur, account_number: str) -> dict[str, Any]:
     cur.execute(
         """
-        SELECT c.*, a.account_number, a.survey_id, m.meter_serial
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'accounts'
+          AND column_name = 'survey_id'
+        LIMIT 1
+        """
+    )
+    has_survey_id = cur.fetchone() is not None
+    survey_select = "a.survey_id" if has_survey_id else "NULL::text AS survey_id"
+    cur.execute(
+        """
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'meters'
+          AND column_name = 'meter_serial'
+        LIMIT 1
+        """
+    )
+    has_meter_serial = cur.fetchone() is not None
+    meter_select = "m.meter_serial" if has_meter_serial else "m.meter_id AS meter_serial"
+    cur.execute(
+        f"""
+        SELECT c.*, a.account_number, {survey_select}, {meter_select}
         FROM accounts a
         JOIN customers c ON c.id = a.customer_id
         LEFT JOIN meters m ON m.account_number = a.account_number

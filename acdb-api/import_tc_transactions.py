@@ -133,7 +133,8 @@ def main():
     reconcile_only = args.reconcile_only or RECONCILE_ONLY
     cutover_after = _parse_cutover_after(args.cutover_after or CUTOVER_AFTER)
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=args.days)
+    now_utc = datetime.now(timezone.utc)
+    cutoff = now_utc - timedelta(days=args.days)
     log.info("=" * 60)
     log.info("THUNDERCLOUD LIVE TRANSACTION IMPORT")
     log.info("Cutoff: %s (%d days)", cutoff.strftime("%Y-%m-%d %H:%M"), args.days)
@@ -174,6 +175,13 @@ def main():
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
         except (ValueError, TypeError):
+            continue
+        if dt > now_utc + timedelta(days=1):
+            log.warning(
+                "Skipping future-dated TC credit: acct_type=credit created=%s amount=%s",
+                created,
+                amount,
+            )
             continue
         if dt < cutoff:
             continue

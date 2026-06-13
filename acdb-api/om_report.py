@@ -2462,7 +2462,7 @@ def export_check_meter_comparison(
 # Onboarding Pipeline Report
 # ---------------------------------------------------------------------------
 
-@router.get("/api/om-report/pipeline")
+@router.get("/pipeline")
 def onboarding_pipeline(
     site: Optional[str] = Query(None),
     user: CurrentUser = Depends(require_employee),

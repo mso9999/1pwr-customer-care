@@ -70,3 +70,35 @@ def test_lump_sum_that_covers_all_fee_debt_is_fee_first():
     assert r["fee_to_readyboard"] == 499.0
     assert r["advance_portion"] == 0.0
     assert r["electricity_portion"] == 0.0
+
+
+def test_pre_commissioning_payments_are_fully_fee_first():
+    debts = {
+        "fee_debt_connection_remaining": 501.0,
+        "fee_debt_readyboard_remaining": 499.0,
+        "acquires_1pwr_readyboard": True,
+        "customer_commissioned": False,
+        "date_service_connected": None,
+    }
+    r = compute_fee_then_advance_split(300.0, debts, None)
+    assert r["fee_repayment_portion"] == 300.0
+    assert r["fee_to_connection"] == 300.0
+    assert r["fee_to_readyboard"] == 0.0
+    assert r["advance_portion"] == 0.0
+    assert r["electricity_portion"] == 0.0
+
+
+def test_pre_commissioning_spills_to_readyboard_after_connection():
+    debts = {
+        "fee_debt_connection_remaining": 100.0,
+        "fee_debt_readyboard_remaining": 80.0,
+        "acquires_1pwr_readyboard": True,
+        "customer_commissioned": False,
+        "date_service_connected": None,
+    }
+    r = compute_fee_then_advance_split(150.0, debts, None)
+    assert r["fee_repayment_portion"] == 150.0
+    assert r["fee_to_connection"] == 100.0
+    assert r["fee_to_readyboard"] == 50.0
+    assert r["advance_portion"] == 0.0
+    assert r["electricity_portion"] == 0.0

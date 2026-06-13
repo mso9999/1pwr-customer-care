@@ -1,0 +1,13 @@
+[Unit]
+Description=Lesotho SMP balance drift check (1PDB vs SparkMeter)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=cc_api
+Group=cc_api
+EnvironmentFile=/opt/1pdb/.env
+WorkingDirectory=/opt/cc-portal/backend
+Environment=PYTHONPATH=/opt/cc-portal/backend
+ExecStart=/opt/cc-portal/backend/venv/bin/python3 scripts/ops/audit_ls_balances.py --check
