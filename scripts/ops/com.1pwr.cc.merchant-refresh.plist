@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Weekly merchant-statement refresh for CC Unmatched Payments.
+
+  Installs to ~/Library/LaunchAgents/com.1pwr.cc.merchant-refresh.plist
+  (see scripts/ops/README_merchant_refresh.md). Runs the refresh script on this
+  Mac (where the Dropbox finance folder lives) every Monday at 06:00 local time.
+  If the Mac is asleep/off at that time, launchd runs the job at next wake.
+
+  MODE: the last ProgramArguments entry is the backfill mode.
+    "dry-run" (default) -> report only, no DB writes.
+    "apply"             -> book matched + park unmatched in 1PDB.
+  Change that single string and re-load to switch modes.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.1pwr.cc.merchant-refresh</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/mattmso/Dropbox/AI Projects/1PWR CC/scripts/ops/refresh_merchant_unmatched.sh</string>
+        <string>apply</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>1</integer>
+        <key>Hour</key>
+        <integer>6</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/mattmso/Dropbox/AI Projects/1PWR CC/docs/ops/merchant-refresh-logs/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/mattmso/Dropbox/AI Projects/1PWR CC/docs/ops/merchant-refresh-logs/launchd.err.log</string>
+</dict>
+</plist>

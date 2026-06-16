@@ -1,3 +1,128 @@
+## Session 2026-06-16 [202606160753] (Real-time SMS unmatched → match list: RCA + fix + backfill)
+
+### What was done
+- **RCA of a real gap (MSO-driven):** all site phones run the SMS gateway app → two
+  mirrors (electricity `/api/sms/incoming` + fee/finance `/api/sms/incoming-contract-fees`).
+  Unmatched payments DO arrive in real time, but `ingest.py`'s `if not account:` branch
+  only wrote `sms_inbound_log.outcome='no_account'` and `continue`d — **never parked into
+  `merchant_unmatched_payments`**. The match list was fed ONLY by the monthly statement batch.
+- **Sized it:** 88 distinct unmatched real-time payments (M7,000), logged 1,894× (repeated
+  forwards, no dedup for unbooked receipts). Of 88: 19 later booked, 59 in match list (only
+  via the monthly batch), **29 genuinely lost (M1,860)** — uncredited, invisible, latest 15 Jun.
+- **Fix (`acdb-api/ingest.py`):** the `no_account` branch now calls `park_unmatched_payment()`
+  (LS only) so unmatched payments surface in the portal in REAL TIME. Idempotent via the
+  unique-receipt index (also tames the repeated-forward log spam). Moved ts/payer_phone calc
+  above the branch. Syntax-validated on server (`ast.parse`). **NOT yet deployed.**
+- **Backfill (`scripts/ops/backfill_sms_no_account_to_match_list.py`):** parked the 29 lost
+  payments into the match list with payer-phone hints. Applied on prod: 29 parked, M1,860.
+  Open customer queue 17 → 46.
+
+### Key decisions
+- Parking guarded to `COUNTRY.code == "LS"` (BN keeps prior behavior; enable later if wanted).
+- Backfill uses `received_at` as `paid_at` (actual payment ts not stored separately; within secs).
+
+### What next session should know / caveats
+- **DEPLOY PENDING:** ingest.py fix is local + syntax-checked but not live. Needs push to main
+  (auto-deploy) or it reverts on next deploy. Backfill (data) is already persistent.
+- **kWh-credit caveat:** the portal "Link" books ledger-only (`_book_parked_payment`, no meter
+  kWh) — fine for historical merchant rows, but these are LIVE electricity top-ups. After
+  linking, the meter may still need a manual SparkMeter credit. Consider enhancing the claim
+  path to credit kWh for `source_file LIKE 'sms_gateway%'` parked rows. FLAG for decision.
+- Log spam continues (sms_inbound_log writes a `no_account` row per forward); harmless, optimize later.
+
+## Session 2026-06-16 [202606160655] (Merchant Unmatched: batch RCA + auto-refresh)
+
+### What was done
+- **Answered Moletsane:** Unmatched Payments tab shows nothing after 31 May because it is
+  **batch-fed, not real-time.** All 313 parked rows loaded in ONE batch on 2026-06-11 15:32
+  from April+May M-Pesa till statements; merchant-line payments never hit SMS ingest (only
+  `backfill_merchant_payments_from_exports.py` writes `merchant_unmatched_payments`).
+- **No June data exists yet:** newest statement file for every till is `2026-05.xlsx`
+  (appeared ~1–2 Jun). M-Pesa merchant statements are **monthly**, no API → June lands
+  ~early July. Root cause of original incident: import hadn't run since 12 May.
+- **Verified pipeline (Task 1):** rsynced Dropbox `mobile money records` (110MB data files)
+  → server `/opt/cc-portal/merchant_exports`; dry-run `--since 2026-05-01` →
+  **0 insertable** (all dup/fuzzy/parked), latest real paid_at 31 May. Pushed canonical
+  (hardened, `--park-unmatched`/`--no-repair-credit`) backfill script + parser to server
+  (deployed copy was older).
+- **Built automation (Task 2):**
+  - `scripts/ops/refresh_merchant_unmatched.sh` — rsync Dropbox→server, run backfill,
+    pull timestamped report to `docs/ops/merchant-refresh-logs/`. `apply` arg to write;
+    idempotent, `--no-repair-credit` always on. Scoped to **MPESA only** (`CC_MM_SUBDIR`).
+  - `scripts/ops/com.1pwr.cc.merchant-refresh.plist` — launchd, Mondays 06:00 local
+    (Mac-hosted because Dropbox lives here; server has no Dropbox). Installed + loaded
+    in **apply** mode (user chose auto-book).
+  - `scripts/ops/README_merchant_refresh.md` — full pipeline + ops docs.
+  - Baseline apply run: **0 new bookings, 2 trivial rows parked** (M0.01 commission
+    reversal + M1 campaign — date-defaulted-to-now junk). Queue: 17 open customer + 8 treasury.
+
+### Key decisions
+- **Automation runs on the Mac (launchd), not the server**, because the statement files
+  only exist in Dropbox on this machine; server-side timer can't reach them.
+- **Scoped to MPESA only.** Full-folder sync pulled EcoCash, whose dates the parser can't
+  read → defaulted to now() → would have parked ~2,000 mis-dated junk rows. MPESA matches
+  the proven 2026-06-11 baseline (all parked `source_file`s were `.../MPESA/...`).
+- **Schedule set to apply** (auto-book + auto-park weekly). Dedup layers make it safe/idempotent.
+
+### What next session should know
+- Real-time merchant visibility is impossible without an M-Pesa merchant API; weekly
+  auto-refresh is the practical fix (catches a new month within days of finance's upload).
+- **TODO: fix EcoCash date parsing** in `acdb-api/merchant_export_parser.py` (refs like
+  `MP######.####.A#####` / numeric), verify dry-run shows real dates, then set
+  `CC_MM_SUBDIR=""` to include EcoCash (covers MAT/SMP EcoCash customers).
+- 8 pre-existing `conflict` rows reported each run (not auto-applied); a few MPESA
+  campaign/reversal rows also date-default to now — low-value, O&M dismisses.
+- Files are **local/uncommitted** (scripts + plist + README + this log). Not yet pushed.
+- Switch schedule back to review-only: set plist mode `apply`→`dry-run`, `launchctl unload/load`.
+
+## Session 2026-06-13 [202606131312] (Postgres outage recovery + 3h transaction gap)
+
+### What was done
+- **O&M merchant mappings applied** (`no_reference_payments_om.csv` via
+  `scripts/ops/apply_om_merchant_mappings.py`): **26 payments booked**, 0 errors.
+  Queue now **15 open rows (M866)** — see
+  `docs/ops/merchant-unmatched-2026-06/remaining_open_payments.csv`.
+- **Production outage RCA (read-only):** disk **100% full** on CC host (`/` 116G,
+  ~57MB free). Autovacuum on `hourly_consumption` at **08:57 UTC** triggered
+  `PANIC: No space left on device` writing `pg_wal/xlogtemp`. Postgres down
+  **~08:57–11:52 UTC** until disk freed and PG restarted (now ~65%, 41GB free).
+  Largest hog: `/var/backups` **57GB**.
+- **3h gap closed:** During outage window, **4 SMS + 3 Koios manual credits** (7 total)
+  had `transaction_date` in gap but `created_at` after recovery — all now in CC:
+  - SMS replay ~12:06 UTC (`004C5SG78T94`, `07SIJEL6A01R`, `00ASG57SP2VI`, `00ASG57SP1FZ`)
+  - SM credit mirror ~11:57 UTC (3 koios rows for 0003LSB/0114MAS/0034MAS)
+- **SMS reconcile** (12h lookback): replayed post-recovery errored payment
+  `08SUIRA3O9WU` M200 → 0148SHG. Final run: **All 13 payments accounted for**.
+- **Live SMS fix:** `cc_api` had **no grants on partitioned `hourly_consumption`**
+  (only on `hourly_consumption_old`). SMS ingest calls `get_balance_kwh()` →
+  `permission denied for table hourly_consumption`. Restored
+  `SELECT/INSERT/UPDATE/DELETE` on parent + 9 partitions on prod.
+- **Catch-up jobs run:** Koios `backfill_transactions.py` (0 new — today's daily
+  CSVs 404; yesterday deduped), MAK/TC backfill (0 new), SM credit mirror (all skipped).
+
+### Key decisions
+- Gap verification used **gateway LOGIN.TXT receipt keys** vs `transactions.payment_reference`
+  for the 08:57–11:52 window — authoritative for SMS, not `created_at` alone.
+- Grants applied directly on prod; **migration not yet committed** to repo.
+
+### What next session should know
+- **Unmatched payments:** 15 open (13 O&M "Not Found" + 0221LSB missing + KETANE POLICE +
+  Merchants Campaigns M1). Portal live at `/unmatched-payments`.
+- **Secondary failures (not blocking core):** `1pdb-import-bn` varchar(10) overflow;
+  `cc-balance-rate` duplicate keys in `balance_refresh_state`; `mv_hourly_account_summary`
+  refresh fails (cc_api not owner).
+- **Disk hygiene urgent:** `/var/backups` retention policy needed to prevent recurrence.
+- **Pending:** ops note for team. (Grant migration `044_grant_hourly_consumption_cc_api.sql`
+  is now **obsolete** — migration `044_partition_hourly_consumption.py` rebuilds the table as
+  `cc_api`, so `cc_api` owns `hourly_consumption` + all partitions and has every privilege by
+  ownership. No standalone grant migration needed.)
+
+### Senescence notes
+- Conversation continued from prior session via summary handoff; gap work completed cleanly.
+
+### Protocol feedback
+- SESSION_LOG + transcript handoff sufficient for outage continuation; prod SSH access essential.
+
 ## Session 2026-06-08 [202606081011] (Proactive balance freshness)
 
 ### What was done

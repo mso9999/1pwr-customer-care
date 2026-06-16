@@ -359,6 +359,17 @@ def register_customer(
             claimed_payments = claim_unmatched_for_account(conn, account_number)
             if claimed_payments:
                 conn.commit()
+                # Post-commit: credit the meter for any live-SMS electricity payments
+                # that were parked before this account existed.
+                try:
+                    from merchant_unmatched import trigger_sm_credit_for_bookings
+
+                    trigger_sm_credit_for_bookings(claimed_payments)
+                except Exception as sm_exc:
+                    logger.warning(
+                        "SM credit for claimed payments failed for %s: %s",
+                        account_number, sm_exc,
+                    )
             else:
                 conn.rollback()
         except Exception as e:

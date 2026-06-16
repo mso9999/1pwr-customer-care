@@ -58,6 +58,7 @@ from fee_debt import (
     maybe_sync_commissioning_flags_from_fee_debt,
 )
 from payment_verification import create_verification_entry
+from merchant_unmatched import park_unmatched_payment
 
 logger = logging.getLogger("cc-api.ingest")
 MAX_FUTURE_SMS_TIMESTAMP_SKEW = timedelta(hours=12)
@@ -811,27 +812,6 @@ def _sms_incoming_process_raw(
                                  (account, sms_log_id))
                     conn.commit()
 
-                if not account:
-                    _update_sms_inbound(conn, sms_log_id, "no_account")
-                    conn.commit()
-                    if COUNTRY.code == "BN":
-                        logger.warning(
-                            "SMS payment %.0f %s from %s (ref %s) — no account (text/phone)",
-                            amount, COUNTRY.currency, phone, reference,
-                        )
-                    else:
-                        logger.warning(
-                            "SMS payment M%.2f from %s (ref %s) — no account (remark/phone)",
-                            amount, phone, reference,
-                        )
-                    continue
-
-                cur = conn.cursor()
-
-                cur.execute("SELECT value FROM system_config WHERE key = 'tariff_rate'")
-                rate_row = cur.fetchone()
-                rate = float(rate_row[0]) if rate_row else _default_tariff_fallback()
-
                 now_utc = datetime.now(timezone.utc)
                 try:
                     ts_ms = int(sms_received)
@@ -844,6 +824,52 @@ def _sms_incoming_process_raw(
                 ts = _sanitize_sms_timestamp(ts, now_utc)
 
                 payer_phone = "".join(c for c in str(phone) if c.isdigit()) or str(phone)
+
+                if not account:
+                    # No CC account resolved (unregistered, reference typo, or paid
+                    # before registration). Park into the Unmatched Payments queue so
+                    # O&M can link it from the portal in REAL TIME, instead of waiting
+                    # for the monthly merchant-statement import to surface it. The
+                    # unique-receipt index makes this idempotent across the repeated
+                    # forwards from multiple gateway phones. (RCA 2026-06-16.)
+                    parked_new = False
+                    if COUNTRY.code == "LS":
+                        try:
+                            parked_new = park_unmatched_payment(
+                                conn,
+                                receipt=receipt_key,
+                                amount=amount,
+                                paid_at=ts,
+                                reference_text=content,
+                                payer_phone=payer_phone,
+                                provider=(parsed.get("provider") or "mpesa"),
+                                source_file="sms_gateway",
+                            )
+                            conn.commit()
+                        except Exception as park_exc:
+                            conn.rollback()
+                            logger.warning(
+                                "Could not park unmatched SMS %s: %s", receipt_key, park_exc,
+                            )
+                    _update_sms_inbound(conn, sms_log_id, "no_account")
+                    conn.commit()
+                    if COUNTRY.code == "BN":
+                        logger.warning(
+                            "SMS payment %.0f %s from %s (ref %s) — no account (text/phone)",
+                            amount, COUNTRY.currency, phone, reference,
+                        )
+                    else:
+                        logger.warning(
+                            "SMS payment M%.2f from %s (ref %s) — no account; parked=%s",
+                            amount, phone, reference, parked_new,
+                        )
+                    continue
+
+                cur = conn.cursor()
+
+                cur.execute("SELECT value FROM system_config WHERE key = 'tariff_rate'")
+                rate_row = cur.fetchone()
+                rate = float(rate_row[0]) if rate_row else _default_tariff_fallback()
 
                 if not contract_fee_gateway:
                     # ------------------------------------------------------------

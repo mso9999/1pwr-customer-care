@@ -1,0 +1,3 @@
+*.csv
+launchd.*.log
+refresh.log

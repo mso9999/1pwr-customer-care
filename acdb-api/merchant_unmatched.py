@@ -98,9 +98,22 @@ def _book_parked_payment(
     amount: float,
     paid_at: datetime,
     account: str,
+    live_sms: bool = False,
 ) -> Optional[dict[str, Any]]:
-    """Book one parked payment onto *account*. Returns booking dict or None if skipped."""
-    from balance_engine import record_fee_transaction, record_historical_payment_transaction
+    """Book one parked payment onto *account*. Returns booking dict or None if skipped.
+
+    *live_sms* marks rows that arrived via the live SMS gateway (``source_file``
+    ``sms_gateway*``) but could not be matched at ingest time. Unlike historical
+    merchant-export rows (ledger-only, must not move re-anchored balances), these
+    are real-time electricity top-ups: we credit kWh to the balance and the
+    booking carries an ``sm_credit`` directive so the caller pushes the meter
+    credit after commit (mirrors the live ingest path).
+    """
+    from balance_engine import (
+        record_fee_transaction,
+        record_historical_payment_transaction,
+        record_payment_kwh,
+    )
     from fee_classifier import classify_payment
     from fee_debt import apply_fee_payment_category_to_debt
     from payment_verification import create_verification_entry
@@ -121,6 +134,7 @@ def _book_parked_payment(
     meter_id = _resolve_meter(conn, account)
     cls = classify_payment(conn, account, amt)
     category = cls["category"]
+    sm_credit: Optional[dict[str, Any]] = None
     if category in ("connection_fee", "readyboard_fee"):
         txn_id, _ = record_fee_transaction(
             conn, account, meter_id, amt, category,
@@ -128,6 +142,18 @@ def _book_parked_payment(
         )
         create_verification_entry(conn, txn_id, account, category, amt)
         apply_fee_payment_category_to_debt(conn, account, category, amt)
+    elif live_sms:
+        rate = _get_tariff_rate(conn, account)
+        txn_id, _kwh, _bal = record_payment_kwh(
+            conn, account, meter_id, amt, rate,
+            source="sms_gateway", timestamp=paid_at, payment_reference=receipt,
+        )
+        sm_credit = {
+            "account_number": account,
+            "amount": amt,
+            "transaction_id": txn_id,
+            "receipt": receipt,
+        }
     else:
         rate = _get_tariff_rate(conn, account)
         txn_id, _ = record_historical_payment_transaction(
@@ -151,9 +177,11 @@ def _book_parked_payment(
         "transaction_id": txn_id,
         "account_number": account,
     }
+    if sm_credit:
+        booking["sm_credit"] = sm_credit
     logger.info(
-        "Claimed parked merchant payment %s (%.2f, %s) for %s -> txn %s",
-        receipt, amt, category, account, txn_id,
+        "Claimed parked %s payment %s (%.2f, %s) for %s -> txn %s",
+        "live-SMS" if live_sms else "merchant", receipt, amt, category, account, txn_id,
     )
     return booking
 
@@ -167,7 +195,7 @@ def claim_unmatched_row(conn, row_id: int, account_number: str) -> dict[str, Any
     cur = conn.cursor()
     cur.execute(
         """
-        SELECT id, receipt, amount, paid_at, reference_text, resolved_at, category
+        SELECT id, receipt, amount, paid_at, reference_text, resolved_at, category, source_file
         FROM merchant_unmatched_payments
         WHERE id = %s
         """,
@@ -176,7 +204,7 @@ def claim_unmatched_row(conn, row_id: int, account_number: str) -> dict[str, Any
     row = cur.fetchone()
     if not row:
         raise LookupError("Payment not found")
-    _id, receipt, amount, paid_at, _ref, resolved_at, category = row
+    _id, receipt, amount, paid_at, _ref, resolved_at, category, source_file = row
     if resolved_at is not None:
         raise ValueError("Payment is already resolved")
     if category != "customer":
@@ -190,6 +218,7 @@ def claim_unmatched_row(conn, row_id: int, account_number: str) -> dict[str, Any
         conn, cur,
         row_id=_id, receipt=receipt, amount=float(amount),
         paid_at=paid_at, account=account,
+        live_sms=str(source_file or "").startswith("sms_gateway"),
     )
     if booking is None:
         return {
@@ -255,7 +284,7 @@ def claim_unmatched_for_account(conn, account_number: str) -> list[dict[str, Any
     try:
         cur.execute(
             """
-            SELECT id, receipt, amount, paid_at, reference_text
+            SELECT id, receipt, amount, paid_at, reference_text, source_file
             FROM merchant_unmatched_payments
             WHERE resolved_at IS NULL
               AND category = 'customer'   -- treasury rows are ring-fenced, never claimable
@@ -270,15 +299,44 @@ def claim_unmatched_for_account(conn, account_number: str) -> list[dict[str, Any
         logger.warning("Unmatched-payment lookup failed for %s: %s", account, exc)
         return []
 
-    for row_id, receipt, amount, paid_at, _ref in candidates:
+    for row_id, receipt, amount, paid_at, _ref, source_file in candidates:
         try:
             booking = _book_parked_payment(
                 conn, cur,
                 row_id=row_id, receipt=receipt, amount=float(amount),
                 paid_at=paid_at, account=account,
+                live_sms=str(source_file or "").startswith("sms_gateway"),
             )
             if booking:
                 booked.append(booking)
         except Exception as exc:
             logger.warning("Claim of parked payment %s for %s failed: %s", receipt, account, exc)
     return booked
+
+
+def trigger_sm_credit_for_bookings(bookings: list[dict[str, Any]]) -> None:
+    """Push SparkMeter credit for any live-SMS electricity bookings, post-commit.
+
+    Call this only AFTER the booking transaction has been committed, so a meter
+    credit is never applied for a CC row that later rolls back. Best-effort:
+    failures are logged and queued by ``credit_sm_with_retry`` itself.
+    """
+    for b in bookings or []:
+        sm = b.get("sm_credit") if isinstance(b, dict) else None
+        if not sm:
+            continue
+        try:
+            from sm_credit_retry import credit_sm_with_retry
+
+            credit_sm_with_retry(
+                account_number=sm["account_number"],
+                amount=float(sm["amount"]),
+                memo=f"unmatched-claim ref={sm.get('receipt') or '?'} txn={sm.get('transaction_id')}",
+                external_id=str(sm.get("transaction_id") or ""),
+                replay_due_limit=2,
+            )
+        except Exception as exc:
+            logger.warning(
+                "SM credit after unmatched claim failed for %s: %s",
+                sm.get("account_number"), exc,
+            )

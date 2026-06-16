@@ -21,6 +21,7 @@ from merchant_unmatched import (
     _ACCOUNT_RE,
     claim_unmatched_row,
     dismiss_unmatched_row,
+    trigger_sm_credit_for_bookings,
 )
 from middleware import require_employee
 from models import CurrentUser
@@ -201,6 +202,9 @@ def claim_payment(
         except Exception as exc:
             logger.exception("Claim failed for parked payment %s", payment_id)
             raise HTTPException(500, f"Claim failed: {exc}") from exc
+    # Post-commit: push meter credit for live-SMS electricity payments.
+    if isinstance(result, dict) and result.get("sm_credit"):
+        trigger_sm_credit_for_bookings([result])
     return result
 
 
