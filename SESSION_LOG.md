@@ -21,14 +21,21 @@
 - Parking guarded to `COUNTRY.code == "LS"` (BN keeps prior behavior; enable later if wanted).
 - Backfill uses `received_at` as `paid_at` (actual payment ts not stored separately; within secs).
 
+### Deploy + kWh enhancement (done same session)
+- **DEPLOYED:** commit `aefb7dd` pushed to main → GitHub Actions deploy SUCCESS (backend +
+  frontend, all health checks green). Verified on server: `ingest.py` parks, `merchant_unmatched.py`
+  has `live_sms`/`trigger_sm_credit_for_bookings`. `/api/health` + `/api/bn/health` = 200.
+- **kWh auto-credit IMPLEMENTED (user chose "auto"):** `_book_parked_payment(live_sms=...)` now
+  uses `record_payment_kwh` for `sms_gateway`-sourced electricity rows (credits kWh) and returns
+  an `sm_credit` directive; `trigger_sm_credit_for_bookings()` pushes SparkMeter credit POST-commit
+  from both the portal claim endpoint and registration auto-claim. Fees unchanged; historical
+  merchant rows still ledger-only (no balance move). So O&M linking a live-SMS payment now both
+  books it AND powers the meter.
+
 ### What next session should know / caveats
-- **DEPLOY PENDING:** ingest.py fix is local + syntax-checked but not live. Needs push to main
-  (auto-deploy) or it reverts on next deploy. Backfill (data) is already persistent.
-- **kWh-credit caveat:** the portal "Link" books ledger-only (`_book_parked_payment`, no meter
-  kWh) — fine for historical merchant rows, but these are LIVE electricity top-ups. After
-  linking, the meter may still need a manual SparkMeter credit. Consider enhancing the claim
-  path to credit kWh for `source_file LIKE 'sms_gateway%'` parked rows. FLAG for decision.
+- BN unmatched still drops (parking guarded to LS); enable later if BN wants the queue.
 - Log spam continues (sms_inbound_log writes a `no_account` row per forward); harmless, optimize later.
+- Weekly Mac launchd `com.1pwr.cc.merchant-refresh` runs MPESA-scoped backfill in apply mode.
 
 ## Session 2026-06-16 [202606160655] (Merchant Unmatched: batch RCA + auto-refresh)
 
