@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Koios feed duplication guard
+
+[Timer]
+# After the daily imports have settled; sampled days are 2-4 days back anyway.
+OnCalendar=*-*-* 06:45:00 UTC
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

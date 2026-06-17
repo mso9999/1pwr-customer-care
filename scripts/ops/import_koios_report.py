@@ -46,6 +46,14 @@ import requests
 
 KOIOS_BASE = os.environ.get("KOIOS_BASE_URL", "https://www.sparkmeter.cloud")
 
+# Sanity cap on a single 15-min heartbeat's kWh. Koios occasionally emits a
+# garbage reading (e.g. a cumulative register / sentinel leaking into the
+# interval field — observed 1.66e12 kWh for one LS meter-hour on 2026-02-26),
+# which would otherwise over-debit a balance into oblivion. A real sub-hourly
+# single-meter reading is well under this; anything above is dropped.
+# (RCA 2026-06-17.)
+MAX_READING_KWH = float(os.environ.get("MAX_READING_KWH", "100"))
+
 # Site UUID maps mirror import_hourly.py ORGS. Keys read from env per country.
 ORGS = {
     "LS": {
@@ -107,8 +115,17 @@ def fetch_report(site_id: str, date_str: str, key: str, secret: str) -> str | No
 
 
 def parse_hourly(raw_csv: str) -> dict[tuple[str, str, str], float]:
-    """Return {(account, meter_serial, 'YYYY-MM-DD HH:00:00'): kwh} from 15-min rows."""
-    out: dict[tuple[str, str, str], float] = defaultdict(float)
+    """Return {(account, meter_serial, 'YYYY-MM-DD HH:00:00'): kwh} from 15-min rows.
+
+    Koios's /api/v2/report intermittently returns each 15-minute heartbeat
+    duplicated N times (observed up to ~11x for Lesotho in Jan 2026). Summing
+    every CSV row inflated hourly kWh by the duplication factor, over-debiting
+    balances. We collapse identical heartbeats by (serial, heartbeat_start) —
+    duplicates carry byte-identical kWh — before binning to the hour.
+    (RCA 2026-06-17.)
+    """
+    # (serial, heartbeat_start) -> (acct, hour_key, kwh) for each DISTINCT heartbeat.
+    heartbeats: dict[tuple[str, str], tuple[str, str, float]] = {}
     for row in csv.DictReader(io.StringIO(raw_csv)):
         acct = (row.get("meter/customer/code") or "").strip()
         if not acct or acct == "None":
@@ -121,7 +138,13 @@ def parse_hourly(raw_csv: str) -> dict[tuple[str, str, str], float]:
             kwh = float(row.get("kilowatt_hours") or 0)
         except (ValueError, TypeError):
             continue
+        if kwh > MAX_READING_KWH:
+            continue  # garbage reading (see MAX_READING_KWH note)
         hour_key = hb[:13] + ":00:00"  # heartbeat_start is UTC; truncate to hour
+        heartbeats[(serial, hb)] = (acct, hour_key, kwh)
+
+    out: dict[tuple[str, str, str], float] = defaultdict(float)
+    for (serial, hb), (acct, hour_key, kwh) in heartbeats.items():
         out[(acct, serial, hour_key)] += kwh
     return out
 

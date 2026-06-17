@@ -1,0 +1,15 @@
+[Unit]
+Description=Daily guard: alert if the Koios /report feed returns duplicate heartbeats
+Documentation=file:///opt/cc-portal/scripts/ops/koios_feed_guard.py
+After=network-online.target
+
+[Service]
+Type=oneshot
+# cc_api can read both /opt/1pdb/.env and /opt/1pdb-bn/.env for Koios keys.
+User=cc_api
+EnvironmentFile=/opt/1pdb/.env
+StateDirectory=cc-monitors
+Environment=FEED_GUARD_STATE_FILE=/var/lib/cc-monitors/koios-feed-guard.state
+Environment=FEED_RATIO_THRESHOLD=1.05
+ExecStart=/opt/cc-portal/backend/venv/bin/python3 /opt/cc-portal/backend/scripts/ops/koios_feed_guard.py
+Nice=10

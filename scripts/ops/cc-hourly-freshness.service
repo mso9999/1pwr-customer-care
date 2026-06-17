@@ -1,0 +1,18 @@
+[Unit]
+Description=Alert if hourly_consumption inserts stall or a site's feed lags (LS+BN)
+Documentation=file:///opt/cc-portal/scripts/ops/hourly_consumption_freshness.py
+After=postgresql.service network-online.target
+
+[Service]
+Type=oneshot
+# cc_api can read both /opt/1pdb/.env and /opt/1pdb-bn/.env (per-DB DATABASE_URL).
+User=cc_api
+# EnvironmentFile supplies CC_BRIDGE_NOTIFY_URL/SECRET.
+EnvironmentFile=/opt/1pdb/.env
+StateDirectory=cc-monitors
+Environment=HOURLY_FRESH_STATE_FILE=/var/lib/cc-monitors/hourly-freshness.state
+Environment=GLOBAL_STALL_DAYS=2.5
+Environment=SITE_LAG_DAYS=4
+Environment=MIN_ACTIVE_ROWS_30D=5000
+ExecStart=/opt/cc-portal/backend/venv/bin/python3 /opt/cc-portal/backend/scripts/ops/hourly_consumption_freshness.py
+Nice=10

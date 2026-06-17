@@ -37,6 +37,13 @@ API_SECRET = os.environ["KOIOS_API_SECRET"]
 BASE = os.environ.get("KOIOS_BASE_URL", "https://www.sparkmeter.cloud")
 HEADERS = {"X-API-KEY": API_KEY, "X-API-SECRET": API_SECRET}
 
+# Sanity cap on a single 15-min heartbeat's kWh. Koios occasionally emits a
+# garbage reading (cumulative register / sentinel leaking into the interval
+# field — observed 1.66e12 kWh for one LS meter-hour on 2026-02-26) that would
+# over-debit a balance. Real sub-hourly single-meter reads are far below this.
+# (RCA 2026-06-17.)
+MAX_READING_KWH = float(os.environ.get("MAX_READING_KWH", "100"))
+
 SITES = {
     "GBO": "a23c334e-33f7-473d-9ae3-9e631d5336e4",
     "SAM": "8f80b0a8-0502-4e26-9043-7152979360aa",
@@ -61,10 +68,20 @@ def fetch_daily_readings(site_id: str, date_str: str) -> str | None:
 
 
 def parse_to_hourly(raw_csv: str, site_code: str) -> dict:
-    """Parse daily CSV into hourly buckets: {(account, hour_str): kwh}."""
-    reader = csv.DictReader(io.StringIO(raw_csv))
-    hourly = defaultdict(float)
+    """Parse daily CSV into hourly buckets: {(account, hour_str): kwh}.
 
+    Koios's /api/v2/report intermittently returns each 15-minute heartbeat
+    duplicated N times (observed up to 49x for Benin in Jan 2026). Blindly
+    summing every CSV row therefore inflated hourly kWh by the duplication
+    factor (SAM ~7x / GBO ~6x in Jan 2026), over-debiting customer balances.
+    We first collapse identical heartbeats by (meter serial, heartbeat_start)
+    — duplicates carry byte-identical kWh, so keeping one is correct — and only
+    then sum the distinct heartbeats into hourly buckets. (RCA 2026-06-17.)
+    """
+    reader = csv.DictReader(io.StringIO(raw_csv))
+
+    # (serial, heartbeat_start) -> (acct, hour_str, kwh) for each DISTINCT heartbeat.
+    heartbeats: dict[tuple[str, str], tuple[str, str, float]] = {}
     for row in reader:
         acct = (row.get("meter/customer/code") or "").strip()
         if not acct or acct == "None":
@@ -77,8 +94,10 @@ def parse_to_hourly(raw_csv: str, site_code: str) -> dict:
             continue
         if kwh <= 0:
             continue
+        if kwh > MAX_READING_KWH:
+            continue  # garbage reading (see MAX_READING_KWH note)
 
-        hb_start = row.get("heartbeat_start", "").strip()
+        hb_start = (row.get("heartbeat_start") or "").strip()
         if not hb_start:
             continue
 
@@ -87,7 +106,12 @@ def parse_to_hourly(raw_csv: str, site_code: str) -> dict:
         except ValueError:
             continue
 
+        serial = (row.get("meter/serial") or "").strip()
         hour_str = ts.strftime("%Y-%m-%d %H:00:00")
+        heartbeats[(serial, hb_start)] = (acct, hour_str, kwh)
+
+    hourly = defaultdict(float)
+    for acct, hour_str, kwh in heartbeats.values():
         hourly[(acct, hour_str)] += kwh
 
     return hourly

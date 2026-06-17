@@ -1,4 +1,113 @@
-## Session 2026-06-16 [202606160753] (Real-time SMS unmatched → match list: RCA + fix + backfill)
+## Session 2026-06-17 [202606171244] (Koios duplicate-heartbeat RCA: dedup importers, full re-import, robustness monitors, UGP CDF check)
+
+### What was done
+- **Trigger (Nils Lurie):** "Koios has large amount of duplicate records in the consumption of SAM
+  for Jan 2026 ... CC portal summed up all the duplicates -> inflated values." Feb/Mar too. Asked
+  to screen both BN villages.
+- **RCA — defect #1 (duplication):** Koios `/api/v2/report` intermittently returns each 15-min
+  heartbeat duplicated N times, byte-identical kWh (measured **2.58x** in BN Jan-Mar 2026; up to
+  ~49x in spots). All three importers summed every row -> inflated hourly kWh. Patched
+  `import_benin_hourly.py`, `import_koios_report.py`, `acdb-api/import_hourly.py` to collapse
+  `(serial, heartbeat_start/timestamp)` BEFORE summing.
+- **RCA — defect #2 (silent outage):** migration-044 (Jun 13) dropped the `id` DEFAULT on the
+  partitioned `hourly_consumption`, so EVERY koios insert had failed since Jun 13 (4-day data hole,
+  `NotNullViolation`). Restored `ALTER ... SET DEFAULT nextval(...)` + `setval` in both DBs.
+- **Full re-import (deduped) 2025-08-01 -> today, all 10 sites both countries** (incl. Jun13-17 gap).
+  LS GRAND TOTAL 6,969,710 hourly rows. Snapshots `hourly_consumption_bak_koiosdup_20260617` in
+  both DBs for rollback.
+- **BN source consolidation:** the live importer's `ON CONFLICT DO UPDATE` had been writing deduped
+  kWh into the legacy `source='import'` rows (which `balance_engine` ignores). Deleted 140,301
+  `import` rows >=2025-08 (snapshotted) and re-imported as `koios` -> BN now a **single clean koios
+  source**. SAM Jan 5,704 -> 1,307 kWh; GBO ~6x -> ~3,948. Portal display + balances both correct.
+- **Defect #3 (garbage outlier) — found via the UGP CDF check:** one LS row (0251MAT,
+  2026-02-26 15:00) carried **1.66e12 kWh** (cumulative-register/sentinel leak in the feed) pulled
+  in by the re-import. Deleted it; MAT Q1 now 7,041 kWh (max 8.3). Added a `MAX_READING_KWH=100`
+  sanity cap to all three importers + an outlier guard in the freshness monitor (defense in depth).
+  Full rescan: **zero outliers >50 kWh in either DB**.
+- **Robustness monitors deployed + timers armed** (model: `disk_monitor.py` -> CC WhatsApp bridge):
+  - `cc-hourly-freshness.timer` (hourly): self-calibrating freshness/insert-stall + outlier guard
+    (would have caught the Jun-13 outage same-day). Healthy, ~3s.
+  - `cc-koios-feed-guard.timer` (daily): alarms if the feed's raw/dedup ratio spikes (>1.05x).
+    Smoke-tested clean (~1.00x).
+  - `check_schema_invariants.py`: post-migration assertion (id default + sequence) — the exact
+    044 class. Passing in both DBs.
+- **UGP CDF investigation (the user's question):** the Benin CDFs (`benin_hh/sme/chu`, refreshed
+  2026-06-10 from the same /report feed) are **NOT polluted** — `build_benin_hourly_cdfs.py` dedups
+  `(meter,timestamp)` before histogramming (line 174) and builds a normalized `true_power_avg`
+  distribution; empirically the no-dedup-vs-dedup CDF delta is max **0.0022**. LS CDFs almost all
+  predate/exclude the Jan-Mar window or use ThunderCloud; only `smp_hh`/`smp_hh1` overlap (small
+  slice, non-default, and LS was *under*-counted not inflated). Verification script:
+  `/tmp/verify_benin_cdf_dupes.py` (in uGridPlan repo).
+
+### Key decisions
+- Balances are computed **on-demand** (`balance_engine` over `hourly_consumption`) + live SM cache
+  (`account_balance_live`, TTL) — so correcting the data fixes balances automatically; no bulk
+  recompute. LS debits will rise (it was under-counted); BN display drops (was inflated).
+- Outlier cap set at 100 kWh/heartbeat (real single-meter sub-hourly reads are <~7; site-meter
+  hours peaked ~25) — drops only garbage.
+
+### What next session should know / caveats
+- The duplication is INTERMITTENT in the upstream Koios feed (recent days currently clean ~1.00x);
+  the daily feed-guard is the early-warning. If it fires, flag SparkMeter — our importers already
+  dedup so balances stay protected.
+- Rollback: `hourly_consumption_bak_koiosdup_20260617` (both DBs) holds the pre-fix koios+import rows.
+- UGP: no CDF action needed. If desired, rebuild `benin_*` from corrected feed (will be ~identical)
+  and re-quantify the `smp_hh` Q1-2026 slice.
+
+
+
+### What was done
+- **Alert:** CC host root fs at 93% (8.6 GB free of 116 GB); Postgres crash risk.
+- **RCA (the real filler):** `inverter_readings.raw_json` (JSONB) = **24 GB** in its TOAST
+  table (12.3M chunks, 0 dead — genuine data, NOT bloat). Every gensite adapter
+  (alphaess/sinosoar/solarman/victron/sma) writes the full raw inverter payload "for
+  forensic inspection" at ~1 GB/day, but **nothing in the app ever reads `raw_json` back**.
+  This also bloated every nightly `pg_dump` (each `onepower_cc.dump` ~12 GB and growing;
+  `--compress=9` run took 2h40m+).
+- **Secondary fillers:** 4× ~11 GB daily local backups (40 GB); orphaned `hourly_consumption_old`
+  (8.7 GB) — migration-044's documented "DROP after 24h" step never run (renamed Jun 13).
+- **Immediate relief (done live, no DB locks):** pruned Jun 14 + Jun 15 local backups (verified
+  byte-for-byte in S3 `1pwr-cc-backups-758201218523-af-south-1`) → freed ~22 GB; `journalctl
+  --vacuum-size=200M` → 195 MB. **Disk 93% → 75% (30 GB free).**
+- **Prune automation (deployed to host):** `scripts/ops/cc_prune_inverter_rawjson.sh` +
+  `cc-inverter-rawjson-prune.{service,timer}` → installed to `/usr/local/bin` + `/etc/systemd/system`,
+  timer armed for daily 04:30 UTC (Persistent=false to avoid colliding with the backup). Nulls
+  `raw_json` older than `RETAIN_DAYS=7` + plain VACUUM. README in `scripts/ops/`.
+- **Deferred DB ops (auto-run after backup releases locks):** `scripts/ops/cc_disk_remediation_2026-06-17.sh`
+  is running on the host (nohup), waiting for `cc-postgres-backup.service` to finish, then:
+  DROP `hourly_consumption_old` (+8.7 GB); NULL raw_json >7d + `VACUUM FULL inverter_readings`
+  (returns ~16 GB to OS); set `LOCAL_RETENTION_DAYS=2` + pg_dump `--compress=6`. Log:
+  `/tmp/cc_disk_remediation.log`. Idempotent.
+
+### Key decisions
+- User chose **keep last 7 days** of raw_json (not stop-storing entirely): reclaims ~16 GB now,
+  caps growth at ~7 GB rolling, retains recent forensic payloads. And **let the running backup
+  finish** rather than kill it (Jun 16 + S3 intact).
+
+### Execution outcome (remediation ran + manual corrections)
+- **FINAL: disk 93% -> 58% (50 GB free); onepower_cc 38 GB -> 13 GB; inverter_readings 24 GB -> 7.8 GB.**
+- Remediation script's first VACUUM FULL "succeeded" but reclaimed nothing — an `idle in
+  transaction` app connection pinned the xmin horizon, so the rewrite kept the dead toast.
+  **Fix:** re-ran `VACUUM FULL inverter_readings` once the horizon was clean -> 24 GB -> 7.8 GB.
+- DROP `hourly_consumption_old` failed: `mv_hourly_account_summary` was still defined on `_old`
+  (migration-044's rename dragged the matview onto it -> THIS was the stale mv-refresh bug).
+  **Fix:** atomically `DROP MATERIALIZED VIEW` + recreate on partitioned parent `hourly_consumption`
+  (1,615 accts, unique idx) + `DROP TABLE hourly_consumption_old`. Parent vs _old row counts were
+  identical (17,276,224) so _old was fully redundant. `REFRESH ... CONCURRENTLY` now SUCCEEDS
+  (resolves the long-standing mv refresh failure).
+- Backup tuning (Step 4) silently skipped in the script (ran as `ubuntu`; config files are
+  root-only, so its grep guards failed). **Fix:** applied with sudo -> `LOCAL_RETENTION_DAYS=2`,
+  pg_dump `--compress=6` (both LS+BN lines).
+
+### What next session should know / caveats
+- raw_json within-7d is ~7.4 GB (per-row ~165 KB — some gensite adapter stores a verbose payload).
+  Deeper fix: trim/stop persisting raw_json in adapters (write-only today). Lower `RETAIN_DAYS`
+  (service unit env) if host gets tight. Nightly prune timer runs 04:31 UTC.
+- mv_hourly_account_summary refresh failure (prior pending item) is now RESOLVED.
+- Repo files under `scripts/ops/` (prune script+units+README, remediation script) are NOT yet
+  committed (host install/run was direct, not via git deploy).
+
+
 
 ### What was done
 - **RCA of a real gap (MSO-driven):** all site phones run the SMS gateway app → two

@@ -41,6 +41,13 @@ DATABASE_URL = os.environ.get(
 )
 KOIOS_BASE = "https://www.sparkmeter.cloud"
 
+# Sanity cap on a single interval reading's kWh. Koios occasionally emits a
+# garbage value (cumulative register / sentinel leaking into the interval field
+# — observed 1.66e12 kWh for one LS meter-hour on 2026-02-26) that would
+# over-debit a balance. Real sub-hourly single-meter reads are far below this.
+# (RCA 2026-06-17.)
+MAX_READING_KWH = float(os.environ.get("MAX_READING_KWH", "100"))
+
 ORGS = {
     "LS": {
         "org_id": "1cddcb07-6647-40aa-aaaa-70d762922029",
@@ -189,9 +196,18 @@ def fetch_day(session, org_cfg, site_id, date_str, per_page):
 
 
 def bin_to_hourly(records):
-    """Aggregate raw Koios interval readings into hourly buckets per meter."""
-    hourly = defaultdict(float)
+    """Aggregate raw Koios interval readings into hourly buckets per meter.
+
+    Koios intermittently returns each interval reading duplicated N times
+    (observed up to ~11x for LS via the /report endpoint in Jan 2026). Summing
+    every record therefore inflated hourly kWh and over-debited balances. We
+    first collapse identical interval reads by (serial, timestamp) — duplicates
+    carry the same kWh — and only then sum the distinct intervals into hourly
+    buckets. (RCA 2026-06-17.)
+    """
     meter_acct = {}
+    # (serial, ts_str) -> (hour_key, kwh) for each DISTINCT interval reading.
+    intervals = {}
 
     for rec in records:
         meter_obj = rec.get("meter", {})
@@ -225,6 +241,13 @@ def bin_to_hourly(records):
                     pass
                 break
 
+        if kwh > MAX_READING_KWH:
+            continue  # garbage reading (see MAX_READING_KWH note)
+
+        intervals[(serial, ts_str)] = (hour_key, kwh)
+
+    hourly = defaultdict(float)
+    for (serial, _ts), (hour_key, kwh) in intervals.items():
         hourly[(serial, hour_key)] += kwh
 
     return [
