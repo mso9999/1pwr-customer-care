@@ -24,17 +24,42 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS trg_transactions_acct_upper ON transactions;
-CREATE TRIGGER trg_transactions_acct_upper
-    BEFORE INSERT OR UPDATE OF account_number ON transactions
-    FOR EACH ROW EXECUTE FUNCTION normalize_account_number_upper();
+-- Create each trigger ONLY if absent. CREATE TRIGGER needs a SHARE ROW EXCLUSIVE
+-- lock on the (hot) target table; on a live system DROP+CREATE can hit lock_timeout
+-- against API traffic. Guarding on pg_trigger makes this a true no-op once applied,
+-- so re-runs on every deploy never take the lock (idempotent and lock-free on prod).
+-- A short lock_timeout keeps the first-time creation from blocking forever; if it
+-- cannot grab the lock it raises (deploy retries next push during a quieter window).
+SET lock_timeout = '5s';
 
-DROP TRIGGER IF EXISTS trg_meters_acct_upper ON meters;
-CREATE TRIGGER trg_meters_acct_upper
-    BEFORE INSERT OR UPDATE OF account_number ON meters
-    FOR EACH ROW EXECUTE FUNCTION normalize_account_number_upper();
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'trg_transactions_acct_upper' AND NOT tgisinternal
+    ) THEN
+        EXECUTE 'CREATE TRIGGER trg_transactions_acct_upper '
+             || 'BEFORE INSERT OR UPDATE OF account_number ON transactions '
+             || 'FOR EACH ROW EXECUTE FUNCTION normalize_account_number_upper()';
+    END IF;
 
-DROP TRIGGER IF EXISTS trg_meter_assignments_acct_upper ON meter_assignments;
-CREATE TRIGGER trg_meter_assignments_acct_upper
-    BEFORE INSERT OR UPDATE OF account_number ON meter_assignments
-    FOR EACH ROW EXECUTE FUNCTION normalize_account_number_upper();
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'trg_meters_acct_upper' AND NOT tgisinternal
+    ) THEN
+        EXECUTE 'CREATE TRIGGER trg_meters_acct_upper '
+             || 'BEFORE INSERT OR UPDATE OF account_number ON meters '
+             || 'FOR EACH ROW EXECUTE FUNCTION normalize_account_number_upper()';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'trg_meter_assignments_acct_upper' AND NOT tgisinternal
+    ) THEN
+        EXECUTE 'CREATE TRIGGER trg_meter_assignments_acct_upper '
+             || 'BEFORE INSERT OR UPDATE OF account_number ON meter_assignments '
+             || 'FOR EACH ROW EXECUTE FUNCTION normalize_account_number_upper()';
+    END IF;
+END $$;
+
+RESET lock_timeout;
