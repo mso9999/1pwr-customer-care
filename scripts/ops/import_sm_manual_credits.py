@@ -459,6 +459,28 @@ def _cc_has_txn_id(conn, txn_id: str) -> bool:
     return cur.fetchone() is not None
 
 
+def _exact_already_recorded(conn, account: str, amount: float, when: datetime) -> bool:
+    """Hard, always-on idempotency guard: a payment for this account at this EXACT
+    timestamp (to the second) and amount is the same SparkMeter credit. This catches
+    re-inserts regardless of external_id/source_table/fuzzy-window settings, which is
+    how 10k+ duplicate credit rows leaked in historically (RCA 2026-06-18). Two
+    genuinely distinct top-ups never share account+exact-timestamp+amount."""
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT 1
+        FROM transactions
+        WHERE account_number = %s
+          AND is_payment = true
+          AND transaction_date = %s
+          AND ABS(COALESCE(transaction_amount, 0) - %s) <= 0.01
+        LIMIT 1
+        """,
+        (account, when, amount),
+    )
+    return cur.fetchone() is not None
+
+
 def _fuzzy_already_recorded(conn, account: str, amount: float, when: datetime, window_minutes: int) -> bool:
     if window_minutes <= 0:
         return False
@@ -685,6 +707,10 @@ def _insert_missing_credit(
     src_norm = _norm_ref(src_tbl)
     if pref_norm in existing.refs or src_norm in existing.refs:
         return "skip_already_imported"
+
+    # Always-on exact-duplicate guard (independent of fuzzy window / refs).
+    if _exact_already_recorded(conn, row.account_number, row.amount, row.occurred_at):
+        return "skip_exact_duplicate"
 
     if _fuzzy_already_recorded(
         conn, row.account_number, row.amount, row.occurred_at, fuzzy_window_minutes

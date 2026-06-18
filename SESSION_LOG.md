@@ -1,3 +1,49 @@
+## Session 2026-06-18 [202606172136] (CC<->Koios true reconciliation: payment-duplicate RCA + dedup, in progress)
+
+### Trigger
+User: "cure the root cause, not bandaid topical treatments ... Koios and CC in sync, recon to each
+other, both 'correct', avoid dupes or lost packets." Follow-on from the consumption fix, which had
+left ~588 LS accounts reading falsely negative in `balance_engine`.
+
+### RCA (root cause found — it was NOT the consumption side)
+- CC reconstructs balance: `engine = SUM(payment kWh) - consumption - legacy - balance_seed`.
+- **Dominant root cause = DUPLICATE PAYMENT CREDITS:** 14,878 extra payment rows / **164,958 kWh** /
+  1,322 LS accounts. Mostly the credit mirror (`import_sm_manual_credits.py`) RE-INSERTING payments
+  CC already had (idempotency = external_id + 10-min fuzzy window failed at scale; copies carry exact
+  same timestamp+amount, ref `sm_manual_hist:...`). This inflated engine balances; the negative
+  `balance_seed` plugs (-224,473 kWh, 1,791 rows from layered prior fixes: realign/anchor/auto-seed)
+  were inserted to HIDE it. The Koios credit FEED itself is complete (full-window screen: only 1
+  missing of 13,391 -> no lost packets).
+- Secondary: phantom large payments Koios reversed but the mirror kept (0235SHG koios 61,344 kWh /
+  306,721 LSL; 0125MAK portal 41,006 `hist_repair`), 28 NULL-account payments (1,735 kWh).
+
+### Done (financial mutations APPLIED, all reversible)
+- Phase 0 snapshots: `transactions_bak_recon_20260618` (LS 199,434 / BN 6,884 rows). Enum value
+  `opening_anchor` added to both DBs. Built `scripts/ops/recon_balance_cutover.py` (true recon tool).
+- **Tranche 1 dedup (applied):** removed 9,748 mirror rows that are EXACT (account+timestamp+amount)
+  twins of a non-mirror original (84,113 kWh). `scripts/ops/dedup_payments_tranche1.sql`.
+- **Tranche 2a dedup (applied):** removed 546 remaining exact-ts dup rows keeping min(id) original
+  (incl. 500 portal `hist_repair` phantoms, e.g. 0125MAK 41,006). `dedup_payments_tranche2a.sql`.
+- All 10,294 removed rows archived to `recon_deleted_dupes_20260618` (+ full snapshot).
+- Result: recon dry-run net anchor -196,647 -> **-66,744 kWh**; 83% of accounts now <=100 kWh anchor.
+
+### Remaining (NOT yet done)
+- Same-day (non-exact-ts) dup class: 5,130 rows / 80,843 kWh — AMBIGUOUS (could be genuine repeat
+  top-ups); held for validation, NOT auto-removed.
+- CURE 2: fix mirror idempotency (prevent recurrence) — code change, deploys via main.
+- CURE 3: reverse validated phantom koios payments (0235SHG 61,344 etc.).
+- CURE 4: 28 NULL-account payments.
+- CURE 5: remove stale balance_seed (1,791) + write small `opening_anchor` residual; flip audit to
+  monitor-only (cc-ls-balance-audit already runs --check only).
+- engine-too-LOW accounts (e.g. 0053SHG Koios 4127 vs engine -845): RCA missing-credit vs over-cons.
+- Apply same RCA+cure to BN (balance_seed 1,361 rows).
+
+### Rollback
+`transactions_bak_recon_20260618` (both DBs) = full pre-recon ledger. `recon_deleted_dupes_20260618`
+= exactly the rows removed by tranches 1+2a.
+
+---
+
 ## Session 2026-06-17 [202606171244] (Koios duplicate-heartbeat RCA: dedup importers, full re-import, robustness monitors, UGP CDF check)
 
 ### What was done

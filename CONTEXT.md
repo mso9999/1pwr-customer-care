@@ -85,6 +85,34 @@ There are **two live gateway deployments** — **Lesotho** (M-Pesa) and **Benin*
 
 **Low-balance SMS alerts** are **not** driven by SparkMeter or SMSComms `customer_info.json`. Run **`scripts/ops/run_low_balance_alerts.py`** on a timer (see **`deploy/systemd/cc-low-balance-alerts.timer`**): it uses **`balance_engine.get_balance_kwh()`**, compares thresholds from **`country_fees.get_low_balance_thresholds()`** (stored in **`system_config`**, editable on **Tariff Management** → *Low balance SMS (kWh)* — Lesotho vs Benin use separate backends/databases), tracks **`accounts.low_balance_alert_sent_at`**, and sends SMS via **`sms_outbound.send_gateway_sms`**. Code defaults differ by **`country_config`** (e.g. BN **5 / 12** kWh vs LS **10 / 20** kWh) when keys are absent. Enable with **`LOW_BALANCE_ALERTS_ENABLED=1`** (migration **`020_low_balance_alert_state.sql`**). Legacy PHP **`customer_info.php`** low-balance paths should be retired once this job is live.
 
+### CC ⇄ SparkMeter (Koios) balance reconciliation model (2026-06-18)
+
+**Principle:** Koios is the **authoritative prepaid ledger** (the meter enforces
+`lifetime_credits − lifetime_consumption`, floored near 0). CC *reconstructs* the
+balance from feeds: `engine = Σ payment_kWh − Σ consumption_kWh − legacy − anchor`.
+Both feeds must be independently correct (no dupes / no lost packets); residual is
+captured by **one** transparent opening anchor; drift is **monitored, never auto-plugged**.
+
+- **Do NOT re-introduce `balance_seed` auto-plugging.** That old mechanism (audit
+  `--reconcile --apply`) repeatedly inserted plug rows = `Koios − engine`, which
+  *masked* feed bugs. When a feed was later fixed, the plugs double-counted. All
+  `balance_seed` rows were removed 2026-06-18 and replaced by `opening_anchor`.
+  `cc-ls-balance-audit.service` must stay **`--check` only** (drift alarm).
+- **`opening_anchor`** (enum value on `transaction_source`): one row per account,
+  `kwh = Koios_balance_now − engine_raw`, written ONCE by
+  **`scripts/ops/recon_balance_cutover.py`** after feeds were corrected. It represents
+  the unreconstructable pre-feed-window opening balance. Re-runnable (deletes prior
+  anchors first). Idempotent and transparent.
+- **Root cause cured (RCA 2026-06-18):** the CC↔Koios divergence was **duplicate
+  payment credits** (LS 164,958 kWh / 1,322 accts), mostly the credit mirror
+  (`import_sm_manual_credits.py`) re-inserting payments CC already had. Fixed by
+  (a) deduping (`dedup_payments_tranche1/2a.sql`, archived to
+  `recon_deleted_dupes_20260618`), and (b) an **always-on exact (account+timestamp+
+  amount) idempotency guard** in the mirror so re-dups are structurally impossible.
+- **Phantom payments** (Koios reversed it but the mirror kept it, e.g. `0235SHG`
+  306,721 LSL) are **reversed at source**, not anchored over.
+- **Rollback:** `transactions_bak_recon_20260618` (both DBs) = full pre-recon ledger.
+
 ### Payment gateway without deep telecom-operator integration
 
 New markets do **not** require a lengthy, costly integration with each carrier (Vodacom, MTN, bespoke USSD/short-code products, or operator API programs). The **merchant-gateway** pattern is:
