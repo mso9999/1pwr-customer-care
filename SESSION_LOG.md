@@ -1,3 +1,41 @@
+## Session 2026-06-18 [202606172136b] (CC<->Koios reconciliation: 2nd root cause = account-number casing; cure deployed)
+
+### What was done (continuation; all deployed)
+- Committed + deployed the dupe/idempotency/anchor cure (`b612e3f`): CI green, LS+BN `/api/health` 200.
+  Verified on host: mirror idempotency guard live; `cc-ls-balance-audit` is `--check` only (no auto-plug).
+- Ran the live drift alarm post-cutover -> it surfaced a **2nd root cause: account-number casing
+  fragmentation.** One physical account stored under up to 4 casings (`0020MAK/0020MAk/0020Mak/0020mak`).
+  Master `accounts` is 100% canonical UPPERCASE; Koios uses uppercase; but SMS/manual payments sometimes
+  wrote lower/mixed case -> **13,485 kWh of payments (1,147 rows / 219 accts)** orphaned on ghost
+  identities (real account under-credited; ghost shows `SM=0` "+200" false drift).
+- **Cure (applied LS):** `scripts/ops/casing_normalize.sql` normalized account_number -> UPPERCASE across
+  transactions (1,147), hourly_consumption (4,773), meters (17), meter_assignments (17); 0 residual;
+  backups `casing_bak_*_20260618`. No unique constraint includes account_number -> collision-free relabel.
+  Re-ran `recon_balance_cutover.py --country LS --apply` -> engine=Koios restored for 1,290 accts.
+- **Recurrence prevention:** migration `044_normalize_account_number_casing.sql` adds trigger
+  `normalize_account_number_upper()` on transactions/meters/meter_assignments (applied to both DBs; CI will
+  re-apply idempotently). Casing can never re-fragment an account again.
+- **Audit hardened into an honest monitor** (`audit_ls_balances.py`): REMOVED the `--reconcile/--apply`
+  balance_seed footgun; split reporting into TRUE DRIFT (present both, disagree -> trips `--check`) vs
+  NO SM RECORD (CC balance but absent from Koios feed -> review, `--strict` to fail).
+- **BN:** transactions 100% canonical (0 fragmentation); only 10 lowercase rows are *test* accounts ->
+  no financial casing problem, no data mutation (RCA discipline). Trigger still deployed to BN.
+
+### Post-cure verification (LS)
+- Audit now: **TRUE DRIFT = 2** accounts, both sub-7 kWh readings-lag noise (0096SHG -2.82 of 2,238;
+  4321MAS 6.24). i.e. **engine = Koios for every one of the ~1,391 accounts Koios returns a balance for.**
+- **NO SM RECORD = 119** accounts (CC balance, absent from Koios balance feed).
+
+### Remaining open item (genuine next root-cause step)
+- The 119 NO-SM-RECORD: Koios `/sm/organizations/{KOIOS_ORG_ID}/customers` balance fetch covers ~1,391 of
+  1,925 CC accounts (SEH cluster, non-commissioned TOS, 2020 accdb legacy like PTA). Likely the missing
+  sites live under a **different Koios org** than the single `KOIOS_ORG_ID`. Next: enumerate Koios orgs and
+  fetch balances across all of them, then classify each absent account (decommission / not-commissioned /
+  re-fetch). Also still held: phantom reviews (0016KET 700, 0311SHG 560), 28 NULL-account payments, Tranche 2b
+  (5,130 same-day ambiguous dupes).
+
+---
+
 ## Session 2026-06-18 [202606172136] (CC<->Koios true reconciliation: payment-duplicate RCA + dedup, in progress)
 
 ### Trigger

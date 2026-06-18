@@ -2,16 +2,30 @@
 """
 Audit Lesotho customer balances: compare 1PDB vs Koios (LS sites) and ThunderCloud (MAK/LAB).
 
+MONITOR ONLY. This tool reports divergence; it NEVER writes plug rows. The old
+``--reconcile --apply`` balance_seed auto-plug was removed 2026-06-18 (RCA): it
+masked feed bugs and double-counted once feeds were fixed. Authoritative
+reconciliation now happens once, transparently, via
+``scripts/ops/recon_balance_cutover.py`` (opening_anchor). See CONTEXT.md
+"CC <-> SparkMeter (Koios) balance reconciliation model".
+
+Drift is reported in two distinct buckets so the coverage gap never masquerades
+as a balance error:
+  * TRUE DRIFT  - account present in BOTH CC and the SparkMeter balance feed, but
+                  balances disagree. This is the real alarm (exit 1 under --check).
+  * NO SM RECORD - account exists in CC with a non-zero balance but the SparkMeter
+                  balance endpoint returns nothing for it (decommissioned, not-yet
+                  commissioned, or a Koios org-coverage gap). Reported for review;
+                  does NOT trip --check unless --strict is given.
+
 Modes:
   (default)   Full audit report with per-account deltas
-  --check     Quick drift check (exit 1 if any delta exceeds threshold)
-  --reconcile Preview balance_seed rows for drift (dry run by default)
-  --apply     With --reconcile, insert balance_seed transactions
+  --check     Drift check (exit 1 if any TRUE DRIFT exceeds threshold)
+  --strict    With --check, also exit 1 on NO SM RECORD accounts
 
 Usage:
     PYTHONPATH=acdb-api python3 scripts/ops/audit_ls_balances.py
     PYTHONPATH=acdb-api python3 scripts/ops/audit_ls_balances.py --check
-    PYTHONPATH=acdb-api python3 scripts/ops/audit_ls_balances.py --reconcile
 """
 
 from __future__ import annotations
@@ -186,7 +200,7 @@ def compute_1pdb_balances(conn) -> dict[str, float]:
     return balances
 
 
-def run_audit(conn) -> list[tuple[str, float, float, float, str]]:
+def run_audit(conn) -> list[tuple[str, float, float, float, str, bool]]:
     log.info("Fetching SparkMeter balances (Koios + ThunderCloud)...")
     sm_balances = fetch_sparkmeter_balances()
     log.info("  %d SparkMeter accounts", len(sm_balances))
@@ -200,18 +214,45 @@ def run_audit(conn) -> list[tuple[str, float, float, float, str]]:
     log.info("  %d 1PDB accounts", len(pdb_balances))
 
     all_accounts = sorted(set(sm_balances) | set(pdb_balances))
-    results: list[tuple[str, float, float, float, str]] = []
+    results: list[tuple[str, float, float, float, str, bool]] = []
     for account in all_accounts:
+        present_in_sm = account in sm_balances
         sm_kwh, _, _ = sm_balances.get(account, (0.0, 0.0, 0.0))
         pdb_kwh = pdb_balances.get(account, 0.0)
+        # When an account is absent from the SparkMeter feed, sm_kwh defaults to 0.
+        # That is a coverage gap, NOT a real -pdb_kwh "drift"; the delta is only
+        # meaningful when both sides actually have a record. We still record it so
+        # the absent-with-balance accounts can be reported separately.
         delta = round(sm_kwh - pdb_kwh, 4)
         site = _site_code(account)
         platform = "thundercloud" if site in THUNDERCLOUD_SITES else "koios"
-        results.append((account, sm_kwh, pdb_kwh, delta, platform))
+        results.append((account, sm_kwh, pdb_kwh, delta, platform, present_in_sm))
     return results
 
 
-def print_report(results: list[tuple[str, float, float, float, str]], threshold: float) -> None:
+def _classify(results, threshold, only_sites=None):
+    """Split rows into (true_drift, no_sm_record), applying bulk/site filters.
+
+    true_drift   : present in SparkMeter AND |delta| >= threshold (real mismatch).
+    no_sm_record : absent from SparkMeter AND |engine| >= threshold (coverage gap).
+    """
+    true_drift, no_sm = [], []
+    for row in results:
+        account, _, pdb_kwh, delta, _, present_in_sm = row
+        if is_bulk_excluded_account(account):
+            continue
+        if only_sites and _site_code(account) not in only_sites:
+            continue
+        if present_in_sm:
+            if abs(delta) >= threshold:
+                true_drift.append(row)
+        else:
+            if abs(pdb_kwh) >= threshold:
+                no_sm.append(row)
+    return true_drift, no_sm
+
+
+def print_report(results, threshold: float) -> None:
     print()
     print("=" * 88)
     print("LS BALANCE AUDIT REPORT")
@@ -220,118 +261,61 @@ def print_report(results: list[tuple[str, float, float, float, str]], threshold:
     print(f"  Accounts: {len(results)}")
     print("=" * 88)
 
-    drifted = [row for row in results if abs(row[3]) >= threshold]
-    matched = len(results) - len(drifted)
-    print(f"\n  Matched (|delta| < {threshold} kWh): {matched}")
-    print(f"  Drifted (|delta| >= {threshold} kWh): {len(drifted)}")
+    true_drift, no_sm = _classify(results, threshold)
+    in_sm = sum(1 for r in results if r[5])
+    matched = in_sm - len(true_drift)
+    print(f"\n  In SparkMeter feed: {in_sm}  (matched within {threshold} kWh: {matched})")
+    print(f"  TRUE DRIFT (present both, |delta| >= {threshold}): {len(true_drift)}")
+    print(f"  NO SM RECORD (CC balance, absent from feed): {len(no_sm)}")
 
-    if not drifted:
-        print()
-        return
-
-    print(
-        f"\n{'Account':<12} {'Platform':<12} {'SM kWh':>10} {'1PDB kWh':>10} "
-        f"{'Delta kWh':>10} {'Delta LSL':>10}"
-    )
-    print("-" * 88)
-    total_delta = 0.0
-    for account, sm_kwh, pdb_kwh, delta, platform in sorted(drifted, key=lambda row: -abs(row[3])):
-        site = _site_code(account)
-        rate = float(get_tariff_rate_for_site(site) or 0)
-        total_delta += delta
+    if true_drift:
         print(
-            f"{account:<12} {platform:<12} {sm_kwh:>10.2f} {pdb_kwh:>10.2f} "
-            f"{delta:>10.2f} {delta * rate:>10.2f}"
+            f"\n[TRUE DRIFT]\n{'Account':<12} {'Platform':<12} {'SM kWh':>10} "
+            f"{'1PDB kWh':>10} {'Delta kWh':>10} {'Delta LSL':>10}"
         )
-    print("-" * 88)
-    print(f"{'TOTAL':<12} {'':<12} {'':>10} {'':>10} {total_delta:>10.2f}")
+        print("-" * 88)
+        total_delta = 0.0
+        for account, sm_kwh, pdb_kwh, delta, platform, _ in sorted(
+            true_drift, key=lambda row: -abs(row[3])
+        ):
+            rate = float(get_tariff_rate_for_site(_site_code(account)) or 0)
+            total_delta += delta
+            print(
+                f"{account:<12} {platform:<12} {sm_kwh:>10.2f} {pdb_kwh:>10.2f} "
+                f"{delta:>10.2f} {delta * rate:>10.2f}"
+            )
+        print("-" * 88)
+        print(f"{'TOTAL':<12} {'':<12} {'':>10} {'':>10} {total_delta:>10.2f}")
+
+    if no_sm:
+        print(f"\n[NO SM RECORD] (top 30 by |CC balance|)")
+        print(f"{'Account':<12} {'1PDB kWh':>10}")
+        print("-" * 24)
+        for account, _, pdb_kwh, _, _, _ in sorted(
+            no_sm, key=lambda row: -abs(row[2])
+        )[:30]:
+            print(f"{account:<12} {pdb_kwh:>10.2f}")
     print()
 
 
-def _seed_candidates(results, threshold, only_sites, exclude_accounts=None):
-    exclude = {a.strip().upper() for a in (exclude_accounts or set())}
-    out = []
-    for row in results:
-        account, _, _, delta, _ = row
-        if abs(delta) < threshold:
-            continue
-        if is_bulk_excluded_account(account):
-            continue
-        if only_sites and _site_code(account) not in only_sites:
-            continue
-        if account.strip().upper() in exclude:
-            continue
-        out.append(row)
-    return out
-
-
-def preview_seeds(results, threshold: float, only_sites=None, exclude_accounts=None) -> int:
-    seeds = _seed_candidates(results, threshold, only_sites, exclude_accounts)
-    if not seeds:
-        print("No balance seeds needed - all accounts within threshold.")
-        return 0
-
-    print(f"\n-- Balance seed preview ({len(seeds)} accounts)")
-    print(f"-- Generated: {datetime.now(timezone.utc).isoformat()}")
-    for account, _, _, delta, _ in seeds:
-        rate = float(get_tariff_rate_for_site(_site_code(account)) or 0)
-        lsl = round(delta * rate, 4) if rate > 0 else 0.0
-        print(
-            f"-- {account}: seed {delta:.4f} kWh ({lsl:.2f} LSL at {rate:.2f})"
-        )
-    print("\n-- To apply, re-run with: --reconcile --apply")
-    return len(seeds)
-
-
-def apply_seeds(conn, results, threshold: float, only_sites=None, exclude_accounts=None) -> int:
-    cur = conn.cursor()
-    ts = datetime.now(timezone.utc)
-    count = 0
-    skipped = 0
-    seeds = _seed_candidates(results, threshold, only_sites, exclude_accounts)
-    for account, _, _, delta, _ in seeds:
-        rate = float(get_tariff_rate_for_site(_site_code(account)) or 0)
-        amount = round(delta * rate, 4) if rate > 0 else 0.0
-        cur.execute(
-            """
-            INSERT INTO transactions
-                (account_number, meter_id, transaction_date, transaction_amount,
-                 rate_used, kwh_value, is_payment, current_balance, source)
-            VALUES (%s, '', %s, %s, %s, %s, true, 0, 'balance_seed')
-            """,
-            (account, ts, amount, rate, delta),
-        )
-        count += 1
-    conn.commit()
-    cur.close()
-    if skipped:
-        log.info("Skipped %d invalid account codes", skipped)
-    return count
-
-
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Audit LS balances: 1PDB vs Koios/ThunderCloud")
-    parser.add_argument("--check", action="store_true", help="Exit 1 when drift exceeds threshold")
-    parser.add_argument("--reconcile", action="store_true", help="Preview or apply balance_seed rows")
-    parser.add_argument("--apply", action="store_true", help="Insert seeds (requires --reconcile)")
+    parser = argparse.ArgumentParser(description="Audit LS balances: 1PDB vs Koios/ThunderCloud (monitor only)")
+    parser.add_argument("--check", action="store_true", help="Exit 1 when TRUE DRIFT exceeds threshold")
+    parser.add_argument(
+        "--strict", action="store_true",
+        help="With --check, also exit 1 on NO SM RECORD accounts (coverage gap)",
+    )
     parser.add_argument("--threshold", type=float, default=DRIFT_THRESHOLD_KWH)
     parser.add_argument(
         "--only-sites",
         default="",
-        help="Comma-separated site codes to limit --check/--reconcile/--apply to (e.g. MAK). "
+        help="Comma-separated site codes to limit --check to (e.g. MAK). "
         "Bulk-excluded accounts (LAB test, BVW, 0500MAK Power House, FAULTY, malformed) are "
         "always skipped.",
-    )
-    parser.add_argument(
-        "--exclude-accounts",
-        default="",
-        help="Comma-separated account numbers to skip when seeding (e.g. accounts with "
-        "pending/failed SM credit pushes whose CC-only credit must be re-pushed, not erased).",
     )
     args = parser.parse_args()
 
     only_sites = {s.strip().upper() for s in args.only_sites.split(",") if s.strip()} or None
-    exclude_accounts = {s.strip().upper() for s in args.exclude_accounts.split(",") if s.strip()} or None
 
     if not DATABASE_URL:
         log.error("DATABASE_URL is required")
@@ -347,55 +331,42 @@ def main() -> int:
 
     threshold = args.threshold
     if args.check:
-        drifted = [
-            row for row in results
-            if abs(row[3]) >= threshold and not is_bulk_excluded_account(row[0])
-            and (not only_sites or _site_code(row[0]) in only_sites)
-            and (not exclude_accounts or row[0].strip().upper() not in exclude_accounts)
-        ]
-        if drifted:
+        true_drift, no_sm = _classify(results, threshold, only_sites)
+        if no_sm:
             log.warning(
-                "DRIFT DETECTED: %d accounts exceed %.2f kWh threshold",
-                len(drifted),
+                "NO SM RECORD: %d accounts have a CC balance but are absent from the "
+                "SparkMeter balance feed (coverage gap / decommissioned) -- review, do not plug",
+                len(no_sm),
+            )
+            for account, _, pdb_kwh, _, _, _ in sorted(
+                no_sm, key=lambda row: -abs(row[2])
+            )[:10]:
+                log.warning("  %s: CC=%.2f kWh, SM=absent", account, pdb_kwh)
+        if true_drift:
+            log.warning(
+                "TRUE DRIFT: %d accounts present in both feeds exceed %.2f kWh threshold",
+                len(true_drift),
                 threshold,
             )
-            for account, sm_kwh, pdb_kwh, delta, platform in sorted(
-                drifted, key=lambda row: -abs(row[3])
+            for account, sm_kwh, pdb_kwh, delta, platform, _ in sorted(
+                true_drift, key=lambda row: -abs(row[3])
             )[:15]:
                 log.warning(
                     "  %s (%s): delta=%.2f kWh (SM=%.2f, 1PDB=%.2f)",
-                    account,
-                    platform,
-                    delta,
-                    sm_kwh,
-                    pdb_kwh,
+                    account, platform, delta, sm_kwh, pdb_kwh,
                 )
+        fail = bool(true_drift) or (args.strict and bool(no_sm))
+        if fail:
             conn.close()
             return 1
-        log.info("OK: all %d accounts within %.2f kWh threshold", len(results), threshold)
+        log.info(
+            "OK: no true drift (in-feed accounts within %.2f kWh; %d no-SM-record accounts noted)",
+            threshold, len(no_sm),
+        )
         conn.close()
         return 0
 
     print_report(results, threshold)
-
-    if args.reconcile:
-        if args.apply:
-            log.info(
-                "Applying balance seeds%s...",
-                f" (sites={sorted(only_sites)})" if only_sites else "",
-            )
-            count = apply_seeds(conn, results, threshold, only_sites, exclude_accounts)
-            log.info("Inserted %d balance_seed transactions", count)
-            log.info("Verifying post-seed balances...")
-            results2 = run_audit(conn)
-            drifted2 = _seed_candidates(results2, threshold, only_sites, exclude_accounts)
-            if drifted2:
-                log.warning("POST-SEED: %d in-scope accounts still drifted", len(drifted2))
-            else:
-                log.info("POST-SEED: all in-scope accounts within threshold")
-        else:
-            preview_seeds(results, threshold, only_sites, exclude_accounts)
-
     conn.close()
     return 0
 

@@ -111,7 +111,29 @@ captured by **one** transparent opening anchor; drift is **monitored, never auto
   amount) idempotency guard** in the mirror so re-dups are structurally impossible.
 - **Phantom payments** (Koios reversed it but the mirror kept it, e.g. `0235SHG`
   306,721 LSL) are **reversed at source**, not anchored over.
-- **Rollback:** `transactions_bak_recon_20260618` (both DBs) = full pre-recon ledger.
+- **Account-number casing (2nd root cause, 2026-06-18):** the same physical account
+  was stored under up to 4 casings (`0020MAK`/`0020MAk`/`0020Mak`/`0020mak`). The
+  master `accounts` table is 100% canonical UPPERCASE and Koios uses uppercase, but
+  SMS/manual payment inserts sometimes wrote lower/mixed case, orphaning **13,485 kWh
+  of payments (1,147 rows / 219 accts)** on ghost identities (real account
+  under-credited; ghost shows `SM=0` "+200" drift). Cured by `scripts/ops/casing_normalize.sql`
+  (backups `casing_bak_*_20260618`) + **trigger `normalize_account_number_upper()`**
+  (migration `044`) on `transactions`/`meters`/`meter_assignments` so casing can never
+  re-fragment an account. (`hourly_consumption` excluded: already uppercase from Koios,
+  too high-volume for a per-row trigger.)
+- **The audit is a monitor, two buckets** (`scripts/ops/audit_ls_balances.py`, the
+  `--reconcile/--apply` balance_seed path was REMOVED 2026-06-18): **TRUE DRIFT**
+  (present in both CC and the SM balance feed, balances disagree — the real alarm,
+  trips `--check`) vs **NO SM RECORD** (CC has a balance but the Koios balance
+  endpoint returns nothing — decommissioned / not-yet-commissioned / org-coverage gap;
+  reported, does not trip `--check` unless `--strict`). Post-cure LS: **2 true drift**
+  (sub-7 kWh readings-lag), **119 no-SM-record**. The 119 are the remaining open item:
+  the Koios `/sm/organizations/{KOIOS_ORG_ID}/customers` balance fetch covers ~1,391 of
+  1,925 CC accounts; SEH and others are likely under a different Koios org than the
+  single `KOIOS_ORG_ID` the audit/cutover query. Next root-cause step = enumerate Koios
+  orgs and fetch balances across all of them.
+- **Rollback:** `transactions_bak_recon_20260618` (both DBs) = full pre-recon ledger;
+  `casing_bak_*_20260618` = pre-casing-normalization rows.
 
 ### Payment gateway without deep telecom-operator integration
 
