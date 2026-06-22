@@ -46,6 +46,7 @@ import CommissionSitePage from './pages/CommissionSitePage';
 import SMSLogPage from './pages/SMSLogPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import CustomerCohortPage from './pages/CustomerCohortPage';
+import ProvisioningPage from './pages/ProvisioningPage';
 
 function HomeRedirect() {
   const { user, loading } = useAuth();
@@ -86,6 +87,7 @@ export default function App() {
             <Route path="commission" element={<ProtectedRoute requireEmployee requireRole={['superadmin', 'onm_team']}><CommissionCustomerPage /></ProtectedRoute>} />
             <Route path="tariffs" element={<ProtectedRoute requireEmployee><TariffManagementPage /></ProtectedRoute>} />
             <Route path="check-meters" element={<ProtectedRoute requireEmployee><CheckMeterPage /></ProtectedRoute>} />
+            <Route path="provisioning" element={<ProtectedRoute requireEmployee requireRole={['superadmin', 'onm_team']}><ProvisioningPage /></ProtectedRoute>} />
             <Route path="billing-priority" element={<ProtectedRoute requireEmployee><BillingPriorityPage /></ProtectedRoute>} />
             <Route path="financing" element={<ProtectedRoute requireEmployee><FinancingPage /></ProtectedRoute>} />
             <Route path="advances" element={<ProtectedRoute requireEmployee><AdvancesPage /></ProtectedRoute>} />

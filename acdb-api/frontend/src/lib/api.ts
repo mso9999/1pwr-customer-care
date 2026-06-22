@@ -3656,3 +3656,99 @@ export async function clearCohortStatusOverride(
 ): Promise<{ cohort_status_override: null }> {
   return request(`/cohort-status/${customerId}/override`, { method: 'DELETE' });
 }
+
+// ---------------------------------------------------------------------------
+// 1Meter provisioning (AWS IoT Thing + cert issuance)
+// ---------------------------------------------------------------------------
+
+export interface ProvisioningSiteCode {
+  code: string;
+  name: string;
+  district?: string | null;
+  country?: string | null;
+}
+
+export interface BootstrapPayload {
+  thing_name: string;
+  ssid: string;
+  password: string;
+  version: number;
+  cert_pem: string;
+  key_pem: string;
+}
+
+export interface ProvisionResult {
+  thing_name: string;
+  meter_serial: string;
+  site: string;
+  account: string;
+  certificate_arn: string;
+  certificate_id: string;
+  policy: string;
+  mqtt_endpoint: string;
+  bootstrap: BootstrapPayload;
+  instructions: string;
+}
+
+export interface RotateResult {
+  new_thing_name: string;
+  from_client_id: string;
+  published_topic: string;
+  certificate_id: string;
+  ack_topic: string;
+  note: string;
+}
+
+export interface ProvisioningRegistryRow {
+  pcb_mac?: string;
+  thing_name?: string;
+  is_test?: boolean | string;
+  status?: string;
+  meter_serial?: string;
+  site?: string;
+  operator?: string;
+  cert_id?: string;
+  claimed_at?: string;
+  provisioned_at?: string;
+  [k: string]: unknown;
+}
+
+export async function getProvisioningSiteCodes(): Promise<ProvisioningSiteCode[]> {
+  return request<ProvisioningSiteCode[]>('/provisioning/site-codes');
+}
+
+export async function provisionThing(body: {
+  site_code: string;
+  account: string;
+  meter_serial: string;
+  pcb_mac: string;
+  wifi_ssid: string;
+  wifi_password: string;
+  policy_name?: string;
+  version?: number;
+  legacy_id?: string;
+}): Promise<ProvisionResult> {
+  return request<ProvisionResult>('/provisioning/things', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function rotateMeterIdentity(body: {
+  current_client_id: string;
+  site_code: string;
+  account: string;
+  meter_serial: string;
+  pcb_mac: string;
+  policy_name?: string;
+  version?: number;
+}): Promise<RotateResult> {
+  return request<RotateResult>('/provisioning/rotate', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getProvisioningRegistry(): Promise<{ count: number; rows: ProvisioningRegistryRow[] }> {
+  return request<{ count: number; rows: ProvisioningRegistryRow[] }>('/provisioning/registry');
+}
