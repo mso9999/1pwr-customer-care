@@ -257,6 +257,144 @@ def _registry_record_cert(mac: str, *, cert_arn: str, cert_id: str, meter_serial
 
 
 # ---------------------------------------------------------------------------
+# 1PDB persistence — CC system of record for provisioned meters + location
+# ---------------------------------------------------------------------------
+#
+# The DynamoDB registry remains the device/cert source of truth (shared with the
+# firmware bench/HQ flow). We ALSO mirror every provisioning into 1PDB so CC is
+# aware of provisioned meters and can track their locational assignment (site +
+# account, joined to meters/accounts for village/GPS). 1PDB is CC's canonical
+# datastore, so reporting, joins to customers/accounts, and audit all live here.
+
+
+def ensure_meter_provisioning_table():
+    """Create the meter_provisioning table if absent (idempotent, additive)."""
+    try:
+        from customer_api import get_connection
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS meter_provisioning (
+                    id              SERIAL PRIMARY KEY,
+                    thing_name      VARCHAR(128) NOT NULL UNIQUE,
+                    meter_serial    VARCHAR(64),
+                    pcb_mac         VARCHAR(32),
+                    site            VARCHAR(16),
+                    account_number  VARCHAR(32),
+                    cert_id         VARCHAR(128),
+                    cert_arn        TEXT,
+                    status          VARCHAR(24) NOT NULL DEFAULT 'provisioned',
+                    legacy_id       VARCHAR(128),
+                    fw_version      VARCHAR(32),
+                    provisioned_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    provisioned_by  TEXT,
+                    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_mp_serial ON meter_provisioning (meter_serial)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_mp_site ON meter_provisioning (site)")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_mp_account ON meter_provisioning (account_number)")
+            # Additive columns for gateway-pool batch provisioning + lifecycle tracking.
+            cur.execute("ALTER TABLE meter_provisioning ADD COLUMN IF NOT EXISTS box_label VARCHAR(64)")
+            cur.execute("ALTER TABLE meter_provisioning ADD COLUMN IF NOT EXISTS first_seen_online TIMESTAMPTZ")
+            cur.execute("ALTER TABLE meter_provisioning ADD COLUMN IF NOT EXISTS last_seen_online TIMESTAMPTZ")
+            # Atomic per-site gateway sequence allocator (MAK-GW-0007 ...).
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS gateway_pool_seq (
+                    site       VARCHAR(16) PRIMARY KEY,
+                    last_seq   INTEGER NOT NULL DEFAULT 0,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            conn.commit()
+    except Exception as exc:  # noqa: BLE001 - never block app startup
+        logger.error("meter_provisioning table init failed: %s", exc)
+
+
+def _allocate_gateway_block(conn, site: str, count: int) -> list[int]:
+    """Atomically reserve `count` gateway sequence numbers for a site.
+
+    Returns the reserved sequence integers (ascending). Uses a single
+    UPSERT...RETURNING so concurrent provisioning stations can't collide.
+    """
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO gateway_pool_seq (site, last_seq, updated_at)
+        VALUES (%s, %s, NOW())
+        ON CONFLICT (site) DO UPDATE
+            SET last_seq = gateway_pool_seq.last_seq + EXCLUDED.last_seq,
+                updated_at = NOW()
+        RETURNING last_seq
+        """,
+        (site, count),
+    )
+    new_max = int(cur.fetchone()[0])
+    start = new_max - count + 1
+    return list(range(start, new_max + 1))
+
+
+def _record_provisioning_1pdb(conn, *, thing, meter_serial, pcb_mac, site, account,
+                              cert_id, cert_arn, status, fw_version, operator, legacy_id,
+                              box_label=None):
+    """Upsert the CC-side provisioning record (caller owns the transaction).
+
+    Also best-effort tags the meters row (platform/community/account) so the
+    provisioned unit shows up with its site in the existing Meters views and can
+    inherit village/GPS once it is assigned to a customer.
+    """
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO meter_provisioning
+            (thing_name, meter_serial, pcb_mac, site, account_number, cert_id,
+             cert_arn, status, legacy_id, fw_version, provisioned_by, box_label, updated_at)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, NOW())
+        ON CONFLICT (thing_name) DO UPDATE SET
+            meter_serial   = COALESCE(EXCLUDED.meter_serial, meter_provisioning.meter_serial),
+            pcb_mac        = EXCLUDED.pcb_mac,
+            site           = EXCLUDED.site,
+            account_number = COALESCE(EXCLUDED.account_number, meter_provisioning.account_number),
+            cert_id        = EXCLUDED.cert_id,
+            cert_arn       = EXCLUDED.cert_arn,
+            status         = EXCLUDED.status,
+            legacy_id      = COALESCE(EXCLUDED.legacy_id, meter_provisioning.legacy_id),
+            fw_version     = EXCLUDED.fw_version,
+            provisioned_by = EXCLUDED.provisioned_by,
+            box_label      = COALESCE(EXCLUDED.box_label, meter_provisioning.box_label),
+            updated_at     = NOW()
+        """,
+        (thing, meter_serial, pcb_mac, site, account, cert_id, cert_arn,
+         status, legacy_id, fw_version, operator, box_label),
+    )
+    # Best-effort: ensure a meters row exists for this serial, tagged to the site.
+    # Wrapped in a SAVEPOINT so a failure here (e.g. a NOT NULL column) cannot
+    # poison the authoritative meter_provisioning write in the same transaction.
+    # Does not overwrite an existing customer assignment's location fields.
+    if meter_serial:
+        cur.execute("SAVEPOINT mp_meter_tag")
+        try:
+            cur.execute("SELECT 1 FROM meters WHERE meter_id = %s", (meter_serial,))
+            if cur.fetchone():
+                cur.execute(
+                    "UPDATE meters SET platform = COALESCE(platform, 'prototype'), "
+                    "community = COALESCE(NULLIF(community, ''), %s) WHERE meter_id = %s",
+                    (site, meter_serial),
+                )
+            else:
+                cur.execute(
+                    "INSERT INTO meters (meter_id, community, account_number, platform, status) "
+                    "VALUES (%s, %s, %s, 'prototype', 'active')",
+                    (meter_serial, site, account),
+                )
+            cur.execute("RELEASE SAVEPOINT mp_meter_tag")
+        except Exception as exc:  # noqa: BLE001 - meters tagging is best-effort
+            cur.execute("ROLLBACK TO SAVEPOINT mp_meter_tag")
+            cur.execute("RELEASE SAVEPOINT mp_meter_tag")
+            logger.warning("meters tag on provision failed for %s: %s", meter_serial, exc)
+
+
+# ---------------------------------------------------------------------------
 # AWS IoT control-plane helpers
 # ---------------------------------------------------------------------------
 
@@ -310,6 +448,26 @@ class ProvisionRequest(BaseModel):
     policy_name: str = Field(default="", description="IoT policy to attach; defaults to DevicePolicy")
     version: int = Field(default=1, ge=1)
     legacy_id: Optional[str] = Field(default=None, description="Prior client id, recorded as an attribute")
+
+
+class GatewayUnit(BaseModel):
+    pcb_mac: str = Field(..., description="Device PCB MAC (durable registry key)")
+    box_label: Optional[str] = Field(default=None, max_length=64,
+                                     description="Physical asset/box label or QR (optional)")
+
+
+class GatewayBatchRequest(BaseModel):
+    """Batch-provision virgin gateways for a site, account-free.
+
+    Each unit gets a stable gateway-pool Thing name <SITE>-GW-<seq>; the customer
+    account is assigned later via the commissioning workflow.
+    """
+    site_code: str = Field(..., description="Destination site (canonical CC code)")
+    units: list[GatewayUnit] = Field(..., min_length=1, max_length=200)
+    wifi_ssid: str = Field(..., min_length=1, max_length=64)
+    wifi_password: str = Field(..., max_length=128)
+    policy_name: str = Field(default="")
+    version: int = Field(default=1, ge=1)
 
 
 class RotateRequest(BaseModel):
@@ -393,8 +551,14 @@ def provision_thing(
     try:
         from customer_api import get_connection
         with get_connection() as conn:
+            _record_provisioning_1pdb(
+                conn, thing=thing, meter_serial=payload.meter_serial, pcb_mac=mac,
+                site=site, account=payload.account.strip(), cert_id=cert_id,
+                cert_arn=cert_arn, status="provisioned", fw_version=None,
+                operator=f"cc:{user.user_id}", legacy_id=payload.legacy_id,
+            )
             try_log_mutation(
-                user, "create", "iot_provisioning", thing,
+                user, "create", "meter_provisioning", thing,
                 new_values={"thing_name": thing, "meter_serial": payload.meter_serial,
                             "account": payload.account, "site": site, "cert_id": cert_id},
                 metadata={"kind": "provision_thing", "endpoint": "POST /api/provisioning/things",
@@ -402,8 +566,8 @@ def provision_thing(
                 conn=conn,
             )
             conn.commit()
-    except Exception as exc:  # noqa: BLE001 - audit must never block provisioning
-        logger.warning("provision audit log failed: %s", exc)
+    except Exception as exc:  # noqa: BLE001 - persistence/audit must never block provisioning
+        logger.warning("provision 1PDB record/audit failed: %s", exc)
 
     bootstrap = {
         "thing_name": thing,
@@ -427,6 +591,148 @@ def provision_thing(
                         "http://<device-ip>/v1/provision/bootstrap while connected to "
                         "the device SoftAP, then verify it reconnects as the new Thing.",
     }
+
+
+@router.post("/gateways")
+def provision_gateway_batch(
+    payload: GatewayBatchRequest,
+    user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES)),
+):
+    """Batch-provision virgin gateways for a site (account-free, gateway-pool names).
+
+    Allocates a stable ``<SITE>-GW-<seq>`` Thing per unit, issues a cert, claims
+    the registry by PCB MAC, records to 1PDB (status='provisioned', no account),
+    and returns the device bootstrap payload per unit for the provisioning
+    station to deliver on the local network.
+    """
+    site = payload.site_code.strip().upper()
+    if site not in ALL_SITE_ABBREV:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown site code '{site}'. Must be canonical "
+                   f"(one of: {', '.join(sorted(ALL_SITE_ABBREV))}).",
+        )
+    policy = payload.policy_name.strip() or DEFAULT_POLICY
+
+    # Reserve a contiguous gateway-number block for this site, atomically.
+    from customer_api import get_connection
+    with get_connection() as conn:
+        seqs = _allocate_gateway_block(conn, site, len(payload.units))
+        conn.commit()
+
+    results = []
+    errors = []
+    for unit, seq in zip(payload.units, seqs):
+        thing = f"{site}-GW-{seq:04d}"
+        mac = _norm_mac(unit.pcb_mac)
+        try:
+            _validate_thing_name(thing)
+            _registry_claim(mac, thing, site=site, operator=f"cc:{user.user_id}")
+            attrs = {"site": site, "role": "gateway", "legacy_id": ""}
+            cert_arn, cert_id, cert_pem, key_pem = _issue_cert_and_payload(thing, attrs, policy)
+            _registry_record_cert(mac, cert_arn=cert_arn, cert_id=cert_id, meter_serial="")
+            try:
+                with get_connection() as conn:
+                    _record_provisioning_1pdb(
+                        conn, thing=thing, meter_serial=None, pcb_mac=mac, site=site,
+                        account=None, cert_id=cert_id, cert_arn=cert_arn,
+                        status="provisioned", fw_version=None,
+                        operator=f"cc:{user.user_id}", legacy_id=None,
+                        box_label=unit.box_label,
+                    )
+                    try_log_mutation(
+                        user, "create", "meter_provisioning", thing,
+                        new_values={"thing_name": thing, "site": site, "pcb_mac": mac,
+                                    "cert_id": cert_id, "box_label": unit.box_label},
+                        metadata={"kind": "provision_gateway", "endpoint": "POST /api/provisioning/gateways"},
+                        conn=conn,
+                    )
+                    conn.commit()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("gateway 1PDB record failed for %s: %s", thing, exc)
+
+            results.append({
+                "pcb_mac": mac,
+                "thing_name": thing,
+                "certificate_id": cert_id,
+                "box_label": unit.box_label,
+                "bootstrap": {
+                    "thing_name": thing,
+                    "ssid": payload.wifi_ssid,
+                    "password": payload.wifi_password,
+                    "version": payload.version,
+                    "cert_pem": cert_pem,
+                    "key_pem": key_pem,
+                },
+            })
+        except HTTPException as exc:
+            errors.append({"pcb_mac": mac, "thing_name": thing, "error": exc.detail})
+        except Exception as exc:  # noqa: BLE001
+            errors.append({"pcb_mac": mac, "thing_name": thing, "error": str(exc)})
+
+    return {
+        "site": site,
+        "requested": len(payload.units),
+        "provisioned": len(results),
+        "failed": len(errors),
+        "mqtt_endpoint": IOT_ENDPOINT,
+        "gateways": results,
+        "errors": errors,
+    }
+
+
+@router.post("/reconcile")
+def reconcile_from_telemetry(_user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES))):
+    """Bind provisioned gateways to the meter serials they've acquired in the field.
+
+    Reads DynamoDB ``meter_last_seen`` (which carries both ``meterId`` and
+    ``thingName``) and fills ``meter_provisioning.meter_serial`` + online
+    timestamps for matching Things. Safe to run repeatedly.
+    """
+    ddb = _client("dynamodb")
+    seen = {}  # thing_name -> (meter_serial, last_ts)
+    start = None
+    try:
+        while True:
+            kwargs = {
+                "TableName": os.environ.get("METER_LAST_SEEN_TABLE", "meter_last_seen"),
+                "ProjectionExpression": "meterId, thingName, last_seen",
+            }
+            if start:
+                kwargs["ExclusiveStartKey"] = start
+            resp = ddb.scan(**kwargs)
+            for it in resp.get("Items", []):
+                thing = it.get("thingName", {}).get("S")
+                serial = it.get("meterId", {}).get("S")
+                ts = it.get("last_seen", {}).get("S") or it.get("last_seen", {}).get("N")
+                if thing and serial:
+                    seen[thing] = (serial, ts)
+            start = resp.get("LastEvaluatedKey")
+            if not start:
+                break
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"meter_last_seen scan failed: {exc}") from exc
+
+    updated = 0
+    from customer_api import get_connection
+    with get_connection() as conn:
+        cur = conn.cursor()
+        for thing, (serial, _ts) in seen.items():
+            cur.execute(
+                """
+                UPDATE meter_provisioning
+                SET meter_serial = COALESCE(meter_serial, %s),
+                    first_seen_online = COALESCE(first_seen_online, NOW()),
+                    last_seen_online = NOW(),
+                    status = CASE WHEN status = 'provisioned' THEN 'online' ELSE status END,
+                    updated_at = NOW()
+                WHERE thing_name = %s
+                """,
+                (serial, thing),
+            )
+            updated += cur.rowcount
+        conn.commit()
+    return {"matched_things": len(seen), "rows_updated": updated}
 
 
 @router.post("/rotate")
@@ -478,8 +784,14 @@ def rotate_identity(
     try:
         from customer_api import get_connection
         with get_connection() as conn:
+            _record_provisioning_1pdb(
+                conn, thing=new_thing, meter_serial=payload.meter_serial, pcb_mac=mac,
+                site=site, account=payload.account.strip(), cert_id=cert_id,
+                cert_arn=cert_arn, status="rotating", fw_version=None,
+                operator=f"cc:{user.user_id}", legacy_id=payload.current_client_id,
+            )
             try_log_mutation(
-                user, "update", "iot_provisioning", new_thing,
+                user, "update", "meter_provisioning", new_thing,
                 new_values={"thing_name": new_thing, "from_client_id": payload.current_client_id,
                             "meter_serial": payload.meter_serial, "cert_id": cert_id},
                 metadata={"kind": "rotate_identity", "endpoint": "POST /api/provisioning/rotate",
@@ -488,7 +800,7 @@ def rotate_identity(
             )
             conn.commit()
     except Exception as exc:  # noqa: BLE001
-        logger.warning("rotate audit log failed: %s", exc)
+        logger.warning("rotate 1PDB record/audit failed: %s", exc)
 
     return {
         "new_thing_name": new_thing,
@@ -498,6 +810,65 @@ def rotate_identity(
         "ack_topic": f"oneMeter/{payload.current_client_id}/cfg/identity/ack",
         "note": "Device will reboot and reconnect under the new Thing. Confirm via the ack topic and fleet index.",
     }
+
+
+@router.get("/meters")
+def list_provisioned_meters(
+    site: Optional[str] = None,
+    _user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES)),
+):
+    """CC's system-of-record view of provisioned meters + locational assignment.
+
+    Joins the 1PDB ``meter_provisioning`` records to ``meters`` (via meter serial)
+    and ``accounts`` (via account number) so each row carries both the IoT
+    identity and where the unit is assigned (site/community, village, GPS,
+    customer account).
+    """
+    from customer_api import get_connection
+    sql = """
+        SELECT mp.thing_name, mp.meter_serial, mp.pcb_mac, mp.site,
+               mp.account_number, mp.status, mp.cert_id, mp.legacy_id,
+               mp.box_label, mp.first_seen_online, mp.last_seen_online,
+               mp.provisioned_at, mp.provisioned_by, mp.updated_at,
+               m.community AS meter_community, m.village_name, m.latitude,
+               m.longitude, m.status AS meter_status, m.customer_type,
+               a.customer_id
+        FROM meter_provisioning mp
+        LEFT JOIN meters m ON m.meter_id = mp.meter_serial
+        LEFT JOIN accounts a ON a.account_number = mp.account_number
+        {where}
+        ORDER BY mp.provisioned_at DESC
+    """
+    params: list = []
+    where = ""
+    if site:
+        where = "WHERE mp.site = %s"
+        params.append(site.strip().upper())
+    with get_connection() as conn:
+        cur = conn.cursor()
+        try:
+            cur.execute(sql.format(where=where), params)
+        except Exception as exc:  # noqa: BLE001 - table may not exist yet
+            logger.warning("list provisioned meters failed: %s", exc)
+            return {"count": 0, "meters": []}
+        cols = [d[0] for d in cur.description]
+        rows = []
+        for r in cur.fetchall():
+            d = dict(zip(cols, r))
+            for k, v in d.items():
+                if v is not None and not isinstance(v, (str, int, float, bool)):
+                    d[k] = str(v)
+            # Lifecycle segment for the UI.
+            if d.get("account_number") or d.get("customer_id"):
+                d["allocation"] = "allocated"
+            elif d.get("meter_serial"):
+                d["allocation"] = "serial-acquired"
+            elif d.get("last_seen_online"):
+                d["allocation"] = "online"
+            else:
+                d["allocation"] = "unallocated"
+            rows.append(d)
+    return {"count": len(rows), "meters": rows}
 
 
 @router.get("/registry")

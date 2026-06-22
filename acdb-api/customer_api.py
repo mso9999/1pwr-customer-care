@@ -326,7 +326,7 @@ from cohort_status import router as cohort_status_router
 from onboarding_ops import router as onboarding_router
 from onboarding_dashboard import router as onboarding_dashboard_router
 from om_tickets import router as om_tickets_router
-from meter_provisioning import router as meter_provisioning_router
+from meter_provisioning import router as meter_provisioning_router, ensure_meter_provisioning_table
 
 from db_auth import init_auth_db
 init_auth_db()
@@ -375,6 +375,7 @@ app.include_router(onboarding_dashboard_router)
 app.include_router(om_tickets_router)
 app.include_router(meter_provisioning_router)
 ensure_meter_assignments_table()
+ensure_meter_provisioning_table()
 warm_stats_cache()
 
 

@@ -4,13 +4,15 @@ import {
   provisionThing,
   rotateMeterIdentity,
   getProvisioningRegistry,
+  getProvisionedMeters,
   type ProvisioningSiteCode,
   type ProvisionResult,
   type RotateResult,
   type ProvisioningRegistryRow,
+  type ProvisionedMeter,
 } from '../lib/api';
 
-type Mode = 'provision' | 'rotate' | 'registry';
+type Mode = 'provision' | 'rotate' | 'meters' | 'registry';
 
 const inputCls =
   'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none';
@@ -45,6 +47,9 @@ export default function ProvisioningPage() {
   const [registry, setRegistry] = useState<ProvisioningRegistryRow[]>([]);
   const [registryLoading, setRegistryLoading] = useState(false);
 
+  const [meters, setMeters] = useState<ProvisionedMeter[]>([]);
+  const [metersLoading, setMetersLoading] = useState(false);
+
   const previewThing = useMemo(() => deriveThingName(siteCode, account), [siteCode, account]);
 
   useEffect(() => {
@@ -61,8 +66,17 @@ export default function ProvisioningPage() {
       .finally(() => setRegistryLoading(false));
   };
 
+  const loadMeters = () => {
+    setMetersLoading(true);
+    getProvisionedMeters()
+      .then((r) => setMeters(r.meters))
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setMetersLoading(false));
+  };
+
   useEffect(() => {
     if (mode === 'registry') loadRegistry();
+    if (mode === 'meters') loadMeters();
   }, [mode]);
 
   const resetResults = () => {
@@ -144,6 +158,7 @@ export default function ProvisioningPage() {
         {([
           ['provision', 'Provision new unit'],
           ['rotate', 'Migrate / rename online unit'],
+          ['meters', 'Provisioned meters'],
           ['registry', 'Registry'],
         ] as [Mode, string][]).map(([m, label]) => (
           <button
@@ -172,7 +187,59 @@ export default function ProvisioningPage() {
         </div>
       )}
 
-      {mode === 'registry' ? (
+      {mode === 'meters' ? (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+            <span className="text-sm font-medium text-gray-700">
+              Provisioned meters &amp; locational assignment {meters.length ? `(${meters.length})` : ''}
+            </span>
+            <button onClick={loadMeters} className="text-xs text-blue-600 hover:underline">
+              {metersLoading ? 'Loading…' : 'Refresh'}
+            </button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
+                <tr>
+                  <th className="text-left px-4 py-2">Thing</th>
+                  <th className="text-left px-4 py-2">Serial</th>
+                  <th className="text-left px-4 py-2">Site</th>
+                  <th className="text-left px-4 py-2">Account</th>
+                  <th className="text-left px-4 py-2">Village</th>
+                  <th className="text-left px-4 py-2">GPS</th>
+                  <th className="text-left px-4 py-2">Status</th>
+                  <th className="text-left px-4 py-2">Provisioned</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {meters.map((r, i) => (
+                  <tr key={i} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 font-mono text-gray-900">{r.thing_name}</td>
+                    <td className="px-4 py-2 font-mono">{r.meter_serial || '—'}</td>
+                    <td className="px-4 py-2">{r.site || r.meter_community || '—'}</td>
+                    <td className="px-4 py-2 font-mono">{r.account_number || '—'}</td>
+                    <td className="px-4 py-2">{r.village_name || '—'}</td>
+                    <td className="px-4 py-2 text-xs text-gray-500">
+                      {r.latitude && r.longitude ? `${r.latitude}, ${r.longitude}` : '—'}
+                    </td>
+                    <td className="px-4 py-2">
+                      <span className={`px-2 py-0.5 rounded-full text-xs ${
+                        r.status === 'provisioned' ? 'bg-green-100 text-green-700'
+                          : r.status === 'rotating' ? 'bg-amber-100 text-amber-700'
+                          : 'bg-gray-100 text-gray-600'
+                      }`}>{String(r.status || '—')}</span>
+                    </td>
+                    <td className="px-4 py-2 text-xs text-gray-500">{r.provisioned_at || '—'}</td>
+                  </tr>
+                ))}
+                {!meters.length && !metersLoading && (
+                  <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No provisioned meters yet.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : mode === 'registry' ? (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
             <span className="text-sm font-medium text-gray-700">

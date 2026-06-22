@@ -3752,3 +3752,29 @@ export async function rotateMeterIdentity(body: {
 export async function getProvisioningRegistry(): Promise<{ count: number; rows: ProvisioningRegistryRow[] }> {
   return request<{ count: number; rows: ProvisioningRegistryRow[] }>('/provisioning/registry');
 }
+
+export interface ProvisionedMeter {
+  thing_name?: string;
+  meter_serial?: string;
+  pcb_mac?: string;
+  site?: string;
+  account_number?: string;
+  status?: string;
+  cert_id?: string;
+  legacy_id?: string;
+  provisioned_at?: string;
+  provisioned_by?: string;
+  meter_community?: string;
+  village_name?: string;
+  latitude?: string;
+  longitude?: string;
+  meter_status?: string;
+  customer_type?: string;
+  customer_id?: string | number;
+  [k: string]: unknown;
+}
+
+export async function getProvisionedMeters(site?: string): Promise<{ count: number; meters: ProvisionedMeter[] }> {
+  const qs = site ? `?site=${encodeURIComponent(site)}` : '';
+  return request<{ count: number; meters: ProvisionedMeter[] }>(`/provisioning/meters${qs}`);
+}
