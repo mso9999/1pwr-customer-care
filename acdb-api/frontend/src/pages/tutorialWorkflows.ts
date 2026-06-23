@@ -51,6 +51,13 @@ export const TUTORIAL_WORKFLOWS: TutorialWorkflowDef[] = [
     helpSectionIds: ['tariffs', 'advances', 'advances', 'advances', 'payments', 'advances'],
   },
   {
+    id: 'provisioning',
+    i18nKey: 'workflows.provisioning',
+    rolesKey: 'roles.onmSuperadmin',
+    links: ['/provisioning', '/provisioning', '/provisioning', '/provisioning', '/assign-meter'],
+    helpSectionIds: ['provisioning', 'provisioning', 'provisioning', 'provisioning', 'meters'],
+  },
+  {
     id: 'reporting',
     i18nKey: 'workflows.reporting',
     rolesKey: 'roles.allEmployees',

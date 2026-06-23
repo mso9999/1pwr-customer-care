@@ -37,6 +37,17 @@
         "Suivre l’avancement dans le Pipeline."
       ]
     },
+    "provisioning": {
+      "title": "Provisionnement et mise en service des passerelles",
+      "description": "Mettre en ligne les passerelles 1Meter flashees en usine et les suivre jusqu'au compte client.",
+      "steps": [
+        "Ouvrez la page Provisionnement (superadmin / equipe O&M). Onglet Guide & telechargement : telechargez la station de provisionnement et lisez la vue d'ensemble.",
+        "Sur un portable connecte au Wi-Fi de provisionnement 1Meter (avec acces internet a CC), lancez la station, connectez-vous, puis Scan pour enumerer les passerelles vierges.",
+        "Choisissez le site de destination et le Wi-Fi du site, selectionnez les unites et Confirmez. CC alloue des Things <SITE>-GW-#### stables + certificats (sans compte client) et la station ecrit chaque bootstrap sur l'appareil.",
+        "Suivez les unites dans Compteurs provisionnes : provisioned -> online -> serial-acquired une fois installees et en service.",
+        "Mettez en service chaque unite : reliez son numero de serie au compte client via Affecter un compteur. Le nom de la passerelle ne change jamais."
+      ]
+    },
     "payments": {
       "title": "Paiements et rapprochement",
       "description": "Lorsque la passerelle SMS est incomplète ou à contrôler, et pour tracer les crédits.",

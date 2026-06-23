@@ -5,6 +5,7 @@ import {
   rotateMeterIdentity,
   getProvisioningRegistry,
   getProvisionedMeters,
+  downloadProvisioningStation,
   type ProvisioningSiteCode,
   type ProvisionResult,
   type RotateResult,
@@ -12,7 +13,7 @@ import {
   type ProvisionedMeter,
 } from '../lib/api';
 
-type Mode = 'provision' | 'rotate' | 'meters' | 'registry';
+type Mode = 'guide' | 'provision' | 'rotate' | 'meters' | 'registry';
 
 const inputCls =
   'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none';
@@ -64,6 +65,19 @@ export default function ProvisioningPage() {
       .then((r) => setRegistry(r.rows))
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setRegistryLoading(false));
+  };
+
+  const [downloading, setDownloading] = useState(false);
+  const handleDownloadStation = async () => {
+    setError('');
+    setDownloading(true);
+    try {
+      await downloadProvisioningStation();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDownloading(false);
+    }
   };
 
   const loadMeters = () => {
@@ -156,6 +170,7 @@ export default function ProvisioningPage() {
 
       <div className="flex gap-1 mb-5 border-b border-gray-200">
         {([
+          ['guide', 'Guide & download'],
           ['provision', 'Provision new unit'],
           ['rotate', 'Migrate / rename online unit'],
           ['meters', 'Provisioned meters'],
@@ -187,7 +202,52 @@ export default function ProvisioningPage() {
         </div>
       )}
 
-      {mode === 'meters' ? (
+      {mode === 'guide' ? (
+        <div className="grid md:grid-cols-2 gap-6">
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <h3 style={{ marginTop: 0 }} className="text-sm font-semibold text-gray-900">Provisioning station (laptop app)</h3>
+            <p className="text-sm text-gray-600 mt-1">
+              Batch-provisioning happens from a small app the technician runs on a laptop that is on
+              the <code>1Meter</code> provisioning Wi-Fi <b>and</b> has internet to CC. A virgin gateway
+              has no certificate, so CC can't reach it directly — the station bridges the local network
+              while CC issues the identities and records everything.
+            </p>
+            <div className="mt-3">
+              <button onClick={handleDownloadStation} disabled={downloading}
+                className="py-2.5 px-4 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+                {downloading ? 'Preparing…' : 'Download provisioning station (.zip)'}
+              </button>
+            </div>
+            <div className="mt-4 text-sm text-gray-600">
+              <div className="font-medium text-gray-800 mb-1">Run it</div>
+              <ol className="list-decimal ml-5 space-y-1">
+                <li>Unzip; needs Python 3.9+ (no install).</li>
+                <li>Join the <code>1Meter</code> / <code>1Meter00</code> provisioning Wi-Fi (keep internet).</li>
+                <li><code>python3 provisioning_station.py --cc {window.location.origin}</code></li>
+                <li>Open <code>http://localhost:8787</code> and sign in with your CC login.</li>
+              </ol>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-gray-200 p-5">
+            <h3 style={{ marginTop: 0 }} className="text-sm font-semibold text-gray-900">How the workstream works</h3>
+            <ol className="list-decimal ml-5 space-y-2 text-sm text-gray-600 mt-2">
+              <li><b>Factory</b> flashes the universal image (LED heartbeat = good) and seals the units. No identity is set at the factory.</li>
+              <li><b>Batch provision</b> at the depot with the station: it scans the network, lists virgin gateways, you pick a destination <b>site</b> + Wi-Fi, confirm, and CC issues stable <code>&lt;SITE&gt;-GW-####</code> Things + certs (no customer account yet). The station writes each bootstrap to the device.</li>
+              <li><b>Install</b> the gateway in the meter box. On the site Wi-Fi it reaches AWS IoT and <b>auto-acquires</b> its meter serial from telemetry.</li>
+              <li><b>Commission</b> in CC: link the meter serial to the customer account via the normal assign-meter flow. The gateway name never changes.</li>
+            </ol>
+            <p className="text-sm text-gray-500 mt-3">
+              Lifecycle: <span className="state seg-unallocated">provisioned</span> →
+              <span className="state seg-online"> online</span> →
+              <span className="state seg-serial-acquired"> serial-acquired</span> →
+              <span className="state seg-allocated"> allocated</span>. Track it in the
+              <b> Provisioned meters</b> tab. Full detail: <b>Help → Provisioning</b> (<code>/help#provisioning</code>)
+              and the operational SOP.
+            </p>
+          </div>
+        </div>
+      ) : mode === 'meters' ? (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
             <span className="text-sm font-medium text-gray-700">

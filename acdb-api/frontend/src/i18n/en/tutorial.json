@@ -37,6 +37,17 @@
         "Track funnel position on the Pipeline page."
       ]
     },
+    "provisioning": {
+      "title": "Gateway provisioning & commissioning",
+      "description": "Bring factory-flashed 1Meter gateways online and track them to a customer account.",
+      "steps": [
+        "Open the Provisioning page (superadmin / O&M). Use the Guide & download tab to download the provisioning station and read the workstream overview.",
+        "On a laptop on the 1Meter provisioning Wi-Fi (with internet to CC), run the station, sign in, and Scan to enumerate virgin gateways.",
+        "Pick the destination site and site Wi-Fi, select the units, and Confirm. CC allocates stable <SITE>-GW-#### Things + certs (no customer account yet) and the station writes each bootstrap to the device.",
+        "Watch the units appear under Provisioned meters as provisioned -> online -> serial-acquired once installed and reporting.",
+        "Commission each unit: link its acquired meter serial to the customer account via Assign Meter. The gateway name never changes."
+      ]
+    },
     "payments": {
       "title": "Payments & reconciliation",
       "description": "When SMS gateway data is missing or needs review, and how to trace credits.",

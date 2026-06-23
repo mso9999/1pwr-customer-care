@@ -1349,6 +1349,46 @@ function AccdbDiffContent() {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Provisioning (1Meter gateways)                                     */
+/* ------------------------------------------------------------------ */
+
+function ProvisioningContent() {
+  return (
+    <>
+      <P>
+        The <PageLink to="/provisioning">Provisioning</PageLink> page brings factory-flashed 1Meter
+        gateways online as registered AWS IoT Things and tracks them through to commissioning. It is
+        for <Bold>superadmin</Bold> / <Bold>O&amp;M team</Bold>.
+      </P>
+      <SubHead>Naming</SubHead>
+      <Ul>
+        <li><Bold>Gateway pool</Bold> (batch, account unknown): <Code>&lt;SITE&gt;-GW-####</Code> (e.g. <Code>MAK-GW-0007</Code>) — a stable, account-free device identity allocated by CC.</li>
+        <li><Bold>Site-account</Bold> (account known / migration): <Code>&lt;SITE&gt;-&lt;account&gt;</Code> (e.g. <Code>MAK-0026</Code>).</li>
+      </Ul>
+      <P>Site codes are the canonical three-letter CC codes; the Thing name is fixed for the life of the device.</P>
+      <SubHead>Batch provisioning with the station</SubHead>
+      <P>
+        A virgin gateway has no certificate, so CC cannot reach it directly. Download the
+        <Bold> provisioning station</Bold> (Guide &amp; download tab) and run it on a laptop that is on the
+        <Code>1Meter</Code> provisioning Wi-Fi and has internet to CC. It scans/enumerates virgin gateways,
+        you pick the destination site + Wi-Fi and confirm, CC issues the Things + certs, and the station
+        delivers each bootstrap to the device with a progress bar.
+      </P>
+      <SubHead>Lifecycle</SubHead>
+      <Ol>
+        <li><Bold>provisioned</Bold> — identity + cert + site Wi-Fi written; no customer account yet (the "unallocated" bucket).</li>
+        <li><Bold>online</Bold> — installed at site, reached AWS IoT.</li>
+        <li><Bold>serial-acquired</Bold> — telemetry seen; CC auto-binds the gateway to its meter serial.</li>
+        <li><Bold>allocated</Bold> — meter serial linked to a customer account via the normal <PageLink to="/assign-meter">commissioning</PageLink> flow.</li>
+      </Ol>
+      <P>Track every unit and its locational assignment in the <Bold>Provisioned meters</Bold> tab.</P>
+      <Tip>Batch-provision gateways ahead of installation. The customer-account link is the last step (commissioning), not part of provisioning.</Tip>
+      <Warning>Never use <Code>TestSite*</Code> / <Code>HQTEST*</Code> / ad-hoc client IDs in the field — always provision through this page or the station so a registered Thing + cert are created and recorded.</Warning>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Public hook: returns fully-translated sections array               */
 /* ------------------------------------------------------------------ */
 
@@ -1365,6 +1405,7 @@ export function useHelpSections(): HelpSection[] {
     { id: 'advances',             content: <AdvancesContent />, searchKeywords: 'advance ledger connection readyboard fee monthly accrual contract upload writeoff repayment fraction premium' },
     { id: 'financing',            content: <FinancingContent /> },
     { id: 'meters',               content: <MetersContent /> },
+    { id: 'provisioning',         content: <ProvisioningContent />, searchKeywords: 'gateway station batch virgin bootstrap commissioning provision certificate softap mak-gw download laptop' },
     { id: 'reports',              content: <ReportsContent /> },
     { id: 'data-browsers',        content: <DataBrowsersContent />, searchKeywords: 'accounts transactions tables sql browse' },
     { id: 'export',               content: <ExportContent /> },

@@ -42,14 +42,17 @@ plane (``iot:CreateThing``, ``CreateThingType``, ``DescribeThing*``,
 
 from __future__ import annotations
 
+import io
 import json
 import logging
 import os
 import re
+import zipfile
 from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from middleware import require_role
@@ -483,6 +486,33 @@ class RotateRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+STATION_DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "provisioning_station_dist")
+
+
+@router.get("/station/download")
+def download_station(_user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES))):
+    """Download the provisioning-station local app (zip) for the technician laptop.
+
+    The station is a stdlib-only Python app the provisioner runs on the laptop;
+    canonical source lives in onepwr-aws-mesh/tools/provisioning-station and is
+    vendored here so CC can serve it.
+    """
+    if not os.path.isdir(STATION_DIST):
+        raise HTTPException(status_code=404, detail="provisioning station bundle not found on server")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for root, _dirs, files in os.walk(STATION_DIST):
+            for fn in files:
+                full = os.path.join(root, fn)
+                arc = os.path.join("provisioning-station", os.path.relpath(full, STATION_DIST))
+                z.write(full, arc)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=provisioning-station.zip"},
+    )
 
 
 @router.get("/site-codes", response_model=list[SiteCode])

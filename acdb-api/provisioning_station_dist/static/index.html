@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>1Meter Provisioning Station</title>
+<style>
+  :root { --b:#2563eb; --bg:#f6f7f9; --line:#e5e7eb; --ok:#16a34a; --warn:#d97706; --err:#dc2626; --muted:#6b7280; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:14px/1.45 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:#111827; }
+  header { background:#fff; border-bottom:1px solid var(--line); padding:12px 20px; display:flex; align-items:center; gap:16px; }
+  header h1 { font-size:16px; margin:0; }
+  .pill { font-size:12px; padding:2px 8px; border-radius:999px; background:#f3f4f6; color:var(--muted); }
+  .pill.ok { background:#dcfce7; color:#166534; }
+  main { max-width:1000px; margin:20px auto; padding:0 16px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:16px; }
+  .tabs { display:flex; gap:4px; border-bottom:1px solid var(--line); margin-bottom:16px; }
+  .tabs button { background:none; border:none; border-bottom:2px solid transparent; padding:8px 14px; font-size:14px; color:var(--muted); cursor:pointer; }
+  .tabs button.active { color:var(--b); border-color:var(--b); font-weight:600; }
+  label { display:block; font-size:12px; color:var(--muted); margin:10px 0 4px; }
+  input, select { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:14px; }
+  button.primary { background:var(--b); color:#fff; border:none; border-radius:8px; padding:9px 16px; font-size:14px; cursor:pointer; }
+  button.primary:disabled { opacity:.5; cursor:default; }
+  button.ghost { background:#f3f4f6; border:none; border-radius:8px; padding:7px 12px; cursor:pointer; font-size:13px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; font-size:11px; text-transform:uppercase; color:var(--muted); padding:6px 8px; border-bottom:1px solid var(--line); }
+  td { padding:7px 8px; border-bottom:1px solid #f1f5f9; }
+  .mono { font-family:ui-monospace,Menlo,Consolas,monospace; }
+  .err { background:#fef2f2; border:1px solid #fecaca; color:#991b1b; padding:10px; border-radius:8px; margin-bottom:12px; white-space:pre-wrap; }
+  .row { display:flex; gap:14px; flex-wrap:wrap; }
+  .row > div { flex:1; min-width:180px; }
+  .bar { height:8px; background:#e5e7eb; border-radius:999px; overflow:hidden; }
+  .bar > span { display:block; height:100%; background:var(--b); width:0; transition:width .3s; }
+  .state { font-size:12px; padding:2px 8px; border-radius:999px; }
+  .s-queued{background:#f3f4f6;color:#6b7280} .s-working{background:#dbeafe;color:#1d4ed8}
+  .s-done{background:#dcfce7;color:#166534} .s-failed{background:#fee2e2;color:#991b1b}
+  .seg-unallocated{background:#f3f4f6;color:#6b7280} .seg-online{background:#dbeafe;color:#1d4ed8}
+  .seg-serial-acquired{background:#fef9c3;color:#854d0e} .seg-allocated{background:#dcfce7;color:#166534}
+  .muted { color:var(--muted); }
+  .hide { display:none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>1Meter Provisioning Station</h1>
+  <span id="ccPill" class="pill">CC: …</span>
+  <span id="authPill" class="pill">signed out</span>
+  <span id="subnetPill" class="pill"></span>
+</header>
+<main>
+  <div id="error" class="err hide"></div>
+
+  <!-- Login -->
+  <div id="loginCard" class="card">
+    <h3 style="margin-top:0">Sign in to CC</h3>
+    <div class="row">
+      <div><label>Employee ID</label><input id="empId" autocomplete="username" /></div>
+      <div><label>Password</label><input id="empPw" type="password" autocomplete="current-password" /></div>
+    </div>
+    <div style="margin-top:12px"><button class="primary" onclick="login()">Sign in</button></div>
+  </div>
+
+  <!-- App -->
+  <div id="app" class="hide">
+    <div class="tabs">
+      <button data-tab="detect" class="active" onclick="setTab('detect')">1 · Detect &amp; assign</button>
+      <button data-tab="provisioned" onclick="setTab('provisioned')">Provisioned meters (CC)</button>
+    </div>
+
+    <!-- DETECT + ASSIGN -->
+    <div id="tab-detect">
+      <div class="card">
+        <div class="row" style="align-items:flex-end">
+          <div><label>Provisioning subnet</label><input id="subnet" /></div>
+          <div style="flex:0 0 auto"><button class="primary" id="scanBtn" onclick="scan()">Scan for gateways</button></div>
+        </div>
+        <div id="scanInfo" class="muted" style="margin-top:10px"></div>
+        <table id="gwTable" class="hide" style="margin-top:10px">
+          <thead><tr>
+            <th><input type="checkbox" id="selAll" onclick="toggleAll(this)"></th>
+            <th>IP</th><th>PCB MAC</th><th>Status</th><th>Current name</th><th>Box label</th>
+          </tr></thead>
+          <tbody id="gwBody"></tbody>
+        </table>
+      </div>
+
+      <div id="assignCard" class="card hide">
+        <h3 style="margin-top:0">Assignment (batch)</h3>
+        <div class="row">
+          <div><label>Destination site (canonical CC)</label><select id="site"></select></div>
+          <div><label>Site Wi-Fi SSID</label><input id="ssid" placeholder="MAK_Wifi-ext" /></div>
+          <div><label>Site Wi-Fi password</label><input id="wpw" /></div>
+        </div>
+        <p class="muted" style="margin:12px 0 0">
+          <span id="selCount">0</span> gateway(s) selected. Names <b>&lt;SITE&gt;-GW-####</b> are
+          allocated by CC. No customer account is set now — that happens later in commissioning.
+        </p>
+        <div style="margin-top:12px">
+          <button class="primary" id="provBtn" onclick="confirmProvision()">Confirm &amp; provision selected</button>
+        </div>
+      </div>
+
+      <div id="progressCard" class="card hide">
+        <h3 style="margin-top:0">Provisioning progress</h3>
+        <div class="bar"><span id="progBar"></span></div>
+        <div id="progText" class="muted" style="margin:8px 0"></div>
+        <table><thead><tr><th>PCB MAC</th><th>Thing</th><th>State</th></tr></thead>
+          <tbody id="progBody"></tbody></table>
+        <div style="margin-top:12px">
+          <button class="ghost" onclick="downloadCsv()">Export CSV</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- PROVISIONED VIEW -->
+    <div id="tab-provisioned" class="hide">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <h3 style="margin:0">Provisioned meters &amp; locational assignment</h3>
+          <button class="ghost" onclick="loadProvisioned()">Refresh</button>
+        </div>
+        <table style="margin-top:10px"><thead><tr>
+          <th>Thing</th><th>Serial</th><th>Site</th><th>Account</th><th>Village</th>
+          <th>Stage</th><th>Provisioned</th>
+        </tr></thead><tbody id="provBody"></tbody></table>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+let SITES = [], SCAN = [], RESULTS = [];
+
+function showError(m){ const e=document.getElementById('error'); e.textContent=m; e.classList.remove('hide'); }
+function clearError(){ document.getElementById('error').classList.add('hide'); }
+async function api(path, method='GET', body){
+  const r = await fetch(path, {method, headers:{'Content-Type':'application/json'}, body: body?JSON.stringify(body):undefined});
+  const j = await r.json().catch(()=>({}));
+  if(!r.ok) throw new Error(j.error || ('HTTP '+r.status));
+  return j;
+}
+function setTab(t){
+  document.querySelectorAll('.tabs button').forEach(b=>b.classList.toggle('active', b.dataset.tab===t));
+  document.getElementById('tab-detect').classList.toggle('hide', t!=='detect');
+  document.getElementById('tab-provisioned').classList.toggle('hide', t!=='provisioned');
+  if(t==='provisioned') loadProvisioned();
+}
+
+async function boot(){
+  const s = await api('/api/session');
+  document.getElementById('ccPill').textContent = 'CC: ' + s.cc_base.replace(/^https?:\/\//,'');
+  document.getElementById('subnetPill').textContent = s.subnet;
+  document.getElementById('subnet').value = s.subnet;
+  if(s.logged_in){ onLoggedIn(s.user); }
+}
+function onLoggedIn(user){
+  document.getElementById('authPill').textContent = (user && (user.name||user.employee_id)) || 'signed in';
+  document.getElementById('authPill').className = 'pill ok';
+  document.getElementById('loginCard').classList.add('hide');
+  document.getElementById('app').classList.remove('hide');
+  loadSites();
+}
+async function login(){
+  clearError();
+  try{
+    const r = await api('/api/login','POST',{employee_id:document.getElementById('empId').value, password:document.getElementById('empPw').value});
+    onLoggedIn(r.user);
+  }catch(e){ showError(e.message); }
+}
+async function loadSites(){
+  try{
+    const r = await api('/api/sitecodes');
+    SITES = r.sites || [];
+    const sel = document.getElementById('site');
+    sel.innerHTML = '<option value="">Select site…</option>' +
+      SITES.map(s=>`<option value="${s.code}">${s.code} — ${s.name}${s.country?` (${s.country})`:''}</option>`).join('');
+  }catch(e){ showError(e.message); }
+}
+
+async function scan(){
+  clearError();
+  const btn=document.getElementById('scanBtn'); btn.disabled=true; btn.textContent='Scanning…';
+  document.getElementById('scanInfo').textContent='Probing the subnet — this can take ~20s.';
+  try{
+    const r = await api('/api/scan','POST',{subnet:document.getElementById('subnet').value});
+    SCAN = r.gateways || [];
+    renderScan();
+  }catch(e){ showError(e.message); }
+  finally{ btn.disabled=false; btn.textContent='Scan for gateways'; }
+}
+function renderScan(){
+  const t=document.getElementById('gwTable'), b=document.getElementById('gwBody');
+  document.getElementById('scanInfo').textContent = `${SCAN.length} device(s) responded on the provisioning network.`;
+  if(!SCAN.length){ t.classList.add('hide'); document.getElementById('assignCard').classList.add('hide'); return; }
+  t.classList.remove('hide');
+  b.innerHTML = SCAN.map((g,i)=>{
+    const virgin = !g.has_runtime_tls;
+    const badge = virgin ? '<span class="state s-queued">virgin</span>' : '<span class="state s-done">provisioned</span>';
+    return `<tr>
+      <td><input type="checkbox" class="gwsel" data-i="${i}" ${virgin?'':'disabled'} onchange="updateSel()"></td>
+      <td class="mono">${g.ip}</td>
+      <td class="mono">${g.pcb_mac||'<span class="muted">unknown</span>'}</td>
+      <td>${badge}</td>
+      <td class="mono">${g.thing_name||'—'}</td>
+      <td><input data-label="${i}" placeholder="box/QR" style="padding:4px 6px;font-size:12px"></td>
+    </tr>`;
+  }).join('');
+  document.getElementById('assignCard').classList.remove('hide');
+  updateSel();
+}
+function toggleAll(cb){ document.querySelectorAll('.gwsel:not(:disabled)').forEach(x=>x.checked=cb.checked); updateSel(); }
+function selectedUnits(){
+  return [...document.querySelectorAll('.gwsel:checked')].map(cb=>{
+    const i=+cb.dataset.i; const g=SCAN[i];
+    const label=document.querySelector(`[data-label="${i}"]`).value.trim();
+    return {ip:g.ip, pcb_mac:g.pcb_mac, box_label:label||null};
+  }).filter(u=>u.pcb_mac);
+}
+function updateSel(){ document.getElementById('selCount').textContent = selectedUnits().length; }
+
+async function confirmProvision(){
+  clearError();
+  const site=document.getElementById('site').value;
+  const ssid=document.getElementById('ssid').value;
+  const wpw=document.getElementById('wpw').value;
+  const units=selectedUnits();
+  if(!site) return showError('Pick a destination site.');
+  if(!ssid) return showError('Enter the site Wi-Fi SSID.');
+  if(!units.length) return showError('Select at least one virgin gateway.');
+  const names = units.length;
+  if(!confirm(`Provision ${names} gateway(s) for site ${site}?\nWi-Fi: ${ssid}\nCC will allocate ${site}-GW-#### names and certs. No customer account is set now.`)) return;
+
+  const prov=document.getElementById('provBtn'); prov.disabled=true;
+  document.getElementById('progressCard').classList.remove('hide');
+  const body=document.getElementById('progBody'); body.innerHTML='';
+  setProg(0, units.length, 'Allocating Things + certs from CC…');
+
+  let alloc;
+  try{
+    alloc = await api('/api/allocate','POST',{site_code:site, wifi_ssid:ssid, wifi_password:wpw, units});
+  }catch(e){ showError(e.message); prov.disabled=false; return; }
+
+  RESULTS = [];
+  const gws = alloc.gateways||[];
+  (alloc.errors||[]).forEach(er=>{
+    body.innerHTML += `<tr><td class="mono">${er.pcb_mac||'—'}</td><td class="mono">${er.thing_name||'—'}</td><td><span class="state s-failed">alloc failed</span> <span class="muted">${er.error||''}</span></td></tr>`;
+  });
+
+  let done=0;
+  for(const g of gws){
+    const rowId='r_'+g.pcb_mac.replace(/[^a-z0-9]/gi,'');
+    body.innerHTML += `<tr id="${rowId}"><td class="mono">${g.pcb_mac}</td><td class="mono">${g.thing_name}</td><td><span class="state s-working">delivering…</span></td></tr>`;
+    try{
+      const d = await api('/api/deliver','POST',{pcb_mac:g.pcb_mac});
+      document.querySelector('#'+rowId+' td:last-child').innerHTML='<span class="state s-done">done</span>';
+      RESULTS.push({pcb_mac:g.pcb_mac, thing_name:g.thing_name, box_label:g.box_label||'', ip:g.ip, status:'done'});
+    }catch(e){
+      document.querySelector('#'+rowId+' td:last-child').innerHTML=`<span class="state s-failed">failed</span> <span class="muted">${e.message}</span>`;
+      RESULTS.push({pcb_mac:g.pcb_mac, thing_name:g.thing_name, box_label:g.box_label||'', ip:g.ip, status:'failed'});
+    }
+    done++; setProg(done, gws.length, `Delivered ${done}/${gws.length}`);
+  }
+  setProg(gws.length, gws.length, `Complete — ${RESULTS.filter(r=>r.status==='done').length} provisioned, ${RESULTS.filter(r=>r.status==='failed').length} failed.`);
+  prov.disabled=false;
+}
+function setProg(done,total,msg){
+  const pct = total? Math.round(done/total*100):0;
+  document.getElementById('progBar').style.width = pct+'%';
+  document.getElementById('progText').textContent = msg;
+}
+function downloadCsv(){
+  const rows=[['pcb_mac','thing_name','box_label','ip','status'], ...RESULTS.map(r=>[r.pcb_mac,r.thing_name,r.box_label,r.ip,r.status])];
+  const csv=rows.map(r=>r.map(x=>`"${(x||'').toString().replace(/"/g,'""')}"`).join(',')).join('\n');
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download='provisioned-gateways.csv'; a.click();
+}
+
+async function loadProvisioned(){
+  try{
+    const r = await api('/api/provisioned');
+    const seg = s => `<span class="state seg-${s}">${s}</span>`;
+    document.getElementById('provBody').innerHTML = (r.meters||[]).map(m=>`<tr>
+      <td class="mono">${m.thing_name||''}</td><td class="mono">${m.meter_serial||'—'}</td>
+      <td>${m.site||m.meter_community||'—'}</td><td class="mono">${m.account_number||'—'}</td>
+      <td>${m.village_name||'—'}</td><td>${seg(m.allocation||'unallocated')}</td>
+      <td class="muted">${(m.provisioned_at||'').slice(0,16)}</td></tr>`).join('')
+      || '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">No provisioned meters yet.</td></tr>';
+  }catch(e){ showError(e.message); }
+}
+
+boot();
+</script>
+</body>
+</html>

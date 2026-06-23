@@ -15,6 +15,7 @@ const SECTION_TITLE_KEYS: Record<string, string> = {
   advances: 'help:sections.advances',
   financing: 'help:sections.financing',
   meters: 'help:sections.metering',
+  provisioning: 'help:sections.provisioning',
   reports: 'help:sections.reporting',
   'data-browsers': 'help:sections.dataBrowsers',
   export: 'help:sections.dataExport',
