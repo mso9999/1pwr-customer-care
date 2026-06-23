@@ -137,10 +137,31 @@ def init_auth_db():
             )
             logger.info("Seeded superadmin role for employee 00 (Matt Orosz)")
 
+        # Bokang Leqele (1PWR138F) — engineering/R&D, not in the PR system so the
+        # department auto-map can't reach him; grant the engineering role directly.
+        if not conn.execute(
+            "SELECT 1 FROM cc_employee_roles WHERE employee_id = '1PWR138F'"
+        ).fetchone():
+            conn.execute(
+                """INSERT INTO cc_employee_roles (employee_id, cc_role, assigned_by, assigned_at)
+                   VALUES ('1PWR138F', 'engineering', 'system', datetime('now'))"""
+            )
+            logger.info("Seeded engineering role for employee 1PWR138F (Bokang Leqele)")
+
         _seed_department_mappings(conn)
+        _ensure_role_dept_mappings(conn)
 
     logger.info("Auth database initialized at %s", AUTH_DB_PATH)
 
+
+# Engineering / R&D -> 1Meter provisioning access (PR dept names/codes, from the
+# PR Firestore: "Engineering"/ENG and "Electrical & Software Engineering"/EE/SE).
+_ENGINEERING_DEPT_MAPPINGS: list[tuple[str, str, str]] = [
+    ("engineering",                          "engineering", "Engineering"),
+    ("eng",                                  "engineering", "Engineering (code)"),
+    ("electrical & software engineering",    "engineering", "Electrical & Software Engineering"),
+    ("ee/se",                                "engineering", "EE/SE (code)"),
+]
 
 _DEFAULT_DEPT_MAPPINGS: list[tuple[str, str, str]] = [
     # key, cc_role, label — LS English
@@ -154,7 +175,23 @@ _DEFAULT_DEPT_MAPPINGS: list[tuple[str, str, str]] = [
     ("fin",                            "finance_team",  "FIN (code)"),
     ("service client",                 "onm_team",      "Service client"),
     ("sc",                             "onm_team",      "SC (code)"),
-]
+] + _ENGINEERING_DEPT_MAPPINGS
+
+
+def _ensure_role_dept_mappings(conn: sqlite3.Connection):
+    """Idempotently ensure the engineering department->role mappings exist.
+
+    _seed_department_mappings only runs on an empty table, so on already-seeded
+    production DBs new mappings must be inserted explicitly. INSERT OR IGNORE
+    never clobbers an admin-edited mapping.
+    """
+    for key, role, label in _ENGINEERING_DEPT_MAPPINGS:
+        conn.execute(
+            """INSERT OR IGNORE INTO cc_department_role_mappings
+               (department_key, cc_role, label, added_by)
+               VALUES (?, ?, ?, 'system')""",
+            (key.lower(), role, label),
+        )
 
 
 def _seed_department_mappings(conn: sqlite3.Connection):

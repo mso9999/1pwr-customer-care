@@ -77,7 +77,7 @@ IDENTITY_TOPIC_FMT = os.environ.get("IOT_IDENTITY_TOPIC_FMT", "oneMeter/{client_
 # system exists to retire.
 _BENCH_PREFIXES = ("HQTEST", "TEST-", "TESTSITE")
 
-PROVISIONING_ROLES = (CCRole.superadmin, CCRole.onm_team)
+PROVISIONING_ROLES = (CCRole.superadmin, CCRole.onm_team, CCRole.engineering)
 
 
 def _now() -> str:

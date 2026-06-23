@@ -8,8 +8,8 @@ import {
   type PinPreview, type PinBroadcastResult,
 } from '../lib/api';
 
-const ROLES = ['superadmin', 'onm_team', 'finance_team', 'generic'];
-const MAPPABLE_ROLES = ['onm_team', 'finance_team'];
+const ROLES = ['superadmin', 'onm_team', 'finance_team', 'engineering', 'generic'];
+const MAPPABLE_ROLES = ['onm_team', 'finance_team', 'engineering'];
 
 export default function AdminRolesPage() {
   const { t } = useTranslation(['admin', 'common']);

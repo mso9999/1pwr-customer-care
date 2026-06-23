@@ -22,14 +22,19 @@ class CCRole(str, Enum):
     superadmin = "superadmin"
     onm_team = "onm_team"
     finance_team = "finance_team"
+    engineering = "engineering"
     generic = "generic"
 
 
 # Permission matrix: role -> (can_write_customers, can_write_transactions, can_manage_roles)
+# `engineering` (R&D) is least-privilege like `generic` for customer/finance data;
+# its purpose is 1Meter provisioning access, which is gated separately in
+# meter_provisioning.py (PROVISIONING_ROLES).
 ROLE_PERMISSIONS = {
     CCRole.superadmin:   {"write_customers": True,  "write_transactions": True,  "manage_roles": True},
     CCRole.onm_team:     {"write_customers": True,  "write_transactions": True,  "manage_roles": False},
     CCRole.finance_team: {"write_customers": False, "write_transactions": True,  "manage_roles": False},
+    CCRole.engineering:  {"write_customers": False, "write_transactions": False, "manage_roles": False},
     CCRole.generic:      {"write_customers": False, "write_transactions": False, "manage_roles": False},
 }
 
