@@ -26,6 +26,11 @@ logger = logging.getLogger("cc-api.lpg.store")
 # (down to its last cylinder), per the operations flowchart.
 CRITICAL_REMAINING_THRESHOLD = 1
 
+# Predictive warn: when projected days of LPG left at the current burn rate fall
+# below this, the site is "low runway". Burn rate is averaged over this window.
+LOW_RUNWAY_WARN_DAYS = 7
+BURN_RATE_WINDOW_DAYS = 30
+
 
 def _conn():
     from customer_api import get_connection
@@ -292,7 +297,30 @@ def stop_run(
             result["run"] = updated_run
             result["batch"] = batch_row
             result["critical_triggered"] = critical_triggered
-            result["site_remaining"] = _site_remaining(cur, run["site_code"])
+
+            remaining = _site_remaining(cur, run["site_code"])
+            result["site_remaining"] = remaining
+
+            # Predictive runway: days of LPG left at the current burn rate.
+            per_day = _site_burn_per_day(cur, run["site_code"])
+            days_remaining = (remaining / per_day) if per_day > 0 else None
+            result["cylinders_per_day"] = round(per_day, 3)
+            result["days_remaining"] = round(days_remaining, 1) if days_remaining is not None else None
+
+            # Low-runway warn fires once per active-stock period, and only when
+            # the site isn't already critical (critical owns the last cylinder).
+            low_runway_triggered = False
+            if (
+                not critical_triggered
+                and remaining > CRITICAL_REMAINING_THRESHOLD
+                and days_remaining is not None
+                and days_remaining < LOW_RUNWAY_WARN_DAYS
+            ):
+                nb = _newest_active_batch_id(cur, run["site_code"])
+                if nb is not None and not _low_runway_already_sent(cur, nb):
+                    low_runway_triggered = True
+                    result["low_runway_batch_id"] = nb
+            result["low_runway_triggered"] = low_runway_triggered
         conn.commit()
     return result
 
@@ -306,6 +334,64 @@ def mark_critical_alert_sent(batch_id: int) -> None:
                 (batch_id,),
             )
         conn.commit()
+
+
+def mark_low_runway_alert_sent(batch_id: int) -> None:
+    with _conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE lpg_batches SET low_runway_alert_sent_at = NOW() "
+                "WHERE id = %s AND low_runway_alert_sent_at IS NULL",
+                (batch_id,),
+            )
+        conn.commit()
+
+
+def _scalar(row, key: str):
+    if row is None:
+        return None
+    return row[key] if isinstance(row, dict) else row[0]
+
+
+def _site_burn_per_day(cur, site_code: str) -> float:
+    """Average cylinders consumed per day over the trailing burn-rate window
+    (uses the caller's cursor so it sees in-transaction updates)."""
+    cur.execute(
+        """
+        SELECT COALESCE(SUM(cylinders_consumed), 0) AS c
+        FROM lpg_generator_runs
+        WHERE site_code = %s
+          AND started_at >= NOW() - (%s || ' days')::interval
+        """,
+        (site_code.upper(), BURN_RATE_WINDOW_DAYS),
+    )
+    consumed = float(_scalar(cur.fetchone(), "c") or 0)
+    return consumed / float(BURN_RATE_WINDOW_DAYS)
+
+
+def _newest_active_batch_id(cur, site_code: str) -> Optional[int]:
+    cur.execute(
+        """
+        SELECT id FROM lpg_batches
+        WHERE site_code = %s AND status = 'active'
+        ORDER BY arrived_at DESC, id DESC
+        LIMIT 1
+        """,
+        (site_code.upper(),),
+    )
+    val = _scalar(cur.fetchone(), "id")
+    return int(val) if val is not None else None
+
+
+def _low_runway_already_sent(cur, batch_id: int) -> bool:
+    cur.execute(
+        "SELECT low_runway_alert_sent_at FROM lpg_batches WHERE id = %s",
+        (batch_id,),
+    )
+    row = cur.fetchone()
+    if row is None:
+        return True
+    return _scalar(row, "low_runway_alert_sent_at") is not None
 
 
 def list_runs(site_code: str, *, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
@@ -414,6 +500,18 @@ def site_summaries(country: Optional[str] = None) -> List[Dict[str, Any]]:
         r["value_remaining"] = round(remaining * float(unit), 2) if unit is not None else None
         cyl_30d = float(r.get("cylinders_consumed_30d") or 0)
         r["cost_30d"] = round(cyl_30d * float(unit), 2) if unit is not None else None
+
+        # Burn rate + projected runway (days of LPG left at current burn rate).
+        per_day = cyl_30d / float(BURN_RATE_WINDOW_DAYS)
+        r["cylinders_per_day"] = round(per_day, 3)
+        days_remaining = (remaining / per_day) if per_day > 0 else None
+        r["days_remaining"] = round(days_remaining, 1) if days_remaining is not None else None
+        if r["is_critical"]:
+            r["runway_status"] = "critical"
+        elif days_remaining is not None and days_remaining < LOW_RUNWAY_WARN_DAYS:
+            r["runway_status"] = "warn"
+        else:
+            r["runway_status"] = "ok"
     return rows
 
 

@@ -19,6 +19,13 @@ function money(value: number | null | undefined, currency: string | null | undef
   return `${currency ? currency + ' ' : ''}${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 }
 
+function runwayBadge(status: 'ok' | 'warn' | 'critical', days: number | null) {
+  const label = days == null ? '—' : `${days}d`;
+  if (status === 'critical') return <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700">{label}</span>;
+  if (status === 'warn') return <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">{label}</span>;
+  return <span className="text-gray-600">{label}</span>;
+}
+
 export default function LpgPage() {
   const { country } = useCountry();
   const [sites, setSites] = useState<LpgSiteSummary[]>([]);
@@ -121,6 +128,7 @@ export default function LpgPage() {
                 <th className="px-4 py-3">Country</th>
                 <th className="px-4 py-3 text-right">Cylinders left</th>
                 <th className="px-4 py-3 text-right">kg left</th>
+                <th className="px-4 py-3 text-right">Days left</th>
                 <th className="px-4 py-3 text-right">Value left</th>
                 <th className="px-4 py-3 text-right">Used (30d)</th>
                 <th className="px-4 py-3 text-right">Cost (30d)</th>
@@ -149,6 +157,7 @@ export default function LpgPage() {
                     )}
                   </td>
                   <td className="px-4 py-3 text-right text-gray-600">{s.kg_remaining.toLocaleString()}</td>
+                  <td className="px-4 py-3 text-right">{runwayBadge(s.runway_status, s.days_remaining)}</td>
                   <td className="px-4 py-3 text-right text-gray-600">{money(s.value_remaining, s.currency)}</td>
                   <td className="px-4 py-3 text-right text-gray-600">{s.cylinders_consumed_30d}</td>
                   <td className="px-4 py-3 text-right text-gray-600">{money(s.cost_30d, s.currency)}</td>

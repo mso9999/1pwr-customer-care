@@ -39,11 +39,27 @@ Design decisions (user-confirmed via question form 2026-06-24):
 - `RealDictCursor` scalar reads with `[0]` would fail (dict rows). Fixed `_next_batch_number`
   and `_site_remaining` to read aggregates by alias.
 
+### Shipped
+- Deployed to cc.1pwrafrica.com (commit ef24621, GH run 28120371481 green). Live checks:
+  /api/lpg/sites and /api/bn/lpg/sites => 401 (mounted, auth-gated); /api/health => 200.
+
+### Follow-up shipped same session: predictive runway analytics + alert
+- Migration `046_lpg_low_runway_alert.sql` adds `lpg_batches.low_runway_alert_sent_at` (dedupe
+  tied to newest active batch; resets on new delivery).
+- "Days of LPG left at current burn rate" = cylinders_remaining / (cyl consumed over trailing
+  30d / 30). Surfaced in `site_summaries` (cylinders_per_day, days_remaining, runway_status
+  ok/warn/critical) and on stop_run. Constants in store: LOW_RUNWAY_WARN_DAYS=7,
+  BURN_RATE_WINDOW_DAYS=30.
+- Proactive low-runway WhatsApp alert fires synchronously on run-stop (no new scheduler;
+  same pattern as the critical alert) when days_remaining < 7 and site not already critical,
+  once per active-stock period.
+- Frontend: "Days left" column on the overview (color-coded), a runway card on the site page,
+  and runway surfaced in the run-stop notice.
+
 ### What next session should know
-- Not deployed. To ship: `cd acdb-api/frontend && npx tsc -b --noEmit` (already green), then
-  commit + push to main (auto-deploys to cc.1pwrafrica.com; migration 045 auto-applies).
-- Open follow-ups if requested: per-genset analytics, expected-consumption alerts, and tying
-  runs to gensite telemetry (battery SOC could be auto-pulled from inverter_readings).
+- Open follow-ups if requested: per-genset analytics (note: team chose one genset/site, so
+  low priority), making LOW_RUNWAY_WARN_DAYS configurable per site, and a daily scheduled
+  runway sweep (current alert only re-evaluates on run-stop events).
 
 ---
 

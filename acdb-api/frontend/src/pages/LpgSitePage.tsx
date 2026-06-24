@@ -206,7 +206,9 @@ export default function LpgSitePage() {
       });
       let msg = `Run stopped (${fmtDuration(r.run.runtime_seconds)}).`;
       if (eDepleted) msg += ` ${r.site_remaining} cylinder(s) remaining at site.`;
+      if (r.days_remaining != null) msg += ` ~${r.days_remaining} day(s) of LPG left at current burn rate.`;
       if (r.critical_triggered) msg += ' ⚠️ Site is now CRITICAL — alert sent to O&M.';
+      else if (r.low_runway_triggered) msg += ' ⚠️ Low runway — alert sent to O&M.';
       setNotice(msg);
       setESoc('');
       setEReason('');
@@ -237,6 +239,15 @@ export default function LpgSitePage() {
   const currencyHint = summary?.currency || '';
   const inputCls = 'border rounded-lg px-3 py-2 text-sm w-full';
   const labelCls = 'block text-xs font-medium text-gray-600 mb-1';
+  const runwayStatus = summary?.runway_status ?? 'ok';
+  const runwayCardCls =
+    runwayStatus === 'critical' ? 'bg-red-50 border-red-200'
+    : runwayStatus === 'warn' ? 'bg-amber-50 border-amber-200'
+    : 'bg-white';
+  const runwayTextCls =
+    runwayStatus === 'critical' ? 'text-red-600'
+    : runwayStatus === 'warn' ? 'text-amber-600'
+    : '';
 
   return (
     <div className="p-6 max-w-6xl mx-auto">
@@ -263,7 +274,7 @@ export default function LpgSitePage() {
       {!loading && (
         <>
           {/* Balance summary */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
             <div className="bg-white rounded-xl shadow-sm border p-4">
               <div className="text-xs uppercase tracking-wide text-gray-500">Cylinders left</div>
               <div className="text-2xl font-semibold mt-1">{summary?.cylinders_remaining ?? 0}</div>
@@ -271,6 +282,15 @@ export default function LpgSitePage() {
             <div className="bg-white rounded-xl shadow-sm border p-4">
               <div className="text-xs uppercase tracking-wide text-gray-500">kg remaining</div>
               <div className="text-2xl font-semibold mt-1">{(summary?.kg_remaining ?? 0).toLocaleString()}</div>
+            </div>
+            <div className={`rounded-xl shadow-sm border p-4 ${runwayCardCls}`}>
+              <div className="text-xs uppercase tracking-wide text-gray-500">Days left (at burn rate)</div>
+              <div className={`text-2xl font-semibold mt-1 ${runwayTextCls}`}>
+                {summary?.days_remaining != null ? `${summary.days_remaining}d` : '—'}
+              </div>
+              <div className="text-xs text-gray-400 mt-1">
+                {summary && summary.cylinders_per_day > 0 ? `${summary.cylinders_per_day}/day` : 'no recent burn'}
+              </div>
             </div>
             <div className="bg-white rounded-xl shadow-sm border p-4">
               <div className="text-xs uppercase tracking-wide text-gray-500">Value remaining</div>

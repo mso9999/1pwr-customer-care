@@ -112,6 +112,39 @@ def _maybe_alert_critical(result: Dict[str, Any], site_code: str) -> bool:
     return True
 
 
+def _maybe_alert_low_runway(result: Dict[str, Any], site_code: str) -> bool:
+    """Fire a one-shot predictive 'low runway' WhatsApp/O&M alert when a site has
+    crossed below the days-left threshold. Best-effort; never raises."""
+    if not result.get("low_runway_triggered"):
+        return False
+    batch_id = result.get("low_runway_batch_id")
+    days = result.get("days_remaining")
+    remaining = result.get("site_remaining")
+    try:
+        from country_config import get_country_for_site
+        country = get_country_for_site(site_code)
+    except Exception:
+        country = None
+    text = (
+        f"⚠️ LPG LOW — {site_code.upper()} has about {days} day(s) of LPG left at the "
+        f"current burn rate ({remaining} cylinders in stock). Plan a delivery to avoid an outage."
+    )
+    try:
+        from cc_bridge_notify import notify_cc_bridge
+        notify_cc_bridge(
+            {"source": "lpg", "kind": "lpg_low_runway", "site_code": site_code.upper(), "text": text},
+            country_code=country,
+        )
+    except Exception as exc:
+        logger.warning("lpg low-runway bridge notify failed for %s: %s", site_code, exc)
+    if batch_id is not None:
+        try:
+            store.mark_low_runway_alert_sent(int(batch_id))
+        except Exception as exc:
+            logger.warning("mark_low_runway_alert_sent failed for batch %s: %s", batch_id, exc)
+    return True
+
+
 def _seed_sites_best_effort() -> None:
     """Ensure the shared sites table is populated (gensite seeds all countries
     into the consolidated DB). Best-effort; never breaks the request."""
@@ -322,6 +355,7 @@ def stop_run(
         raise HTTPException(status_code=409, detail=str(exc))
 
     alerted = _maybe_alert_critical(result, existing["site_code"])
+    low_runway_alerted = _maybe_alert_low_runway(result, existing["site_code"])
     _try_log_mutation(
         user, "update", "lpg_generator_runs", str(run_id),
         new_values={
@@ -339,8 +373,12 @@ def stop_run(
         "run": result.get("run"),
         "batch": result.get("batch"),
         "site_remaining": result.get("site_remaining"),
+        "days_remaining": result.get("days_remaining"),
+        "cylinders_per_day": result.get("cylinders_per_day"),
         "critical_triggered": result.get("critical_triggered"),
+        "low_runway_triggered": result.get("low_runway_triggered"),
         "alert_sent": alerted,
+        "low_runway_alert_sent": low_runway_alerted,
     }
 
 

@@ -3824,6 +3824,9 @@ export interface LpgSiteSummary {
   open_runs: number;
   cost_30d: number | null;
   is_critical: boolean;
+  cylinders_per_day: number;
+  days_remaining: number | null;
+  runway_status: 'ok' | 'warn' | 'critical';
 }
 
 export interface LpgBatch {
@@ -3944,8 +3947,12 @@ export async function stopLpgRun(runId: number, body: StopLpgRunRequest): Promis
   run: LpgRun;
   batch: LpgBatch | null;
   site_remaining: number;
+  days_remaining: number | null;
+  cylinders_per_day: number | null;
   critical_triggered: boolean;
+  low_runway_triggered: boolean;
   alert_sent: boolean;
+  low_runway_alert_sent: boolean;
 }> {
   return requestLpg(`/lpg/runs/${runId}/stop`, {
     method: 'POST',
