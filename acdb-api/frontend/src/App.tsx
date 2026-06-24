@@ -42,6 +42,8 @@ import TutorialPage from './pages/TutorialPage';
 import TicketsPage from './pages/TicketsPage';
 import GenSiteListPage from './pages/GenSiteListPage';
 import GenSitePage from './pages/GenSitePage';
+import LpgPage from './pages/LpgPage';
+import LpgSitePage from './pages/LpgSitePage';
 import CommissionSitePage from './pages/CommissionSitePage';
 import SMSLogPage from './pages/SMSLogPage';
 import AnalyticsPage from './pages/AnalyticsPage';
@@ -101,6 +103,8 @@ export default function App() {
             <Route path="gensite" element={<ProtectedRoute requireEmployee><GenSiteListPage /></ProtectedRoute>} />
             <Route path="gensite/commission" element={<ProtectedRoute requireEmployee requireRole={['superadmin', 'onm_team']}><CommissionSitePage /></ProtectedRoute>} />
             <Route path="gensite/:code" element={<ProtectedRoute requireEmployee><GenSitePage /></ProtectedRoute>} />
+            <Route path="lpg" element={<ProtectedRoute requireEmployee><LpgPage /></ProtectedRoute>} />
+            <Route path="lpg/:code" element={<ProtectedRoute requireEmployee><LpgSitePage /></ProtectedRoute>} />
             <Route path="help" element={<ProtectedRoute requireEmployee><HelpPage /></ProtectedRoute>} />
             <Route path="tutorial" element={<ProtectedRoute requireEmployee><TutorialPage /></ProtectedRoute>} />
             {/* Customer routes */}

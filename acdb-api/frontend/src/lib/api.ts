@@ -3794,3 +3794,188 @@ export async function downloadProvisioningStation(): Promise<void> {
   a.click();
   URL.revokeObjectURL(url);
 }
+
+// ---------------------------------------------------------------------------
+// LPG (generator fuel) tracking — consolidated backend, country-filtered.
+// ---------------------------------------------------------------------------
+
+// LPG data is consolidated in 1PDB (like gensite), so always hit /api and
+// filter by country, rather than the country-routed base.
+async function requestLpg<T>(path: string, options: RequestInit = {}): Promise<T> {
+  return requestAtBase('/api', path, options);
+}
+
+export interface LpgSiteSummary {
+  code: string;
+  display_name: string;
+  country: string;
+  district?: string | null;
+  cylinders_remaining: number;
+  cylinders_total: number;
+  cylinder_kg: number;
+  kg_remaining: number;
+  value_remaining: number | null;
+  last_unit_price: number | null;
+  currency: string | null;
+  last_delivery_at: string | null;
+  cylinders_consumed_30d: number;
+  runtime_seconds_30d: number;
+  last_run_at: string | null;
+  open_runs: number;
+  cost_30d: number | null;
+  is_critical: boolean;
+}
+
+export interface LpgBatch {
+  id: number;
+  site_code: string;
+  batch_number: string;
+  arrived_at: string;
+  cylinders_total: number;
+  cylinders_remaining: number;
+  cylinder_kg: number;
+  unit_price: number | null;
+  currency: string | null;
+  status: string;
+  critical_alert_sent_at: string | null;
+  created_by?: string | null;
+  notes?: string | null;
+  created_at: string;
+}
+
+export interface LpgRun {
+  id: number;
+  site_code: string;
+  batch_id: number | null;
+  batch_number?: string | null;
+  generator_label: string | null;
+  status: string;
+  started_at: string;
+  start_soc_pct: number | null;
+  start_reason: string | null;
+  start_operator: string | null;
+  start_instructor: string | null;
+  ended_at: string | null;
+  stop_soc_pct: number | null;
+  stop_reason: string | null;
+  stop_operator: string | null;
+  stop_instructor: string | null;
+  lpg_depleted: boolean;
+  cylinders_consumed: number;
+  runtime_seconds: number | null;
+}
+
+export interface LpgReportRow {
+  code: string;
+  display_name: string;
+  country: string;
+  run_count: number;
+  cylinders_consumed: number;
+  kg_consumed: number;
+  runtime_seconds: number;
+  runtime_hours: number;
+  unit_price: number | null;
+  currency: string | null;
+  est_cost: number | null;
+}
+
+export async function listLpgSites(country?: string): Promise<{ sites: LpgSiteSummary[]; count: number; critical_count: number }> {
+  const qs = country ? `?country=${encodeURIComponent(country)}` : '';
+  return requestLpg(`/lpg/sites${qs}`);
+}
+
+export async function getLpgSite(code: string): Promise<{
+  site_code: string;
+  summary: LpgSiteSummary | null;
+  batches: LpgBatch[];
+  runs: LpgRun[];
+}> {
+  return requestLpg(`/lpg/sites/${encodeURIComponent(code)}`);
+}
+
+export interface CreateLpgBatchRequest {
+  cylinders_total: number;
+  arrived_at?: string;
+  unit_price?: number;
+  currency?: string;
+  cylinder_kg?: number;
+  notes?: string;
+}
+
+export async function createLpgBatch(code: string, body: CreateLpgBatchRequest): Promise<{ batch: LpgBatch }> {
+  return requestLpg(`/lpg/sites/${encodeURIComponent(code)}/batches`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function archiveLpgBatch(code: string, batchId: number): Promise<{ batch: LpgBatch }> {
+  return requestLpg(`/lpg/sites/${encodeURIComponent(code)}/batches/${batchId}/archive`, { method: 'POST' });
+}
+
+export interface StartLpgRunRequest {
+  batch_id?: number;
+  started_at?: string;
+  start_soc_pct?: number;
+  start_reason?: string;
+  start_operator?: string;
+  start_instructor?: string;
+  generator_label?: string;
+}
+
+export async function startLpgRun(code: string, body: StartLpgRunRequest): Promise<{ run: LpgRun }> {
+  return requestLpg(`/lpg/sites/${encodeURIComponent(code)}/runs`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export interface StopLpgRunRequest {
+  ended_at?: string;
+  stop_soc_pct?: number;
+  stop_reason?: string;
+  stop_operator?: string;
+  stop_instructor?: string;
+  lpg_depleted?: boolean;
+  cylinders_consumed?: number;
+}
+
+export async function stopLpgRun(runId: number, body: StopLpgRunRequest): Promise<{
+  run: LpgRun;
+  batch: LpgBatch | null;
+  site_remaining: number;
+  critical_triggered: boolean;
+  alert_sent: boolean;
+}> {
+  return requestLpg(`/lpg/runs/${runId}/stop`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function listLpgRuns(code: string, limit = 100, offset = 0): Promise<{ site_code: string; runs: LpgRun[] }> {
+  return requestLpg(`/lpg/sites/${encodeURIComponent(code)}/runs?limit=${limit}&offset=${offset}`);
+}
+
+export async function getLpgLiveSoc(code: string): Promise<{ site_code: string; soc_pct: number | null; ts_utc: string | null }> {
+  return requestLpg(`/lpg/sites/${encodeURIComponent(code)}/live-soc`);
+}
+
+export async function getLpgReport(country?: string, days = 30): Promise<{
+  start_utc: string;
+  end_utc: string;
+  country: string | null;
+  rows: LpgReportRow[];
+}> {
+  const qs = new URLSearchParams();
+  if (country) qs.set('country', country);
+  qs.set('days', String(days));
+  return requestLpg(`/lpg/report?${qs.toString()}`);
+}
+
+export async function downloadLpgReport(country?: string, days = 30): Promise<void> {
+  const qs = new URLSearchParams();
+  if (country) qs.set('country', country);
+  qs.set('days', String(days));
+  return downloadFileAtBase('/api', `/lpg/report/export?${qs.toString()}`, `lpg_report_${(country || 'ALL')}.csv`);
+}

@@ -1,3 +1,52 @@
+## Session 2026-06-23 [202606230728] (LPG generator-fuel tracking — new module built; NOT yet deployed)
+
+### What was done
+Built a new LPG (generator-fuel) inventory + generator-run tracking module from the
+operations flowchart (Moletsane, 2026-06-23). Tracks LPG consumption, balance and cost
+per site for daily ops + reporting. Code complete; `npx tsc -b --noEmit` clean, py_compile
+clean, no lint errors. **Not committed/deployed — awaiting user go-ahead.**
+
+Design decisions (user-confirmed via question form 2026-06-24):
+- LPG = backup-generator fuel; depletion is operator-judged per the flowchart.
+- `unit_price` = price of ONE 48 kg cylinder; period cost = cylinders consumed x unit_price.
+- One generator per site → generator-label field removed from the UI (DB column kept,
+  nullable, for future multi-genset use).
+- Critical at last cylinder (remaining <= 1): visual flag + one-shot WhatsApp O&M alert via
+  `notify_cc_bridge` (routed by site country).
+- Battery SOC at start/stop AUTO-PREFILLS from live gensite telemetry (most recent non-null
+  `inverter_readings.battery_soc_pct`), editable, with a "↻ live: X% · use" refresh button.
+  New endpoint `GET /api/lpg/sites/{code}/live-soc`.
+- Currency per site country (LSL/XOF/ZMW) via `get_currency_for_site`.
+
+### Files
+- `acdb-api/migrations/045_lpg_tracking.sql` — `lpg_batches` + `lpg_generator_runs`
+  (FK -> sites(code); auto-applied by CI to onepower_cc/bj/zm).
+- `acdb-api/lpg/{__init__,store,router}.py` — module mirrors gensite. Routes under `/api/lpg`:
+  sites overview, site detail, batches (stock capture), run start, run stop (atomic batch
+  decrement + critical-edge detection), runs list, report (+CSV export). Reads=employee,
+  writes=superadmin/onm_team. Mutations logged via cc_mutations.
+- Registered router in `customer_api.py`.
+- Frontend: `pages/LpgPage.tsx` (overview, critical count, report export),
+  `pages/LpgSitePage.tsx` (balance, stock-capture form, genset start/stop, batch+run tables),
+  `lib/api.ts` client (consolidated `/api`, country-filtered like gensite), routes in
+  `App.tsx`, nav item + `nav.lpg` i18n (en/fr).
+
+### RCA-relevant note
+- LPG data is consolidated in onepower_cc (frontend always hits `/api`, filtered by
+  sites.country), matching the gensite pattern. Migration still creates empty tables on bj/zm.
+
+### Bug caught + fixed during build
+- `RealDictCursor` scalar reads with `[0]` would fail (dict rows). Fixed `_next_batch_number`
+  and `_site_remaining` to read aggregates by alias.
+
+### What next session should know
+- Not deployed. To ship: `cd acdb-api/frontend && npx tsc -b --noEmit` (already green), then
+  commit + push to main (auto-deploys to cc.1pwrafrica.com; migration 045 auto-applies).
+- Open follow-ups if requested: per-genset analytics, expected-consumption alerts, and tying
+  runs to gensite telemetry (battery SOC could be auto-pulled from inverter_readings).
+
+---
+
 ## Session 2026-06-18 [202606172136b] (CC<->Koios reconciliation: 2nd root cause = account-number casing; cure deployed)
 
 ### What was done (continuation; all deployed)

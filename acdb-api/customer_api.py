@@ -309,6 +309,7 @@ from merchant_unmatched_api import router as merchant_unmatched_router
 from tickets import router as tickets_router
 from customer_messages import router as customer_messages_router
 from gensite import router as gensite_router
+from lpg import router as lpg_router
 from app_bff import router as app_bff_router
 from billing_priority import router as billing_priority_router
 from relay_control import router as relay_control_router
@@ -356,6 +357,7 @@ app.include_router(merchant_unmatched_router)
 app.include_router(tickets_router)
 app.include_router(customer_messages_router)
 app.include_router(gensite_router)
+app.include_router(lpg_router)
 app.include_router(app_bff_router)
 app.include_router(billing_priority_router)
 app.include_router(relay_control_router)
