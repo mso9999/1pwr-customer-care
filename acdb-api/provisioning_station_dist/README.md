@@ -53,7 +53,12 @@ Then open `http://localhost:8787`.
   (`1Meter_<mac3>`) so multiple units can be enumerated without SSID collisions.
 - The device must be reachable over the LAN (units join STA `1Meter`/`1Meter00`).
   Provide an AP with that SSID at the bench, or scan each unit's SoftAP one at a
-  time (set `--subnet` to the SoftAP range, e.g. `192.168.4.0/24`).
+  time.
+- **Subnet auto-detection:** by default the station scans **all** local /24
+  subnets (so a Windows Mobile-Hotspot / ICS subnet like `192.168.137.0/24` is
+  covered automatically alongside the internet-facing one). The subnet field is
+  pre-filled with the detected list (comma-separated) and is editable; pass
+  `--subnet 192.168.5.0/24` to force a specific one (e.g. a unit's SoftAP).
 - "Provisioned" means identity + cert + **site** Wi‑Fi are written; the unit
   reaches AWS IoT only once it's on the real site network at install time.
 

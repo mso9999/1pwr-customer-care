@@ -115,6 +115,51 @@ def default_subnet() -> str:
     return str(net)
 
 
+def local_ipv4s() -> set[str]:
+    """All local IPv4 addresses across interfaces (so a laptop hotspot subnet,
+    e.g. Windows Mobile Hotspot 192.168.137.x, is included alongside the
+    internet-facing one)."""
+    ips: set[str] = set()
+    p = primary_ipv4()
+    if p:
+        ips.add(p)
+    try:
+        for res in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            ip = res[4][0]
+            if ip and not ip.startswith("127.") and not ip.startswith("169.254."):
+                ips.add(ip)
+    except Exception:
+        pass
+    return ips
+
+
+def local_subnets() -> list[str]:
+    """Distinct /24 networks for every local IPv4 (the set we scan by default)."""
+    nets: list[str] = []
+    for ip in sorted(local_ipv4s()):
+        try:
+            n = str(ipaddress.ip_network(ip + "/24", strict=False))
+            if n not in nets:
+                nets.append(n)
+        except Exception:
+            pass
+    return nets or [default_subnet()]
+
+
+def scan_subnets(subnets: list[str]) -> list[dict]:
+    """Scan several subnets and merge results (dedup by IP)."""
+    seen: dict[str, dict] = {}
+    for sn in subnets:
+        sn = sn.strip()
+        if not sn:
+            continue
+        for g in scan_subnet(sn):
+            seen[g["ip"]] = g
+    out = list(seen.values())
+    out.sort(key=lambda d: ipaddress.ip_address(d["ip"]))
+    return out
+
+
 def probe_device(ip: str, timeout: float = 1.5) -> dict | None:
     """GET http://<ip>/v1/provision/status; return parsed JSON or None."""
     try:
@@ -223,7 +268,9 @@ class Handler(BaseHTTPRequestHandler):
                 "logged_in": SESSION.token is not None,
                 "user": SESSION.user,
                 "cc_base": SESSION.cc_base,
-                "subnet": SESSION.subnet or default_subnet(),
+                # Default to ALL local subnets (comma-separated) so a laptop
+                # hotspot subnet is scanned alongside the internet-facing one.
+                "subnet": SESSION.subnet or ", ".join(local_subnets()),
             })
         if self.path == "/api/sitecodes":
             try:
@@ -257,9 +304,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(401, {"error": str(e)})
 
         if self.path == "/api/scan":
-            subnet = (body.get("subnet") or SESSION.subnet or default_subnet())
+            raw = (body.get("subnet") or SESSION.subnet or ", ".join(local_subnets()))
+            subnets = [s.strip() for s in str(raw).split(",") if s.strip()]
             try:
-                return self._send(200, {"subnet": subnet, "gateways": scan_subnet(subnet)})
+                return self._send(200, {"subnet": ", ".join(subnets),
+                                        "gateways": scan_subnets(subnets)})
             except Exception as e:
                 return self._send(500, {"error": str(e)})
 
