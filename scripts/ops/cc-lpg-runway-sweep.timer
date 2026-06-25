@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily LPG runway sweep
+
+[Timer]
+# Morning UTC, after overnight data has settled. Randomized to avoid a thundering
+# herd with the other daily CC monitors (freshness, feed-guard, coverage).
+OnCalendar=*-*-* 07:15:00 UTC
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

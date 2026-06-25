@@ -1,0 +1,18 @@
+[Unit]
+Description=Daily LPG runway sweep: alert sites low on LPG at current burn rate
+Documentation=file:///opt/cc-portal/backend/scripts/ops/lpg_runway_sweep.py
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# cc_api can read /opt/1pdb/.env (DATABASE_URL + per-country CC_BRIDGE_* creds).
+User=cc_api
+Group=cc_api
+EnvironmentFile=-/opt/1pdb/.env
+EnvironmentFile=-/etc/default/cc-portal
+WorkingDirectory=/opt/cc-portal/backend
+ExecStart=/opt/cc-portal/backend/venv/bin/python3 /opt/cc-portal/backend/scripts/ops/lpg_runway_sweep.py
+StandardOutput=journal
+StandardError=journal
+Nice=10

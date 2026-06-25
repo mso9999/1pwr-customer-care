@@ -309,12 +309,14 @@ def stop_run(
 
             # Low-runway warn fires once per active-stock period, and only when
             # the site isn't already critical (critical owns the last cylinder).
+            warn_days = _site_warn_days(cur, run["site_code"])
+            result["low_runway_warn_days"] = warn_days
             low_runway_triggered = False
             if (
                 not critical_triggered
                 and remaining > CRITICAL_REMAINING_THRESHOLD
                 and days_remaining is not None
-                and days_remaining < LOW_RUNWAY_WARN_DAYS
+                and days_remaining < warn_days
             ):
                 nb = _newest_active_batch_id(cur, run["site_code"])
                 if nb is not None and not _low_runway_already_sent(cur, nb):
@@ -394,6 +396,37 @@ def _low_runway_already_sent(cur, batch_id: int) -> bool:
     return _scalar(row, "low_runway_alert_sent_at") is not None
 
 
+def _site_warn_days(cur, site_code: str) -> int:
+    """Effective low-runway warn threshold for a site (per-site override on
+    sites.lpg_low_runway_warn_days, else the module default)."""
+    cur.execute(
+        "SELECT lpg_low_runway_warn_days FROM sites WHERE code = %s",
+        (site_code.upper(),),
+    )
+    val = _scalar(cur.fetchone(), "lpg_low_runway_warn_days")
+    try:
+        return int(val) if val else LOW_RUNWAY_WARN_DAYS
+    except (TypeError, ValueError):
+        return LOW_RUNWAY_WARN_DAYS
+
+
+def set_low_runway_warn_days(site_code: str, days: Optional[int]) -> Optional[Dict[str, Any]]:
+    """Set (or clear, when days is None) the per-site low-runway threshold."""
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                UPDATE sites SET lpg_low_runway_warn_days = %s
+                WHERE code = %s
+                RETURNING code, display_name, lpg_low_runway_warn_days
+                """,
+                (days, site_code.upper()),
+            )
+            row = cur.fetchone()
+        conn.commit()
+    return dict(row) if row else None
+
+
 def list_runs(site_code: str, *, limit: int = 100, offset: int = 0) -> List[Dict[str, Any]]:
     with _conn() as conn:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
@@ -467,6 +500,7 @@ def site_summaries(country: Optional[str] = None) -> List[Dict[str, Any]]:
                 )
                 SELECT
                     s.code, s.display_name, s.country, s.district,
+                    s.lpg_low_runway_warn_days,
                     COALESCE(bal.cylinders_remaining, 0) AS cylinders_remaining,
                     COALESCE(bal.cylinders_total, 0)     AS cylinders_total,
                     COALESCE(bal.cylinder_kg, 48)        AS cylinder_kg,
@@ -506,9 +540,11 @@ def site_summaries(country: Optional[str] = None) -> List[Dict[str, Any]]:
         r["cylinders_per_day"] = round(per_day, 3)
         days_remaining = (remaining / per_day) if per_day > 0 else None
         r["days_remaining"] = round(days_remaining, 1) if days_remaining is not None else None
+        warn_days = r.get("lpg_low_runway_warn_days") or LOW_RUNWAY_WARN_DAYS
+        r["low_runway_warn_days"] = int(warn_days)
         if r["is_critical"]:
             r["runway_status"] = "critical"
-        elif days_remaining is not None and days_remaining < LOW_RUNWAY_WARN_DAYS:
+        elif days_remaining is not None and days_remaining < warn_days:
             r["runway_status"] = "warn"
         else:
             r["runway_status"] = "ok"

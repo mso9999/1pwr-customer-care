@@ -8,6 +8,7 @@ import {
   startLpgRun,
   stopLpgRun,
   getLpgLiveSoc,
+  updateLpgSiteSettings,
   type LpgSiteSummary,
   type LpgBatch,
   type LpgRun,
@@ -223,6 +224,39 @@ export default function LpgSitePage() {
     }
   };
 
+  // ---- Per-site low-runway threshold ----
+  const [warnDays, setWarnDays] = useState('');
+  useEffect(() => {
+    if (summary?.lpg_low_runway_warn_days != null) setWarnDays(String(summary.lpg_low_runway_warn_days));
+  }, [summary?.lpg_low_runway_warn_days]);
+
+  const saveWarnDays = async (clear: boolean) => {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      if (clear) {
+        await updateLpgSiteSettings(code, { clear: true });
+        setWarnDays('');
+        setNotice('Low-runway threshold reset to the default (7 days).');
+      } else {
+        const d = num(warnDays);
+        if (!d || d < 1) {
+          setError('Enter a threshold of at least 1 day.');
+          setBusy(false);
+          return;
+        }
+        await updateLpgSiteSettings(code, { low_runway_warn_days: d });
+        setNotice(`Low-runway threshold set to ${d} days.`);
+      }
+      load();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleArchive = async (batchId: number) => {
     setBusy(true);
     setError('');
@@ -305,6 +339,39 @@ export default function LpgSitePage() {
               </div>
             </div>
           </div>
+
+          {/* Low-runway threshold setting */}
+          {canEdit && (
+            <div className="bg-white rounded-xl shadow-sm border p-4 mb-6 flex flex-wrap items-end gap-3">
+              <div>
+                <label className={labelCls}>Low-runway warning threshold</label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={120}
+                    value={warnDays}
+                    onChange={(e) => setWarnDays(e.target.value)}
+                    placeholder="7"
+                    className="border rounded-lg px-3 py-2 text-sm w-24"
+                  />
+                  <span className="text-sm text-gray-500">days of LPG left</span>
+                </div>
+              </div>
+              <button onClick={() => saveWarnDays(false)} disabled={busy} className="px-3 py-2 bg-gray-800 hover:bg-gray-900 disabled:opacity-50 text-white rounded-lg text-sm font-medium">
+                Save
+              </button>
+              {summary?.lpg_low_runway_warn_days != null && (
+                <button onClick={() => saveWarnDays(true)} disabled={busy} className="px-3 py-2 text-gray-500 hover:text-gray-700 text-sm">
+                  Reset to default (7)
+                </button>
+              )}
+              <span className="text-xs text-gray-400 ml-auto">
+                Effective: {summary?.low_runway_warn_days ?? 7} days
+                {summary?.lpg_low_runway_warn_days == null ? ' (default)' : ' (custom)'}
+              </span>
+            </div>
+          )}
 
           {/* Action panels */}
           {canEdit && (

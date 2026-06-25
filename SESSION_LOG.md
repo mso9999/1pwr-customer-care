@@ -56,10 +56,27 @@ Design decisions (user-confirmed via question form 2026-06-24):
 - Frontend: "Days left" column on the overview (color-coded), a runway card on the site page,
   and runway surfaced in the run-stop notice.
 
+### Follow-ups shipped same session: per-site threshold + daily runway sweep
+- Migration `047_lpg_per_site_runway_threshold.sql` adds `sites.lpg_low_runway_warn_days`
+  (NULL = default 7). Used by both site_summaries (runway_status) and stop_run, and the sweep.
+  Editable on the site page (PATCH `/api/lpg/sites/{code}/settings`, write role).
+- `scripts/ops/lpg_runway_sweep.py` — standalone daily sweep (loads /opt/1pdb/.env, connects
+  DATABASE_URL directly like fix_mak_drift.py). Recomputes runway for every tracked site and
+  fires low-runway/critical alerts (deduped via the *_alert_sent_at columns), catching sites
+  that sit low without new run-stop events. `--dry-run` supported. One run covers all
+  countries (LPG consolidated in onepower_cc; alerts routed per site country).
+- systemd units `scripts/ops/cc-lpg-runway-sweep.{service,timer}` (daily 07:15 UTC). These
+  live in the repo but are NOT auto-deployed — install on the host via SSH (scp to
+  /etc/systemd/system, daemon-reload, enable --now), same as the other cc-*.timer monitors.
+
+### Host install steps for the sweep timer (run after the deploy lands the .py)
+  scp -i EOver.pem scripts/ops/cc-lpg-runway-sweep.{service,timer} ubuntu@cc...:/tmp/
+  sudo mv /tmp/cc-lpg-runway-sweep.* /etc/systemd/system/ && sudo systemctl daemon-reload
+  sudo systemctl enable --now cc-lpg-runway-sweep.timer
+  # smoke: sudo -u cc_api .../venv/bin/python3 .../scripts/ops/lpg_runway_sweep.py --dry-run
+
 ### What next session should know
-- Open follow-ups if requested: per-genset analytics (note: team chose one genset/site, so
-  low priority), making LOW_RUNWAY_WARN_DAYS configurable per site, and a daily scheduled
-  runway sweep (current alert only re-evaluates on run-stop events).
+- Open follow-ups if requested: per-genset analytics (team chose one genset/site, low priority).
 
 ---
 

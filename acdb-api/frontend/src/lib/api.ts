@@ -3827,6 +3827,8 @@ export interface LpgSiteSummary {
   cylinders_per_day: number;
   days_remaining: number | null;
   runway_status: 'ok' | 'warn' | 'critical';
+  low_runway_warn_days: number;
+  lpg_low_runway_warn_days: number | null;
 }
 
 export interface LpgBatch {
@@ -3966,6 +3968,16 @@ export async function listLpgRuns(code: string, limit = 100, offset = 0): Promis
 
 export async function getLpgLiveSoc(code: string): Promise<{ site_code: string; soc_pct: number | null; ts_utc: string | null }> {
   return requestLpg(`/lpg/sites/${encodeURIComponent(code)}/live-soc`);
+}
+
+export async function updateLpgSiteSettings(
+  code: string,
+  body: { low_runway_warn_days?: number; clear?: boolean },
+): Promise<{ site: { code: string; display_name: string; lpg_low_runway_warn_days: number | null } }> {
+  return requestLpg(`/lpg/sites/${encodeURIComponent(code)}/settings`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
 }
 
 export async function getLpgReport(country?: string, days = 30): Promise<{

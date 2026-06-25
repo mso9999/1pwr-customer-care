@@ -202,6 +202,34 @@ def get_lpg_site(
     }
 
 
+class SiteSettingsRequest(BaseModel):
+    low_runway_warn_days: Optional[int] = Field(
+        None, ge=1, le=120,
+        description="Per-site low-runway warn threshold (days). Null clears the override (uses default 7).",
+    )
+    clear: bool = Field(False, description="If true, clear the per-site override (use module default).")
+
+
+@router.patch("/sites/{code}/settings")
+def update_site_settings(
+    code: str,
+    req: SiteSettingsRequest,
+    user: CurrentUser = Depends(require_employee),
+) -> Dict[str, Any]:
+    _require_write_role(user)
+    _site_or_404(code)
+    days = None if req.clear else req.low_runway_warn_days
+    updated = store.set_low_runway_warn_days(code, days)
+    if not updated:
+        raise HTTPException(status_code=404, detail=f"Site '{code}' not found.")
+    _try_log_mutation(
+        user, "update", "sites", code.upper(),
+        new_values={"lpg_low_runway_warn_days": updated.get("lpg_low_runway_warn_days")},
+        metadata={"kind": "lpg_site_settings"},
+    )
+    return {"site": updated}
+
+
 # ---------------------------------------------------------------------------
 # Batches (stock capture)
 # ---------------------------------------------------------------------------
