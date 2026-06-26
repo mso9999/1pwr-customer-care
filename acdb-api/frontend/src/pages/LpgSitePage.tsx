@@ -50,6 +50,19 @@ function num(v: string): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+function fuelEconomy(run: { cylinders_consumed: number; runtime_seconds: number | null; total_kwh: number | null }): {
+  kg_per_hour: number | null;
+  kg_per_kwh: number | null;
+} {
+  const kg = run.cylinders_consumed * 48;
+  const hrs = (run.runtime_seconds ?? 0) / 3600;
+  return {
+    kg_per_hour: hrs > 0 && run.cylinders_consumed > 0 ? +(kg / hrs).toFixed(1) : null,
+    kg_per_kwh: run.total_kwh != null && run.total_kwh > 0 && run.cylinders_consumed > 0
+      ? +(kg / run.total_kwh).toFixed(3) : null,
+  };
+}
+
 export default function LpgSitePage() {
   const { code = '' } = useParams();
   const { user } = useAuth();
@@ -208,6 +221,11 @@ export default function LpgSitePage() {
       let msg = `Run stopped (${fmtDuration(r.run.runtime_seconds)}).`;
       if (eDepleted) msg += ` ${r.site_remaining} cylinder(s) remaining at site.`;
       if (r.days_remaining != null) msg += ` ~${r.days_remaining} day(s) of LPG left at current burn rate.`;
+      if (r.total_kwh != null) {
+        msg += ` ⚡ ${r.total_kwh.toFixed(1)} kWh generated.`;
+        if (r.kg_per_kwh != null) msg += ` ${r.kg_per_kwh} kg/kWh (fuel economy).`;
+        if (r.kg_per_hour != null) msg += ` ${r.kg_per_hour} kg/hr burn rate.`;
+      }
       if (r.critical_triggered) msg += ' ⚠️ Site is now CRITICAL — alert sent to O&M.';
       else if (r.low_runway_triggered) msg += ' ⚠️ Low runway — alert sent to O&M.';
       setNotice(msg);
@@ -370,6 +388,18 @@ export default function LpgSitePage() {
                 Effective: {summary?.low_runway_warn_days ?? 7} days
                 {summary?.lpg_low_runway_warn_days == null ? ' (default)' : ' (custom)'}
               </span>
+            </div>
+          )}
+
+          {/* First-time onboarding: no deliveries recorded yet */}
+          {!loading && batches.length === 0 && (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 mb-6">
+              <h2 className="font-semibold text-blue-800 mb-2">👋 This site isn't tracking LPG yet</h2>
+              <ol className="text-sm text-blue-700 space-y-1 list-decimal list-inside">
+                <li>Record your first LPG delivery below — this creates a batch and enrolls the site in tracking.</li>
+                <li>Once stock exists, you can start and stop generator runs to log consumption.</li>
+                <li>The overview table on the LPG page will then include this site with runway and cost data.</li>
+              </ol>
             </div>
           )}
 
@@ -542,12 +572,14 @@ export default function LpgSitePage() {
                   <th className="px-4 py-3">Reason</th>
                   <th className="px-4 py-3">Operator</th>
                   <th className="px-4 py-3 text-right">Depleted</th>
+                  <th className="px-4 py-3 text-right">kg/hr</th>
+                  <th className="px-4 py-3 text-right">kg/kWh</th>
                   <th className="px-4 py-3">Batch</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {runs.length === 0 && (
-                  <tr><td colSpan={8} className="px-4 py-6 text-center text-gray-400">No runs logged yet.</td></tr>
+                  <tr><td colSpan={10} className="px-4 py-6 text-center text-gray-400">No runs logged yet.</td></tr>
                 )}
                 {runs.map((r) => (
                   <tr key={r.id} className={`hover:bg-gray-50 ${r.status === 'running' ? 'bg-green-50' : ''}`}>
@@ -560,6 +592,12 @@ export default function LpgSitePage() {
                     <td className="px-4 py-3 text-gray-600">{r.stop_reason || r.start_reason || '—'}</td>
                     <td className="px-4 py-3 text-gray-600">{r.stop_operator || r.start_operator || '—'}</td>
                     <td className="px-4 py-3 text-right">{r.lpg_depleted ? `${r.cylinders_consumed} ⛽` : '—'}</td>
+                    <td className="px-4 py-3 text-right text-gray-600">
+                      {(() => { const fe = fuelEconomy(r); return fe.kg_per_hour != null ? fe.kg_per_hour : '—'; })()}
+                    </td>
+                    <td className="px-4 py-3 text-right text-gray-600">
+                      {(() => { const fe = fuelEconomy(r); return fe.kg_per_kwh != null ? fe.kg_per_kwh : '—'; })()}
+                    </td>
                     <td className="px-4 py-3 font-mono text-xs text-gray-500">{r.batch_number || '—'}</td>
                   </tr>
                 ))}

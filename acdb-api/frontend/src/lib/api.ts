@@ -3868,6 +3868,7 @@ export interface LpgRun {
   lpg_depleted: boolean;
   cylinders_consumed: number;
   runtime_seconds: number | null;
+  total_kwh: number | null;
 }
 
 export interface LpgReportRow {
@@ -3887,6 +3888,18 @@ export interface LpgReportRow {
 export async function listLpgSites(country?: string): Promise<{ sites: LpgSiteSummary[]; count: number; critical_count: number }> {
   const qs = country ? `?country=${encodeURIComponent(country)}` : '';
   return requestLpg(`/lpg/sites${qs}`);
+}
+
+export interface AvailableLpgSite {
+  code: string;
+  display_name: string;
+  country: string;
+  district?: string | null;
+}
+
+export async function listAvailableLpgSites(country?: string): Promise<{ sites: AvailableLpgSite[]; count: number }> {
+  const qs = country ? `?country=${encodeURIComponent(country)}` : '';
+  return requestLpg(`/lpg/sites/available${qs}`);
 }
 
 export async function getLpgSite(code: string): Promise<{
@@ -3955,6 +3968,10 @@ export async function stopLpgRun(runId: number, body: StopLpgRunRequest): Promis
   low_runway_triggered: boolean;
   alert_sent: boolean;
   low_runway_alert_sent: boolean;
+  total_kwh: number | null;
+  kg_per_hour: number | null;
+  kg_per_kwh: number | null;
+  kwh_per_cylinder: number | null;
 }> {
   return requestLpg(`/lpg/runs/${runId}/stop`, {
     method: 'POST',

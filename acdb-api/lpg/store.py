@@ -187,6 +187,29 @@ def get_run(run_id: int) -> Optional[Dict[str, Any]]:
     return dict(row) if row else None
 
 
+def _run_total_kwh(cur, site_code: str, started_at: datetime, ended_at: datetime) -> Optional[float]:
+    """Sum avg_genset_kw over the hourly metrics that overlap the run window.
+    Returns None when no telemetry rows exist for the site/window."""
+    cur.execute(
+        """
+        SELECT COALESCE(SUM(avg_genset_kw), 0) AS total_kwh
+        FROM gensite_hourly_metrics
+        WHERE site_code = %s
+          AND hour_utc >= %s
+          AND hour_utc <  %s
+        """,
+        (site_code.upper(), started_at, ended_at),
+    )
+    row = cur.fetchone()
+    if row is None:
+        return None
+    val = row["total_kwh"] if isinstance(row, dict) else row[0]
+    if val is None:
+        return None
+    f = float(val)
+    return f if f > 0 else None
+
+
 def stop_run(
     run_id: int,
     *,
@@ -236,6 +259,11 @@ def stop_run(
             if isinstance(started_at, datetime):
                 runtime_seconds = max(0, int((ended_at - started_at).total_seconds()))
 
+            # Fuel economy: total kWh from gensite hourly metrics over the run window.
+            total_kwh: Optional[float] = None
+            if isinstance(started_at, datetime) and runtime_seconds is not None and runtime_seconds > 0:
+                total_kwh = _run_total_kwh(cur, run["site_code"], started_at, ended_at)
+
             cur.execute(
                 """
                 UPDATE lpg_generator_runs SET
@@ -247,13 +275,15 @@ def stop_run(
                     stop_instructor = %s,
                     lpg_depleted = %s,
                     cylinders_consumed = %s,
-                    runtime_seconds = %s
+                    runtime_seconds = %s,
+                    total_kwh = %s
                 WHERE id = %s
                 RETURNING *
                 """,
                 (
                     ended_at, stop_soc_pct, stop_reason, stop_operator,
-                    stop_instructor, lpg_depleted, consumed, runtime_seconds, run_id,
+                    stop_instructor, lpg_depleted, consumed, runtime_seconds,
+                    total_kwh, run_id,
                 ),
             )
             updated_run = dict(cur.fetchone())
@@ -323,6 +353,19 @@ def stop_run(
                     low_runway_triggered = True
                     result["low_runway_batch_id"] = nb
             result["low_runway_triggered"] = low_runway_triggered
+
+            # Fuel economy metrics (cylinder = 48 kg nominal)
+            result["total_kwh"] = total_kwh
+            if total_kwh is not None and runtime_seconds is not None and runtime_seconds > 0:
+                kg_consumed = consumed * 48.0
+                runtime_hours = runtime_seconds / 3600.0
+                result["kg_per_hour"] = round(kg_consumed / runtime_hours, 2)
+                result["kg_per_kwh"] = round(kg_consumed / total_kwh, 3) if total_kwh > 0 else None
+                result["kwh_per_cylinder"] = round(total_kwh / consumed, 1) if consumed > 0 else None
+            else:
+                result["kg_per_hour"] = None
+                result["kg_per_kwh"] = None
+                result["kwh_per_cylinder"] = None
         conn.commit()
     return result
 
@@ -549,6 +592,26 @@ def site_summaries(country: Optional[str] = None) -> List[Dict[str, Any]]:
         else:
             r["runway_status"] = "ok"
     return rows
+
+
+def available_sites(country: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Sites that exist in the ``sites`` table but have no LPG batches yet
+    (i.e. not yet enrolled in LPG tracking)."""
+    with _conn() as conn:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT s.code, s.display_name, s.country, s.district
+                FROM sites s
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM lpg_batches b WHERE b.site_code = s.code
+                )
+                AND (%(country)s IS NULL OR s.country = %(country)s)
+                ORDER BY s.code
+                """,
+                {"country": country.upper() if country else None},
+            )
+            return [dict(r) for r in cur.fetchall()]
 
 
 def live_battery_soc(site_code: str) -> Dict[str, Any]:

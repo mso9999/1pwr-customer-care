@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 import { useCountry } from '../contexts/CountryContext';
-import { listLpgSites, downloadLpgReport, type LpgSiteSummary } from '../lib/api';
+import { listLpgSites, listAvailableLpgSites, downloadLpgReport, type LpgSiteSummary, type AvailableLpgSite } from '../lib/api';
 
 function fmtTs(ts: string | null | undefined): string {
   if (!ts) return '—';
@@ -28,12 +29,20 @@ function runwayBadge(status: 'ok' | 'warn' | 'critical', days: number | null) {
 
 export default function LpgPage() {
   const { country } = useCountry();
+  const { user } = useAuth();
+  const navigate = useNavigate();
+  const canEdit = user?.role === 'superadmin' || user?.role === 'onm_team';
   const [sites, setSites] = useState<LpgSiteSummary[]>([]);
   const [criticalCount, setCriticalCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [days, setDays] = useState(30);
   const [exporting, setExporting] = useState(false);
+
+  // "Add site" dropdown
+  const [availableSites, setAvailableSites] = useState<AvailableLpgSite[]>([]);
+  const [availableLoading, setAvailableLoading] = useState(false);
+  const [selectedSite, setSelectedSite] = useState('');
 
   const countryFilter = country && country !== 'ALL' ? country : undefined;
 
@@ -63,6 +72,23 @@ export default function LpgPage() {
     } finally {
       setExporting(false);
     }
+  };
+
+  const loadAvailable = useCallback(async () => {
+    setAvailableLoading(true);
+    try {
+      const r = await listAvailableLpgSites(countryFilter);
+      setAvailableSites(r.sites);
+    } catch {
+      // Silently ignore — dropdown just stays empty.
+    } finally {
+      setAvailableLoading(false);
+    }
+  }, [countryFilter]);
+
+  const goToSite = () => {
+    if (!selectedSite) return;
+    navigate(`/lpg/${encodeURIComponent(selectedSite)}`);
   };
 
   return (
@@ -109,6 +135,39 @@ export default function LpgPage() {
           <div className="text-2xl font-semibold mt-1">{totalKg.toLocaleString(undefined, { maximumFractionDigits: 0 })} kg</div>
         </div>
       </div>
+
+      {/* Add site to LPG tracking (onm_team / superadmin only) */}
+      {canEdit && (
+        <div className="bg-white rounded-xl shadow-sm border p-4 mb-6 flex flex-wrap items-end gap-3">
+          <div className="flex-1 min-w-[200px]">
+            <label className="block text-xs font-medium text-gray-600 mb-1">Add a site to LPG tracking</label>
+            <select
+              value={selectedSite}
+              onFocus={() => { if (availableSites.length === 0) loadAvailable(); }}
+              onChange={(e) => setSelectedSite(e.target.value)}
+              className="border rounded-lg px-3 py-2 text-sm w-full"
+            >
+              <option value="">— select a site —</option>
+              {availableSites.map((s) => (
+                <option key={s.code} value={s.code}>
+                  {s.code.toUpperCase()} — {s.display_name} ({s.country})
+                </option>
+              ))}
+            </select>
+            {availableLoading && <span className="text-xs text-gray-400 mt-1">Loading sites…</span>}
+            {!availableLoading && availableSites.length === 0 && selectedSite === '' && (
+              <span className="text-xs text-gray-400 mt-1">All sites are already enrolled in LPG tracking.</span>
+            )}
+          </div>
+          <button
+            onClick={goToSite}
+            disabled={!selectedSite}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium"
+          >
+            Open site
+          </button>
+        </div>
+      )}
 
       {loading && <p className="text-sm text-gray-500">Loading…</p>}
       {error && <p className="text-sm text-red-600 mb-3">{error}</p>}

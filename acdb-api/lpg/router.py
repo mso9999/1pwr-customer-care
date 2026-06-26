@@ -186,6 +186,17 @@ def list_lpg_sites(
     }
 
 
+@router.get("/sites/available")
+def list_available_sites(
+    country: Optional[str] = None,
+    user: CurrentUser = Depends(require_employee),
+) -> Dict[str, Any]:
+    """Sites not yet enrolled in LPG tracking (no batches recorded)."""
+    _seed_sites_best_effort()
+    rows = store.available_sites(country=country)
+    return {"sites": rows, "count": len(rows)}
+
+
 @router.get("/sites/{code}")
 def get_lpg_site(
     code: str,
