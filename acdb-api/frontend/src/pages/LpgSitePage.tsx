@@ -391,8 +391,17 @@ export default function LpgSitePage() {
             </div>
           )}
 
-          {/* First-time onboarding: no deliveries recorded yet */}
-          {!loading && batches.length === 0 && (
+          {/* Read-only notice: explain why capture forms are absent for non-writers */}
+          {!canEdit && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 text-sm text-amber-800">
+              You're viewing LPG data in <strong>read-only</strong> mode. Recording deliveries
+              and logging generator runs requires the <strong>onm_team</strong> or{' '}
+              <strong>superadmin</strong> role — ask an administrator to update your account role.
+            </div>
+          )}
+
+          {/* First-time onboarding (writers only): no deliveries recorded yet */}
+          {!loading && canEdit && batches.length === 0 && (
             <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 mb-6">
               <h2 className="font-semibold text-blue-800 mb-2">👋 This site isn't tracking LPG yet</h2>
               <ol className="text-sm text-blue-700 space-y-1 list-decimal list-inside">

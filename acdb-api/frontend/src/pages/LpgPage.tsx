@@ -136,38 +136,44 @@ export default function LpgPage() {
         </div>
       </div>
 
-      {/* Add site to LPG tracking (onm_team / superadmin only) */}
-      {canEdit && (
-        <div className="bg-white rounded-xl shadow-sm border p-4 mb-6 flex flex-wrap items-end gap-3">
-          <div className="flex-1 min-w-[200px]">
-            <label className="block text-xs font-medium text-gray-600 mb-1">Add a site to LPG tracking</label>
-            <select
-              value={selectedSite}
-              onFocus={() => { if (availableSites.length === 0) loadAvailable(); }}
-              onChange={(e) => setSelectedSite(e.target.value)}
-              className="border rounded-lg px-3 py-2 text-sm w-full"
-            >
-              <option value="">— select a site —</option>
-              {availableSites.map((s) => (
-                <option key={s.code} value={s.code}>
-                  {s.code.toUpperCase()} — {s.display_name} ({s.country})
-                </option>
-              ))}
-            </select>
-            {availableLoading && <span className="text-xs text-gray-400 mt-1">Loading sites…</span>}
-            {!availableLoading && availableSites.length === 0 && selectedSite === '' && (
-              <span className="text-xs text-gray-400 mt-1">All sites are already enrolled in LPG tracking.</span>
-            )}
-          </div>
-          <button
-            onClick={goToSite}
-            disabled={!selectedSite}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium"
+      {/* Open any site's LPG page. Navigation only — reads are open to all
+          employees, so this is shown regardless of write permission. Sites
+          already tracking LPG appear (with links) in the table below; this
+          picker covers sites not yet enrolled. */}
+      <div className="bg-white rounded-xl shadow-sm border p-4 mb-6 flex flex-wrap items-end gap-3">
+        <div className="flex-1 min-w-[200px]">
+          <label className="block text-xs font-medium text-gray-600 mb-1">
+            {canEdit ? 'Open / add a site to LPG tracking' : 'Open a site'}
+          </label>
+          <select
+            value={selectedSite}
+            onFocus={() => { if (availableSites.length === 0) loadAvailable(); }}
+            onChange={(e) => setSelectedSite(e.target.value)}
+            className="border rounded-lg px-3 py-2 text-sm w-full"
           >
-            Open site
-          </button>
+            <option value="">— select a site not yet tracking —</option>
+            {availableSites.map((s) => (
+              <option key={s.code} value={s.code}>
+                {s.code.toUpperCase()} — {s.display_name} ({s.country})
+              </option>
+            ))}
+          </select>
+          {availableLoading && <span className="text-xs text-gray-400 mt-1">Loading sites…</span>}
+          {!availableLoading && availableSites.length === 0 && selectedSite === '' && (
+            <span className="text-xs text-gray-400 mt-1">All sites are already tracking LPG — use the table below.</span>
+          )}
+          {!availableLoading && availableSites.length > 0 && (
+            <span className="text-xs text-gray-400 mt-1">Sites already tracking LPG are listed (with links) in the table below.</span>
+          )}
         </div>
-      )}
+        <button
+          onClick={goToSite}
+          disabled={!selectedSite}
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium"
+        >
+          Open site →
+        </button>
+      </div>
 
       {loading && <p className="text-sm text-gray-500">Loading…</p>}
       {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
