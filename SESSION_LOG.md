@@ -1,3 +1,52 @@
+## Session 2026-06-26 [202606260907] (Benin SM-credit "deferred" — RCA + cure + prevention)
+
+### Report
+Comfort (BN): refund/payment recorded in CC but not reflected in SparkMeter; portal
+showed "Échec du crédit SM (deferred)" for 0190GBO (txn #108521, 500 XOF).
+
+### RCA (two stacked causes)
+1. **Not commissioned in CC.** CC's SM-credit eligibility guard
+   (`sm_credit_retry._account_credit_eligibility`) refuses to push a credit unless the
+   account is `customer_commissioned=TRUE` AND `date_service_connected` is set. 6 BN
+   accounts were live + consuming on Koios (meters online, 600-700 readings/30d) but
+   `customer_commissioned=false` in onepower_bj, so every payment was deferred and parked
+   in `sm_credit_retry_queue` as `failed: blocked_uncommissioned:customer_not_commissioned`.
+   4,500 XOF stuck (0026/0030SAM/0055SAM/0157/0190/0201). 0190GBO also had NO CC meter row
+   (its Koios meter SMRSD-04-00034DE6 was parked on a leftover test account "test 9").
+2. **Queue never self-drains.** Blocked rows only reopen inside `process_due_sm_credit_retries`,
+   which BN ran only opportunistically after a (rare) successful credit. The only BN credit
+   timer (`cc-sm-credit-mirror`) is the Koios->CC import mirror, not the CC->Koios push.
+
+### Cure applied (host, onepower_bj)
+- Commissioned all 6 (customer_commissioned=TRUE; commissioned/connected date = each
+  account's earliest hourly reading — truthful, not fabricated).
+- Re-pointed meter id 1345 (SMRSD-04-00034DE6) from test account "test 9" -> 0190GBO.
+- Drained the retry queue: **6/7 credited on Koios** (0190GBO now 997 XOF, was 0). 0083GBO
+  idempotent-done. **0030SAM still fails: Koios-side `400 Invalid request data`** (customer
+  exists w/ balance 984 + valid meter/tariff; same write key+payload credits 0055SAM fine) —
+  needs manual Koios credit / SparkMeter support. Left `retrying` (visible) in the queue.
+
+### GOTCHA (cost me a wrong turn): /opt/1pdb-bn/.env line 11
+`KOIOS_API_SECRET=aK4kSG#1IR)@q7Yg@i1IeOIuswGm4@lt` is UNQUOTED -> bash `set -a; . file`
+dies on the `)` and DOES NOT load the KOIOS_* keys, so any manual run that sources the env
+gets `Authentication Error (HTTP 401) Missing API key`. systemd EnvironmentFile parses it
+literally (fine), so production is unaffected. **Always load BN env literally in Python**
+(see process_sm_credit_retries `_load_env_file_literal`), never `source` it. Consider
+single-quoting that secret in the env file to remove the foot-gun.
+
+### Prevention shipped (CC repo, this commit)
+- `acdb-api/scripts/ops/process_sm_credit_retries.py` — scheduled retry-queue drain + (when
+  COUNTRY_CODE=BN) a self-heal that commissions any live-consuming GBO/SAM account whose
+  customer_commissioned=false (date_service_connected = earliest reading), then drains.
+  Idempotent. (The real BN importer lives in the **1PDB repo** at /opt/1pdb-bn/, not here,
+  so the self-heal is CC-side; upstreaming into import_benin_hourly.py is a nice-to-have.)
+- systemd `scripts/ops/cc-sm-credit-retry-bn.{service,timer}` (twice hourly, EnvironmentFile
+  =/opt/1pdb-bn/.env). NOT auto-deployed — install on host via SSH like the other cc-*.timer.
+- LS has the same drain gap (lower impact due to volume); a `cc-sm-credit-retry-ls` timer
+  using /opt/1pdb/.env is a trivial follow-up if wanted.
+
+---
+
 ## Session 2026-06-23 [202606230728] (LPG generator-fuel tracking — new module built; NOT yet deployed)
 
 ### What was done

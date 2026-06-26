@@ -1,0 +1,11 @@
+[Unit]
+Description=Periodic drain of the Benin CC->SparkMeter credit retry queue
+
+[Timer]
+# Twice an hour, offset from :00/:30 to avoid clustering with other CC monitors.
+OnCalendar=*:08/30
+RandomizedDelaySec=120
+Persistent=true
+
+[Install]
+WantedBy=timers.target

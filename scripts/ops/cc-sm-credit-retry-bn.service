@@ -1,0 +1,19 @@
+[Unit]
+Description=Drain the Benin CC->SparkMeter credit retry queue (+ self-heal commissioning)
+Documentation=file:///opt/cc-portal/backend/scripts/ops/process_sm_credit_retries.py
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# cc_api reads /opt/1pdb-bn/.env (DATABASE_URL=onepower_bj, COUNTRY_CODE=BN, and
+# the BN Koios write keys). systemd parses EnvironmentFile literally, so secrets
+# containing '#' / ')' / '@' are loaded correctly (unlike bash `source`).
+User=cc_api
+Group=cc_api
+EnvironmentFile=/opt/1pdb-bn/.env
+WorkingDirectory=/opt/cc-portal/backend
+ExecStart=/opt/cc-portal/backend/venv/bin/python3 /opt/cc-portal/backend/scripts/ops/process_sm_credit_retries.py --limit 100
+StandardOutput=journal
+StandardError=journal
+Nice=10
