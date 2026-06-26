@@ -137,16 +137,19 @@ def init_auth_db():
             )
             logger.info("Seeded superadmin role for employee 00 (Matt Orosz)")
 
-        # Bokang Leqele (1PWR138F) — engineering/R&D, not in the PR system so the
-        # department auto-map can't reach him; grant the engineering role directly.
-        if not conn.execute(
-            "SELECT 1 FROM cc_employee_roles WHERE employee_id = '1PWR138F'"
-        ).fetchone():
-            conn.execute(
-                """INSERT INTO cc_employee_roles (employee_id, cc_role, assigned_by, assigned_at)
-                   VALUES ('1PWR138F', 'engineering', 'system', datetime('now'))"""
-            )
-            logger.info("Seeded engineering role for employee 1PWR138F (Bokang Leqele)")
+        # Engineering/R&D direct grants (provisioning access). Bokang Leqele
+        # (1PWR138F) is not in PR; Motlatsi Manka (1PWR87) is pinned explicitly
+        # too so access doesn't depend on the PR email/department auto-map.
+        for emp_id, who in (("1PWR138F", "Bokang Leqele"), ("1PWR87", "Motlatsi Manka")):
+            if not conn.execute(
+                "SELECT 1 FROM cc_employee_roles WHERE employee_id = ?", (emp_id,)
+            ).fetchone():
+                conn.execute(
+                    """INSERT INTO cc_employee_roles (employee_id, cc_role, assigned_by, assigned_at)
+                       VALUES (?, 'engineering', 'system', datetime('now'))""",
+                    (emp_id,),
+                )
+                logger.info("Seeded engineering role for employee %s (%s)", emp_id, who)
 
         _seed_department_mappings(conn)
         _ensure_role_dept_mappings(conn)
