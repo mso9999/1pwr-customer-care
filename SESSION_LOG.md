@@ -42,6 +42,15 @@ single-quoting that secret in the env file to remove the foot-gun.
   so the self-heal is CC-side; upstreaming into import_benin_hourly.py is a nice-to-have.)
 - systemd `scripts/ops/cc-sm-credit-retry-bn.{service,timer}` (twice hourly, EnvironmentFile
   =/opt/1pdb-bn/.env). NOT auto-deployed — install on host via SSH like the other cc-*.timer.
+  INSTALLED + enabled on host 2026-06-26 (next run twice hourly at :08/:38).
+
+### Magnitude (bigger than the one report)
+First timer run self-healed **164** live-consuming BN accounts that were uncommissioned in CC
+(not just the 6 with queued credits). Post-run onepower_bj: 170 commissioned / 21 not (the 21
+have no consumption in 45d). Every one of the 164 would otherwise have had future payments
+deferred. Data-hygiene aside: account_numbers "GBO" (no number) and "2143GBO" exist with
+~7,600 readings each — real live meters, malformed codes; worth a separate cleanup.
+Net: 3,800 XOF delivered (6 accts); 0030SAM 1,000 XOF still blocked by Koios 400.
 - LS has the same drain gap (lower impact due to volume); a `cc-sm-credit-retry-ls` timer
   using /opt/1pdb/.env is a trivial follow-up if wanted.
 
