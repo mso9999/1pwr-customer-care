@@ -117,7 +117,10 @@
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <h3 style="margin:0">Provisioned meters &amp; locational assignment</h3>
-          <button class="ghost" onclick="loadProvisioned()">Refresh</button>
+          <div style="display:flex;gap:8px">
+            <button class="ghost" onclick="reconcile()" title="Bind online gateways to their acquired meter serial (from telemetry)">Reconcile from telemetry</button>
+            <button class="ghost" onclick="loadProvisioned()">Refresh</button>
+          </div>
         </div>
         <table style="margin-top:10px"><thead><tr>
           <th>Thing</th><th>Serial</th><th>Site</th><th>Account</th><th>Village</th>
@@ -274,6 +277,14 @@ function downloadCsv(){
   const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download='provisioned-gateways.csv'; a.click();
 }
 
+async function reconcile(){
+  clearError();
+  try{
+    const r = await api('/api/reconcile','POST',{});
+    alert(`Reconcile complete: matched ${r.matched_things} online things, updated ${r.rows_updated} rows.`);
+    loadProvisioned();
+  }catch(e){ showError(e.message); }
+}
 async function loadProvisioned(){
   try{
     const r = await api('/api/provisioned');

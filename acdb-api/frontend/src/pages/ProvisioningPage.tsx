@@ -5,6 +5,7 @@ import {
   rotateMeterIdentity,
   getProvisioningRegistry,
   getProvisionedMeters,
+  reconcileProvisioning,
   downloadProvisioningStation,
   type ProvisioningSiteCode,
   type ProvisionResult,
@@ -86,6 +87,22 @@ export default function ProvisioningPage() {
       .then((r) => setMeters(r.meters))
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setMetersLoading(false));
+  };
+
+  const [reconciling, setReconciling] = useState(false);
+  const handleReconcile = async () => {
+    setError('');
+    setReconciling(true);
+    try {
+      const r = await reconcileProvisioning();
+      setError('');
+      alert(`Reconcile complete: matched ${r.matched_things} online things, updated ${r.rows_updated} rows.`);
+      loadMeters();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setReconciling(false);
+    }
   };
 
   useEffect(() => {
@@ -253,9 +270,16 @@ export default function ProvisioningPage() {
             <span className="text-sm font-medium text-gray-700">
               Provisioned meters &amp; locational assignment {meters.length ? `(${meters.length})` : ''}
             </span>
-            <button onClick={loadMeters} className="text-xs text-blue-600 hover:underline">
-              {metersLoading ? 'Loading…' : 'Refresh'}
-            </button>
+            <div className="flex items-center gap-3">
+              <button onClick={handleReconcile} disabled={reconciling}
+                className="text-xs px-3 py-1.5 bg-gray-100 rounded-md hover:bg-gray-200 disabled:opacity-50"
+                title="Bind online gateways to their acquired meter serial (from telemetry)">
+                {reconciling ? 'Reconciling…' : 'Reconcile from telemetry'}
+              </button>
+              <button onClick={loadMeters} className="text-xs text-blue-600 hover:underline">
+                {metersLoading ? 'Loading…' : 'Refresh'}
+              </button>
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

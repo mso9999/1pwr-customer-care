@@ -3779,6 +3779,10 @@ export async function getProvisionedMeters(site?: string): Promise<{ count: numb
   return request<{ count: number; meters: ProvisionedMeter[] }>(`/provisioning/meters${qs}`);
 }
 
+export async function reconcileProvisioning(): Promise<{ matched_things: number; rows_updated: number }> {
+  return request<{ matched_things: number; rows_updated: number }>('/provisioning/reconcile', { method: 'POST' });
+}
+
 /** Download the provisioning-station local app (zip) with the auth token. */
 export async function downloadProvisioningStation(): Promise<void> {
   const token = getToken();

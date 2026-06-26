@@ -318,6 +318,14 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/deliver":
             return self._handle_deliver(body)
 
+        if self.path == "/api/reconcile":
+            if not SESSION.token:
+                return self._send(401, {"error": "not logged in to CC"})
+            try:
+                return self._send(200, cc_request("POST", "/provisioning/reconcile"))
+            except Exception as e:
+                return self._send(502, {"error": str(e)})
+
         return self._send(404, {"error": "not found"})
 
     def _handle_allocate(self, body: dict):
