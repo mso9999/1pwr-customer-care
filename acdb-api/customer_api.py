@@ -17,8 +17,10 @@ Environment variables:
   CC_JWT_SECRET       - JWT signing secret   (default: dev secret)
   CC_JWT_EXPIRY_HOURS - Token lifetime       (default: 8)
   CC_AUTH_DB          - SQLite auth DB path  (default: ./cc_auth.db)
-  HR_PORTAL_URL       - HR portal base URL   (default: http://13.246.55.153)
-  HR_PORTAL_API_KEY   - API key for HR lookup (default: empty)
+  HR_API_BASE_URL       - HR portal base URL (default https://hr.1pwrafrica.com)
+  HR_API_KEY_CC_PORTAL  - CC portal's named HR API key (preferred; legacy
+                          HR_PORTAL_URL / HR_PORTAL_API_KEY still accepted)
+  FIREBASE_SA_PATH      - Firebase service account JSON (portfolio list only)
 """
 
 import os

@@ -12,14 +12,12 @@ Customer identity:
   (XXXNNNN) and normalise to NNNNXXX for storage.
 """
 
-import os
 import re
 import logging
 from datetime import datetime
 from typing import Optional
 
 import bcrypt as _bcrypt
-import requests
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from models import (
@@ -49,38 +47,18 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 # ---------------------------------------------------------------------------
 # HR Portal integration
 # ---------------------------------------------------------------------------
-
-HR_PORTAL_URL = os.environ.get("HR_PORTAL_URL", "https://13.246.55.153")
-HR_PORTAL_API_KEY = os.environ.get("HR_PORTAL_API_KEY", "")
-
+# Employee records + department associations are sourced from the HR portal via
+# hr_directory (canonical). Sign-in validation uses HR /lookup; department is
+# resolved from the HR directory cache. See hr_directory.py for config/env vars.
 
 def lookup_employee(employee_id: str) -> Optional[dict]:
     """
-    Look up an employee in the HR portal by employee_id.
+    Minimal sign-in lookup in the HR portal by employee_id.
     Returns dict with employee_id, name, email, role or None.
     Accepts bare numbers (e.g. "137") -- the HR portal normalises to "1PWR137".
     """
-    if not HR_PORTAL_URL:
-        logger.warning("HR_PORTAL_URL not configured, skipping employee lookup")
-        return None
-
-    url = f"{HR_PORTAL_URL}/api/employees/lookup/{employee_id}"
-    headers = {}
-    if HR_PORTAL_API_KEY:
-        headers["X-API-Key"] = HR_PORTAL_API_KEY
-
-    try:
-        resp = requests.get(url, headers=headers, timeout=5, verify=False)
-        if resp.status_code == 200:
-            return resp.json()
-        elif resp.status_code == 404:
-            return None
-        else:
-            logger.warning("HR portal returned %d for employee %s", resp.status_code, employee_id)
-            return None
-    except requests.RequestException as e:
-        logger.error("HR portal request failed: %s", e)
-        return None
+    from hr_directory import lookup_employee_minimal
+    return lookup_employee_minimal(employee_id)
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +135,7 @@ def employee_login(req: EmployeeLoginRequest):
     name = emp.get("name", req.employee_id)
     email = emp.get("email", "")
 
-    # Cache HR portal email in SQLite for future PR lookups
+    # Cache HR email in SQLite (diagnostic continuity; HR is keyed by employee_id)
     from pr_lookup import (
         get_cc_role_for_email,
         get_cc_role_for_employee_id,
@@ -168,18 +146,18 @@ def employee_login(req: EmployeeLoginRequest):
     if email:
         set_employee_email(req.employee_id, email)
 
-    # Determine CC role: manual SQLite override > PR department auto-map > generic
+    # Determine CC role: manual SQLite override > HR department auto-map > generic
     manual_role = get_employee_role(req.employee_id)
     if manual_role:
         cc_role = manual_role
     else:
         # Try email-based lookup first, then employee_id fallback
-        pr_role = get_cc_role_for_email(email) if email else None
-        if pr_role is None:
-            pr_role = get_cc_role_for_employee_id(req.employee_id)
-        cc_role = pr_role or CCRole.generic.value
+        hr_role = get_cc_role_for_email(email) if email else None
+        if hr_role is None:
+            hr_role = get_cc_role_for_employee_id(req.employee_id)
+        cc_role = hr_role or CCRole.generic.value
 
-    # Readable PR department affiliation (for display/self-diagnosis in CC).
+    # Readable HR department affiliation (for display/self-diagnosis in CC).
     # Shown regardless of whether it maps to a role, so staff can see what HR
     # has them as when their access is wrong.
     department = (get_department_for_email(email) if email else None) \
@@ -459,7 +437,7 @@ def get_me(user: CurrentUser = Depends(get_current_user)):
         "permissions": user.permissions,
     }
 
-    # Employees: re-derive PR department from the cached email/id so it survives
+    # Employees: re-derive HR department from the cached email/id so it survives
     # token refreshes (it isn't stored in the JWT). Best-effort.
     if user.user_type == UserType.employee:
         try:

@@ -18,7 +18,7 @@
   "removeFailed": "Échec du retrait du rôle",
 
   "deptMappingTitle": "Mapping automatique par département",
-  "deptMappingDesc": "Les employés se voient attribuer automatiquement un rôle CC basé sur leur département PR. Gérez les correspondances département-rôle ci-dessous.",
+  "deptMappingDesc": "Les employés se voient attribuer automatiquement un rôle CC basé sur leur département RH. Gérez les correspondances département-rôle ci-dessous.",
   "deptAddMapping": "Ajouter une correspondance",
   "deptKey": "Clé département",
   "deptKeyPlaceholder": "ex : finance, o&m, em",
@@ -31,8 +31,8 @@
   "deptColKey": "Clé département",
   "deptColLabel": "Libellé",
   "deptColRole": "Rôle CC",
-  "deptUnmappedTitle": "Départements PR non mappés",
-  "deptUnmappedDesc": "Ces départements existent dans le système PR mais n'ont pas de rôle CC associé. Cliquez pour pré-remplir le formulaire.",
+  "deptUnmappedTitle": "Départements RH non mappés",
+  "deptUnmappedDesc": "Ces départements existent dans le système RH mais n'ont pas de rôle CC associé. Cliquez pour pré-remplir le formulaire.",
 
   "pinBroadcastTitle": "Diffusion mensuelle du PIN du personnel",
   "pinBroadcastDesc": "Le PIN de connexion employé CC change à 00h00 UTC le 1er de chaque mois. Un timer systemd diffuse automatiquement le nouveau PIN dans le groupe WhatsApp Customer Care ; ce bouton est le déclencheur manuel / re-diffusion.",

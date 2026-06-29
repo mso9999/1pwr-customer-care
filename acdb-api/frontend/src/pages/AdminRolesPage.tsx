@@ -98,7 +98,8 @@ export default function AdminRolesPage() {
 
   const handleSelectPrDept = (dept: PRDepartment) => {
     setNewDeptKey(dept.name.toLowerCase());
-    setNewDeptLabel(`${dept.name} (${dept.org_name || dept.org})`);
+    const org = dept.org_name || dept.org;
+    setNewDeptLabel(org ? `${dept.name} (${org})` : dept.name);
     if (dept.code) {
       setNewDeptKey(dept.code.toLowerCase());
       setNewDeptLabel(`${dept.name} [${dept.code}]`);
@@ -267,9 +268,9 @@ export default function AdminRolesPage() {
                   key={d.id}
                   onClick={() => handleSelectPrDept(d)}
                   className="px-2.5 py-1 bg-white border border-amber-300 rounded text-xs text-amber-900 hover:bg-amber-100 transition"
-                  title={`${d.name} (${d.code || '?'}) — ${d.org_name || d.org}`}
+                  title={d.code ? `${d.name} [${d.code}]` : d.name}
                 >
-                  {d.name} <span className="text-amber-500">· {d.org}</span>
+                  {d.name}{d.org ? <span className="text-amber-500"> · {d.org}</span> : null}
                 </button>
               ))}
             </div>

@@ -18,7 +18,7 @@
   "removeFailed": "Failed to remove role",
 
   "deptMappingTitle": "Department Auto-Mapping",
-  "deptMappingDesc": "Employees are automatically assigned a CC role based on their PR department. Manage the department-to-role mappings below.",
+  "deptMappingDesc": "Employees are automatically assigned a CC role based on their HR department. Manage the department-to-role mappings below.",
   "deptAddMapping": "Add Mapping",
   "deptKey": "Department Key",
   "deptKeyPlaceholder": "e.g. finance, o&m, em",
@@ -31,8 +31,8 @@
   "deptColKey": "Department Key",
   "deptColLabel": "Label",
   "deptColRole": "CC Role",
-  "deptUnmappedTitle": "Unmapped PR Departments",
-  "deptUnmappedDesc": "These departments exist in the PR system but have no CC role mapping. Click one to pre-fill the form.",
+  "deptUnmappedTitle": "Unmapped HR Departments",
+  "deptUnmappedDesc": "These departments exist in the HR system but have no CC role mapping. Click one to pre-fill the form.",
 
   "pinBroadcastTitle": "Monthly Staff PIN Broadcast",
   "pinBroadcastDesc": "The CC employee login PIN rotates at 00:00 UTC on the 1st of every month. A systemd timer broadcasts the new PIN to the Customer Care WhatsApp group automatically; this button is the manual fallback / re-send.",

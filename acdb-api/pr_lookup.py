@@ -1,8 +1,22 @@
 """
-PR System (Firestore) integration for CC portal.
+Employee department affiliation + portfolio/organization lookups for CC.
 
-1. Department lookup for role auto-mapping (email → department → CC role).
-2. Portfolio / organization list sourced from ``referenceData_organizations``.
+Employee + department source (HR):
+    Employee records and their department associations are now sourced from
+    the HR portal (``hr.1pwrafrica.com``) via :mod:`hr_directory`, which is the
+    authoritative system of record. The department string from HR is mapped to
+    a CC role using the CC-side ``cc_department_role_mappings`` table
+    (managed in Admin → Roles). Previously this came from the PR system's
+    Firestore; HR replaced it as canonical on 2026-06-29.
+
+    The public helpers below (``get_cc_role_for_*``, ``get_department_for_*``,
+    ``get_all_pr_departments``, ``reload_department_mappings``) are preserved as
+    thin delegates so callers (auth.py, admin.py) need no changes.
+
+Portfolio / organization list (Firestore):
+    The portfolio/organization reference data still comes from the PR system's
+    Firestore ``referenceData_organizations`` collection — that is reference
+    data about sites/orgs, not employees, and is unaffected by the HR move.
 
 Firebase Admin SDK authenticates via the service-account JSON referenced by
 ``FIREBASE_SA_PATH`` (default: ``firebase-service-account.json`` next to this file).
@@ -15,12 +29,14 @@ from typing import Any, Optional
 
 from fastapi import APIRouter
 
+import hr_directory
+
 logger = logging.getLogger("acdb-api.pr-lookup")
 
 router = APIRouter(prefix="/api/portfolios", tags=["portfolios"])
 
 # ---------------------------------------------------------------------------
-# Firebase initialisation (lazy)
+# Firebase initialisation (lazy) — used only for portfolio/org reference data
 # ---------------------------------------------------------------------------
 
 _firebase_initialised = False
@@ -33,7 +49,8 @@ FIREBASE_SA_PATH = os.environ.get(
 
 
 def _ensure_firebase():
-    """Initialise Firebase Admin SDK once (lazy)."""
+    """Initialise Firebase Admin SDK once (lazy). Only needed for the
+    portfolio/organization list; employee lookups go through HR now."""
     global _firebase_initialised, _firestore_db
 
     if _firebase_initialised:
@@ -43,7 +60,7 @@ def _ensure_firebase():
 
     if not os.path.isfile(FIREBASE_SA_PATH):
         logger.warning(
-            "Firebase service account not found at %s — PR department lookup disabled",
+            "Firebase service account not found at %s — portfolio list disabled",
             FIREBASE_SA_PATH,
         )
         return False
@@ -57,7 +74,7 @@ def _ensure_firebase():
             firebase_admin.initialize_app(cred)
 
         _firestore_db = firestore.client()
-        logger.info("Connected to PR Firestore for department lookup")
+        logger.info("Connected to PR Firestore for portfolio/organization list")
         return True
     except Exception as e:
         logger.error("Failed to initialise Firebase: %s", e)
@@ -65,198 +82,51 @@ def _ensure_firebase():
 
 
 # ---------------------------------------------------------------------------
-# Department → CC Role mapping (DB-backed via cc_department_role_mappings)
+# Department → CC role mapping (delegates to HR directory + CC mapping table)
 # ---------------------------------------------------------------------------
-
-_dept_role_map: dict[str, str] = {}  # populated from SQLite
-
-
-def _reload_dept_role_map():
-    """Refresh the in-memory department→role dict from SQLite."""
-    global _dept_role_map
-    try:
-        from db_auth import get_all_department_mappings_dict
-        _dept_role_map = get_all_department_mappings_dict()
-        logger.debug("Loaded %d department→role mappings from DB", len(_dept_role_map))
-    except Exception as e:
-        logger.error("Failed to load department mappings from DB: %s", e)
-
 
 def reload_department_mappings():
-    """Public helper — call after admin writes a mapping change."""
-    _reload_dept_role_map()
-    _invalidate_user_cache()
-
-
-def _map_department_to_role(department: str) -> Optional[str]:
-    """Map a PR department string to a CCRole value, or None if no mapping."""
-    if not department:
-        return None
-    if not _dept_role_map:
-        _reload_dept_role_map()
-    return _dept_role_map.get(department.lower().strip())
+    """Invalidate HR directory caches after an admin mapping/role edit.
+    Kept under the historical name so admin.py need not change."""
+    hr_directory.reload()
 
 
 # ---------------------------------------------------------------------------
-# Firestore referenceData_departments resolution cache
+# Public employee/department API (delegates to hr_directory)
 # ---------------------------------------------------------------------------
 
-_ref_departments: dict[str, dict] = {}  # doc_id → {name, code, org}
-_ref_depts_loaded = False
+def get_cc_role_for_email(email: str) -> Optional[str]:
+    return hr_directory.get_cc_role_for_email(email)
 
 
-def _load_reference_departments():
-    """Bulk-load referenceData_departments for ID→name resolution."""
-    global _ref_depts_loaded, _ref_departments
-
-    if _ref_depts_loaded:
-        return
-
-    _ref_depts_loaded = True
-
-    if not _ensure_firebase() or _firestore_db is None:
-        return
-
-    try:
-        count = 0
-        for doc in _firestore_db.collection("referenceData_departments").stream():
-            d = doc.to_dict()
-            org_data = d.get("organization")
-            org_id = ""
-            if isinstance(org_data, dict):
-                org_id = org_data.get("id", "")
-            _ref_departments[doc.id] = {
-                "name": d.get("name", ""),
-                "code": d.get("code", ""),
-                "org": org_id,
-                "org_name": org_data.get("name", "") if isinstance(org_data, dict) else "",
-                "active": d.get("active", True),
-            }
-            count += 1
-        logger.info("Loaded %d referenceData_departments from Firestore", count)
-    except Exception as e:
-        logger.error("Failed to load referenceData_departments: %s", e)
+def get_cc_role_for_employee_id(employee_id: str) -> Optional[str]:
+    return hr_directory.get_cc_role_for_employee_id(employee_id)
 
 
-def _resolve_department(raw_department: str) -> list[str]:
-    """Return candidate strings to try against the mapping table.
-
-    For readable departments (e.g. "O&M"), returns [raw].
-    For Firestore doc IDs, resolves via referenceData_departments and
-    returns [name, code] (lowercased) so any of them can match.
-    """
-    if not raw_department:
-        return []
-
-    _load_reference_departments()
-
-    ref = _ref_departments.get(raw_department)
-    if ref:
-        candidates = [raw_department.lower()]
-        if ref["name"]:
-            candidates.append(ref["name"].lower().strip())
-        if ref["code"]:
-            candidates.append(ref["code"].lower().strip())
-        return candidates
-
-    return [raw_department.lower().strip()]
+def get_department_for_email(email: str) -> Optional[str]:
+    return hr_directory.get_department_for_email(email)
 
 
-def _readable_department(raw_department: str) -> str:
-    """Resolve a raw department value (readable label or Firestore doc ID) to a
-    human-readable name. Falls back to the raw value when unresolved."""
-    if not raw_department:
-        return ""
-    _load_reference_departments()
-    ref = _ref_departments.get(raw_department)
-    if ref and ref.get("name"):
-        return ref["name"]
-    return raw_department
+def get_department_for_employee_id(employee_id: str) -> Optional[str]:
+    return hr_directory.get_department_for_employee_id(employee_id)
 
 
 def get_all_pr_departments() -> list[dict]:
-    """Return every referenceData_department for the admin UI."""
-    _load_reference_departments()
-    result = []
-    for doc_id, info in _ref_departments.items():
-        result.append({
-            "id": doc_id,
-            "name": info["name"],
-            "code": info["code"],
-            "org": info["org"],
-            "org_name": info["org_name"],
-            "active": info["active"],
-        })
-    result.sort(key=lambda d: (d["org"], d["name"]))
-    return result
+    """HR departments, shaped for the admin department→role picker UI.
+    Name kept for backward compatibility with admin.py / the frontend."""
+    return hr_directory.get_all_pr_departments()
 
 
 # ---------------------------------------------------------------------------
-# Preloaded email → role cache (all Firestore users, loaded once)
+# SQLite fallback: employee_id → email mapping (legacy cache)
 # ---------------------------------------------------------------------------
-
-_email_role_cache: dict[str, Optional[str]] = {}  # lowered email → role
-_email_dept_cache: dict[str, str] = {}  # lowered email → readable department
-_cache_loaded = False
-
-
-def _invalidate_user_cache():
-    """Force re-evaluation of user roles on next lookup."""
-    global _cache_loaded
-    _cache_loaded = False
-    _email_role_cache.clear()
-    _email_dept_cache.clear()
-
-
-def _load_all_firestore_users():
-    """Bulk-load all PR Firestore users into _email_role_cache."""
-    global _cache_loaded
-
-    if _cache_loaded:
-        return
-
-    _cache_loaded = True
-
-    if not _ensure_firebase() or _firestore_db is None:
-        return
-
-    if not _dept_role_map:
-        _reload_dept_role_map()
-
-    try:
-        count = 0
-        for doc in _firestore_db.collection("users").stream():
-            data = doc.to_dict()
-            email = (data.get("email") or "").strip().lower()
-            raw_dept = str(data.get("department", "")).strip()
-            if email:
-                role = None
-                for candidate in _resolve_department(raw_dept):
-                    role = _map_department_to_role(candidate)
-                    if role:
-                        break
-                _email_role_cache[email] = role
-                _email_dept_cache[email] = _readable_department(raw_dept)
-                count += 1
-
-        logger.info(
-            "PR lookup: preloaded %d users from Firestore (%d with mapped roles)",
-            count,
-            sum(1 for v in _email_role_cache.values() if v is not None),
-        )
-    except Exception as e:
-        logger.error("Failed to preload PR Firestore users: %s", e)
-
-
-# ---------------------------------------------------------------------------
-# SQLite fallback: employee_id → email mapping
-# ---------------------------------------------------------------------------
+# No longer required for role resolution (HR is keyed by employee_id directly),
+# but still populated at login for diagnostic continuity. Harmless to keep.
 
 _SQLITE_PATH = os.path.join(os.path.dirname(__file__), "cc_auth.db")
 
 
 def _ensure_email_table():
-    """Create cc_employee_emails table if it doesn't exist."""
     try:
         conn = sqlite3.connect(_SQLITE_PATH)
         conn.execute("""
@@ -272,7 +142,6 @@ def _ensure_email_table():
 
 
 def get_employee_email(employee_id: str) -> Optional[str]:
-    """Look up cached email for an employee_id from SQLite."""
     try:
         _ensure_email_table()
         conn = sqlite3.connect(_SQLITE_PATH)
@@ -288,7 +157,6 @@ def get_employee_email(employee_id: str) -> Optional[str]:
 
 
 def set_employee_email(employee_id: str, email: str):
-    """Store an employee_id → email mapping in SQLite."""
     try:
         _ensure_email_table()
         conn = sqlite3.connect(_SQLITE_PATH)
@@ -301,63 +169,6 @@ def set_employee_email(employee_id: str, email: str):
         logger.info("Stored email mapping: %s → %s", employee_id, email)
     except Exception as e:
         logger.error("SQLite email store failed for %s: %s", employee_id, e)
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-def get_cc_role_for_email(email: str) -> Optional[str]:
-    """
-    Look up the CC portal role for a given email address.
-
-    Uses the preloaded Firestore cache (case-insensitive).
-    Returns the mapped role string or None.
-    """
-    if not email:
-        return None
-
-    _load_all_firestore_users()
-
-    email_lower = email.lower().strip()
-    if email_lower in _email_role_cache:
-        return _email_role_cache[email_lower]
-
-    # Not found in Firestore
-    logger.debug("No PR user found for email %s", email_lower)
-    return None
-
-
-def get_cc_role_for_employee_id(employee_id: str) -> Optional[str]:
-    """
-    Look up the CC portal role for an employee_id.
-
-    1. Checks the SQLite cc_employee_emails table for a stored email mapping
-    2. Uses that email to look up the department in the Firestore cache
-    3. Returns the mapped role string or None
-    """
-    email = get_employee_email(employee_id)
-    if not email:
-        return None
-
-    return get_cc_role_for_email(email)
-
-
-def get_department_for_email(email: str) -> Optional[str]:
-    """Return the readable PR department for an email (regardless of whether the
-    department maps to a CC role), or None. Used to surface affiliation in CC."""
-    if not email:
-        return None
-    _load_all_firestore_users()
-    return _email_dept_cache.get(email.lower().strip()) or None
-
-
-def get_department_for_employee_id(employee_id: str) -> Optional[str]:
-    """Return the readable PR department for an employee_id, or None."""
-    email = get_employee_email(employee_id)
-    if not email:
-        return None
-    return get_department_for_email(email)
 
 
 # ---------------------------------------------------------------------------
