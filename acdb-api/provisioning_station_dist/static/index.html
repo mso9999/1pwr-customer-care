@@ -255,8 +255,9 @@ async function confirmProvision(){
     body.innerHTML += `<tr id="${rowId}"><td class="mono">${g.pcb_mac}</td><td class="mono">${g.thing_name}</td><td><span class="state s-working">delivering…</span></td></tr>`;
     try{
       const d = await api('/api/deliver','POST',{pcb_mac:g.pcb_mac});
-      document.querySelector('#'+rowId+' td:last-child').innerHTML='<span class="state s-done">done</span>';
-      RESULTS.push({pcb_mac:g.pcb_mac, thing_name:g.thing_name, box_label:g.box_label||'', ip:g.ip, status:'done'});
+      const label = d && d.rebooting ? 'done <span class="muted">(rebooted — confirm via Re-scan)</span>' : 'done';
+      document.querySelector('#'+rowId+' td:last-child').innerHTML='<span class="state s-done">'+label+'</span>';
+      RESULTS.push({pcb_mac:g.pcb_mac, thing_name:g.thing_name, box_label:g.box_label||'', ip:g.ip, status: d && d.rebooting ? 'done (rebooted)' : 'done'});
     }catch(e){
       document.querySelector('#'+rowId+' td:last-child').innerHTML=`<span class="state s-failed">failed</span> <span class="muted">${e.message}</span>`;
       RESULTS.push({pcb_mac:g.pcb_mac, thing_name:g.thing_name, box_label:g.box_label||'', ip:g.ip, status:'failed'});

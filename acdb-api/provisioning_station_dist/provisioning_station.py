@@ -28,6 +28,7 @@ Stdlib only — no pip install. Python 3.9+.
 from __future__ import annotations
 
 import argparse
+import http.client
 import ipaddress
 import json
 import os
@@ -221,12 +222,37 @@ def scan_subnet(subnet: str) -> list[dict]:
     return found
 
 
-def deliver_bootstrap(ip: str, bootstrap: dict, timeout: float = 20.0) -> dict:
+def deliver_bootstrap(ip: str, bootstrap: dict, timeout: float = 30.0) -> dict:
+    """POST the bootstrap to the device local API.
+
+    The firmware persists the identity/cert/Wi-Fi and then immediately REBOOTS,
+    which usually severs the TCP connection before the HTTP response is fully
+    received. So a read timeout / connection reset here is the EXPECTED success
+    path (the unit applied the bootstrap and is rebooting), not a failure. We
+    return status="rebooting" for those, and only treat an explicit device error
+    (HTTP 4xx/5xx) or an inability to connect as a real failure.
+    """
     data = json.dumps(bootstrap).encode()
     req = urllib.request.Request(f"http://{ip}/v1/provision/bootstrap", data=data,
                                  headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode() or "{}")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return {"status": "done", "device_response": json.loads(resp.read().decode() or "{}")}
+    except urllib.error.HTTPError as e:
+        # Device responded with an error (e.g. 400 bad payload) -> real failure.
+        body = ""
+        try:
+            body = e.read().decode(errors="replace")[:200]
+        except Exception:
+            pass
+        raise RuntimeError(f"device rejected bootstrap: HTTP {e.code} {body}".strip())
+    except (socket.timeout, TimeoutError, http.client.RemoteDisconnected, ConnectionResetError):
+        return {"status": "rebooting"}
+    except urllib.error.URLError as e:
+        reason = getattr(e, "reason", None)
+        if isinstance(reason, (socket.timeout, TimeoutError, ConnectionResetError)):
+            return {"status": "rebooting"}
+        raise  # e.g. connection refused / host unreachable -> real failure
 
 
 # ---------------------------------------------------------------------------
@@ -385,8 +411,15 @@ class Handler(BaseHTTPRequestHandler):
             result = deliver_bootstrap(ip, pend["bootstrap"])
             with SESSION.lock:
                 SESSION.pending.pop(mac, None)
-            return self._send(200, {"ok": True, "thing_name": pend.get("thing_name"),
-                                    "device_response": result})
+            rebooting = result.get("status") == "rebooting"
+            return self._send(200, {
+                "ok": True,
+                "rebooting": rebooting,
+                "thing_name": pend.get("thing_name"),
+                "device_response": result.get("device_response"),
+                "note": ("device applied bootstrap and rebooted (no HTTP response, "
+                         "which is normal) — confirm with Re-scan") if rebooting else None,
+            })
         except Exception as e:
             return self._send(502, {"error": f"device delivery failed: {e}",
                                     "thing_name": pend.get("thing_name")})

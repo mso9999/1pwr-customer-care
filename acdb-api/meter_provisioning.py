@@ -194,8 +194,14 @@ def _registry_get_by_mac(mac: str) -> Optional[dict]:
         return None
 
 
-def _registry_claim(mac: str, thing: str, *, site: str, operator: str):
-    """Atomic claim with the same guarantees as provisioning_registry.py claim."""
+def _registry_claim(mac: str, thing: str, *, site: str, operator: str, allow_rebind: bool = False):
+    """Atomic claim with the same guarantees as provisioning_registry.py claim.
+
+    allow_rebind=True is used by the rename/rotate flow: the PCB is intentionally
+    being moved from its current Thing to a new one, so the "PCB already bound to
+    a different Thing" guard is relaxed (the binding is overwritten). The
+    "target Thing already owned by a DIFFERENT PCB" guard is always enforced.
+    """
     ddb = _client("dynamodb")
 
     for it in _registry_get_by_thing(thing):
@@ -207,11 +213,13 @@ def _registry_claim(mac: str, thing: str, *, site: str, operator: str):
             )
 
     existing = _registry_get_by_mac(mac)
-    if existing and existing.get("thing_name", {}).get("S") != thing:
+    prior_thing = existing.get("thing_name", {}).get("S") if existing else None
+    if existing and prior_thing != thing and not allow_rebind:
         raise HTTPException(
             status_code=409,
-            detail=f"PCB {mac} is already bound to Thing "
-                   f"'{existing['thing_name']['S']}', not '{thing}'.",
+            detail=f"PCB {mac} is already bound to Thing '{prior_thing}', not "
+                   f"'{thing}'. To change an already-provisioned unit's identity, "
+                   f"use the Migrate / rename (rotate) flow.",
         )
 
     item = {
@@ -225,13 +233,19 @@ def _registry_claim(mac: str, thing: str, *, site: str, operator: str):
     }
     if existing and "provisioned_at" in existing:
         item["provisioned_at"] = existing["provisioned_at"]
+    if prior_thing and prior_thing != thing:
+        item["previous_thing_name"] = {"S": prior_thing}
     try:
-        ddb.put_item(
-            TableName=REGISTRY_TABLE,
-            Item=item,
-            ConditionExpression="attribute_not_exists(pcb_mac) OR thing_name = :t",
-            ExpressionAttributeValues={":t": {"S": thing}},
-        )
+        if allow_rebind:
+            # Intentional rebind (rotate): overwrite the PCB->Thing mapping.
+            ddb.put_item(TableName=REGISTRY_TABLE, Item=item)
+        else:
+            ddb.put_item(
+                TableName=REGISTRY_TABLE,
+                Item=item,
+                ConditionExpression="attribute_not_exists(pcb_mac) OR thing_name = :t",
+                ExpressionAttributeValues={":t": {"S": thing}},
+            )
     except Exception as exc:  # noqa: BLE001 - includes ConditionalCheckFailed
         raise HTTPException(status_code=409, detail=f"registry claim failed: {exc}") from exc
 
@@ -783,7 +797,8 @@ def rotate_identity(
     site = payload.site_code.strip().upper()
     policy = payload.policy_name.strip() or DEFAULT_POLICY
 
-    _registry_claim(mac, new_thing, site=site, operator=f"cc:{user.user_id}")
+    # Rotation intentionally rebinds the PCB from its current Thing to the new one.
+    _registry_claim(mac, new_thing, site=site, operator=f"cc:{user.user_id}", allow_rebind=True)
 
     attrs = {
         "meter_serial": payload.meter_serial,
