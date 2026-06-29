@@ -243,6 +243,14 @@ export default function Layout() {
                   {user.role}
                 </span>
               )}
+              {isEmployee && (
+                <p
+                  className="text-[10px] text-gray-400 truncate mt-0.5"
+                  title={user.department ? `HR department: ${user.department}` : 'No HR department on record'}
+                >
+                  {user.department ? user.department : 'No HR department'}
+                </p>
+              )}
             </div>
           </div>
           {/* Language toggle */}

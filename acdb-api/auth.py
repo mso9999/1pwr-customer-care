@@ -158,7 +158,13 @@ def employee_login(req: EmployeeLoginRequest):
     email = emp.get("email", "")
 
     # Cache HR portal email in SQLite for future PR lookups
-    from pr_lookup import get_cc_role_for_email, get_cc_role_for_employee_id, set_employee_email
+    from pr_lookup import (
+        get_cc_role_for_email,
+        get_cc_role_for_employee_id,
+        get_department_for_email,
+        get_department_for_employee_id,
+        set_employee_email,
+    )
     if email:
         set_employee_email(req.employee_id, email)
 
@@ -172,6 +178,12 @@ def employee_login(req: EmployeeLoginRequest):
         if pr_role is None:
             pr_role = get_cc_role_for_employee_id(req.employee_id)
         cc_role = pr_role or CCRole.generic.value
+
+    # Readable PR department affiliation (for display/self-diagnosis in CC).
+    # Shown regardless of whether it maps to a role, so staff can see what HR
+    # has them as when their access is wrong.
+    department = (get_department_for_email(email) if email else None) \
+        or get_department_for_employee_id(req.employee_id) or ""
 
     # Create JWT
     token, expires_in = create_token(
@@ -194,6 +206,7 @@ def employee_login(req: EmployeeLoginRequest):
             "email": email,
             "cc_role": cc_role,
             "hr_role": emp.get("role", ""),
+            "department": department,
             "permissions": permissions,
         },
     )
@@ -445,6 +458,17 @@ def get_me(user: CurrentUser = Depends(get_current_user)):
         "email": user.email,
         "permissions": user.permissions,
     }
+
+    # Employees: re-derive PR department from the cached email/id so it survives
+    # token refreshes (it isn't stored in the JWT). Best-effort.
+    if user.user_type == UserType.employee:
+        try:
+            from pr_lookup import get_department_for_email, get_department_for_employee_id
+            dept = (get_department_for_email(user.email) if user.email else None) \
+                or get_department_for_employee_id(user.user_id)
+            result["department"] = dept or ""
+        except Exception:
+            result["department"] = ""
 
     # If customer, also fetch their CC record via account number
     if user.user_type == UserType.customer:

@@ -166,6 +166,17 @@ _ENGINEERING_DEPT_MAPPINGS: list[tuple[str, str, str]] = [
     ("ee/se",                                "engineering", "EE/SE (code)"),
 ]
 
+# IT -> O&M-equivalent CC access. Per ops decision (MSO, 2026-06): the IT team
+# is responsible for these systems and should have the same access as O&M, so
+# IT departments map to onm_team. Covers EN + FR PR dept names/codes.
+_IT_DEPT_MAPPINGS: list[tuple[str, str, str]] = [
+    ("it",                              "onm_team", "IT"),
+    ("it team",                         "onm_team", "IT Team"),
+    ("information technology",          "onm_team", "Information Technology"),
+    ("ti",                             "onm_team", "TI (code)"),
+    ("technologies de l'information",   "onm_team", "Technologies de l'information"),
+]
+
 _DEFAULT_DEPT_MAPPINGS: list[tuple[str, str, str]] = [
     # key, cc_role, label — LS English
     ("o&m",                            "onm_team",      "O&M"),
@@ -178,17 +189,17 @@ _DEFAULT_DEPT_MAPPINGS: list[tuple[str, str, str]] = [
     ("fin",                            "finance_team",  "FIN (code)"),
     ("service client",                 "onm_team",      "Service client"),
     ("sc",                             "onm_team",      "SC (code)"),
-] + _ENGINEERING_DEPT_MAPPINGS
+] + _ENGINEERING_DEPT_MAPPINGS + _IT_DEPT_MAPPINGS
 
 
 def _ensure_role_dept_mappings(conn: sqlite3.Connection):
-    """Idempotently ensure the engineering department->role mappings exist.
+    """Idempotently ensure the engineering + IT department->role mappings exist.
 
     _seed_department_mappings only runs on an empty table, so on already-seeded
     production DBs new mappings must be inserted explicitly. INSERT OR IGNORE
     never clobbers an admin-edited mapping.
     """
-    for key, role, label in _ENGINEERING_DEPT_MAPPINGS:
+    for key, role, label in _ENGINEERING_DEPT_MAPPINGS + _IT_DEPT_MAPPINGS:
         conn.execute(
             """INSERT OR IGNORE INTO cc_department_role_mappings
                (department_key, cc_role, label, added_by)

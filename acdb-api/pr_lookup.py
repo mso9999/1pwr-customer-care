@@ -162,6 +162,18 @@ def _resolve_department(raw_department: str) -> list[str]:
     return [raw_department.lower().strip()]
 
 
+def _readable_department(raw_department: str) -> str:
+    """Resolve a raw department value (readable label or Firestore doc ID) to a
+    human-readable name. Falls back to the raw value when unresolved."""
+    if not raw_department:
+        return ""
+    _load_reference_departments()
+    ref = _ref_departments.get(raw_department)
+    if ref and ref.get("name"):
+        return ref["name"]
+    return raw_department
+
+
 def get_all_pr_departments() -> list[dict]:
     """Return every referenceData_department for the admin UI."""
     _load_reference_departments()
@@ -184,6 +196,7 @@ def get_all_pr_departments() -> list[dict]:
 # ---------------------------------------------------------------------------
 
 _email_role_cache: dict[str, Optional[str]] = {}  # lowered email → role
+_email_dept_cache: dict[str, str] = {}  # lowered email → readable department
 _cache_loaded = False
 
 
@@ -192,6 +205,7 @@ def _invalidate_user_cache():
     global _cache_loaded
     _cache_loaded = False
     _email_role_cache.clear()
+    _email_dept_cache.clear()
 
 
 def _load_all_firestore_users():
@@ -222,6 +236,7 @@ def _load_all_firestore_users():
                     if role:
                         break
                 _email_role_cache[email] = role
+                _email_dept_cache[email] = _readable_department(raw_dept)
                 count += 1
 
         logger.info(
@@ -326,6 +341,23 @@ def get_cc_role_for_employee_id(employee_id: str) -> Optional[str]:
         return None
 
     return get_cc_role_for_email(email)
+
+
+def get_department_for_email(email: str) -> Optional[str]:
+    """Return the readable PR department for an email (regardless of whether the
+    department maps to a CC role), or None. Used to surface affiliation in CC."""
+    if not email:
+        return None
+    _load_all_firestore_users()
+    return _email_dept_cache.get(email.lower().strip()) or None
+
+
+def get_department_for_employee_id(employee_id: str) -> Optional[str]:
+    """Return the readable PR department for an employee_id, or None."""
+    email = get_employee_email(employee_id)
+    if not email:
+        return None
+    return get_department_for_email(email)
 
 
 # ---------------------------------------------------------------------------

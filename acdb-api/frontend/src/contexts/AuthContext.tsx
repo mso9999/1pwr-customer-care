@@ -7,6 +7,7 @@ interface User {
   role: string;
   name: string;
   email: string;
+  department?: string;
   permissions: Record<string, boolean>;
   [key: string]: unknown;
 }
