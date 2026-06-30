@@ -137,10 +137,15 @@ def init_auth_db():
             )
             logger.info("Seeded superadmin role for employee 00 (Matt Orosz)")
 
-        # Engineering/R&D direct grants (provisioning access). Bokang Leqele
-        # (1PWR138F) is not in PR; Motlatsi Manka (1PWR87) is pinned explicitly
-        # too so access doesn't depend on the PR email/department auto-map.
-        for emp_id, who in (("1PWR138F", "Bokang Leqele"), ("1PWR87", "Motlatsi Manka")):
+        # Engineering/EE test team — direct grants (provisioning access) so it
+        # does NOT depend on the HR department auto-map (which is intermittent).
+        # Pin BOTH the bare number and the 1PWR-prefixed form, because the
+        # manual-role lookup matches the exact employee_id string typed at login.
+        _ENGINEERING_EMPLOYEE_PINS = [
+            ("1PWR87",  "Motlatsi Manka"), ("87",  "Motlatsi Manka"),
+            ("1PWR156", "Bokang"),         ("156", "Bokang"),
+        ]
+        for emp_id, who in _ENGINEERING_EMPLOYEE_PINS:
             if not conn.execute(
                 "SELECT 1 FROM cc_employee_roles WHERE employee_id = ?", (emp_id,)
             ).fetchone():
@@ -150,6 +155,14 @@ def init_auth_db():
                     (emp_id,),
                 )
                 logger.info("Seeded engineering role for employee %s (%s)", emp_id, who)
+
+        # Correct an earlier mis-identification: Bokang is 1PWR156, not 1PWR138F.
+        # Remove the stale system-seeded 1PWR138F grant if present (only if it was
+        # auto-seeded; never touch a human-assigned role).
+        conn.execute(
+            "DELETE FROM cc_employee_roles WHERE employee_id = '1PWR138F' "
+            "AND cc_role = 'engineering' AND assigned_by = 'system'"
+        )
 
         _seed_department_mappings(conn)
         _ensure_role_dept_mappings(conn)
