@@ -92,6 +92,13 @@
           </tr></thead>
           <tbody id="gwBody"></tbody>
         </table>
+
+        <div id="elimCard" class="hide" style="margin-top:14px;padding:12px;border:1px solid var(--line);border-radius:10px;background:#fafafa">
+          <b>Identify by elimination</b>
+          <p class="muted" style="margin:6px 0">No factory serial→MAC list? Power off / unplug ONE unit, then click the button — the MAC that just disappeared is that unit. Enter its printed serial.</p>
+          <button class="ghost" id="elimBtn" onclick="elimCheck()">I just powered off one unit — check which disappeared</button>
+          <div id="elimResult" style="margin-top:10px"></div>
+        </div>
       </div>
 
       <div id="assignCard" class="card hide">
@@ -224,6 +231,54 @@ function importCsv(ev){
   reader.readAsText(file);
 }
 
+// Identify by elimination: re-probe the known units; the MAC that went offline
+// since the last scan is the unit the tech just powered off. Prompt for its serial
+// and fill that row's serial field.
+async function elimCheck(){
+  clearError();
+  const res = document.getElementById('elimResult');
+  const btn = document.getElementById('elimBtn');
+  if(!SCAN.length){ res.innerHTML='<span class="muted">Scan first.</span>'; return; }
+  btn.disabled = true; btn.textContent = 'Re-probing known units…';
+  res.innerHTML = '';
+  try{
+    const targets = SCAN.map(g => ({ip:g.ip, pcb_mac:g.pcb_mac}));
+    const r = await api('/api/reprobe','POST',{units:targets});
+    const after = {}; (r.units||[]).forEach(u => { if(u.pcb_mac) after[u.pcb_mac.toLowerCase()] = u; });
+    const gone = SCAN.filter(g => g.pcb_mac && !after[(g.pcb_mac||'').toLowerCase()]);
+    if(!gone.length){
+      res.innerHTML = '<span class="muted">No unit disappeared — every scanned MAC is still online. Power off exactly one unit and try again.</span>';
+    } else {
+      const rows = gone.map(g => {
+        const i = SCAN.indexOf(g);
+        const mac = g.pcb_mac;
+        return `<div style="margin:6px 0">
+          <span class="mono">${mac}</span>
+          <input id="elimSerial_${i}" placeholder="enter this unit's serial" style="padding:4px 6px;font-size:12px;width:180px;display:inline-block;margin:0 8px">
+          <button class="ghost" onclick="assignElimSerial(${i})">Save to row</button>
+        </div>`;
+      }).join('');
+      res.innerHTML = `<div style="color:#166534">${gone.length} unit(s) just went offline — that's the unit(s) you powered off. Enter its printed serial:</div>${rows}`;
+    }
+  }catch(e){ showError(e.message); }
+  finally{ btn.disabled = false; btn.textContent = 'I just powered off one unit — check which disappeared'; }
+}
+
+function assignElimSerial(i){
+  const inp = document.getElementById('elimSerial_'+i);
+  const serial = (inp.value||'').trim();
+  if(!serial){ return; }
+  const labelInput = document.querySelector(`[data-label="${i}"]`);
+  if(labelInput){ labelInput.value = serial; }
+  // also remember it so a re-render keeps it
+  const macKey = ((SCAN[i]&&SCAN[i].pcb_mac)||'').toLowerCase();
+  if(macKey) MAC_TO_SERIAL[macKey] = serial;
+  document.getElementById('elimResult').innerHTML =
+    `<span style="color:#166534">Saved serial <b>${serial}</b> to MAC <span class="mono">${SCAN[i].pcb_mac}</span>.</span> ` +
+    `<span class="muted">Power it back on if you want to provision it in this batch, or eliminate the next unit.</span>`;
+  updateSel();
+}
+
 async function scan(){
   clearError();
   const btn=document.getElementById('scanBtn'); btn.disabled=true; btn.textContent='Scanning…';
@@ -238,7 +293,7 @@ async function scan(){
 function renderScan(){
   const t=document.getElementById('gwTable'), b=document.getElementById('gwBody');
   document.getElementById('scanInfo').textContent = `${SCAN.length} device(s) responded on the provisioning network.`;
-  if(!SCAN.length){ t.classList.add('hide'); document.getElementById('assignCard').classList.add('hide'); return; }
+  if(!SCAN.length){ t.classList.add('hide'); document.getElementById('assignCard').classList.add('hide'); document.getElementById('elimCard').classList.add('hide'); return; }
   t.classList.remove('hide');
   b.innerHTML = SCAN.map((g,i)=>{
     const virgin = !g.has_runtime_tls;
@@ -256,6 +311,7 @@ function renderScan(){
     </tr>`;
   }).join('');
   document.getElementById('assignCard').classList.remove('hide');
+  document.getElementById('elimCard').classList.remove('hide');
   updateSel();
 }
 function toggleAll(cb){ document.querySelectorAll('.gwsel:not(:disabled)').forEach(x=>x.checked=cb.checked); updateSel(); }

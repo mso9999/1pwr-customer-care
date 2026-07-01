@@ -222,6 +222,32 @@ def scan_subnet(subnet: str) -> list[dict]:
     return found
 
 
+def reprobe_units(targets: list[dict]) -> list[dict]:
+    """Fast targeted presence check: re-probe only the given {ip, pcb_mac} units
+    (not a full subnet sweep) and report which are still responding, with their
+    current status. Used by the 'Identify by elimination' flow: power off one
+    unit, re-probe, the MAC that vanished is the unit you just eliminated."""
+    out: list[dict] = []
+    out_lock = threading.Lock()
+
+    def worker(u: dict):
+        ip = u.get("ip")
+        status = probe_device(ip, timeout=2.0) if ip else None
+        with out_lock:
+            out.append({
+                "ip": ip,
+                "pcb_mac": (status.get("pcb_mac") or "").strip().lower() or u.get("pcb_mac"),
+                "online": status is not None,
+                "provisioned": bool(status.get("provisioned")) if status else None,
+                "thing_name": status.get("thing_name") if status else None,
+            })
+
+    with ThreadPoolExecutor(max_workers=64) as ex:
+        list(ex.map(worker, targets))
+    out.sort(key=lambda d: ipaddress.ip_address(d["ip"]) if d.get("ip") else "0.0.0.0")
+    return out
+
+
 def deliver_bootstrap(ip: str, bootstrap: dict, timeout: float = 30.0) -> dict:
     """POST the bootstrap to the device local API.
 
@@ -335,6 +361,15 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 return self._send(200, {"subnet": ", ".join(subnets),
                                         "gateways": scan_subnets(subnets)})
+            except Exception as e:
+                return self._send(500, {"error": str(e)})
+
+        if self.path == "/api/reprobe":
+            units = body.get("units") or []
+            if not units:
+                return self._send(400, {"error": "no units to re-probe"})
+            try:
+                return self._send(200, {"units": reprobe_units(units)})
             except Exception as e:
                 return self._send(500, {"error": str(e)})
 
