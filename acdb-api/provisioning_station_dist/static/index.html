@@ -74,11 +74,21 @@
           <div><label>Provisioning subnet(s) — comma-separated (auto-detected; includes laptop hotspot)</label><input id="subnet" /></div>
           <div style="flex:0 0 auto"><button class="primary" id="scanBtn" onclick="scan()">Scan for gateways</button></div>
         </div>
+
+        <div class="row" style="align-items:flex-end;margin-top:12px">
+          <div>
+            <label>Factory serial → MAC list (optional; auto-fills each unit's serial)</label>
+            <input type="file" id="macCsv" accept=".csv,.txt" onchange="importCsv(event)" />
+          </div>
+          <div style="flex:0 0 auto"><button class="ghost" onclick="document.getElementById('macCsv').click()">Import serial→MAC CSV</button></div>
+        </div>
+        <div id="csvInfo" class="muted" style="margin-top:8px"></div>
+
         <div id="scanInfo" class="muted" style="margin-top:10px"></div>
         <table id="gwTable" class="hide" style="margin-top:10px">
           <thead><tr>
             <th><input type="checkbox" id="selAll" onclick="toggleAll(this)"></th>
-            <th>IP</th><th>PCB MAC</th><th>Status</th><th>Current name</th><th>Box label</th>
+            <th>IP</th><th>PCB MAC</th><th>Status</th><th>Current name</th><th>Serial (from CSV or type)</th>
           </tr></thead>
           <tbody id="gwBody"></tbody>
         </table>
@@ -133,6 +143,7 @@
 
 <script>
 let SITES = [], SCAN = [], RESULTS = [];
+let MAC_TO_SERIAL = {};  // normalized mac -> serial, from the factory CSV
 
 function showError(m){ const e=document.getElementById('error'); e.textContent=m; e.classList.remove('hide'); }
 function clearError(){ document.getElementById('error').classList.add('hide'); }
@@ -180,6 +191,39 @@ async function loadSites(){
   }catch(e){ showError(e.message); }
 }
 
+function normMac(s){ return (s||'').trim().toLowerCase().replace(/[-\.]/g,':'); }
+
+// Factory CSV: any of these column names (case-insensitive) -> serial + mac.
+// Accepts headered CSV (serial,mac) OR two-column (serial,mac) with no header.
+function importCsv(ev){
+  const file = ev.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const lines = reader.result.split(/\r?\n/).filter(l => l.trim());
+    if(!lines.length){ document.getElementById('csvInfo').textContent='Empty file.'; return; }
+    const first = lines[0].toLowerCase();
+    let si=0, mi=1;
+    if(/serial|nameplate|sn/.test(first) || /mac/.test(first)){
+      const h = first.split(',').map(c=>c.trim());
+      const sIdx=h.findIndex(c=>/serial|nameplate|^sn$/.test(c));
+      const mIdx=h.findIndex(c=>/mac/.test(c));
+      if(sIdx<0||mIdx<0){ document.getElementById('csvInfo').textContent='Header found but no serial/mac columns.'; return; }
+      si=sIdx; mi=mIdx; lines.shift();
+    }
+    let n=0;
+    for(const ln of lines){
+      const cols = ln.split(',').map(c=>c.trim().replace(/^"|"$/g,''));
+      const serial=cols[si], mac=normMac(cols[mi]);
+      if(serial && mac && /([0-9a-f]{2}:){5}[0-9a-f]{2}/.test(mac)){ MAC_TO_SERIAL[mac]=serial; n++; }
+    }
+    document.getElementById('csvInfo').textContent =
+      n ? `Loaded ${n} serial→MAC pairs. Scanned units will auto-fill their serial.` : 'No valid serial,mac rows found.';
+    if(SCAN.length) renderScan();  // re-render to fill any already-scanned rows
+  };
+  reader.readAsText(file);
+}
+
 async function scan(){
   clearError();
   const btn=document.getElementById('scanBtn'); btn.disabled=true; btn.textContent='Scanning…';
@@ -199,13 +243,16 @@ function renderScan(){
   b.innerHTML = SCAN.map((g,i)=>{
     const virgin = !g.has_runtime_tls;
     const badge = virgin ? '<span class="state s-queued">virgin</span>' : '<span class="state s-done">provisioned</span>';
+    const macKey = (g.pcb_mac||'').toLowerCase().replace(/-/g,':');
+    const autoSerial = MAC_TO_SERIAL[macKey] || '';
+    const matched = autoSerial ? ' <span class="muted">(from CSV)</span>' : '';
     return `<tr>
       <td><input type="checkbox" class="gwsel" data-i="${i}" ${virgin?'':'disabled'} onchange="updateSel()"></td>
       <td class="mono">${g.ip}</td>
       <td class="mono">${g.pcb_mac||'<span class="muted">unknown</span>'}</td>
       <td>${badge}</td>
       <td class="mono">${g.thing_name||'—'}</td>
-      <td><input data-label="${i}" placeholder="box/QR" style="padding:4px 6px;font-size:12px"></td>
+      <td><input data-label="${i}" value="${autoSerial}" placeholder="serial" style="padding:4px 6px;font-size:12px">${matched}</td>
     </tr>`;
   }).join('');
   document.getElementById('assignCard').classList.remove('hide');
