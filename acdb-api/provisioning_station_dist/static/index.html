@@ -198,6 +198,17 @@ async function loadSites(){
   }catch(e){ showError(e.message); }
 }
 
+// Parse a MAC cell that may be: bare colon/dash form, bare 12-hex, OR the
+// factory's "AP: <hex>  STA: <hex>" form. We want the STA MAC (what the firmware
+// reports as pcb_mac). Normalizes colonless 12-hex to aa:bb:cc:dd:ee:ff.
+function parseMacCell(raw){
+  const s = (raw||'').toLowerCase();
+  let m = s.match(/sta[:\s]*([0-9a-f]{12})/);        // prefer STA
+  if(!m) m = s.match(/([0-9a-f]{12})/);              // bare 12-hex (assume STA)
+  if(m) return m[1].match(/.{2}/g).join(':');
+  const c = s.replace(/[-\.]/g,':').match(/([0-9a-f]{2}:){5}[0-9a-f]{2}/);  // colon/dash form
+  return c ? c[0] : null;
+}
 function normMac(s){ return (s||'').trim().toLowerCase().replace(/[-\.]/g,':'); }
 
 // Factory CSV: any of these column names (case-insensitive) -> serial + mac.
@@ -218,14 +229,14 @@ function importCsv(ev){
       if(sIdx<0||mIdx<0){ document.getElementById('csvInfo').textContent='Header found but no serial/mac columns.'; return; }
       si=sIdx; mi=mIdx; lines.shift();
     }
-    let n=0;
+    let n=0, sample='';
     for(const ln of lines){
       const cols = ln.split(',').map(c=>c.trim().replace(/^"|"$/g,''));
-      const serial=cols[si], mac=normMac(cols[mi]);
-      if(serial && mac && /([0-9a-f]{2}:){5}[0-9a-f]{2}/.test(mac)){ MAC_TO_SERIAL[mac]=serial; n++; }
+      const serial=cols[si], mac=parseMacCell(cols[mi]);
+      if(serial && mac){ MAC_TO_SERIAL[mac]=serial; n++; if(!sample) sample=`${serial} → ${mac}`; }
     }
     document.getElementById('csvInfo').textContent =
-      n ? `Loaded ${n} serial→MAC pairs. Scanned units will auto-fill their serial.` : 'No valid serial,mac rows found.';
+      n ? `Loaded ${n} serial→MAC pair(s). Scanned units will auto-fill their serial. (e.g. ${sample})` : 'No valid serial,mac rows found.';
     if(SCAN.length) renderScan();  // re-render to fill any already-scanned rows
   };
   reader.readAsText(file);
