@@ -33,6 +33,11 @@ SANDBOX_DUMMY_ACCOUNT = os.environ.get("APP_SANDBOX_ACCOUNT", "0000SBX")
 SANDBOX_DUMMY_PIN = "sandbox"
 SANDBOX_DUMMY_METER = os.environ.get("APP_SANDBOX_METER", "SBX-TEST-0001")
 SANDBOX_DUMMY_NAME = os.environ.get("APP_SANDBOX_NAME", "Sandbox Customer")
+# `community` and (for accounts) `account_sequence` are NOT NULL without
+# defaults on the production schema, so the seeder must supply them. Use a
+# clearly non-production community tag ("SBX"); the column is a free varchar
+# with no FK, so the tag need not exist in any reference table.
+SANDBOX_DUMMY_COMMUNITY = os.environ.get("APP_SANDBOX_COMMUNITY", "SBX")
 
 
 def sandbox_enabled() -> bool:
@@ -113,32 +118,32 @@ def _ensure_dummy_customer(conn) -> None:
     # Customer row (best-effort on optional columns).
     cur.execute(
         """
-        INSERT INTO customers (first_name, last_name, phone, customer_type)
-        VALUES (%s, %s, %s, 'residential')
+        INSERT INTO customers (first_name, last_name, phone, customer_type, community)
+        VALUES (%s, %s, %s, 'residential', %s)
         RETURNING id
         """,
-        ("Sandbox", "Customer", "00000000"),
+        ("Sandbox", "Customer", "00000000", SANDBOX_DUMMY_COMMUNITY),
     )
     cust_id = cur.fetchone()[0]
 
     cur.execute(
         """
-        INSERT INTO accounts (account_number, customer_id, site_code)
-        VALUES (%s, %s, %s)
+        INSERT INTO accounts (account_number, customer_id, community, account_sequence)
+        VALUES (%s, %s, %s, %s)
         ON CONFLICT (account_number) DO NOTHING
         """,
-        (SANDBOX_DUMMY_ACCOUNT, cust_id, "SBX"),
+        (SANDBOX_DUMMY_ACCOUNT, cust_id, SANDBOX_DUMMY_COMMUNITY, 1),
     )
 
     # Dummy meter with a bench/test name (blocked from production overwrite
     # by meter_provisioning's naming guard).
     cur.execute(
         """
-        INSERT INTO meters (meter_id, account_number, site_code, meter_name)
+        INSERT INTO meters (meter_id, account_number, community, meter_number)
         VALUES (%s, %s, %s, %s)
         ON CONFLICT (meter_id) DO NOTHING
         """,
-        (SANDBOX_DUMMY_METER, SANDBOX_DUMMY_ACCOUNT, "SBX", "SBX-TEST-BENCH"),
+        (SANDBOX_DUMMY_METER, SANDBOX_DUMMY_ACCOUNT, SANDBOX_DUMMY_COMMUNITY, "SBX-TEST-BENCH"),
     )
     conn.commit()
 
