@@ -25,6 +25,12 @@ from country_fees import get_low_balance_thresholds, get_sms_rate_limit_settings
 from customer_api import get_connection
 from sms_outbound import send_gateway_sms
 
+try:  # Phase 3: mirror SMS into the app inbox + FCM (best-effort).
+    from app_notifications import mirror_to_app
+except Exception:  # noqa: BLE001
+    def mirror_to_app(*a, **k):  # type: ignore[misc]
+        return None
+
 logger = logging.getLogger("cc-api.low-balance-alerts")
 
 
@@ -190,6 +196,13 @@ def low_balance_tick(conn, *, dry_run: bool = False) -> dict[str, Any]:
             )
             conn.commit()
             stats["sent"] += 1
+            mirror_to_app(
+                account_number,
+                "low_balance",
+                "1PWR",
+                msg,
+                {"balance_kwh": bal_kwh, "balance_currency": bal_currency},
+            )
         else:
             logger.warning("SMS send failed for %s — not updating counters", account_number)
 

@@ -331,6 +331,7 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
             phone_number=req.phone_number,
             en_url=en_url,
             so_url=so_url,
+            account_number=req.account_number,
         )
     except Exception as exc:
         logger.warning("SMS delivery failed: %s", exc)

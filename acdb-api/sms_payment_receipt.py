@@ -17,6 +17,12 @@ from customer_api import get_connection
 from payments import _get_tariff_rate
 from sms_outbound import send_gateway_sms
 
+try:  # Phase 3: mirror SMS into the app inbox + FCM (best-effort).
+    from app_notifications import mirror_to_app
+except Exception:  # noqa: BLE001
+    def mirror_to_app(*a, **k):  # type: ignore[misc]
+        return None
+
 logger = logging.getLogger("cc-api.sms-payment-receipt")
 
 SMS_PAYMENT_RECEIPT_ENABLED = os.environ.get(
@@ -109,6 +115,13 @@ def send_fee_payment_receipt_sms(
         account_number=account_number,
         trigger="fee_receipt",
     )
+    mirror_to_app(
+        account_number,
+        "fee_receipt",
+        "1PWR",
+        msg,
+        {"fee_category": fee_category, "amount": amount_paid_currency},
+    )
 
 
 def send_electricity_payment_receipt_sms(
@@ -157,4 +170,11 @@ def send_electricity_payment_receipt_sms(
         sms_type="balance",
         account_number=account_number,
         trigger="payment_receipt",
+    )
+    mirror_to_app(
+        account_number,
+        "payment_receipt",
+        "1PWR",
+        msg,
+        {"amount": amount_paid_currency, "balance_kwh": bal_kwh, "balance_currency": bal_curr},
     )

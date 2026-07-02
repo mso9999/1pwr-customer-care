@@ -237,6 +237,7 @@ def send_contract_sms(
     phone_number: str,
     en_url: str,
     so_url: str,
+    account_number: str | None = None,
 ) -> bool:
     """Send the contract download links to the customer via SMS.
 
@@ -253,8 +254,21 @@ def send_contract_sms(
         f"Hore u e bale u lokeloa ho e bula ka internet."
     )
 
-    return send_gateway_sms(phone_number, message, sms_type="welcome",
-                            trigger="contract")
+    ok = send_gateway_sms(phone_number, message, sms_type="welcome",
+                          trigger="contract")
+    if ok and account_number:
+        try:
+            from app_notifications import mirror_to_app
+            mirror_to_app(
+                account_number,
+                "welcome",
+                "1PWR",
+                message,
+                {"contract_url": short_so},
+            )
+        except Exception:  # noqa: BLE001
+            pass
+    return ok
 
 
 # ---------------------------------------------------------------------------
