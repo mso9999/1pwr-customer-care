@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type { ReactNode } from 'react';
+import { WHATS_NEW_FOLIO } from '../whatsnew/folio';
 
 /** Match Layout.tsx: FR toggle sets `fr`; resolved locale may be `fr-*`. */
 export function useHelpLangIsFr(): boolean {
@@ -1389,12 +1390,47 @@ function ProvisioningContent() {
 }
 
 /* ------------------------------------------------------------------ */
+/*  What's new — historical archive of the login primer                */
+/* ------------------------------------------------------------------ */
+
+function WhatsNewContent() {
+  const { t } = useTranslation(['help']);
+  return (
+    <>
+      <P>
+        {t('help:whatsNewIntro')}
+      </P>
+      <div className="space-y-4">
+        {WHATS_NEW_FOLIO.map((entry) => (
+          <div key={entry.id} className="border border-gray-200 rounded-lg p-4">
+            <div className="flex items-center justify-between gap-3 mb-1">
+              <h4 className="text-sm font-bold text-gray-900">{entry.title}</h4>
+              <span className="text-xs text-gray-400 shrink-0">{entry.date}</span>
+            </div>
+            <p className="text-xs text-gray-500 mb-3">{entry.blurb}</p>
+            <div className="space-y-3">
+              {entry.pages.map((pg, i) => (
+                <div key={i} className="border-l-2 border-blue-100 pl-3">
+                  <div className="text-xs font-semibold text-gray-700 mb-1">{pg.heading}</div>
+                  <div className="text-sm text-gray-600 whitespace-pre-line">{pg.body}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Public hook: returns fully-translated sections array               */
 /* ------------------------------------------------------------------ */
 
 export function useHelpSections(): HelpSection[] {
   return [
     { id: 'overview',             content: <OverviewContent />, searchKeywords: 'manual markdown repository printable' },
+    { id: 'whats-new',            content: <WhatsNewContent />, searchKeywords: 'whats new updates changes primer login popup release notes' },
     { id: 'login',                content: <LoginContent />, searchKeywords: 'country portfolio multi-country currency benin lesotho' },
     { id: 'dashboard',            content: <DashboardContent />, searchKeywords: 'home kpi metrics summary' },
     { id: 'sites',                content: <SitesContent />, searchKeywords: 'community concession tosing site code dropdown new site' },

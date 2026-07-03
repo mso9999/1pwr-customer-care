@@ -5,6 +5,7 @@
   "searchPlaceholder": "Rechercher des sections…",
   "sections": {
     "overview": "Vue d'ensemble",
+    "whatsNew": "Nouveautés",
     "loginRoles": "Connexion et rôles",
     "dashboard": "Tableau de bord",
     "sites": "Sites et concessions",
@@ -27,6 +28,7 @@
   },
   "tip": "Conseil :",
   "important": "Important :",
+  "whatsNewIntro": "Archive chronologique des mises à jour de fonctionnalités. Ces récapitulatifs s'affichent automatiquement à la connexion lorsqu'il y a des nouveautés depuis votre dernière visite ; cette page permet de les consulter à tout moment.",
   "featureMap": {
     "category": "Catégorie",
     "feature": "Fonctionnalité",

@@ -3,6 +3,7 @@ import { Link, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 import { useCountry } from '../contexts/CountryContext';
+import WhatsNewGate from './WhatsNewGate';
 
 interface NavItemDef {
   to?: string;
@@ -338,6 +339,7 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+      <WhatsNewGate />
     </div>
   );
 }

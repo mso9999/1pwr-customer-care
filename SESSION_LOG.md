@@ -1,3 +1,44 @@
+## Session 2026-07-02 [202607020547] (What's New login primer + HR-as-department-source follow-through)
+
+### What Was Done
+- **What's New login primer shipped.** Dismissable, multipage popup shown to
+  employees at login only when there are folio entries newer than their
+  `whats_new_seen_at`. No unseen updates → no popup. First-time users silently
+  init `seen_at=now` (no bombardment). Closing stamps `seen_at=now` server-side
+  (cross-device). Historical primers archived in Help → "What's New".
+  - Folio: `acdb-api/frontend/src/whatsnew/folio.ts` (append-only, newest first).
+  - Backend: `cc_employee_whats_new` table in `cc_auth.db` (`db_auth.py`),
+    `/api/auth/me` returns `whats_new_seen_at`, `POST /api/auth/whats-new/seen`
+    marks seen.
+  - Frontend: `components/WhatsNewGate.tsx` (modal + gate), mounted in `Layout`.
+  - Seeded with 4 recent entries: HR-as-department-source, IT→onm_team,
+    LPG tracking, BN SM-credit resilience.
+- **Process encoded as a rule:** any commit shipping a novel/reconfigured
+  user-facing feature MUST append a folio entry in the same commit. Documented
+  in `docs/SPEC_WHATS_NEW.md` and `.cursorrules` ("What's New Primer Protocol").
+
+### Key Decisions
+- `seen_at` stored server-side (SQLite), not localStorage — persists across
+  devices/browsers.
+- First-time users see nothing (primer is for *updates since last login*; new
+  joiners use the Help guide). Avoids dumping the whole history on new staff.
+- Adding a folio entry is the *only* trigger — gating is `date > seen_at`, so no
+  separate "trigger" flag. Pure refactors/invisible fixes do NOT get entries.
+
+### What Next Session Should Know
+- **Mandatory process:** when you ship a user-facing feature, append to
+  `WHATS_NEW_FOLIO` (`acdb-api/frontend/src/whatsnew/folio.ts`) in the same PR.
+  See `.cursorrules` + `docs/SPEC_WHATS_NEW.md`.
+- The folio is frontend-bundled (build-time). A new entry appears after the
+  frontend deploy.
+
+### Protocol Feedback
+- Orientation was fine. CONTEXT.md `pr_lookup.py` row was stale ("Payment
+  reference lookup") — corrected earlier this session to reflect HR-backed
+  department mapping + `hr_directory.py`.
+
+---
+
 ## Session 2026-06-26 [202606260907] (Benin SM-credit "deferred" — RCA + cure + prevention)
 
 ### Report

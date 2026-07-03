@@ -290,6 +290,10 @@ export async function getMe() {
   return request<Record<string, unknown>>('/auth/me');
 }
 
+export async function markWhatsNewSeen(): Promise<{ seen_at: string }> {
+  return request('/auth/whats-new/seen', { method: 'POST' });
+}
+
 // ---------------------------------------------------------------------------
 // Schema
 // ---------------------------------------------------------------------------

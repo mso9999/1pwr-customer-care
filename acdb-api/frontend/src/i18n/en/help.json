@@ -5,6 +5,7 @@
   "searchPlaceholder": "Search sections…",
   "sections": {
     "overview": "Overview",
+    "whatsNew": "What's New",
     "loginRoles": "Login & Roles",
     "dashboard": "Dashboard",
     "sites": "Sites & concessions",
@@ -27,6 +28,7 @@
   },
   "tip": "Tip:",
   "important": "Important:",
+  "whatsNewIntro": "A chronological archive of feature updates. These primers are shown automatically at login when there are updates since your last visit; this page lets you review any of them at any time.",
   "featureMap": {
     "category": "Category",
     "feature": "Feature",

@@ -171,6 +171,24 @@ The goal is **continuous improvement** - each conversation should leave the syst
 - **Key frontend files**: `src/App.tsx`, `src/lib/api.ts`, `src/pages/FinancialPage.tsx`
 - **Legacy naming note**: `acdb-api/` is a historical path name, not a statement about the live datastore
 
+## What's New Primer Protocol (MANDATORY)
+
+CC shows employees a dismissable, multipage "What's new" popup at login when
+there are feature updates shipped since their last visit (gated per-user on
+`whats_new_seen_at`). Full spec: `docs/SPEC_WHATS_NEW.md`. The archive lives in
+Help → "What's New".
+
+**Rule:** any commit that ships a **novel or reconfigured user-facing feature**
+MUST also append an entry to `WHATS_NEW_FOLIO` in
+`acdb-api/frontend/src/whatsnew/folio.ts` (newest first): a stable `id`, UTC ISO
+`date`, user-facing `title`, one-line `blurb`, and one+ concise `pages`
+(`{ heading, body }`; body is plain text, `- ` for bullets). Adding the entry is
+sufficient — the popup auto-triggers for any employee whose `seen_at` predates
+the entry's `date`. No separate trigger flag exists.
+
+Do NOT add entries for pure refactors, dependency bumps, internal fixes, or
+invisible bug fixes. When in doubt, add a short entry.
+
 ## Deployment Protocol (MANDATORY)
 
 ### Single Branch

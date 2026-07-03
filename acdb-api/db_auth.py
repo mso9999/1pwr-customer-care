@@ -124,6 +124,12 @@ def init_auth_db():
                 added_by       TEXT NOT NULL DEFAULT 'system',
                 added_at       TEXT NOT NULL DEFAULT (datetime('now'))
             );
+
+            CREATE TABLE IF NOT EXISTS cc_employee_whats_new (
+                employee_id TEXT PRIMARY KEY,
+                seen_at     TEXT NOT NULL,
+                updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+            );
         """)
 
         # Seed default superadmin if not already present
@@ -311,6 +317,33 @@ def list_employee_roles() -> list[dict]:
             "SELECT employee_id, cc_role, assigned_by, assigned_at FROM cc_employee_roles ORDER BY employee_id"
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Employee "What's new" seen-state (login primer)
+# ---------------------------------------------------------------------------
+
+def get_whats_new_seen(employee_id: str) -> str | None:
+    """Return the ISO timestamp through which the employee has seen the What's
+    new primer, or None if they've never acknowledged it."""
+    with get_auth_db() as conn:
+        row = conn.execute(
+            "SELECT seen_at FROM cc_employee_whats_new WHERE employee_id = ?",
+            (employee_id,),
+        ).fetchone()
+        return row["seen_at"] if row else None
+
+
+def mark_whats_new_seen(employee_id: str, seen_at: str) -> None:
+    """Record that the employee has seen the What's new primer through seen_at."""
+    now = datetime.utcnow().isoformat()
+    with get_auth_db() as conn:
+        conn.execute(
+            """INSERT INTO cc_employee_whats_new (employee_id, seen_at, updated_at)
+               VALUES (?, ?, ?)
+               ON CONFLICT(employee_id) DO UPDATE SET seen_at = ?, updated_at = ?""",
+            (employee_id, seen_at, now, seen_at, now),
+        )
 
 
 # ---------------------------------------------------------------------------

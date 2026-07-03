@@ -5,6 +5,7 @@ import { useHelpSections } from './helpSections';
 
 const SECTION_TITLE_KEYS: Record<string, string> = {
   overview: 'help:sections.overview',
+  'whats-new': 'help:sections.whatsNew',
   login: 'help:sections.loginRoles',
   dashboard: 'help:sections.dashboard',
   sites: 'help:sections.sites',

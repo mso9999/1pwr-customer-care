@@ -31,11 +31,13 @@ from models import (
     TokenResponse,
     UserType,
 )
-from middleware import create_token, get_current_user
+from middleware import create_token, get_current_user, require_employee
 from db_auth import (
     customer_is_registered,
     get_customer_password_hash,
     get_employee_role,
+    get_whats_new_seen,
+    mark_whats_new_seen,
     set_customer_password,
 )
 from mutations import try_log_mutation
@@ -438,7 +440,9 @@ def get_me(user: CurrentUser = Depends(get_current_user)):
     }
 
     # Employees: re-derive HR department from the cached email/id so it survives
-    # token refreshes (it isn't stored in the JWT). Best-effort.
+    # token refreshes (it isn't stored in the JWT). Best-effort. Also surface the
+    # What's-new seen-at so the frontend can prime the login popup only when
+    # there are unseen feature updates.
     if user.user_type == UserType.employee:
         try:
             from pr_lookup import get_department_for_email, get_department_for_employee_id
@@ -447,6 +451,10 @@ def get_me(user: CurrentUser = Depends(get_current_user)):
             result["department"] = dept or ""
         except Exception:
             result["department"] = ""
+        try:
+            result["whats_new_seen_at"] = get_whats_new_seen(user.user_id)
+        except Exception:
+            result["whats_new_seen_at"] = None
 
     # If customer, also fetch their CC record via account number
     if user.user_type == UserType.customer:
@@ -459,3 +467,18 @@ def get_me(user: CurrentUser = Depends(get_current_user)):
             pass
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# What's new primer — mark seen
+# ---------------------------------------------------------------------------
+
+@router.post("/whats-new/seen")
+def mark_whats_new_seen_endpoint(
+    user: CurrentUser = Depends(require_employee),
+):
+    """Acknowledge that the employee has seen the What's new primer through now.
+    Suppresses the popup for entries already shipped at/ before this moment."""
+    seen_at = datetime.utcnow().isoformat()
+    mark_whats_new_seen(user.user_id, seen_at)
+    return {"seen_at": seen_at}
