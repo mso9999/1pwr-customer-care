@@ -279,6 +279,14 @@ export async function customerLogin(customer_id: string, password: string): Prom
   });
 }
 
+/** Exchange a Nexus-minted Firebase custom token for a CC employee JWT. */
+export async function nexusSsoLogin(sso_token: string): Promise<LoginResponse> {
+  return request('/auth/sso', {
+    method: 'POST',
+    body: JSON.stringify({ sso_token }),
+  });
+}
+
 export async function customerRegister(customer_id: string, password: string) {
   return request('/auth/customer-register', {
     method: 'POST',

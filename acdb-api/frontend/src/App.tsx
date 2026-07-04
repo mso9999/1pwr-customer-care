@@ -4,6 +4,7 @@ import { CountryProvider } from './contexts/CountryContext';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 import LoginPage from './pages/LoginPage';
+import SsoReceiverPage from './pages/SsoReceiverPage';
 import DashboardPage from './pages/DashboardPage';
 import CustomersPage from './pages/CustomersPage';
 import CustomerDetailPage from './pages/CustomerDetailPage';
@@ -65,6 +66,7 @@ export default function App() {
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/auth/sso" element={<SsoReceiverPage />} />
           <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
             <Route index element={<HomeRedirect />} />
             {/* Employee routes */}

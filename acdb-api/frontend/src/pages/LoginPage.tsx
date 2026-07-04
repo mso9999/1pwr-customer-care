@@ -70,6 +70,25 @@ export default function LoginPage() {
             </button>
           </div>
 
+          {mode === 'employee' && (
+            <>
+              <a
+                href={
+                  'https://nexus.1pwrafrica.com/sso/authorize?tool=cc&redirect_uri=' +
+                  encodeURIComponent('https://cc.1pwrafrica.com/auth/sso?return=/dashboard')
+                }
+                className="block w-full py-2.5 bg-slate-800 text-white rounded-lg font-medium text-center hover:bg-slate-700 transition"
+              >
+                Continue with Nexus (1PWR staff)
+              </a>
+              <div className="flex items-center gap-3 my-4">
+                <div className="flex-1 h-px bg-gray-200" />
+                <span className="text-xs text-gray-400">or</span>
+                <div className="flex-1 h-px bg-gray-200" />
+              </div>
+            </>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">

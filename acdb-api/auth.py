@@ -19,6 +19,7 @@ from typing import Optional
 
 import bcrypt as _bcrypt
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 
 from models import (
     CCRole,
@@ -98,6 +99,67 @@ def generate_date_password() -> str:
 # Employee login
 # ---------------------------------------------------------------------------
 
+def _employee_token_response(employee_id: str, name: str, email: str, hr_role: str = "") -> TokenResponse:
+    """
+    Issue the CC employee JWT + user payload for an already-authenticated
+    employee. Shared by employee-login (PIN) and the Nexus SSO receiver —
+    role/department resolution is identical for both paths.
+    """
+    # Cache HR email in SQLite (diagnostic continuity; HR is keyed by employee_id)
+    from pr_lookup import (
+        get_cc_role_for_email,
+        get_cc_role_for_employee_id,
+        get_department_for_email,
+        get_department_for_employee_id,
+        set_employee_email,
+    )
+    if email:
+        set_employee_email(employee_id, email)
+
+    # Determine CC role: manual SQLite override > HR department auto-map > generic
+    manual_role = get_employee_role(employee_id)
+    if manual_role:
+        cc_role = manual_role
+    else:
+        # Try email-based lookup first, then employee_id fallback
+        hr_role_mapped = get_cc_role_for_email(email) if email else None
+        if hr_role_mapped is None:
+            hr_role_mapped = get_cc_role_for_employee_id(employee_id)
+        cc_role = hr_role_mapped or CCRole.generic.value
+
+    # Readable HR department affiliation (for display/self-diagnosis in CC).
+    # Shown regardless of whether it maps to a role, so staff can see what HR
+    # has them as when their access is wrong.
+    department = (get_department_for_email(email) if email else None) \
+        or get_department_for_employee_id(employee_id) or ""
+
+    # Create JWT
+    token, expires_in = create_token(
+        user_type=UserType.employee.value,
+        user_id=employee_id,
+        role=cc_role,
+        name=name,
+        email=email,
+    )
+
+    permissions = ROLE_PERMISSIONS.get(CCRole(cc_role), ROLE_PERMISSIONS[CCRole.generic])
+
+    return TokenResponse(
+        access_token=token,
+        expires_in=expires_in,
+        user={
+            "user_type": "employee",
+            "employee_id": employee_id,
+            "name": name,
+            "email": email,
+            "cc_role": cc_role,
+            "hr_role": hr_role,
+            "department": department,
+            "permissions": permissions,
+        },
+    )
+
+
 @router.post("/employee-login", response_model=TokenResponse)
 def employee_login(req: EmployeeLoginRequest):
     """
@@ -134,61 +196,134 @@ def employee_login(req: EmployeeLoginRequest):
         logger.warning("Employee %s not found in HR portal, allowing with limited info", req.employee_id)
         emp = {"employee_id": req.employee_id, "name": req.employee_id, "email": "", "role": "user"}
 
-    name = emp.get("name", req.employee_id)
-    email = emp.get("email", "")
-
-    # Cache HR email in SQLite (diagnostic continuity; HR is keyed by employee_id)
-    from pr_lookup import (
-        get_cc_role_for_email,
-        get_cc_role_for_employee_id,
-        get_department_for_email,
-        get_department_for_employee_id,
-        set_employee_email,
+    return _employee_token_response(
+        employee_id=req.employee_id,
+        name=emp.get("name", req.employee_id),
+        email=emp.get("email", ""),
+        hr_role=emp.get("role", ""),
     )
-    if email:
-        set_employee_email(req.employee_id, email)
 
-    # Determine CC role: manual SQLite override > HR department auto-map > generic
-    manual_role = get_employee_role(req.employee_id)
-    if manual_role:
-        cc_role = manual_role
-    else:
-        # Try email-based lookup first, then employee_id fallback
-        hr_role = get_cc_role_for_email(email) if email else None
-        if hr_role is None:
-            hr_role = get_cc_role_for_employee_id(req.employee_id)
-        cc_role = hr_role or CCRole.generic.value
 
-    # Readable HR department affiliation (for display/self-diagnosis in CC).
-    # Shown regardless of whether it maps to a role, so staff can see what HR
-    # has them as when their access is wrong.
-    department = (get_department_for_email(email) if email else None) \
-        or get_department_for_employee_id(req.employee_id) or ""
+# ---------------------------------------------------------------------------
+# Nexus SSO receiver
+# ---------------------------------------------------------------------------
+# Nexus (nexus.1pwrafrica.com) is the central IdP. Its /sso/authorize flow
+# redirects the browser to the CC frontend /auth/sso route with a Firebase
+# custom token (?sso_token=), which the frontend POSTs here. We verify the
+# token offline against Google's x509 certs for the pr-system-4ea55 service
+# account and issue the normal CC employee JWT. The monthly staff PIN is
+# enforced by Nexus before it mints the token (pinRequired on the cc tool).
 
-    # Create JWT
-    token, expires_in = create_token(
-        user_type=UserType.employee.value,
-        user_id=req.employee_id,
-        role=cc_role,
-        name=name,
+NEXUS_SA_EMAIL = "firebase-adminsdk-f3uff@pr-system-4ea55.iam.gserviceaccount.com"
+NEXUS_CERT_URL = (
+    "https://www.googleapis.com/service_accounts/v1/metadata/x509/" + NEXUS_SA_EMAIL
+)
+# Fixed audience of all Firebase custom tokens (not project-specific).
+NEXUS_EXPECTED_AUD = (
+    "https://identitytoolkit.googleapis.com/"
+    "google.identity.identitytoolkit.v1.IdentityToolkit"
+)
+_nexus_certs_cache: dict = {"fetched_at": 0.0, "certs": {}}
+
+
+def _fetch_nexus_signing_certs() -> dict:
+    """Fetch + cache (1h) Google's x509 certs for the Nexus service account."""
+    import time
+
+    import requests as _requests
+
+    now = time.time()
+    if _nexus_certs_cache["certs"] and now - _nexus_certs_cache["fetched_at"] < 3600:
+        return _nexus_certs_cache["certs"]
+    try:
+        resp = _requests.get(NEXUS_CERT_URL, timeout=10)
+        resp.raise_for_status()
+        certs = resp.json()
+        if isinstance(certs, dict) and certs:
+            _nexus_certs_cache["certs"] = certs
+            _nexus_certs_cache["fetched_at"] = now
+    except Exception as exc:  # keep stale cache on network failure
+        logger.warning("Nexus SSO: could not refresh Google certs: %s", exc)
+    return _nexus_certs_cache["certs"]
+
+
+def _verify_nexus_custom_token(token: str) -> dict:
+    """
+    Verify a Firebase custom token minted by Nexus. Returns the decoded
+    payload (with ``uid`` and nested ``claims``). Raises HTTPException(401)
+    on any validation failure.
+
+    Custom tokens carry no ``kid`` header, so we try each Google cert until
+    one validates the RS256 signature (same approach as the HR receiver).
+    """
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.x509 import load_pem_x509_certificate
+    from jose import jwt as jose_jwt
+
+    certs = _fetch_nexus_signing_certs()
+    if not certs:
+        raise HTTPException(status_code=503, detail="SSO signing certs unavailable. Try again.")
+
+    payload = None
+    for pem in certs.values():
+        try:
+            cert = load_pem_x509_certificate(pem.encode())
+            public_pem = cert.public_key().public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo,
+            )
+            payload = jose_jwt.decode(
+                token,
+                public_pem.decode(),
+                algorithms=["RS256"],
+                audience=NEXUS_EXPECTED_AUD,
+            )
+            break
+        except Exception:
+            continue
+
+    if payload is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired SSO token.")
+    if payload.get("iss") != NEXUS_SA_EMAIL:
+        raise HTTPException(status_code=401, detail="Invalid SSO token issuer.")
+    return payload
+
+
+class NexusSsoRequest(BaseModel):
+    sso_token: str
+
+
+@router.post("/sso", response_model=TokenResponse)
+def nexus_sso_login(req: NexusSsoRequest):
+    """
+    Exchange a Nexus-minted Firebase custom token for a CC employee JWT.
+    The Nexus identity's email is matched against the HR directory to find
+    the employee_id; role/department resolution is then identical to
+    employee-login.
+    """
+    payload = _verify_nexus_custom_token(req.sso_token)
+
+    claims = payload.get("claims") or {}
+    email = str(claims.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=401, detail="SSO token has no email identity.")
+
+    from hr_directory import get_employee_by_email
+
+    emp = get_employee_by_email(email)
+    if not emp or not emp.get("employee_id"):
+        logger.warning("Nexus SSO: no HR employee for email=%s", email)
+        raise HTTPException(
+            status_code=403,
+            detail="No 1PWR staff record is linked to your Nexus account. Contact IT.",
+        )
+
+    logger.info("Nexus SSO: employee %s (%s) signed in", emp["employee_id"], email)
+    return _employee_token_response(
+        employee_id=str(emp["employee_id"]),
+        name=str(emp.get("name") or email),
         email=email,
-    )
-
-    permissions = ROLE_PERMISSIONS.get(CCRole(cc_role), ROLE_PERMISSIONS[CCRole.generic])
-
-    return TokenResponse(
-        access_token=token,
-        expires_in=expires_in,
-        user={
-            "user_type": "employee",
-            "employee_id": req.employee_id,
-            "name": name,
-            "email": email,
-            "cc_role": cc_role,
-            "hr_role": emp.get("role", ""),
-            "department": department,
-            "permissions": permissions,
-        },
+        hr_role=str(emp.get("role") or ""),
     )
 
 
