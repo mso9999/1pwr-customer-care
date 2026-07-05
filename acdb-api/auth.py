@@ -18,7 +18,9 @@ from datetime import datetime
 from typing import Optional
 
 import bcrypt as _bcrypt
-from fastapi import APIRouter, Depends, HTTPException, status
+import os
+
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
 
 from models import (
@@ -33,6 +35,7 @@ from models import (
     UserType,
 )
 from middleware import create_token, get_current_user, require_employee
+from middleware import security as _verify_security
 from db_auth import (
     customer_is_registered,
     get_customer_password_hash,
@@ -561,6 +564,32 @@ def customer_change_password(
 # ---------------------------------------------------------------------------
 # Current user info
 # ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Lightweight auth check for reverse-proxy gates (nginx auth_request)
+# ---------------------------------------------------------------------------
+# om.1pwrafrica.com's nginx guards /api/om/* with a subrequest here: 204 when
+# the caller presents a valid employee JWT (Authorization: Bearer) OR a
+# server-to-server key from OM_SERVER_API_KEYS (comma-separated env) — the
+# latter keeps CC's own om_tickets.py proxy working. JWT decode only; no DB.
+
+import hmac as _hmac
+
+_OM_SERVER_API_KEYS = [
+    k.strip() for k in os.environ.get("OM_SERVER_API_KEYS", "").split(",") if k.strip()
+]
+
+
+@router.get("/verify")
+async def verify_auth(request: Request, credentials=Depends(_verify_security)):
+    presented = request.headers.get("X-API-Key", "")
+    if presented and any(_hmac.compare_digest(k, presented) for k in _OM_SERVER_API_KEYS):
+        return Response(status_code=204)
+    user = await get_current_user(request, credentials)
+    if user.user_type != UserType.employee:
+        raise HTTPException(status_code=403, detail="Employees only.")
+    return Response(status_code=204)
+
 
 @router.get("/me")
 def get_me(user: CurrentUser = Depends(get_current_user)):
