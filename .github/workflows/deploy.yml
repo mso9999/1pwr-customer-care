@@ -124,7 +124,7 @@ jobs:
           # optional — only install the drop-in if the unit is present.
           ssh -F "$HOME/.ssh/config" cc-deploy-ec2 '
             set -e
-            for svc in 1pdb-api 1pdb-api-bn 1pdb-api-zm; do
+            for svc in 1pdb-api 1pdb-api-bn 1pdb-api-zm gen-api; do
               if systemctl list-unit-files | grep -q "^${svc}\.service"; then
                 sudo mkdir -p /etc/systemd/system/${svc}.service.d
                 sudo install -m 600 -o root -g root /tmp/hr-api.conf \
@@ -232,7 +232,7 @@ jobs:
               return 0
             }
             restart_api_services() {
-              for svc in 1pdb-api 1pdb-api-bn 1pdb-api-zm; do
+              for svc in 1pdb-api 1pdb-api-bn 1pdb-api-zm gen-api; do
                 if systemctl list-unit-files | grep -q "^${svc}\.service"; then
                   sudo systemctl restart "$svc"
                   echo "Restarted ${svc}"
