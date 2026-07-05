@@ -35,6 +35,10 @@ const EMPLOYEE_NAV: NavSectionDef[] = [
       { to: '/provisioning', labelKey: 'nav.provisioning', icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z', accent: true },
       { to: '/billing-priority', labelKey: 'nav.billingPriority', icon: 'M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z', accent: true },
       { to: '/tickets', labelKey: 'nav.omTicketing', icon: 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4', accent: true },
+      // Plant Ops (power-plant monitoring/control + LPG) is now its own app at
+      // gen.1pwrafrica.com. The in-CC /gensite and /lpg pages remain as a
+      // fallback during transition; the primary link jumps to the gen portal.
+      { href: 'https://gen.1pwrafrica.com', labelKey: 'nav.plantOps', icon: 'M13 10V3L4 14h7v7l9-11h-7z', accent: true },
       { to: '/gensite', labelKey: 'nav.gensite', icon: 'M13 10V3L4 14h7v7l9-11h-7z', accent: true },
       { to: '/lpg', labelKey: 'nav.lpg', icon: 'M19 14c0 3.314-3.134 6-7 6s-7-2.686-7-6c0-2.5 2-5.5 7-11 5 5.5 7 8.5 7 11z', accent: true },
       { to: '/analytics', labelKey: 'nav.analytics', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z', accent: true },
