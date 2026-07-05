@@ -20,6 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from auth import router as auth_router
 from gensite import router as gensite_router
+from pr_lookup import router as portfolio_router
 
 app = FastAPI(
     title="1PWR Plant Ops (gen) API",
@@ -37,6 +38,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(gensite_router)
+app.include_router(portfolio_router)  # /api/portfolios — country picker
 
 
 @app.get("/api/health")
