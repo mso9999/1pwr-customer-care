@@ -2458,6 +2458,10 @@ export interface Ticket {
   status: string;
   updated_at: string | null;
   resolved_by: string | null;
+  // Phase 3: OM ticket class + optional links
+  ticket_class?: string;
+  transaction_ref?: string | null;
+  om_ticket_id?: string;
 }
 
 export interface TicketsResponse {

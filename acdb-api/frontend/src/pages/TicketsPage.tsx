@@ -154,6 +154,9 @@ export default function TicketsPage() {
       category: tk.category || '',
       reported_by: tk.reported_by || '',
       resolved_by: tk.resolved_by || '',
+      account_number: tk.account_number || '',
+      ticket_class: tk.ticket_class || 'asset_fault',
+      transaction_ref: tk.transaction_ref || '',
     });
     setShowCreate(false);
   };
@@ -199,8 +202,20 @@ export default function TicketsPage() {
   const TicketForm = ({ onSubmit, submitLabel }: { onSubmit: () => void; submitLabel: string }) => (
     <div className="bg-white rounded-xl shadow-lg border p-4 sm:p-6 mb-6 space-y-4">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Ticket type</label>
+          <select
+            className="w-full px-3 py-2 border rounded-lg text-sm"
+            value={(editData.ticket_class as string) ?? 'asset_fault'}
+            onChange={e => setEditData(p => ({ ...p, ticket_class: e.target.value }))}
+          >
+            <option value="asset_fault">Asset fault (maintenance)</option>
+            <option value="customer_grievance">Customer grievance</option>
+          </select>
+        </div>
         <Field label={t('tickets:ticketName')} field="ticket_name" />
         <Field label={t('tickets:siteCode')} field="site_code" />
+        <Field label="Account number" field="account_number" />
         <div>
           <label className="block text-xs font-medium text-gray-600 mb-1">{t('tickets:priority')}</label>
           <select
@@ -237,6 +252,11 @@ export default function TicketsPage() {
         <Field label={t('tickets:precautions')} field="precautions" rows={3} />
         <Field label={t('tickets:resolutionApproach')} field="resolution_approach" rows={3} />
       </div>
+      {(editData.ticket_class as string) === 'customer_grievance' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Field label="Transaction reference (optional)" field="transaction_ref" />
+        </div>
+      )}
       <div className="flex gap-3 pt-2">
         <button
           onClick={onSubmit}
@@ -288,7 +308,7 @@ export default function TicketsPage() {
           </button>
           {canWrite && (
             <button
-              onClick={() => { setShowCreate(true); setEditId(null); setEditData({ status: 'open', source: 'portal' }); }}
+              onClick={() => { setShowCreate(true); setEditId(null); setEditData({ status: 'open', source: 'portal', ticket_class: 'asset_fault' }); }}
               className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 transition flex items-center gap-1.5"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>

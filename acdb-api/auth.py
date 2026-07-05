@@ -192,12 +192,25 @@ def employee_login(req: EmployeeLoginRequest):
             detail=detail,
         )
 
-    # Look up employee in HR portal
+    # Look up employee in HR portal. Fail closed: the shared monthly PIN is
+    # not a per-user secret, so an unknown employee_id must NOT get a session.
+    # CC_ALLOW_LOGIN_WITHOUT_HR=true restores the old HR-outage grace
+    # (any ID + PIN) as an explicit, temporary operator decision.
     emp = lookup_employee(req.employee_id)
     if not emp:
-        # Allow login even if HR portal is down, but with limited info
-        logger.warning("Employee %s not found in HR portal, allowing with limited info", req.employee_id)
-        emp = {"employee_id": req.employee_id, "name": req.employee_id, "email": "", "role": "user"}
+        import os as _os
+        if _os.environ.get("CC_ALLOW_LOGIN_WITHOUT_HR", "").strip().lower() == "true":
+            logger.warning("Employee %s not found in HR portal; allowing via CC_ALLOW_LOGIN_WITHOUT_HR grace", req.employee_id)
+            emp = {"employee_id": req.employee_id, "name": req.employee_id, "email": "", "role": "user"}
+        else:
+            logger.warning("Employee %s not found in HR portal; login rejected (fail closed)", req.employee_id)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=(
+                    "Employee ID not recognized. Check your 1PWR employee number, "
+                    "or sign in through Nexus instead."
+                ),
+            )
 
     return _employee_token_response(
         employee_id=req.employee_id,
