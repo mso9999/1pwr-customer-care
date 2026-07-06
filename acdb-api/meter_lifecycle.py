@@ -41,6 +41,10 @@ def ensure_meter_assignments_table():
     try:
         with _get_connection() as conn:
             cursor = conn.cursor()
+            # Fail fast rather than hang startup if a backup/long read holds a
+            # conflicting lock (see meter_provisioning note, 2026-07-06). All
+            # DDL below is idempotent, so skipping this startup is safe.
+            cursor.execute("SET lock_timeout = '4s'")
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS meter_assignments (
                     id              SERIAL PRIMARY KEY,

@@ -290,6 +290,12 @@ def ensure_meter_provisioning_table():
         from customer_api import get_connection
         with get_connection() as conn:
             cur = conn.cursor()
+            # Fail fast instead of hanging startup forever if a backup (pg_dump)
+            # or long read holds a conflicting lock — these are all idempotent
+            # (IF NOT EXISTS), so skipping on a locked table is safe; a later
+            # startup re-applies them. (A missing lock_timeout here once took CC
+            # down when a deploy overlapped the nightly pg_dump, 2026-07-06.)
+            cur.execute("SET lock_timeout = '4s'")
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS meter_provisioning (
                     id              SERIAL PRIMARY KEY,
