@@ -337,24 +337,60 @@ def ensure_meter_provisioning_table():
 def _allocate_gateway_block(conn, site: str, count: int) -> list[int]:
     """Atomically reserve `count` gateway sequence numbers for a site.
 
-    Returns the reserved sequence integers (ascending). Uses a single
-    UPSERT...RETURNING so concurrent provisioning stations can't collide.
+    Returns the reserved sequence integers (ascending). First fills gaps
+    from failed provisioning attempts (sequence numbers <= last_seq that
+    have no corresponding meter_provisioning row), then advances the
+    counter for any remaining slots. Uses a single UPSERT...RETURNING so
+    concurrent provisioning stations can't collide on the counter.
     """
     cur = conn.cursor()
+
+    # 1. Find existing GW sequence numbers for this site.
     cur.execute(
         """
-        INSERT INTO gateway_pool_seq (site, last_seq, updated_at)
-        VALUES (%s, %s, NOW())
-        ON CONFLICT (site) DO UPDATE
-            SET last_seq = gateway_pool_seq.last_seq + EXCLUDED.last_seq,
-                updated_at = NOW()
-        RETURNING last_seq
+        SELECT thing_name FROM meter_provisioning
+        WHERE thing_name LIKE %s
         """,
-        (site, count),
+        (f"{site}-GW-%%",),
     )
-    new_max = int(cur.fetchone()[0])
-    start = new_max - count + 1
-    return list(range(start, new_max + 1))
+    used = set()
+    for (thing,) in cur.fetchall():
+        m = re.match(rf"^{re.escape(site)}-GW-(\d+)$", thing or "")
+        if m:
+            used.add(int(m.group(1)))
+
+    # 2. Get current counter.
+    cur.execute(
+        "SELECT last_seq FROM gateway_pool_seq WHERE site = %s",
+        (site,),
+    )
+    row = cur.fetchone()
+    last_seq = int(row[0]) if row else 0
+
+    # 3. Find gaps (unused numbers in [1, last_seq]).
+    gaps = [n for n in range(1, last_seq + 1) if n not in used]
+
+    # 4. Take gap numbers first, then allocate new numbers beyond last_seq.
+    result = gaps[:count]
+    remaining = count - len(result)
+    if remaining > 0:
+        cur.execute(
+            """
+            INSERT INTO gateway_pool_seq (site, last_seq, updated_at)
+            VALUES (%s, %s, NOW())
+            ON CONFLICT (site) DO UPDATE
+                SET last_seq = gateway_pool_seq.last_seq + EXCLUDED.last_seq,
+                    updated_at = NOW()
+            RETURNING last_seq
+            """,
+            (site, remaining),
+        )
+        new_max = int(cur.fetchone()[0])
+        start = new_max - remaining + 1
+        result.extend(range(start, new_max + 1))
+
+    result.sort()
+    return result
 
 
 def _record_provisioning_1pdb(conn, *, thing, meter_serial, pcb_mac, site, account,

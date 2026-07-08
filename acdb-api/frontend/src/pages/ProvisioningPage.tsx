@@ -48,6 +48,8 @@ export default function ProvisioningPage() {
 
   const [registry, setRegistry] = useState<ProvisioningRegistryRow[]>([]);
   const [registryLoading, setRegistryLoading] = useState(false);
+  const [rotateRegistry, setRotateRegistry] = useState<ProvisioningRegistryRow[]>([]);
+  const [rotateRegistryLoading, setRotateRegistryLoading] = useState(false);
 
   const [meters, setMeters] = useState<ProvisionedMeter[]>([]);
   const [metersLoading, setMetersLoading] = useState(false);
@@ -108,7 +110,22 @@ export default function ProvisioningPage() {
   useEffect(() => {
     if (mode === 'registry') loadRegistry();
     if (mode === 'meters') loadMeters();
+    if (mode === 'rotate') loadRotateRegistry();
   }, [mode]);
+
+  const loadRotateRegistry = () => {
+    setRotateRegistryLoading(true);
+    getProvisioningRegistry()
+      .then((r) => setRotateRegistry(r.rows))
+      .catch(() => {})
+      .finally(() => setRotateRegistryLoading(false));
+  };
+
+  const handleRotateThingSelect = (thingName: string) => {
+    setLegacyId(thingName);
+    const row = rotateRegistry.find((r) => r.thing_name === thingName);
+    if (row?.pcb_mac) setPcbMac(row.pcb_mac);
+  };
 
   const resetResults = () => {
     setError('');
@@ -372,12 +389,22 @@ export default function ProvisioningPage() {
           <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
             {mode === 'rotate' && (
               <div>
-                <label className={labelCls}>Current MQTT client id (the unit's name today)</label>
-                <input className={inputCls} value={legacyId} onChange={(e) => setLegacyId(e.target.value)}
-                  placeholder="TestSite4 / OneMeter43" />
+                <label className={labelCls}>PCB Thing (current identity)</label>
+                <select className={inputCls} value={legacyId} onChange={(e) => handleRotateThingSelect(e.target.value)}
+                  disabled={rotateRegistryLoading}>
+                  <option value="">{rotateRegistryLoading ? 'Loading registry…' : 'Select registered Thing…'}</option>
+                  {rotateRegistry.map((r) => (
+                    <option key={r.thing_name} value={r.thing_name}>
+                      {r.thing_name}{r.pcb_mac ? ` — ${r.pcb_mac}` : ''}
+                    </option>
+                  ))}
+                </select>
                 <p className="text-xs text-gray-400 mt-1">
-                  Unit must be online with rotation-capable firmware. It reboots into the new name.
+                  Select the unit's current Thing name. PCB MAC auto-fills from the registry.
+                  For unregistered legacy IDs (e.g. TestSite4), type manually below.
                 </p>
+                <input className={`${inputCls} mt-2`} value={legacyId} onChange={(e) => setLegacyId(e.target.value)}
+                  placeholder="Or type a legacy ID manually (TestSite4 / OneMeter43)" />
               </div>
             )}
 
