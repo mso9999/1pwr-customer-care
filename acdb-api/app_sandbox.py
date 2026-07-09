@@ -103,6 +103,15 @@ class SandboxSeedRequest(BaseModel):
     rate: float | None = None
 
 
+class SandboxRechargeRequest(BaseModel):
+    """Single simulated recharge (Phase 1 sandbox). No payment gateway, no
+    real energy — inserts one ``source='sandbox'`` payment through the same
+    ``transactions`` shape as the seeder so the app's Recharge flow can be
+    exercised end-to-end against synthetic data."""
+    amount: float = 50.0
+    rate: float | None = None
+
+
 def _ensure_dummy_customer(conn) -> None:
     """Best-effort insert of a dummy customer + account row.
 
@@ -224,6 +233,39 @@ def sandbox_seed(req: SandboxSeedRequest) -> Dict[str, Any]:
         "pin": SANDBOX_DUMMY_PIN,
         "meter_id": SANDBOX_DUMMY_METER,
         "name": SANDBOX_DUMMY_NAME,
+        "payments_created": created,
+    }
+
+
+@router.post("/recharge")
+def sandbox_recharge(req: SandboxRechargeRequest) -> Dict[str, Any]:
+    """Simulate one recharge against the dummy sandbox account.
+
+    Inserts a single ``source='sandbox'`` payment (same shape as the seeder)
+    so the mobile app's Recharge flow can be validated without a real payment
+    gateway. The dashboard / transactions balance is derived from the
+    ``transactions`` table, so the credit surfaces with no extra wiring.
+    Gated identically to ``/seed``: 404 when sandbox is off, refuses to run
+    against a production database.
+    """
+    if not sandbox_enabled():
+        raise HTTPException(status_code=404, detail="Sandbox mode is not enabled")
+    _assert_not_prod_db()
+    rate = req.rate or 160.0
+    amount = req.amount or 0.0
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="amount must be greater than 0")
+    with _get_connection() as conn:
+        _ensure_dummy_customer(conn)
+        created = _seed_payments(conn, 1, amount, rate)
+    kwh = round(amount / rate, 2) if rate else 0.0
+    return {
+        "status": "ok",
+        "account_number": SANDBOX_DUMMY_ACCOUNT,
+        "meter_id": SANDBOX_DUMMY_METER,
+        "amount": round(amount, 2),
+        "rate": rate,
+        "kwh": kwh,
         "payments_created": created,
     }
 
