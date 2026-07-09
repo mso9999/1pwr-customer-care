@@ -232,7 +232,11 @@ jobs:
               return 0
             }
             restart_api_services() {
-              for svc in 1pdb-api 1pdb-api-bn 1pdb-api-zm gen-api; do
+              # 1pdb-api-sandbox is the ring-fenced CC sandbox instance
+              # (APP_SANDBOX=1, separate sandbox DB). Same code path as prod
+              # (/opt/cc-portal/backend), so it picks up new routes — e.g.
+              # POST /api/app/sandbox/recharge — when restarted here.
+              for svc in 1pdb-api 1pdb-api-bn 1pdb-api-zm 1pdb-api-sandbox gen-api; do
                 if systemctl list-unit-files | grep -q "^${svc}\.service"; then
                   sudo systemctl restart "$svc"
                   echo "Restarted ${svc}"
