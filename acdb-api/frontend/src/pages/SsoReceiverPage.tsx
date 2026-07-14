@@ -35,6 +35,12 @@ export default function SsoReceiverPage() {
       return;
     }
 
+    // Pick up language preference from Nexus SSO launch
+    const lang = params.get('lang');
+    if (lang === 'fr' || lang === 'en') {
+      localStorage.setItem('cc_lang', lang);
+    }
+
     nexusSsoLogin(token)
       .then((res) => {
         login(res.access_token, res.user as never);
