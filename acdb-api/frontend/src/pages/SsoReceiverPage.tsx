@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { nexusSsoLogin } from '../lib/api';
+import i18n from '../i18n';
 
 /**
  * Nexus SSO receiver (route: /auth/sso).
@@ -39,6 +40,7 @@ export default function SsoReceiverPage() {
     const lang = params.get('lang');
     if (lang === 'fr' || lang === 'en') {
       localStorage.setItem('cc_lang', lang);
+      i18n.changeLanguage(lang);
     }
 
     nexusSsoLogin(token)
