@@ -349,6 +349,24 @@ def nexus_sso_login(req: NexusSsoRequest):
             detail="No 1PWR staff record is linked to your Nexus account. Contact IT.",
         )
 
+    # Enforce Nexus systemAccess.cc.enabled — if explicitly false, deny access.
+    system_access = claims.get("systemAccess")
+    if isinstance(system_access, dict) and system_access.get("enabled") is False:
+        logger.warning("Nexus SSO: CC access disabled for email=%s", email)
+        raise HTTPException(
+            status_code=403,
+            detail="Your Nexus account does not have CC Portal access enabled. Contact IT.",
+        )
+
+    # Check HR directory employment status — deny if inactive/terminated.
+    emp_status = str(emp.get("status") or emp.get("employment_status") or "").strip().lower()
+    if emp_status in ("inactive", "terminated", "resigned", "suspended"):
+        logger.warning("Nexus SSO: inactive employee %s (status=%s)", email, emp_status)
+        raise HTTPException(
+            status_code=403,
+            detail="Your employment status is inactive. Contact HR if this is an error.",
+        )
+
     logger.info("Nexus SSO: employee %s (%s) signed in", emp["employee_id"], email)
 
     # Extract Nexus-provided department from SSO claims (authoritative)

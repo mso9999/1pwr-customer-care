@@ -20,7 +20,9 @@ logger = logging.getLogger("acdb-api.middleware")
 # JWT config
 # ---------------------------------------------------------------------------
 
-JWT_SECRET = os.environ.get("CC_JWT_SECRET", "cc-portal-dev-secret-change-me")
+JWT_SECRET = os.environ.get("CC_JWT_SECRET")
+if not JWT_SECRET:
+    raise RuntimeError("CC_JWT_SECRET environment variable is required — refusing to start with no secret (fail-closed).")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = int(os.environ.get("CC_JWT_EXPIRY_HOURS", "8"))
 
