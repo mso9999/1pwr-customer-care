@@ -102,11 +102,20 @@ def generate_date_password() -> str:
 # Employee login
 # ---------------------------------------------------------------------------
 
-def _employee_token_response(employee_id: str, name: str, email: str, hr_role: str = "") -> TokenResponse:
+def _employee_token_response(
+    employee_id: str,
+    name: str,
+    email: str,
+    hr_role: str = "",
+    nexus_department: str | None = None,
+) -> TokenResponse:
     """
     Issue the CC employee JWT + user payload for an already-authenticated
-    employee. Shared by employee-login (PIN) and the Nexus SSO receiver —
-    role/department resolution is identical for both paths.
+    employee. Shared by employee-login (PIN) and the Nexus SSO receiver.
+
+    When ``nexus_department`` is provided (from Nexus SSO claims), it is used
+    as the authoritative department string instead of the HR directory lookup.
+    This makes Nexus the single source of truth for department→role mapping.
     """
     # Cache HR email in SQLite (diagnostic continuity; HR is keyed by employee_id)
     from pr_lookup import (
@@ -116,26 +125,30 @@ def _employee_token_response(employee_id: str, name: str, email: str, hr_role: s
         get_department_for_employee_id,
         set_employee_email,
     )
+    from hr_directory import _map_department_to_role
+
     if email:
         set_employee_email(employee_id, email)
 
-    # Determine CC role: non-generic manual SQLite override > HR department auto-map > generic
-    # A manual 'generic' assignment is treated as "no manual role" so that HR
-    # department reassignment can take effect without needing to delete the row.
+    # Determine CC role: non-generic manual SQLite override > Nexus department > HR department auto-map > generic
+    # A manual 'generic' assignment is treated as "no manual role" so that department
+    # reassignment can take effect without needing to delete the row.
     manual_role = get_employee_role(employee_id)
     if manual_role and manual_role != CCRole.generic.value:
         cc_role = manual_role
+    elif nexus_department:
+        # Nexus SSO provided the department — use it as the single source of truth
+        cc_role = _map_department_to_role(nexus_department) or CCRole.generic.value
     else:
-        # Try email-based lookup first, then employee_id fallback
+        # Fallback for direct (non-SSO) logins: HR directory lookup
         hr_role_mapped = get_cc_role_for_email(email) if email else None
         if hr_role_mapped is None:
             hr_role_mapped = get_cc_role_for_employee_id(employee_id)
         cc_role = hr_role_mapped or CCRole.generic.value
 
     # Readable HR department affiliation (for display/self-diagnosis in CC).
-    # Shown regardless of whether it maps to a role, so staff can see what HR
-    # has them as when their access is wrong.
-    department = (get_department_for_email(email) if email else None) \
+    # When Nexus provided the department, use it; otherwise fall back to HR directory.
+    department = nexus_department or (get_department_for_email(email) if email else None) \
         or get_department_for_employee_id(employee_id) or ""
 
     # Create JWT
@@ -337,11 +350,16 @@ def nexus_sso_login(req: NexusSsoRequest):
         )
 
     logger.info("Nexus SSO: employee %s (%s) signed in", emp["employee_id"], email)
+
+    # Extract Nexus-provided department from SSO claims (authoritative)
+    nexus_department = str(claims.get("department") or "").strip() or None
+
     return _employee_token_response(
         employee_id=str(emp["employee_id"]),
         name=str(emp.get("name") or email),
         email=email,
         hr_role=str(emp.get("role") or ""),
+        nexus_department=nexus_department,
     )
 
 
