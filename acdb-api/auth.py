@@ -119,9 +119,11 @@ def _employee_token_response(employee_id: str, name: str, email: str, hr_role: s
     if email:
         set_employee_email(employee_id, email)
 
-    # Determine CC role: manual SQLite override > HR department auto-map > generic
+    # Determine CC role: non-generic manual SQLite override > HR department auto-map > generic
+    # A manual 'generic' assignment is treated as "no manual role" so that HR
+    # department reassignment can take effect without needing to delete the row.
     manual_role = get_employee_role(employee_id)
-    if manual_role:
+    if manual_role and manual_role != CCRole.generic.value:
         cc_role = manual_role
     else:
         # Try email-based lookup first, then employee_id fallback
