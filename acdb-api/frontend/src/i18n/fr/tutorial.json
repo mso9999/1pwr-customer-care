@@ -81,6 +81,16 @@
         "Cohorte de clients : liste détaillée des clients individuels derrière l'entonnoir — filtrer par site, type de client et statut de paiement (non payé / partiellement payé / entièrement payé / résilié), trier, rechercher par nom ou téléphone, et exporter en CSV pour suivi ou listes de relance."
       ]
     },
+    "investorAnalytics": {
+      "title": "Analyses investisseurs et KPIs portefeuille",
+      "description": "Indicateurs de qualité investisseur, KPIs multi-pays et export Excel.",
+      "steps": [
+        "Ouvrez la page Analyses Investisseurs sous Opérations dans la barre latérale. L'onglet Registre d'actifs se charge en premier — il affiche chaque site opérationnel avec capacité, connexions, répartition clients, tarif (USD/kWh) et disponibilité SCADA.",
+        "Passez à l'onglet Série temporelle KPI pour visualiser les graphiques trimestriels ou mensuels (connexions, revenus, énergie, ARPU) et un tableau avec colonnes financières (OPEX, EBITDA, CAPEX). Utilisez les menus Période et Site pour filtrer.",
+        "Utilisez l'onglet Clients pour explorer la liste des clients d'un site — filtrer par type (HH/SME/C&I), paginer les résultats, et voir le plan tarifaire, la date de raccordement et la dernière transaction.",
+        "Utilisez l'onglet Transactions pour l'historique des transactions par site avec conversion USD et filtrage par date. Cliquez sur Export XLSX dans l'onglet Registre d'actifs pour télécharger un classeur investisseur complet."
+      ]
+    },
     "commerce": {
       "title": "Tarifs, financement et exports",
       "description": "Paramétrage des taux, financement d’actifs et extractions pour analyse.",

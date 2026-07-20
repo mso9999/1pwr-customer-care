@@ -84,6 +84,7 @@ const FEATURE_ROWS: [string, string, string, string, string][] = [
   ['Financing',      'Financement',           'Extend credit (from customer page)','Accorder un crédit (depuis la fiche client)', '/customers/:id'],
   ['Reports',        'Rapports',              'O&M quarterly report',              'Rapport trimestriel O&M',                  '/om-report'],
   ['Reports',        'Rapports',              'Financial analytics (ARPU)',        'Analyses financières (ARPU)',              '/financial'],
+  ['Reports',        'Rapports',              'Investor analytics (portfolio KPIs)','Analyses investisseurs (KPIs portefeuille)','/investor-analytics'],
   ['Reports',        'Rapports',              'Onboarding pipeline',               'Pipeline d\'intégration',                  '/pipeline'],
   ['Reports',        'Rapports',              'Maintenance / ticket log',          'Journal maintenance / tickets',            '/tickets'],
   ['Data',           'Données',               'Accounts browser',                  'Explorateur des comptes',                  '/accounts'],
@@ -1363,10 +1364,9 @@ function ProvisioningContent() {
       </P>
       <SubHead>Naming</SubHead>
       <Ul>
-        <li><Bold>Gateway pool</Bold> (batch, account unknown): <Code>&lt;SITE&gt;-GW-####</Code> (e.g. <Code>MAK-GW-0007</Code>) — a stable, account-free device identity allocated by CC.</li>
-        <li><Bold>Site-account</Bold> (account known / migration): <Code>&lt;SITE&gt;-&lt;account&gt;</Code> (e.g. <Code>MAK-0026</Code>).</li>
+        <li><Bold>Gateway pool</Bold> (batch, account unknown): <Code>&lt;SITE&gt;-GW-####</Code> (e.g. <Code>MAK-GW-0007</Code>) — a stable, account-free device identity allocated by CC. This name is permanent and never changes.</li>
       </Ul>
-      <P>Site codes are the canonical three-letter CC codes; the Thing name is fixed for the life of the device.</P>
+      <P>Site codes are the canonical three-letter CC codes; the Thing name is fixed for the life of the device. Gateway Things are never renamed based on customer accounts.</P>
       <SubHead>Batch provisioning with the station</SubHead>
       <P>
         A virgin gateway has no certificate, so CC cannot reach it directly. Download the
@@ -1375,16 +1375,30 @@ function ProvisioningContent() {
         you pick the destination site + Wi-Fi and confirm, CC issues the Things + certs, and the station
         delivers each bootstrap to the device with a progress bar.
       </P>
+      <SubHead>Updating WiFi configuration</SubHead>
+      <P>
+        After provisioning, use the <Bold>Update Configuration</Bold> tab to push new WiFi/SoftAP settings
+        to an already-provisioned gateway. This publishes a <Code>cfg/network</Code> MQTT message to the
+        device — it does <Bold>not</Bold> change the Thing name, certificates, or identity. Use this for
+        correcting mis-entered WiFi credentials or updating SoftAP settings.
+      </P>
+      <SubHead>Customer association (commissioning)</SubHead>
+      <P>
+        Gateway Things are associated with customer accounts during the normal
+        <PageLink to="/commission">commissioning</PageLink> flow — not during provisioning. The
+        commissioning form includes an optional gateway selector that links the gateway to the customer's
+        account in <Code>meter_provisioning</Code> without renaming anything.
+      </P>
       <SubHead>Lifecycle</SubHead>
       <Ol>
         <li><Bold>provisioned</Bold> — identity + cert + site Wi-Fi written; no customer account yet (the "unallocated" bucket).</li>
         <li><Bold>online</Bold> — installed at site, reached AWS IoT.</li>
         <li><Bold>serial-acquired</Bold> — telemetry seen; CC auto-binds the gateway to its meter serial.</li>
-        <li><Bold>allocated</Bold> — meter serial linked to a customer account via the normal <PageLink to="/assign-meter">commissioning</PageLink> flow.</li>
+        <li><Bold>allocated</Bold> — meter serial linked to a customer account via the <PageLink to="/commission">commissioning</PageLink> flow (gateway association optional).</li>
       </Ol>
       <P>Track every unit and its locational assignment in the <Bold>Provisioned meters</Bold> tab.</P>
       <Tip>Batch-provision gateways ahead of installation. The customer-account link is the last step (commissioning), not part of provisioning.</Tip>
-      <Warning>Never use <Code>TestSite*</Code> / <Code>HQTEST*</Code> / ad-hoc client IDs in the field — always provision through this page or the station so a registered Thing + cert are created and recorded.</Warning>
+      <Warning>Never use <Code>TestSite*</Code> / <Code>HQTEST*</Code> / ad-hoc client IDs in the field — always provision through the station so a registered Thing + cert are created and recorded. Identity rotation (<Code>/rotate</Code>) is superadmin-only and reserved for exceptional cases (e.g. PCB reuse at another site).</Warning>
     </>
   );
 }
@@ -1423,6 +1437,99 @@ function WhatsNewContent() {
   );
 }
 
+function InvestorAnalyticsContent() {
+  const fr = useHelpLangIsFr();
+
+  if (fr) {
+    return (
+      <>
+        <P>
+          La page <PageLink to="/investor-analytics">Analyses Investisseurs</PageLink> (<Code>/investor-analytics</Code>)
+          fournit des indicateurs de performance de qualité investisseur pour l&apos;ensemble du portefeuille 1PWR —
+          multi-pays, multi-sites, avec conversion USD.
+        </P>
+        <SubHead>Onglet Registre d&apos;actifs</SubHead>
+        <P>
+          Affiche chaque site opérationnel avec ses métadonnées (pays, région, statut, date de commissioning,
+          puissance PV, batterie, thermal), les comptes de connexions (total/actif/nouvelles), la répartition par type
+          (HH/SME/C&amp;I), le tarif moyen en USD/kWh et la disponibilité du système (SCADA).
+        </P>
+        <Tip>Le bouton <Bold>Export XLSX</Bold> génère un classeur Excel avec registre d&apos;actifs, KPIs, clients et transactions.</Tip>
+        <SubHead>Onglet Série temporelle KPI</SubHead>
+        <P>
+          Graphiques interactifs (connexions, revenus USD, énergie kWh, ARPU) et tableau détaillé avec colonnes financières
+          (OPEX, EBITDA, CAPEX). Filtrez par période (trimestriel/mensuel) et par site (ou portefeuille entier).
+        </P>
+        <SubHead>Onglets Clients et Transactions</SubHead>
+        <P>
+          Liste paginée des clients par site avec type (HH/SME/C&amp;I/UNK), plan tarifaire, date de raccordement et
+          dernière transaction. L&apos;onglet Transactions affiche l&apos;historique avec conversion USD et filtrage par date.
+        </P>
+        <SubHead>Classification des clients</SubHead>
+        <P>
+          Les types de clients sont classés automatiquement à partir des plans tarifaires SparkMeter. Les administrateurs
+          (superadmin, onm_team) peuvent surcharger manuellement le type via l&apos;API ou la page.
+        </P>
+        <SubHead>Sources de données et ETL</SubHead>
+        <Ul>
+          <li><Bold>SparkMeter</Bold> (Koios / ThunderCloud) — comptes, transactions, plans tarifaires</li>
+          <li><Bold>Odoo</Bold> — factures de revenu pour les sites du Bénin</li>
+          <li><Bold>SCADA</Bold> (SMA Sunny Portal, Victron VRM) — disponibilité des sites</li>
+          <li><Bold>Modèle financier</Bold> — CAPEX importé depuis le classeur FM</li>
+          <li><Bold>Taux de change</Bold> — table fx_rates avec historique, conversion USD</li>
+        </Ul>
+        <Warning>
+          Les données sont aussi agrégées dans l&apos;API mobile (<Code>/api/app/investor-summary</Code>) pour l&apos;intégration
+          Odyssey et l&apos;application mobile.
+        </Warning>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <P>
+        The <PageLink to="/investor-analytics">Investor Analytics</PageLink> page (<Code>/investor-analytics</Code>)
+        provides investor-grade KPIs across the entire 1PWR portfolio — multi-country, multi-site, with USD conversion.
+      </P>
+      <SubHead>Asset Register Tab</SubHead>
+      <P>
+        Shows each operational site with metadata (country, region, status, commissioning date, PV capacity, battery,
+        thermal), connection counts (total/active/new), customer type breakdown (HH/SME/C&amp;I), average tariff in
+        USD/kWh, and system availability (SCADA).
+      </P>
+      <Tip>The <Bold>Export XLSX</Bold> button generates an Excel workbook with asset register, KPIs, customers, and transactions.</Tip>
+      <SubHead>KPI Time Series Tab</SubHead>
+      <P>
+        Interactive charts (connections, revenue USD, energy kWh, ARPU) and a detailed table with financial columns
+        (OPEX, EBITDA, CAPEX). Filter by period (quarterly/monthly) and by site (or entire portfolio).
+      </P>
+      <SubHead>Customers &amp; Transactions Tabs</SubHead>
+      <P>
+        Paginated customer list per site with type (HH/SME/C&amp;I/UNK), tariff plan, connection date, and last
+        transaction. The Transactions tab shows history with USD conversion and date filtering.
+      </P>
+      <SubHead>Customer Classification</SubHead>
+      <P>
+        Customer types are auto-classified from SparkMeter tariff plans. Admins (superadmin, onm_team) can manually
+        override the type via the API or page.
+      </P>
+      <SubHead>Data Sources &amp; ETL</SubHead>
+      <Ul>
+        <li><Bold>SparkMeter</Bold> (Koios / ThunderCloud) — accounts, transactions, tariff plans</li>
+        <li><Bold>Odoo</Bold> — invoiced revenue for Benin sites</li>
+        <li><Bold>SCADA</Bold> (SMA Sunny Portal, Victron VRM) — site availability</li>
+        <li><Bold>Financial Model</Bold> — CAPEX imported from FM workbook</li>
+        <li><Bold>FX Rates</Bold> — fx_rates table with historical lookup, USD conversion</li>
+      </Ul>
+      <Warning>
+        Data is also aggregated in the mobile BFF (<Code>/api/app/investor-summary</Code>) for Odyssey integration
+        and the mobile app.
+      </Warning>
+    </>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Public hook: returns fully-translated sections array               */
 /* ------------------------------------------------------------------ */
@@ -1443,6 +1550,7 @@ export function useHelpSections(): HelpSection[] {
     { id: 'meters',               content: <MetersContent /> },
     { id: 'provisioning',         content: <ProvisioningContent />, searchKeywords: 'gateway station batch virgin bootstrap commissioning provision certificate softap mak-gw download laptop' },
     { id: 'reports',              content: <ReportsContent /> },
+    { id: 'investor-analytics',   content: <InvestorAnalyticsContent />, searchKeywords: 'investor analytics kpi portfolio arpu capex ebitda opex scada odoo sparkmeter etl fx usd availability asset register' },
     { id: 'data-browsers',        content: <DataBrowsersContent />, searchKeywords: 'accounts transactions tables sql browse' },
     { id: 'export',               content: <ExportContent /> },
     { id: 'tariffs',              content: <TariffsContent /> },

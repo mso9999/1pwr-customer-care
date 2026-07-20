@@ -1,0 +1,13 @@
+[Unit]
+Description=Prune inverter_readings.raw_json older than retention window
+Documentation=file:///opt/cc-portal/scripts/ops/README_inverter_rawjson_prune.md
+After=postgresql.service network-online.target
+
+[Service]
+Type=oneshot
+User=postgres
+Environment=RETAIN_DAYS=7
+Environment=DB=onepower_cc
+ExecStart=/usr/local/bin/cc_prune_inverter_rawjson.sh
+Nice=10
+IOSchedulingClass=idle

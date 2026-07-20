@@ -192,6 +192,10 @@ _IT_DEPT_MAPPINGS: list[tuple[str, str, str]] = [
     ("it",                              "onm_team", "IT"),
     ("it team",                         "onm_team", "IT Team"),
     ("information technology",          "onm_team", "Information Technology"),
+    ("is&t",                            "onm_team", "IS&T"),
+    ("is&t - information systems and technology", "onm_team", "IS&T — Information Systems and Technology"),
+    ("information systems and technology", "onm_team", "Information Systems and Technology"),
+    ("ist",                             "onm_team", "IST (code)"),
     ("ti",                             "onm_team", "TI (code)"),
     ("technologies de l'information",   "onm_team", "Technologies de l'information"),
 ]

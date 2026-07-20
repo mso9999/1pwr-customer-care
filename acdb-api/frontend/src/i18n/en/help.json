@@ -17,6 +17,7 @@
     "metering": "Metering",
     "provisioning": "Provisioning",
     "reporting": "Reporting",
+    "investorAnalytics": "Investor Analytics",
     "dataBrowsers": "Accounts, transactions & tables",
     "financing": "Financing",
     "tariffs": "Tariffs",
@@ -34,5 +35,5 @@
     "feature": "Feature",
     "page": "Page"
   },
-  "footer": "1PWR Customer Care Portal — Revision April 2026 — Administered by OnePower Lesotho"
+  "footer": "1PWR Customer Care Portal — Revision July 2026 — Administered by OnePower Lesotho"
 }

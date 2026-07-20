@@ -37,6 +37,26 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW_FOLIO: WhatsNewEntry[] = [
   {
+    id: 'investor-analytics',
+    date: '2026-07-16',
+    title: 'Investor Analytics — portfolio-grade KPIs now available',
+    blurb: 'A new page brings investor-grade metrics, multi-country KPIs, SCADA availability, and Excel export to CC.',
+    pages: [
+      {
+        heading: 'Investor-grade analytics, all in one place',
+        body:
+          'A new Investor Analytics page is now available under Operations in the sidebar.\n\n' +
+          '- **Asset Register**: every operational site with PV/battery capacity, connection counts, customer mix (HH/SME/C&I), tariff in USD/kWh, and SCADA availability\n' +
+          '- **KPI Time Series**: quarterly or monthly charts for connections, revenue (USD), energy (kWh), and ARPU — plus OPEX, EBITDA, and CAPEX columns\n' +
+          '- **Customers & Transactions**: paginated site-level drill-downs with customer type badges and USD conversion\n' +
+          '- **Excel Export**: one-click XLSX workbook for investor reporting\n' +
+          '- **Data sources**: SparkMeter (Koios/ThunderCloud), Odoo invoiced revenue, SCADA (SMA/Victron), and CAPEX from the financial model\n' +
+          '- All revenue is FX-converted to USD using historical rate lookups\n' +
+          '- A lightweight summary is also exposed via the mobile BFF for Odyssey integration',
+      },
+    ],
+  },
+  {
     id: 'whats-new-primer',
     date: '2026-07-02',
     title: 'Introducing the "What\'s new" primer',
@@ -80,7 +100,7 @@ export const WHATS_NEW_FOLIO: WhatsNewEntry[] = [
         heading: 'IT department → onm_team access',
         body:
           'IT staff now receive the same access as O&M (the onm_team role) automatically.\n\n' +
-          'If your HR department is IT, IT Team, Information Technology, TI, or Technologies de l\'information, you\'ll get onm_team access on your next login.\n\n' +
+          'If your HR department is IT, IT Team, IS&T, Information Systems and Technology, Information Technology, TI, or Technologies de l\'information, you\'ll get onm_team access on your next login.\n\n' +
           'Provisioning (1Meter gateways) still requires the Engineering department — a separate role.',
       },
     ],

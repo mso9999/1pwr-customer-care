@@ -81,6 +81,7 @@
     "coverage": "Audit de couverture",
     "smsLog": "Journal SMS",
     "analytics": "Explorateur Analytique",
+    "investorAnalytics": "Analytique Investisseur",
     "customerCohort": "Cohorte de clients",
     "myAccount": "Mon compte"
   },

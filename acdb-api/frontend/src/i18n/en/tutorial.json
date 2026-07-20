@@ -81,6 +81,16 @@
         "Customer Cohort: drill-down list of the individual customers behind the funnel — filter by site, customer type and payment status (not paid / partially paid / fully paid / terminated), sort, search by name or phone, and export to CSV for follow-up or call lists."
       ]
     },
+    "investorAnalytics": {
+      "title": "Investor analytics & portfolio KPIs",
+      "description": "Portfolio-wide investor-grade metrics, multi-country KPIs, and Excel export.",
+      "steps": [
+        "Open the Investor Analytics page under Operations in the sidebar. The Asset Register tab loads first — it shows every operational site with capacity, connections, customer mix, tariff (USD/kWh), and SCADA availability.",
+        "Switch to the KPI Time Series tab to view quarterly or monthly charts (connections, revenue, energy, ARPU) and a table with financial columns (OPEX, EBITDA, CAPEX). Use the Period and Site dropdowns to filter.",
+        "Use the Customers tab to drill into a specific site's customer list — filter by type (HH/SME/C&I), paginate through results, and see tariff plan, connection date, and last transaction.",
+        "Use the Transactions tab for site-level transaction history with USD conversion and date filtering. Click Export XLSX on the Asset Register tab to download a full investor workbook."
+      ]
+    },
     "commerce": {
       "title": "Tariffs, financing, and exports",
       "description": "Rate configuration, asset financing, and bulk extracts for analysis.",

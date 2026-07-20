@@ -48,6 +48,7 @@ import LpgSitePage from './pages/LpgSitePage';
 import CommissionSitePage from './pages/CommissionSitePage';
 import SMSLogPage from './pages/SMSLogPage';
 import AnalyticsPage from './pages/AnalyticsPage';
+import InvestorAnalyticsPage from './pages/InvestorAnalyticsPage';
 import CustomerCohortPage from './pages/CustomerCohortPage';
 import ProvisioningPage from './pages/ProvisioningPage';
 
@@ -86,6 +87,7 @@ export default function App() {
             <Route path="om-report" element={<ProtectedRoute requireEmployee><OMReportPage /></ProtectedRoute>} />
             <Route path="financial" element={<ProtectedRoute requireEmployee><FinancialPage /></ProtectedRoute>} />
             <Route path="analytics" element={<ProtectedRoute requireEmployee><AnalyticsPage /></ProtectedRoute>} />
+            <Route path="investor-analytics" element={<ProtectedRoute requireEmployee><InvestorAnalyticsPage /></ProtectedRoute>} />
             <Route path="customer-cohort" element={<ProtectedRoute requireEmployee><CustomerCohortPage /></ProtectedRoute>} />
             <Route path="sync" element={<ProtectedRoute requireEmployee><SyncPage /></ProtectedRoute>} />
             <Route path="commission" element={<ProtectedRoute requireEmployee requireRole={['superadmin', 'onm_team']}><CommissionCustomerPage /></ProtectedRoute>} />

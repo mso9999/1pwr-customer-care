@@ -42,6 +42,7 @@ const EMPLOYEE_NAV: NavSectionDef[] = [
       { to: '/gensite', labelKey: 'nav.gensite', icon: 'M13 10V3L4 14h7v7l9-11h-7z', accent: true },
       { to: '/lpg', labelKey: 'nav.lpg', icon: 'M19 14c0 3.314-3.134 6-7 6s-7-2.686-7-6c0-2.5 2-5.5 7-11 5 5.5 7 8.5 7 11z', accent: true },
       { to: '/analytics', labelKey: 'nav.analytics', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z', accent: true },
+      { to: '/investor-analytics', labelKey: 'nav.investorAnalytics', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z', accent: true },
       { to: '/customer-cohort', labelKey: 'nav.customerCohort', icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z', accent: true },
     ],
   },

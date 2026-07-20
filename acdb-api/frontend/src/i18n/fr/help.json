@@ -17,6 +17,7 @@
     "metering": "Comptage",
     "provisioning": "Provisionnement",
     "reporting": "Rapports",
+    "investorAnalytics": "Analyses Investisseurs",
     "dataBrowsers": "Comptes, transactions et tables",
     "financing": "Financement",
     "tariffs": "Tarifs",
@@ -34,5 +35,5 @@
     "feature": "Fonctionnalité",
     "page": "Page"
   },
-  "footer": "Portail Service Client 1PWR — Révision avril 2026 — Administré par OnePower Lesotho"
+  "footer": "Portail Service Client 1PWR — Révision juillet 2026 — Administré par OnePower Lesotho"
 }

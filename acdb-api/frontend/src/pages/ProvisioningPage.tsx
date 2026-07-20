@@ -1,66 +1,44 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  getProvisioningSiteCodes,
-  provisionThing,
-  rotateMeterIdentity,
+  updateDeviceConfig,
   getProvisioningRegistry,
   getProvisionedMeters,
   reconcileProvisioning,
   downloadProvisioningStation,
-  type ProvisioningSiteCode,
-  type ProvisionResult,
-  type RotateResult,
+  type UpdateConfigResult,
   type ProvisioningRegistryRow,
   type ProvisionedMeter,
 } from '../lib/api';
 
-type Mode = 'guide' | 'provision' | 'rotate' | 'meters' | 'registry';
+type Mode = 'guide' | 'config' | 'meters' | 'registry';
 
 const inputCls =
   'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none';
 const labelCls = 'block text-xs font-medium text-gray-500 mb-1';
 
-function deriveThingName(site: string, account: string): string {
-  if (!site) return '';
-  const m = account.trim().toUpperCase().match(/^(\d+)/);
-  return m ? `${site}-${m[1]}` : `${site}-?`;
-}
-
 export default function ProvisioningPage() {
-  const [mode, setMode] = useState<Mode>('provision');
-  const [sites, setSites] = useState<ProvisioningSiteCode[]>([]);
-  const [sitesError, setSitesError] = useState('');
+  const [mode, setMode] = useState<Mode>('guide');
 
-  // shared form state
-  const [siteCode, setSiteCode] = useState('');
-  const [account, setAccount] = useState('');
-  const [meterSerial, setMeterSerial] = useState('');
+  // config form state
+  const [thingName, setThingName] = useState('');
   const [pcbMac, setPcbMac] = useState('');
   const [wifiSsid, setWifiSsid] = useState('');
   const [wifiPassword, setWifiPassword] = useState('');
-  const [legacyId, setLegacyId] = useState('');
+  const [softapSsid, setSoftapSsid] = useState('');
+  const [softapPassword, setSoftapPassword] = useState('');
   const [version, setVersion] = useState(1);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [result, setResult] = useState<ProvisionResult | null>(null);
-  const [rotateResult, setRotateResult] = useState<RotateResult | null>(null);
+  const [configResult, setConfigResult] = useState<UpdateConfigResult | null>(null);
 
   const [registry, setRegistry] = useState<ProvisioningRegistryRow[]>([]);
   const [registryLoading, setRegistryLoading] = useState(false);
-  const [rotateRegistry, setRotateRegistry] = useState<ProvisioningRegistryRow[]>([]);
-  const [rotateRegistryLoading, setRotateRegistryLoading] = useState(false);
+  const [configRegistry, setConfigRegistry] = useState<ProvisioningRegistryRow[]>([]);
+  const [configRegistryLoading, setConfigRegistryLoading] = useState(false);
 
   const [meters, setMeters] = useState<ProvisionedMeter[]>([]);
   const [metersLoading, setMetersLoading] = useState(false);
-
-  const previewThing = useMemo(() => deriveThingName(siteCode, account), [siteCode, account]);
-
-  useEffect(() => {
-    getProvisioningSiteCodes()
-      .then(setSites)
-      .catch((e) => setSitesError(e instanceof Error ? e.message : String(e)));
-  }, []);
 
   const loadRegistry = () => {
     setRegistryLoading(true);
@@ -68,6 +46,14 @@ export default function ProvisioningPage() {
       .then((r) => setRegistry(r.rows))
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setRegistryLoading(false));
+  };
+
+  const loadConfigRegistry = () => {
+    setConfigRegistryLoading(true);
+    getProvisioningRegistry()
+      .then((r) => setConfigRegistry(r.rows))
+      .catch(() => {})
+      .finally(() => setConfigRegistryLoading(false));
   };
 
   const [downloading, setDownloading] = useState(false);
@@ -110,86 +96,38 @@ export default function ProvisioningPage() {
   useEffect(() => {
     if (mode === 'registry') loadRegistry();
     if (mode === 'meters') loadMeters();
-    if (mode === 'rotate') loadRotateRegistry();
+    if (mode === 'config') loadConfigRegistry();
   }, [mode]);
 
-  const loadRotateRegistry = () => {
-    setRotateRegistryLoading(true);
-    getProvisioningRegistry()
-      .then((r) => setRotateRegistry(r.rows))
-      .catch(() => {})
-      .finally(() => setRotateRegistryLoading(false));
-  };
-
-  const handleRotateThingSelect = (thingName: string) => {
-    setLegacyId(thingName);
-    const row = rotateRegistry.find((r) => r.thing_name === thingName);
+  const handleConfigThingSelect = (name: string) => {
+    setThingName(name);
+    const row = configRegistry.find((r) => r.thing_name === name);
     if (row?.pcb_mac) setPcbMac(row.pcb_mac);
   };
 
   const resetResults = () => {
     setError('');
-    setResult(null);
-    setRotateResult(null);
+    setConfigResult(null);
   };
 
-  const handleProvision = async () => {
+  const handleUpdateConfig = async () => {
     resetResults();
     setBusy(true);
     try {
-      const r = await provisionThing({
-        site_code: siteCode,
-        account,
-        meter_serial: meterSerial,
-        pcb_mac: pcbMac,
+      const r = await updateDeviceConfig({
+        thing_name: thingName,
         wifi_ssid: wifiSsid,
         wifi_password: wifiPassword,
+        softap_ssid: softapSsid || undefined,
+        softap_password: softapPassword || undefined,
         version,
-        legacy_id: legacyId || undefined,
       });
-      setResult(r);
+      setConfigResult(r);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
-  };
-
-  const handleRotate = async () => {
-    resetResults();
-    setBusy(true);
-    try {
-      const r = await rotateMeterIdentity({
-        current_client_id: legacyId,
-        site_code: siteCode,
-        account,
-        meter_serial: meterSerial,
-        pcb_mac: pcbMac,
-        version,
-      });
-      setRotateResult(r);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const bootstrapJson = result ? JSON.stringify(result.bootstrap, null, 2) : '';
-
-  const copyBootstrap = () => {
-    if (bootstrapJson) navigator.clipboard.writeText(bootstrapJson);
-  };
-
-  const downloadBootstrap = () => {
-    if (!result) return;
-    const blob = new Blob([bootstrapJson], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `bootstrap-${result.thing_name}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
   };
 
   return (
@@ -197,16 +135,15 @@ export default function ProvisioningPage() {
       <div className="mb-5">
         <h1 className="text-xl font-semibold text-gray-900">1Meter Provisioning</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Create a canonical AWS IoT Thing (<code className="text-gray-700">&lt;SITE&gt;-&lt;account&gt;</code>),
-          issue its certificate, and generate the device bootstrap payload — no AWS CLI on the laptop.
+          Provision gateway PCBs with stable <code className="text-gray-700">&lt;SITE&gt;-GW-####</code> identities via the
+          provisioning station, then manage WiFi configuration here. Gateway names never change.
         </p>
       </div>
 
       <div className="flex gap-1 mb-5 border-b border-gray-200">
         {([
           ['guide', 'Guide & download'],
-          ['provision', 'Provision new unit'],
-          ['rotate', 'Migrate / rename online unit'],
+          ['config', 'Update Configuration'],
           ['meters', 'Provisioned meters'],
           ['registry', 'Registry'],
         ] as [Mode, string][]).map(([m, label]) => (
@@ -223,12 +160,6 @@ export default function ProvisioningPage() {
           </button>
         ))}
       </div>
-
-      {sitesError && (
-        <div className="mb-4 p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm">
-          Could not load site codes: {sitesError}
-        </div>
-      )}
 
       {error && (
         <div className="mb-4 p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm whitespace-pre-wrap">
@@ -387,145 +318,99 @@ export default function ProvisioningPage() {
       ) : (
         <div className="grid md:grid-cols-2 gap-6">
           <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
-            {mode === 'rotate' && (
-              <div>
-                <label className={labelCls}>PCB Thing (current identity)</label>
-                <select className={inputCls} value={legacyId} onChange={(e) => handleRotateThingSelect(e.target.value)}
-                  disabled={rotateRegistryLoading}>
-                  <option value="">{rotateRegistryLoading ? 'Loading registry…' : 'Select registered Thing…'}</option>
-                  {rotateRegistry.map((r) => (
-                    <option key={r.thing_name} value={r.thing_name}>
-                      {r.thing_name}{r.pcb_mac ? ` — ${r.pcb_mac}` : ''}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-gray-400 mt-1">
-                  Select the unit's current Thing name. PCB MAC auto-fills from the registry.
-                  For unregistered legacy IDs (e.g. TestSite4), type manually below.
-                </p>
-                <input className={`${inputCls} mt-2`} value={legacyId} onChange={(e) => setLegacyId(e.target.value)}
-                  placeholder="Or type a legacy ID manually (TestSite4 / OneMeter43)" />
-              </div>
-            )}
-
             <div>
-              <label className={labelCls}>Site code (canonical, from CC)</label>
-              <select className={inputCls} value={siteCode} onChange={(e) => setSiteCode(e.target.value)}>
-                <option value="">Select site…</option>
-                {sites.map((s) => (
-                  <option key={s.code} value={s.code}>
-                    {s.code} — {s.name}{s.country ? ` (${s.country})` : ''}
+              <label className={labelCls}>Gateway Thing (permanent identity)</label>
+              <select className={inputCls} value={thingName} onChange={(e) => handleConfigThingSelect(e.target.value)}
+                disabled={configRegistryLoading}>
+                <option value="">{configRegistryLoading ? 'Loading registry…' : 'Select provisioned gateway…'}</option>
+                {configRegistry.map((r) => (
+                  <option key={r.thing_name} value={r.thing_name}>
+                    {r.thing_name}{r.pcb_mac ? ` — ${r.pcb_mac}` : ''}
                   </option>
                 ))}
               </select>
+              <p className="text-xs text-gray-400 mt-1">
+                Select the gateway's permanent Thing name. PCB MAC auto-fills from the registry.
+                The Thing name is never changed — only WiFi/SoftAP settings are updated.
+              </p>
             </div>
 
             <div>
-              <label className={labelCls}>Account (CustomerID)</label>
-              <input className={inputCls} value={account} onChange={(e) => setAccount(e.target.value)}
-                placeholder="0026MAK or 0026" />
+              <label className={labelCls}>PCB MAC (read-only)</label>
+              <input className={`${inputCls} bg-gray-50`} value={pcbMac} readOnly
+                placeholder="auto-filled from registry" />
             </div>
 
-            <div className="p-2.5 rounded-lg bg-blue-50 border border-blue-100 text-sm">
-              <span className="text-gray-500">Thing name: </span>
-              <span className="font-mono font-semibold text-blue-800">{previewThing || '—'}</span>
-            </div>
-
-            <div>
-              <label className={labelCls}>Meter serial (Modbus SN)</label>
-              <input className={inputCls} value={meterSerial} onChange={(e) => setMeterSerial(e.target.value)}
-                placeholder="23022613" />
-            </div>
-
-            <div>
-              <label className={labelCls}>PCB MAC (registry key)</label>
-              <input className={inputCls} value={pcbMac} onChange={(e) => setPcbMac(e.target.value)}
-                placeholder="aa:bb:cc:dd:ee:ff" />
-            </div>
-
-            {mode === 'provision' && (
-              <>
+            <div className="border-t border-gray-100 pt-3">
+              <p className="text-xs font-medium text-gray-500 mb-3">Site Wi-Fi (STA mode)</p>
+              <div className="space-y-3">
                 <div>
-                  <label className={labelCls}>Site Wi-Fi SSID</label>
+                  <label className={labelCls}>Wi-Fi SSID</label>
                   <input className={inputCls} value={wifiSsid} onChange={(e) => setWifiSsid(e.target.value)}
                     placeholder="MAK_Wifi-ext" />
                 </div>
                 <div>
-                  <label className={labelCls}>Site Wi-Fi password</label>
+                  <label className={labelCls}>Wi-Fi password</label>
                   <input className={inputCls} value={wifiPassword} onChange={(e) => setWifiPassword(e.target.value)} />
                 </div>
+              </div>
+            </div>
+
+            <div className="border-t border-gray-100 pt-3">
+              <p className="text-xs font-medium text-gray-500 mb-3">SoftAP (optional — device hotspot)</p>
+              <div className="space-y-3">
                 <div>
-                  <label className={labelCls}>Legacy id (optional, recorded as attribute)</label>
-                  <input className={inputCls} value={legacyId} onChange={(e) => setLegacyId(e.target.value)}
-                    placeholder="TestSite4" />
+                  <label className={labelCls}>SoftAP SSID</label>
+                  <input className={inputCls} value={softapSsid} onChange={(e) => setSoftapSsid(e.target.value)}
+                    placeholder="1Meter_aabbcc" />
                 </div>
-              </>
-            )}
+                <div>
+                  <label className={labelCls}>SoftAP password</label>
+                  <input className={inputCls} value={softapPassword} onChange={(e) => setSoftapPassword(e.target.value)} />
+                </div>
+              </div>
+            </div>
 
             <div>
-              <label className={labelCls}>Identity version</label>
+              <label className={labelCls}>Config version</label>
               <input type="number" min={1} className={inputCls} value={version}
                 onChange={(e) => setVersion(parseInt(e.target.value || '1', 10))} />
+              <p className="text-xs text-gray-400 mt-1">
+                Must be higher than the device's current config version for it to accept the update.
+              </p>
             </div>
 
             <button
-              onClick={mode === 'provision' ? handleProvision : handleRotate}
-              disabled={busy}
+              onClick={handleUpdateConfig}
+              disabled={busy || !thingName || !wifiSsid}
               className="w-full py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition"
             >
-              {busy ? 'Working…' : mode === 'provision' ? 'Provision + issue cert' : 'Issue cert + publish rename'}
+              {busy ? 'Publishing…' : 'Publish config update'}
             </button>
           </div>
 
           <div className="space-y-4">
-            {result && (
-              <div className="bg-white rounded-xl border border-green-200 p-5">
-                <div className="flex items-center gap-2 mb-3">
-                  <span className="w-2 h-2 rounded-full bg-green-500" />
-                  <span className="text-sm font-semibold text-gray-900">
-                    Provisioned {result.thing_name}
-                  </span>
-                </div>
-                <dl className="text-xs text-gray-600 space-y-1 mb-3">
-                  <div><span className="text-gray-400">Cert ID: </span><span className="font-mono">{result.certificate_id}</span></div>
-                  <div><span className="text-gray-400">Policy: </span>{result.policy}</div>
-                  <div><span className="text-gray-400">Endpoint: </span><span className="font-mono">{result.mqtt_endpoint}</span></div>
-                </dl>
-                <p className="text-xs text-gray-500 mb-2">{result.instructions}</p>
-                <div className="flex gap-2 mb-2">
-                  <button onClick={copyBootstrap} className="text-xs px-3 py-1.5 bg-gray-100 rounded-md hover:bg-gray-200">Copy bootstrap JSON</button>
-                  <button onClick={downloadBootstrap} className="text-xs px-3 py-1.5 bg-gray-100 rounded-md hover:bg-gray-200">Download .json</button>
-                </div>
-                <textarea
-                  readOnly
-                  value={bootstrapJson}
-                  className="w-full h-48 font-mono text-[11px] p-3 border border-gray-200 rounded-lg bg-gray-50"
-                />
-              </div>
-            )}
-
-            {rotateResult && (
+            {configResult && (
               <div className="bg-white rounded-xl border border-green-200 p-5 text-sm">
                 <div className="flex items-center gap-2 mb-3">
                   <span className="w-2 h-2 rounded-full bg-green-500" />
-                  <span className="font-semibold text-gray-900">
-                    Rename published: {rotateResult.from_client_id} → {rotateResult.new_thing_name}
+                  <span className="text-sm font-semibold text-gray-900">
+                    Config published to {configResult.thing_name}
                   </span>
                 </div>
                 <dl className="text-xs text-gray-600 space-y-1">
-                  <div><span className="text-gray-400">Published to: </span><span className="font-mono">{rotateResult.published_topic}</span></div>
-                  <div><span className="text-gray-400">Watch ack: </span><span className="font-mono">{rotateResult.ack_topic}</span></div>
-                  <div><span className="text-gray-400">Cert ID: </span><span className="font-mono">{rotateResult.certificate_id}</span></div>
+                  <div><span className="text-gray-400">Published to: </span><span className="font-mono">{configResult.published_topic}</span></div>
+                  <div><span className="text-gray-400">Watch ack: </span><span className="font-mono">{configResult.ack_topic}</span></div>
+                  <div><span className="text-gray-400">Version: </span>{configResult.version}</div>
                 </dl>
-                <p className="text-xs text-gray-500 mt-2">{rotateResult.note}</p>
+                <p className="text-xs text-gray-500 mt-2">{configResult.note}</p>
               </div>
             )}
 
-            {!result && !rotateResult && (
+            {!configResult && (
               <div className="bg-gray-50 rounded-xl border border-dashed border-gray-200 p-8 text-center text-sm text-gray-400">
-                {mode === 'provision'
-                  ? 'Fill the form and provision to get the device bootstrap payload here.'
-                  : 'Rename an online unit in place by publishing a new identity to its current client id.'}
+                Select a provisioned gateway and enter the new WiFi settings. The config is published
+                via MQTT — the device applies it and reconnects. The Thing name and certificates are not touched.
               </div>
             )}
           </div>

@@ -18,6 +18,7 @@ const SECTION_TITLE_KEYS: Record<string, string> = {
   meters: 'help:sections.metering',
   provisioning: 'help:sections.provisioning',
   reports: 'help:sections.reporting',
+  'investor-analytics': 'help:sections.investorAnalytics',
   'data-browsers': 'help:sections.dataBrowsers',
   export: 'help:sections.dataExport',
   tariffs: 'help:sections.tariffs',

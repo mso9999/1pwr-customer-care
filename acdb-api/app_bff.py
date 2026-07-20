@@ -674,3 +674,76 @@ def app_care_create_message(
         logger.warning("app/care/messages: bridge notify failed: %s", e)
 
     return {"status": "ok", "id": new_id, "duplicate": False}
+
+
+# ---------------------------------------------------------------------------
+# Investor analytics summary (cross-subapp integration)
+# ---------------------------------------------------------------------------
+
+@router.get("/investor-summary")
+def investor_summary(response: Response) -> Dict[str, Any]:
+    """Lightweight portfolio KPI summary for the mobile app and Odyssey.
+
+    Returns the latest quarter's aggregate metrics — no auth required
+    (public summary data only, same as active-countries).
+    """
+    from customer_api import get_connection
+    import psycopg2.extras
+
+    try:
+        with get_connection() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                # Total connections across all sites
+                cur.execute("SELECT COUNT(*) as total FROM accounts")
+                total_connections = cur.fetchone()["total"]
+
+                # Active connections (txn in last 90 days)
+                cur.execute(
+                    """
+                    SELECT COUNT(DISTINCT account_number) as active
+                    FROM transactions
+                    WHERE transaction_date >= NOW() - INTERVAL '90 days'
+                    """
+                )
+                active_connections = cur.fetchone()["active"]
+
+                # Site count
+                cur.execute("SELECT COUNT(*) as cnt FROM site_metadata WHERE status = 'Operational'")
+                operational_sites = cur.fetchone()["cnt"]
+
+                # Countries
+                cur.execute("SELECT COUNT(DISTINCT country) as cnt FROM site_metadata WHERE status = 'Operational'")
+                countries = cur.fetchone()["cnt"]
+
+                # Latest quarter revenue
+                cur.execute(
+                    """
+                    SELECT COALESCE(SUM(t.transaction_amount), 0) as revenue_local,
+                           MAX(t.site_code) as sample_site
+                    FROM transactions t
+                    WHERE t.transaction_date >= date_trunc('quarter', NOW()) - INTERVAL '3 months'
+                      AND t.transaction_date < date_trunc('quarter', NOW())
+                    """
+                )
+                rev_row = cur.fetchone()
+                revenue_local = float(rev_row["revenue_local"]) if rev_row else 0.0
+
+                # Get FX rate
+                from investor_analytics import _fx_to_usd
+                from country_config import _REGISTRY
+                currency = _REGISTRY["LS"].currency
+                fx = _fx_to_usd(conn, currency, datetime.now().date())
+                revenue_usd = round(revenue_local * fx, 2)
+
+                response.headers["Cache-Control"] = "public, max-age=300"
+                return {
+                    "total_connections": total_connections,
+                    "active_connections": active_connections,
+                    "operational_sites": operational_sites,
+                    "countries": countries,
+                    "last_quarter_revenue_usd": revenue_usd,
+                    "currency": currency,
+                }
+    except Exception as e:
+        logger.warning("app/investor-summary: failed: %s", e)
+        raise HTTPException(status_code=503, detail="Summary unavailable")

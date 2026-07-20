@@ -11,23 +11,25 @@ credentials on the laptop.
 Why CC owns this
 ----------------
 CC already holds the canonical **site codes** (``country_config.ALL_KNOWN_SITES``)
-and customer **accounts**, so the Thing name ``<SITE>-<account>`` is canonical by
-construction and cannot drift into ad-hoc ``TestSite*`` names. The provisioning
-registry (DynamoDB ``1meter_provisioning_registry``) stays the single source of
-truth for PCB-MAC -> Thing, shared with the bench/HQ PowerShell path.
+and customer **accounts**. Gateway Things are provisioned with stable
+``<SITE>-GW-####`` names via the batch endpoint — customer accounts are linked
+during commissioning, not provisioning. The provisioning registry (DynamoDB
+``1meter_provisioning_registry``) stays the single source of truth for
+PCB-MAC -> Thing, shared with the bench/HQ PowerShell path.
 
 Flow
 ----
 1. ``GET  /api/provisioning/site-codes``      -> canonical site dropdown.
-2. ``POST /api/provisioning/things``          -> validate -> claim registry ->
-   create Thing (+type+attrs) -> issue cert -> attach policy -> record cert ->
-   return the firmware bootstrap payload (thing_name/ssid/password/version/
-   cert_pem/key_pem) for the operator to POST to the device local API.
+2. ``POST /api/provisioning/gateways``        -> batch-provision virgin gateways
+   with stable ``<SITE>-GW-####`` names (no customer account). Used by the
+   provisioning station app.
 3. ``GET  /api/provisioning/registry``        -> list registry rows.
-4. ``POST /api/provisioning/rotate``          -> publish ``cfg/identity`` to an
-   already-online unit's *current* client id to rename it in place (migration of
-   existing ``TestSite*`` / ``OneMeterN`` units), matching the firmware
-   ``oneMeter/<clientId>/cfg/identity`` handler.
+4. ``POST /api/provisioning/update-config``   -> publish ``cfg/network`` to an
+   already-provisioned gateway to update WiFi/SoftAP settings without changing
+   the Thing name, certificates, or identity.
+5. ``POST /api/provisioning/rotate``          -> publish ``cfg/identity`` to an
+   already-online unit's *current* client id (superadmin-only, exceptional use
+   for PCB reuse at another site).
 
 The bootstrap / cfg-identity payload schema is dictated by the firmware
 (``local_api_server.c`` and ``device_control.c``): keys ``thing_name``, ``ssid``,
@@ -71,6 +73,7 @@ THING_TYPE = os.environ.get("IOT_THING_TYPE", "OneMeter")
 DEFAULT_POLICY = os.environ.get("IOT_DEVICE_POLICY", "DevicePolicy")
 IOT_ENDPOINT = os.environ.get("IOT_ENDPOINT", "a3p95svnbmzyit-ats.iot.us-east-1.amazonaws.com")
 IDENTITY_TOPIC_FMT = os.environ.get("IOT_IDENTITY_TOPIC_FMT", "oneMeter/{client_id}/cfg/identity")
+NETWORK_TOPIC_FMT = os.environ.get("IOT_NETWORK_TOPIC_FMT", "oneMeter/{client_id}/cfg/network")
 
 # Names we must never silently overwrite from the GUI. Bench/test identities
 # belong to the HQ PowerShell flow; ad-hoc field names are exactly what this
@@ -525,6 +528,10 @@ class GatewayBatchRequest(BaseModel):
     units: list[GatewayUnit] = Field(..., min_length=1, max_length=200)
     wifi_ssid: str = Field(..., min_length=1, max_length=64)
     wifi_password: str = Field(..., max_length=128)
+    softap_ssid: Optional[str] = Field(default=None, max_length=64,
+                                        description="Optional SoftAP SSID for the device hotspot")
+    softap_password: Optional[str] = Field(default=None, max_length=128,
+                                            description="Optional SoftAP password for the device hotspot")
     policy_name: str = Field(default="")
     version: int = Field(default=1, ge=1)
 
@@ -537,6 +544,22 @@ class RotateRequest(BaseModel):
     pcb_mac: str
     policy_name: str = Field(default="")
     version: int = Field(default=2, ge=1, description="Bump > current so the device accepts the new identity")
+
+
+class UpdateConfigRequest(BaseModel):
+    """WiFi/SoftAP configuration update for an already-provisioned gateway.
+
+    Publishes to ``oneMeter/<thing>/cfg/network`` — does NOT touch the Thing
+    name, certificates, or identity. The device applies the new WiFi config
+    and reconnects. Use this for correcting mis-entered WiFi credentials or
+    updating SoftAP settings after provisioning.
+    """
+    thing_name: str = Field(..., description="The gateway's permanent Thing name (e.g. MAK-GW-0001)")
+    wifi_ssid: str = Field(..., min_length=1, max_length=64)
+    wifi_password: str = Field(..., max_length=128)
+    softap_ssid: Optional[str] = Field(default=None, max_length=64)
+    softap_password: Optional[str] = Field(default=None, max_length=128)
+    version: int = Field(default=1, ge=1, description="Monotonic version — must be higher than the device's current config version")
 
 
 # ---------------------------------------------------------------------------
@@ -737,19 +760,25 @@ def provision_gateway_batch(
             except Exception as exc:  # noqa: BLE001
                 logger.warning("gateway 1PDB record failed for %s: %s", thing, exc)
 
+            bootstrap_payload = {
+                "thing_name": thing,
+                "ssid": payload.wifi_ssid,
+                "password": payload.wifi_password,
+                "version": payload.version,
+                "cert_pem": cert_pem,
+                "key_pem": key_pem,
+            }
+            if payload.softap_ssid:
+                bootstrap_payload["softap_ssid"] = payload.softap_ssid
+            if payload.softap_password:
+                bootstrap_payload["softap_password"] = payload.softap_password
+
             results.append({
                 "pcb_mac": mac,
                 "thing_name": thing,
                 "certificate_id": cert_id,
                 "box_label": unit.box_label,
-                "bootstrap": {
-                    "thing_name": thing,
-                    "ssid": payload.wifi_ssid,
-                    "password": payload.wifi_password,
-                    "version": payload.version,
-                    "cert_pem": cert_pem,
-                    "key_pem": key_pem,
-                },
+                "bootstrap": bootstrap_payload,
             })
         except HTTPException as exc:
             errors.append({"pcb_mac": mac, "thing_name": thing, "error": exc.detail})
@@ -824,7 +853,7 @@ def reconcile_from_telemetry(_user: CurrentUser = Depends(require_role(*PROVISIO
 @router.post("/rotate")
 def rotate_identity(
     payload: RotateRequest,
-    user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES)),
+    user: CurrentUser = Depends(require_role(CCRole.superadmin)),
 ):
     """Rename an already-online unit by publishing ``cfg/identity`` to its CURRENT
     client id. Used to migrate ``TestSite*`` / ``OneMeterN`` units in place.
@@ -896,6 +925,74 @@ def rotate_identity(
         "certificate_id": cert_id,
         "ack_topic": f"oneMeter/{payload.current_client_id}/cfg/identity/ack",
         "note": "Device will reboot and reconnect under the new Thing. Confirm via the ack topic and fleet index.",
+    }
+
+
+@router.post("/update-config")
+def update_device_config(
+    payload: UpdateConfigRequest,
+    user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES)),
+):
+    """Update WiFi/SoftAP configuration on an already-provisioned gateway.
+
+    Publishes a ``cfg/network`` payload to the device's Thing name via AWS IoT.
+    The firmware applies the new WiFi settings with monotonic version checking
+    and rollback-on-failure. This does NOT change the Thing name, certificates,
+    or identity — it only updates operational network parameters.
+
+    The device must be online and running firmware that supports the
+    ``cfg/network`` topic. Watch ``oneMeter/<thing>/cfg/network/ack`` for
+    confirmation.
+    """
+    thing = payload.thing_name.strip()
+    _validate_thing_name(thing)
+
+    network_payload: dict = {
+        "ssid": payload.wifi_ssid,
+        "password": payload.wifi_password,
+        "version": payload.version,
+    }
+    if payload.softap_ssid:
+        network_payload["softap_ssid"] = payload.softap_ssid
+    if payload.softap_password:
+        network_payload["softap_password"] = payload.softap_password
+
+    topic = NETWORK_TOPIC_FMT.format(client_id=thing)
+
+    try:
+        iotdata = _client("iot-data")
+        iotdata.publish(topic=topic, qos=1, payload=json.dumps(network_payload).encode("utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to publish cfg/network to {topic}: {exc}",
+        ) from exc
+
+    try:
+        from customer_api import get_connection
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE meter_provisioning SET updated_at = NOW() WHERE thing_name = %s",
+                (thing,),
+            )
+            try_log_mutation(
+                user, "update", "meter_provisioning", thing,
+                new_values={"wifi_ssid": payload.wifi_ssid, "version": payload.version},
+                metadata={"kind": "update_config", "endpoint": "POST /api/provisioning/update-config",
+                          "topic": topic, "thing_name": thing},
+                conn=conn,
+            )
+            conn.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("update-config audit failed for %s: %s", thing, exc)
+
+    return {
+        "thing_name": thing,
+        "published_topic": topic,
+        "ack_topic": f"oneMeter/{thing}/cfg/network/ack",
+        "version": payload.version,
+        "note": "Device will apply the new WiFi settings and reconnect. Confirm via the ack topic.",
     }
 
 

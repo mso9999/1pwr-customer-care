@@ -81,6 +81,7 @@
     "coverage": "Coverage Audit",
     "smsLog": "SMS Log",
     "analytics": "Analytics Explorer",
+    "investorAnalytics": "Investor Analytics",
     "customerCohort": "Customer Cohort",
     "myAccount": "My Account"
   },

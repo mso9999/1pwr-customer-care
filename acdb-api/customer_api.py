@@ -334,6 +334,10 @@ from onboarding_dashboard import router as onboarding_dashboard_router
 from app_onboarding import router as app_onboarding_router, sandbox_router as app_onboarding_sandbox_router
 from om_tickets import router as om_tickets_router
 from meter_provisioning import router as meter_provisioning_router, ensure_meter_provisioning_table
+from sparkmeter_etl import router as sparkmeter_etl_router
+from investor_analytics import router as investor_analytics_router
+from capex_import import router as capex_import_router
+from report_engine import router as report_engine_router
 
 from db_auth import init_auth_db
 init_auth_db()
@@ -387,6 +391,10 @@ app.include_router(app_onboarding_router)
 app.include_router(app_onboarding_sandbox_router)
 app.include_router(om_tickets_router)
 app.include_router(meter_provisioning_router)
+app.include_router(sparkmeter_etl_router)
+app.include_router(investor_analytics_router)
+app.include_router(capex_import_router)
+app.include_router(report_engine_router)
 ensure_meter_assignments_table()
 ensure_meter_provisioning_table()
 warm_stats_cache()

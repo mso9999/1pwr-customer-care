@@ -1582,6 +1582,7 @@ export interface CommissionRequest {
   gps_lat?: string;
   gps_lng?: string;
   survey_id?: string;
+  gateway_thing_name?: string;
   customer_signature: string;
   commissioned_by?: string;
 }
@@ -1614,6 +1615,7 @@ export interface CommissionResult {
   en_filename: string;
   so_filename: string;
   sms_sent: boolean;
+  gateway_associated?: boolean;
   ugp_sync?: UgpSyncResult;
 }
 
@@ -3765,6 +3767,28 @@ export async function rotateMeterIdentity(body: {
   });
 }
 
+export interface UpdateConfigResult {
+  thing_name: string;
+  published_topic: string;
+  ack_topic: string;
+  version: number;
+  note: string;
+}
+
+export async function updateDeviceConfig(body: {
+  thing_name: string;
+  wifi_ssid: string;
+  wifi_password: string;
+  softap_ssid?: string;
+  softap_password?: string;
+  version?: number;
+}): Promise<UpdateConfigResult> {
+  return request<UpdateConfigResult>('/provisioning/update-config', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 export async function getProvisioningRegistry(): Promise<{ count: number; rows: ProvisioningRegistryRow[] }> {
   return request<{ count: number; rows: ProvisioningRegistryRow[] }>('/provisioning/registry');
 }
@@ -4035,3 +4059,133 @@ export async function downloadLpgReport(country?: string, days = 30): Promise<vo
   qs.set('days', String(days));
   return downloadFileAtBase('/api', `/lpg/report/export?${qs.toString()}`, `lpg_report_${(country || 'ALL')}.csv`);
 }
+
+// ---------------------------------------------------------------------------
+// Investor Analytics
+// ---------------------------------------------------------------------------
+
+export interface AssetRegisterRow {
+  site_code: string;
+  full_name: string;
+  country: string;
+  region: string;
+  status: string;
+  commissioning_date: string | null;
+  pv_kwp: number | null;
+  battery_kwh: number | null;
+  thermal_kw: number | null;
+  total_connections: number;
+  active_connections: number;
+  hh_count: number;
+  sme_count: number;
+  ci_count: number;
+  avg_tariff_local: number | null;
+  tariff_currency: string | null;
+  avg_tariff_usd_kwh: number | null;
+  concession_expiry: string | null;
+  metering_tech: string;
+  concession_permit: string | null;
+  system_availability_pct: number | null;
+}
+
+export interface KpiRow {
+  period: string;
+  concession: string;
+  total_connections: number;
+  active_connections: number;
+  new_connections: number;
+  energy_kwh: number;
+  revenue_usd: number;
+  arpu_usd_month: number;
+  avg_tariff_usd_kwh: number;
+  productive_use_share: number;
+  system_availability_pct: number | null;
+  opex_usd: number | null;
+  opex_per_connection_usd: number | null;
+  ebitda_usd: number | null;
+  ebitda_per_connection_usd: number | null;
+  capex_deployed_usd: number | null;
+  capex_cumulative_usd: number | null;
+  capex_per_connection_usd: number | null;
+}
+
+export interface SiteCustomer {
+  account_number: string;
+  customer_name: string;
+  customer_type: string;
+  phone: string | null;
+  site_code: string;
+  connection_date: string | null;
+  status: string;
+  last_transaction_date: string | null;
+  tariff_plan: string | null;
+  plot_number: string | null;
+}
+
+export interface SiteTransaction {
+  account_number: string;
+  customer_name: string;
+  customer_type: string;
+  timestamp: string | null;
+  kwh: number;
+  amount_local: number;
+  currency: string;
+  amount_usd: number;
+  rate_used: number | null;
+  tariff_plan: string | null;
+}
+
+export async function getAssetRegister(): Promise<AssetRegisterRow[]> {
+  return requestAtBase('/api', '/investor-analytics/asset-register');
+}
+
+export async function getKpis(params?: {
+  period?: 'quarter' | 'month';
+  start?: string;
+  end?: string;
+  concession?: string;
+}): Promise<KpiRow[]> {
+  const qs = new URLSearchParams();
+  if (params?.period) qs.set('period', params.period);
+  if (params?.start) qs.set('start', params.start);
+  if (params?.end) qs.set('end', params.end);
+  if (params?.concession) qs.set('concession', params.concession);
+  return requestAtBase('/api', `/investor-analytics/kpis?${qs.toString()}`);
+}
+
+export async function getSiteCustomers(
+  concession: string,
+  params?: { status?: string; customer_type?: string; page?: number; limit?: number },
+): Promise<{ concession: string; page: number; limit: number; total: number; customers: SiteCustomer[] }> {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set('status', params.status);
+  if (params?.customer_type) qs.set('customer_type', params.customer_type);
+  if (params?.page) qs.set('page', String(params.page));
+  if (params?.limit) qs.set('limit', String(params.limit));
+  return requestAtBase('/api', `/investor-analytics/sites/${concession}/customers?${qs.toString()}`);
+}
+
+export async function getSiteTransactions(
+  concession: string,
+  params?: { date_from?: string; date_to?: string; customer_type?: string; page?: number; limit?: number },
+): Promise<{ concession: string; page: number; limit: number; total: number; transactions: SiteTransaction[] }> {
+  const qs = new URLSearchParams();
+  if (params?.date_from) qs.set('date_from', params.date_from);
+  if (params?.date_to) qs.set('date_to', params.date_to);
+  if (params?.customer_type) qs.set('customer_type', params.customer_type);
+  if (params?.page) qs.set('page', String(params.page));
+  if (params?.limit) qs.set('limit', String(params.limit));
+  return requestAtBase('/api', `/investor-analytics/sites/${concession}/transactions?${qs.toString()}`);
+}
+
+export async function classifyCustomer(
+  account_number: string,
+  customer_type: string,
+  reason?: string,
+): Promise<{ account_number: string; customer_type: string; overridden_by: string }> {
+  return requestAtBase('/api', '/investor-analytics/admin/classify-customer', {
+    method: 'POST',
+    body: JSON.stringify({ account_number, customer_type, reason }),
+  });
+}
+

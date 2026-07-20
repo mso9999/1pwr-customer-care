@@ -9,5 +9,13 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+    <script src="https://nexus-1pwrafrica.web.app/ai/widget.js"></script>
+    <script>
+      window.addEventListener('DOMContentLoaded', function() {
+        if (window.NexusAI) {
+          window.NexusAI.init({ system: 'cc' });
+        }
+      });
+    </script>
   </body>
 </html>

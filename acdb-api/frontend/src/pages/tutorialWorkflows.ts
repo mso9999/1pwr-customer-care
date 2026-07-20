@@ -65,6 +65,13 @@ export const TUTORIAL_WORKFLOWS: TutorialWorkflowDef[] = [
     helpSectionIds: ['reports', 'reports', 'meters', 'reports'],
   },
   {
+    id: 'investorAnalytics',
+    i18nKey: 'workflows.investorAnalytics',
+    rolesKey: 'roles.allEmployees',
+    links: ['/investor-analytics', '/investor-analytics', '/investor-analytics', '/investor-analytics'],
+    helpSectionIds: ['investor-analytics', 'investor-analytics', 'investor-analytics', 'investor-analytics'],
+  },
+  {
     id: 'commerce',
     i18nKey: 'workflows.commerce',
     rolesKey: 'roles.financeOps',

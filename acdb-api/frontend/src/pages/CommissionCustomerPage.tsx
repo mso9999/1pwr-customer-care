@@ -7,10 +7,12 @@ import {
   energizeUpstream,
   listUGPConnections,
   splitConnection,
+  getProvisionedMeters,
   type CommissionData,
   type CommissionResult,
   type UpstreamWarning,
   type UGPConnection,
+  type ProvisionedMeter,
 } from '../lib/api';
 import SignatureCapture from '../components/SignatureCapture';
 
@@ -320,6 +322,10 @@ export default function CommissionCustomerPage() {
   const [surveyId, setSurveyId] = useState('');
   const [showUGPPicker, setShowUGPPicker] = useState(false);
 
+  const [gatewayThingName, setGatewayThingName] = useState('');
+  const [availableGateways, setAvailableGateways] = useState<ProvisionedMeter[]>([]);
+  const [gatewaysLoading, setGatewaysLoading] = useState(false);
+
   const [signatureB64, setSignatureB64] = useState('');
 
   const [error, setError] = useState('');
@@ -358,6 +364,17 @@ export default function CommissionCustomerPage() {
     return () => { cancelled = true; clearTimeout(timer); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customerId]);
+
+  useEffect(() => {
+    if (!customerData?.customer.concession) return;
+    const site = customerData.customer.concession.trim().toUpperCase();
+    setGatewaysLoading(true);
+    getProvisionedMeters(site)
+      .then((r) => setAvailableGateways(r.meters.filter(m => !m.account_number)))
+      .catch(() => {})
+      .finally(() => setGatewaysLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerData?.customer.concession]);
 
   const validateStep = (): string | null => {
     if (step === 0) {
@@ -413,6 +430,7 @@ export default function CommissionCustomerPage() {
         gps_lat: gpsLat || undefined,
         gps_lng: gpsLng || undefined,
         survey_id: surveyId || undefined,
+        gateway_thing_name: gatewayThingName || undefined,
         customer_signature: signatureB64,
       });
       setResult(res);
@@ -537,6 +555,22 @@ export default function CommissionCustomerPage() {
       </div>
 
       <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">Gateway (optional)</label>
+        <select value={gatewayThingName} onChange={e => setGatewayThingName(e.target.value)}
+          className="w-full px-4 py-3.5 border border-gray-300 rounded-xl text-base bg-white focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none appearance-none">
+          <option value="">{gatewaysLoading ? 'Loading gateways...' : 'Select provisioned gateway...'}</option>
+          {availableGateways.map(gw => (
+            <option key={gw.thing_name} value={gw.thing_name}>
+              {gw.thing_name}{gw.pcb_mac ? ` - ${gw.pcb_mac}` : ''}
+            </option>
+          ))}
+        </select>
+        <p className="text-xs text-gray-400 mt-1">
+          Associate a provisioned gateway with this customer. The gateway Thing name is permanent and will not change.
+        </p>
+      </div>
+
+      <div>
         <label className="block text-sm font-medium text-gray-700 mb-2">{t('commission:fields.ugpConnection')}</label>
         {surveyId ? (
           <div className="flex items-center gap-2 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
@@ -621,6 +655,15 @@ export default function CommissionCustomerPage() {
                 : 'Contracts generated. SMS delivery was not configured.'}
             </p>
           </div>
+
+          {result.gateway_associated && (
+            <div className="bg-green-50 border border-green-200 rounded-xl p-3 flex items-center gap-2">
+              <svg className="w-5 h-5 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              <span className="text-sm text-green-800">Gateway <span className="font-mono font-medium">{gatewayThingName}</span> associated with this customer.</span>
+            </div>
+          )}
 
           <div className="space-y-2">
             <a href={result.contract_en_url} target="_blank" rel="noopener noreferrer"
@@ -728,6 +771,7 @@ export default function CommissionCustomerPage() {
     ];
     if (gpsLat && gpsLng) items.push({ label: 'GPS', value: `${gpsLat}, ${gpsLng}` });
     if (surveyId) items.push({ label: t('commission:fields.ugpConnection'), value: surveyId });
+    if (gatewayThingName) items.push({ label: 'Gateway', value: gatewayThingName });
 
     return (
       <div className="space-y-4">

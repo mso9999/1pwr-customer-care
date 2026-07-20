@@ -75,6 +75,10 @@ class CommissionRequest(BaseModel):
     gps_lat: Optional[str] = None
     gps_lng: Optional[str] = None
     survey_id: Optional[str] = None         # UGP connection binding (from picker)
+    gateway_thing_name: Optional[str] = Field(
+        default=None,
+        description="Permanent gateway Thing name (e.g. MAK-GW-0001) to associate with this customer. Does NOT rename the Thing.",
+    )
     customer_signature: str = Field(
         ...,
         min_length=32,
@@ -322,6 +326,28 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
     en_url = build_download_url(result["site_code"], result["en_filename"])
     so_url = build_download_url(result["site_code"], result["so_filename"])
 
+    # ----- Phase 3b: Associate gateway Thing with customer (no renaming) ----- #
+    gateway_associated = False
+    if req.gateway_thing_name:
+        gw_thing = req.gateway_thing_name.strip()
+        try:
+            with _get_connection() as gw_conn:
+                gw_cur = gw_conn.cursor()
+                gw_cur.execute(
+                    "UPDATE meter_provisioning SET account_number = %s, updated_at = NOW() "
+                    "WHERE thing_name = %s AND (account_number IS NULL OR account_number = '')",
+                    (resolved_acct or req.account_number, gw_thing),
+                )
+                gateway_associated = gw_cur.rowcount > 0
+                if gateway_associated:
+                    logger.info(
+                        "Gateway %s associated with account %s during commissioning",
+                        gw_thing, resolved_acct or req.account_number,
+                    )
+                gw_conn.commit()
+        except Exception as exc:
+            logger.warning("Gateway association failed for %s: %s", gw_thing, exc)
+
     # ----- Phase 4: SMS to customer ----- #
     sms_sent = False
     try:
@@ -408,6 +434,7 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
         "en_filename": result["en_filename"],
         "so_filename": result["so_filename"],
         "sms_sent": sms_sent,
+        "gateway_associated": gateway_associated,
     }
     acct_for_sm = resolved_acct or req.account_number
     try:
