@@ -185,13 +185,14 @@ _ENGINEERING_DEPT_MAPPINGS: list[tuple[str, str, str]] = [
     ("ee/se",                                "engineering", "EE/SE (code)"),
 ]
 
-# IT -> O&M-equivalent CC access. Per ops decision (MSO, 2026-06): the IT team
-# is responsible for these systems and should have the same access as O&M, so
-# IT departments map to onm_team. Covers EN + FR PR dept names/codes.
+# IS&T (Information Systems and Technology) -> O&M-equivalent CC access. Per ops
+# decision (MSO, 2026-06): the IS&T team is responsible for these systems and
+# should have the same access as O&M, so IS&T departments map to onm_team.
+# Covers EN + FR dept names/codes. Legacy "IT" names kept for backward compat.
 _IT_DEPT_MAPPINGS: list[tuple[str, str, str]] = [
-    ("it",                              "onm_team", "IT"),
-    ("it team",                         "onm_team", "IT Team"),
-    ("information technology",          "onm_team", "Information Technology"),
+    ("it",                              "onm_team", "IT (legacy)"),
+    ("it team",                         "onm_team", "IT Team (legacy)"),
+    ("information technology",          "onm_team", "Information Technology (legacy)"),
     ("is&t",                            "onm_team", "IS&T"),
     ("is&t - information systems and technology", "onm_team", "IS&T — Information Systems and Technology"),
     ("information systems and technology", "onm_team", "Information Systems and Technology"),

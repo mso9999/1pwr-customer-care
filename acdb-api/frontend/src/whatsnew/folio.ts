@@ -93,13 +93,13 @@ export const WHATS_NEW_FOLIO: WhatsNewEntry[] = [
   {
     id: 'it-onm-team-access',
     date: '2026-06-29',
-    title: 'IT department now gets O&M-level access',
-    blurb: 'Staff in an IT department are auto-assigned the onm_team role.',
+    title: 'IS&T department now gets O&M-level access',
+    blurb: 'Staff in an IS&T (Information Systems and Technology) department are auto-assigned the onm_team role.',
     pages: [
       {
-        heading: 'IT department → onm_team access',
+        heading: 'IS&T department → onm_team access',
         body:
-          'IT staff now receive the same access as O&M (the onm_team role) automatically.\n\n' +
+          'IS&T staff now receive the same access as O&M (the onm_team role) automatically.\n\n' +
           'If your HR department is IT, IT Team, IS&T, Information Systems and Technology, Information Technology, TI, or Technologies de l\'information, you\'ll get onm_team access on your next login.\n\n' +
           'Provisioning (1Meter gateways) still requires the Engineering department — a separate role.',
       },
