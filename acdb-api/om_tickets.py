@@ -544,6 +544,30 @@ def update_om_ticket(
         raise
 
 
+@router.delete("/{ticket_ref}")
+def delete_om_ticket(
+    ticket_ref: str,
+    user: CurrentUser = Depends(require_employee),
+):
+    try:
+        logger.info("DELETE /om-tickets/%s by %s", ticket_ref, user.user_id)
+        resp = _request_om(
+            method="DELETE",
+            path=f"/tickets/{ticket_ref}",
+            user=user,
+        )
+        _raise_for_upstream_error(resp)
+        logger.info("DELETE /om-tickets/%s succeeded", ticket_ref)
+        return {"success": True, "deleted": ticket_ref}
+    except HTTPException as exc:
+        logger.warning("DELETE /om-tickets/%s failed: status=%s detail=%s", ticket_ref, exc.status_code, exc.detail)
+        if _allow_legacy_fallback() and exc.status_code >= 500 and ticket_ref.isdigit():
+            legacy = _legacy_ticket_module()
+            logger.warning("OM delete failed; using legacy ticket fallback: %s", exc.detail)
+            return legacy.delete_ticket(ticket_id=int(ticket_ref), user=user)
+        raise
+
+
 @router.post("/{ticket_ref}/comments")
 def add_om_ticket_comment(
     ticket_ref: str,

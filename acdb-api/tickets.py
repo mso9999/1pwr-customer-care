@@ -436,3 +436,31 @@ def update_ticket(
         conn.commit()
 
     return {"status": "ok", "id": ticket_id, "updated_fields": list(changes.keys())}
+
+
+# ---------------------------------------------------------------------------
+# Delete
+# ---------------------------------------------------------------------------
+
+@router.delete("/{ticket_id}")
+def delete_ticket(
+    ticket_id: int,
+    user: CurrentUser = Depends(require_employee),
+):
+    if OM_TICKETS_SOURCE == "om":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Local ticket deletion is disabled. "
+                "Use /api/om-tickets (OM source-of-truth mode)."
+            ),
+        )
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM wa_tickets WHERE id = %s", (ticket_id,))
+        if not cur.fetchone():
+            raise HTTPException(status_code=404, detail="Ticket not found")
+        cur.execute("DELETE FROM wa_tickets WHERE id = %s", (ticket_id,))
+        conn.commit()
+    logger.info("Ticket deleted: id=%s by %s", ticket_id, user.user_id)
+    return {"status": "ok", "deleted": ticket_id}

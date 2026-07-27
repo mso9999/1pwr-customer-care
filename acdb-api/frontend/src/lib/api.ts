@@ -2498,6 +2498,10 @@ export async function updateTicket(id: number, data: Partial<Ticket>): Promise<{
   return request(`/om-tickets/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
 }
 
+export async function deleteTicket(id: number): Promise<{ success: boolean; deleted: string }> {
+  return request(`/om-tickets/${id}`, { method: 'DELETE' });
+}
+
 export async function addTicketComment(
   id: number | string,
   data: { user?: string; text: string },

@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, type Dispatch, type SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  listTickets, createTicket, updateTicket, downloadTicketsExcel,
+  listTickets, createTicket, updateTicket, deleteTicket, downloadTicketsExcel,
   type Ticket, type TicketsResponse,
 } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -255,6 +255,21 @@ export default function TicketsPage() {
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+
+  const handleDelete = async (tk: Ticket) => {
+    if (!window.confirm(`Delete ticket #${tk.id}? This cannot be undone.`)) return;
+    setDeletingId(tk.id);
+    try {
+      await deleteTicket(tk.id);
+      load();
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
   const startEdit = (tk: Ticket) => {
     setEditId(tk.id);
     setEditData({
@@ -436,6 +451,15 @@ export default function TicketsPage() {
                     >
                       {t('tickets:viewInOm', 'View in O&M')}
                     </button>
+                    {canWrite && (
+                      <button
+                        onClick={() => handleDelete(tk)}
+                        disabled={deletingId === tk.id}
+                        className="text-red-600 hover:text-red-800 text-xs font-medium disabled:opacity-50"
+                      >
+                        {deletingId === tk.id ? '...' : t('common:delete', 'Delete')}
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -540,6 +564,13 @@ export default function TicketsPage() {
                       className="px-3 py-1.5 bg-indigo-600 text-white rounded-lg text-xs font-medium"
                     >
                       {t('tickets:viewInOm', 'View in O&M')}
+                    </button>
+                    <button
+                      onClick={e => { e.stopPropagation(); handleDelete(tk); }}
+                      disabled={deletingId === tk.id}
+                      className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-medium disabled:opacity-50"
+                    >
+                      {deletingId === tk.id ? '...' : t('common:delete', 'Delete')}
                     </button>
                   </div>
                 )}
