@@ -4193,3 +4193,41 @@ export async function classifyCustomer(
   });
 }
 
+// ---------------------------------------------------------------------------
+// MAK Meter Connectivity
+// ---------------------------------------------------------------------------
+
+export interface MakMeterStatus {
+  meter_id: string;
+  account: string;
+  last_seen: string | null;
+  hours_ago: number | null;
+  status: 'online' | 'stale' | 'offline' | 'offline_extended' | 'unknown';
+  firmware: string;
+  energy_kwh: number | null;
+  relay: string | null;
+  iot_connected: boolean | null;
+  iot_disconnect_reason: string | null;
+  iot_disconnect_time: string | null;
+}
+
+export interface MakConnectivityResponse {
+  meters: MakMeterStatus[];
+  iot_only: Array<Record<string, unknown>>;
+  summary: {
+    total_meters: number;
+    online: number;
+    stale: number;
+    offline: number;
+    never_reported: number;
+    iot_things: number;
+    iot_connected: number;
+  };
+  iot_error: string | null;
+  checked_at: string;
+}
+
+export async function getMakConnectivity(): Promise<MakConnectivityResponse> {
+  return request('/mak-connectivity');
+}
+

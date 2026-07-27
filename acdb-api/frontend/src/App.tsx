@@ -51,6 +51,7 @@ import AnalyticsPage from './pages/AnalyticsPage';
 import InvestorAnalyticsPage from './pages/InvestorAnalyticsPage';
 import CustomerCohortPage from './pages/CustomerCohortPage';
 import ProvisioningPage from './pages/ProvisioningPage';
+import MeterConnectivityPage from './pages/MeterConnectivityPage';
 
 function HomeRedirect() {
   const { user, loading } = useAuth();
@@ -94,6 +95,7 @@ export default function App() {
             <Route path="tariffs" element={<ProtectedRoute requireEmployee><TariffManagementPage /></ProtectedRoute>} />
             <Route path="check-meters" element={<ProtectedRoute requireEmployee><CheckMeterPage /></ProtectedRoute>} />
             <Route path="provisioning" element={<ProtectedRoute requireEmployee requireRole={['superadmin', 'onm_team', 'engineering']}><ProvisioningPage /></ProtectedRoute>} />
+            <Route path="meter-connectivity" element={<ProtectedRoute requireEmployee><MeterConnectivityPage /></ProtectedRoute>} />
             <Route path="billing-priority" element={<ProtectedRoute requireEmployee><BillingPriorityPage /></ProtectedRoute>} />
             <Route path="financing" element={<ProtectedRoute requireEmployee><FinancingPage /></ProtectedRoute>} />
             <Route path="advances" element={<ProtectedRoute requireEmployee><AdvancesPage /></ProtectedRoute>} />
