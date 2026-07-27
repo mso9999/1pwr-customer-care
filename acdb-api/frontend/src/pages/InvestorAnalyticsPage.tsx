@@ -570,7 +570,7 @@ export default function InvestorAnalyticsPage() {
           </>
           )}
         </div>
-      )
+      )}
     </div>
   );
 }

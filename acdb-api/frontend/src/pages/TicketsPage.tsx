@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, type Dispatch, type SetStateAction } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   listTickets, createTicket, updateTicket, downloadTicketsExcel,
@@ -40,6 +40,126 @@ const priorityColor: Record<string, string> = {
   P3: 'bg-blue-500 text-white',
   P4: 'bg-gray-400 text-white',
 };
+
+function Field({ label, field, type = 'text', rows, editData, setEditData }: {
+  label: string; field: keyof Ticket; type?: string; rows?: number;
+  editData: Partial<Ticket>;
+  setEditData: Dispatch<SetStateAction<Partial<Ticket>>>;
+}) {
+  return (
+    <div>
+      <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+      {rows ? (
+        <textarea
+          className="w-full px-3 py-2 border rounded-lg text-sm resize-y"
+          rows={rows}
+          value={String(editData[field] ?? '')}
+          onChange={e => setEditData(p => ({ ...p, [field]: e.target.value }))}
+        />
+      ) : type === 'datetime-local' ? (
+        <input
+          type="datetime-local"
+          className="w-full px-3 py-2 border rounded-lg text-sm"
+          value={fmtDateInput(editData[field] as string)}
+          onChange={e => setEditData(p => ({ ...p, [field]: e.target.value ? new Date(e.target.value).toISOString() : '' }))}
+        />
+      ) : (
+        <input
+          type={type}
+          className="w-full px-3 py-2 border rounded-lg text-sm"
+          value={String(editData[field] ?? '')}
+          onChange={e => setEditData(p => ({ ...p, [field]: e.target.value }))}
+        />
+      )}
+    </div>
+  );
+}
+
+function TicketForm({ onSubmit, submitLabel, editData, setEditData, saving, t, onCancel }: {
+  onSubmit: () => void;
+  submitLabel: string;
+  editData: Partial<Ticket>;
+  setEditData: Dispatch<SetStateAction<Partial<Ticket>>>;
+  saving: boolean;
+  t: (key: string, opts?: any) => string;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="bg-white rounded-xl shadow-lg border p-4 sm:p-6 mb-6 space-y-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">Ticket type</label>
+          <select
+            className="w-full px-3 py-2 border rounded-lg text-sm"
+            value={(editData.ticket_class as string) ?? 'asset_fault'}
+            onChange={e => setEditData(p => ({ ...p, ticket_class: e.target.value }))}
+          >
+            <option value="asset_fault">Asset fault (maintenance)</option>
+            <option value="customer_grievance">Customer grievance</option>
+          </select>
+        </div>
+        <Field label={t('tickets:ticketName')} field="ticket_name" editData={editData} setEditData={setEditData} />
+        <Field label={t('tickets:siteCode')} field="site_code" editData={editData} setEditData={setEditData} />
+        <Field label="Account number" field="account_number" editData={editData} setEditData={setEditData} />
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">{t('tickets:priority')}</label>
+          <select
+            className="w-full px-3 py-2 border rounded-lg text-sm"
+            value={editData.priority ?? ''}
+            onChange={e => setEditData(p => ({ ...p, priority: e.target.value }))}
+          >
+            <option value="">--</option>
+            {PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-600 mb-1">{t('tickets:status')}</label>
+          <select
+            className="w-full px-3 py-2 border rounded-lg text-sm"
+            value={editData.status ?? 'open'}
+            onChange={e => setEditData(p => ({ ...p, status: e.target.value }))}
+          >
+            {STATUSES.map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
+          </select>
+        </div>
+        <Field label={t('tickets:category')} field="category" editData={editData} setEditData={setEditData} />
+        <Field label={t('tickets:reportedBy')} field="reported_by" editData={editData} setEditData={setEditData} />
+        <Field label={t('tickets:failureTime')} field="failure_time" type="datetime-local" editData={editData} setEditData={setEditData} />
+        <Field label={t('tickets:restorationTime')} field="restoration_time" type="datetime-local" editData={editData} setEditData={setEditData} />
+        <Field label={t('tickets:duration')} field="duration" editData={editData} setEditData={setEditData} />
+        <Field label={t('tickets:resolvedBy')} field="resolved_by" editData={editData} setEditData={setEditData} />
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Field label={t('tickets:faultDescription')} field="fault_description" rows={3} editData={editData} setEditData={setEditData} />
+        <Field label={t('tickets:servicesAffected')} field="services_affected" rows={3} editData={editData} setEditData={setEditData} />
+        <Field label={t('tickets:troubleshootingSteps')} field="troubleshooting_steps" rows={3} editData={editData} setEditData={setEditData} />
+        <Field label={t('tickets:causeOfFault')} field="cause_of_fault" rows={3} editData={editData} setEditData={setEditData} />
+        <Field label={t('tickets:precautions')} field="precautions" rows={3} editData={editData} setEditData={setEditData} />
+        <Field label={t('tickets:resolutionApproach')} field="resolution_approach" rows={3} editData={editData} setEditData={setEditData} />
+      </div>
+      {(editData.ticket_class as string) === 'customer_grievance' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <Field label="Transaction reference (optional)" field="transaction_ref" editData={editData} setEditData={setEditData} />
+        </div>
+      )}
+      <div className="flex gap-3 pt-2">
+        <button
+          onClick={onSubmit}
+          disabled={saving}
+          className="px-5 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition"
+        >
+          {saving ? t('common:saving') : submitLabel}
+        </button>
+        <button
+          onClick={onCancel}
+          className="px-5 py-2.5 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition"
+        >
+          {t('common:cancel')}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function TicketsPage() {
   const { t } = useTranslation(['tickets', 'common']);
@@ -169,111 +289,6 @@ export default function TicketsPage() {
     ? 'bg-amber-100 text-amber-800 border-amber-200'
     : 'bg-emerald-100 text-emerald-800 border-emerald-200';
 
-  const Field = ({ label, field, type = 'text', rows }: {
-    label: string; field: keyof Ticket; type?: string; rows?: number;
-  }) => (
-    <div>
-      <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
-      {rows ? (
-        <textarea
-          className="w-full px-3 py-2 border rounded-lg text-sm resize-y"
-          rows={rows}
-          value={String(editData[field] ?? '')}
-          onChange={e => setEditData(p => ({ ...p, [field]: e.target.value }))}
-        />
-      ) : type === 'datetime-local' ? (
-        <input
-          type="datetime-local"
-          className="w-full px-3 py-2 border rounded-lg text-sm"
-          value={fmtDateInput(editData[field] as string)}
-          onChange={e => setEditData(p => ({ ...p, [field]: e.target.value ? new Date(e.target.value).toISOString() : '' }))}
-        />
-      ) : (
-        <input
-          type={type}
-          className="w-full px-3 py-2 border rounded-lg text-sm"
-          value={String(editData[field] ?? '')}
-          onChange={e => setEditData(p => ({ ...p, [field]: e.target.value }))}
-        />
-      )}
-    </div>
-  );
-
-  const TicketForm = ({ onSubmit, submitLabel }: { onSubmit: () => void; submitLabel: string }) => (
-    <div className="bg-white rounded-xl shadow-lg border p-4 sm:p-6 mb-6 space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">Ticket type</label>
-          <select
-            className="w-full px-3 py-2 border rounded-lg text-sm"
-            value={(editData.ticket_class as string) ?? 'asset_fault'}
-            onChange={e => setEditData(p => ({ ...p, ticket_class: e.target.value }))}
-          >
-            <option value="asset_fault">Asset fault (maintenance)</option>
-            <option value="customer_grievance">Customer grievance</option>
-          </select>
-        </div>
-        <Field label={t('tickets:ticketName')} field="ticket_name" />
-        <Field label={t('tickets:siteCode')} field="site_code" />
-        <Field label="Account number" field="account_number" />
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">{t('tickets:priority')}</label>
-          <select
-            className="w-full px-3 py-2 border rounded-lg text-sm"
-            value={editData.priority ?? ''}
-            onChange={e => setEditData(p => ({ ...p, priority: e.target.value }))}
-          >
-            <option value="">--</option>
-            {PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-gray-600 mb-1">{t('tickets:status')}</label>
-          <select
-            className="w-full px-3 py-2 border rounded-lg text-sm"
-            value={editData.status ?? 'open'}
-            onChange={e => setEditData(p => ({ ...p, status: e.target.value }))}
-          >
-            {STATUSES.map(s => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
-          </select>
-        </div>
-        <Field label={t('tickets:category')} field="category" />
-        <Field label={t('tickets:reportedBy')} field="reported_by" />
-        <Field label={t('tickets:failureTime')} field="failure_time" type="datetime-local" />
-        <Field label={t('tickets:restorationTime')} field="restoration_time" type="datetime-local" />
-        <Field label={t('tickets:duration')} field="duration" />
-        <Field label={t('tickets:resolvedBy')} field="resolved_by" />
-      </div>
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Field label={t('tickets:faultDescription')} field="fault_description" rows={3} />
-        <Field label={t('tickets:servicesAffected')} field="services_affected" rows={3} />
-        <Field label={t('tickets:troubleshootingSteps')} field="troubleshooting_steps" rows={3} />
-        <Field label={t('tickets:causeOfFault')} field="cause_of_fault" rows={3} />
-        <Field label={t('tickets:precautions')} field="precautions" rows={3} />
-        <Field label={t('tickets:resolutionApproach')} field="resolution_approach" rows={3} />
-      </div>
-      {(editData.ticket_class as string) === 'customer_grievance' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <Field label="Transaction reference (optional)" field="transaction_ref" />
-        </div>
-      )}
-      <div className="flex gap-3 pt-2">
-        <button
-          onClick={onSubmit}
-          disabled={saving}
-          className="px-5 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition"
-        >
-          {saving ? t('common:saving') : submitLabel}
-        </button>
-        <button
-          onClick={() => { setShowCreate(false); setEditId(null); setEditData({}); }}
-          className="px-5 py-2.5 bg-gray-100 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-200 transition"
-        >
-          {t('common:cancel')}
-        </button>
-      </div>
-    </div>
-  );
 
   return (
     <div className="p-4 sm:p-6 max-w-[1400px] mx-auto">
@@ -325,8 +340,8 @@ export default function TicketsPage() {
         </div>
       )}
 
-      {showCreate && <TicketForm onSubmit={handleCreate} submitLabel={t('tickets:createTicket')} />}
-      {editId !== null && <TicketForm onSubmit={handleUpdate} submitLabel={t('tickets:saveChanges')} />}
+      {showCreate && <TicketForm onSubmit={handleCreate} submitLabel={t('tickets:createTicket')} editData={editData} setEditData={setEditData} saving={saving} t={t} onCancel={() => { setShowCreate(false); setEditId(null); setEditData({}); }} />}
+      {editId !== null && <TicketForm onSubmit={handleUpdate} submitLabel={t('tickets:saveChanges')} editData={editData} setEditData={setEditData} saving={saving} t={t} onCancel={() => { setShowCreate(false); setEditId(null); setEditData({}); }} />}
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 mb-4">
