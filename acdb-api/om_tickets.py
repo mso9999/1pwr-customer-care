@@ -269,6 +269,7 @@ def _cc_to_om_update(body: Dict[str, Any]) -> Dict[str, Any]:
         "cause_of_fault": "cause_of_fault",
         "precautions": "preventive_action",
         "restoration_time": "resolved_at",
+        "resolution_approach": "resolution_notes",
         "site_code": "site_id",
         "account_number": "customer_id",
         "category": "equipment_category",
@@ -280,6 +281,15 @@ def _cc_to_om_update(body: Dict[str, Any]) -> Dict[str, Any]:
     for src, dst in direct.items():
         if src in body and body[src] is not None:
             out[dst] = body[src]
+
+    if body.get("duration"):
+        try:
+            out["downtime_hours"] = float(str(body["duration"]).strip())
+        except (ValueError, TypeError):
+            pass
+
+    if body.get("failure_time"):
+        out["reported_at"] = body["failure_time"]
 
     if body.get("status"):
         om_status = _CC_TO_OM_STATUS.get(str(body["status"]).strip().lower())
@@ -469,6 +479,7 @@ def create_om_ticket(
 ):
     try:
         om_body = _cc_to_om_create(body, user)
+        logger.info("POST /om-tickets by %s — site=%s class=%s", user.user_id, om_body.get("site_id"), om_body.get("ticket_class"))
         resp = _request_om(
             method="POST",
             path="/tickets",
@@ -508,6 +519,7 @@ def update_om_ticket(
     try:
         om_body = _cc_to_om_update(body)
         om_body["updated_by"] = user.name or user.user_id
+        logger.info("PATCH /om-tickets/%s by %s — fields: %s", ticket_ref, user.user_id, list(om_body.keys()))
         resp = _request_om(
             method="PUT",
             path=f"/tickets/{ticket_ref}",
@@ -518,9 +530,12 @@ def update_om_ticket(
         result = _json_or_502(resp)
         ticket = result.get("ticket") if isinstance(result, dict) else None
         if ticket:
+            logger.info("PATCH /om-tickets/%s succeeded — ticket updated", ticket_ref)
             return {"success": True, "ticket": _om_to_cc(ticket)}
+        logger.info("PATCH /om-tickets/%s succeeded (no ticket in response)", ticket_ref)
         return result
     except HTTPException as exc:
+        logger.warning("PATCH /om-tickets/%s failed: status=%s detail=%s", ticket_ref, exc.status_code, exc.detail)
         if _allow_legacy_fallback() and exc.status_code >= 500 and ticket_ref.isdigit():
             legacy = _legacy_ticket_module()
             logger.warning("OM update failed; using legacy ticket fallback: %s", exc.detail)
