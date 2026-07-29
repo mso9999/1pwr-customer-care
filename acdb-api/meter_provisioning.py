@@ -60,7 +60,6 @@ import os
 import re
 import hashlib
 import zipfile
-from urllib import request as urllib_request
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -649,8 +648,8 @@ class OtaPromotionRequest(BaseModel):
 STATION_DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "provisioning_station_dist")
 METER_KIT_FIRMWARE_COMMIT = "6ea321048c8fc23564e5d9de91fccc1d821162ae"
 METER_KIT_FILES = {
-    "METER_ADDRESSING.md": "Docs/field/METER_ADDRESSING.md",
-    "set_meter_address.py": "scripts/set_meter_address.py",
+    "METER_ADDRESSING.md": "10c8eecc99eeee35c1636c7446f4a053aba9d0a6b3f3263c6f2ee079ea6b2735",
+    "set_meter_address.py": "1f37b7007006092f58547959999076b49b9a60b72d97a03aad3ab270685eff7f",
 }
 
 
@@ -684,20 +683,28 @@ def download_meter_validation_kit(
 ):
     """Download pinned meter-addressing code plus CC's batch-validation SOP."""
     buf = io.BytesIO()
-    base = (
-        "https://raw.githubusercontent.com/onepowerLS/onepwr-aws-mesh/"
-        f"{METER_KIT_FIRMWARE_COMMIT}/"
-    )
     try:
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
             local_sop = os.path.join(STATION_DIST, "METER_GATEWAY_BATCH_VALIDATION.md")
             z.write(local_sop, "1meter-validation/METER_GATEWAY_BATCH_VALIDATION.md")
-            for filename, repo_path in METER_KIT_FILES.items():
-                with urllib_request.urlopen(base + repo_path, timeout=15) as response:
-                    z.writestr(f"1meter-validation/{filename}", response.read())
+            source_lines = [
+                f"Firmware repository commit: {METER_KIT_FIRMWARE_COMMIT}",
+                "Files are vendored in CC so the operator download does not depend on GitHub access.",
+            ]
+            for filename, expected_sha in METER_KIT_FILES.items():
+                source_path = os.path.join(STATION_DIST, "meter-kit", filename)
+                with open(source_path, "rb") as source_file:
+                    content = source_file.read()
+                actual_sha = hashlib.sha256(content).hexdigest()
+                if actual_sha != expected_sha:
+                    raise ValueError(
+                        f"{filename} checksum mismatch: expected {expected_sha}, got {actual_sha}"
+                    )
+                z.writestr(f"1meter-validation/{filename}", content)
+                source_lines.append(f"{filename} SHA-256: {actual_sha}")
             z.writestr(
                 "1meter-validation/SOURCE.txt",
-                f"Firmware repository commit: {METER_KIT_FIRMWARE_COMMIT}\n",
+                "\n".join(source_lines) + "\n",
             )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
