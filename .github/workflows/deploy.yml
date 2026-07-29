@@ -180,7 +180,7 @@ jobs:
 
             # Install the Zambia API unit once its ring-fenced environment file
             # exists. Port 8103 is reserved because 8102 is the CC sandbox.
-            if [ -f /opt/1pdb-zm/.env ] && [ -f /opt/cc-portal/backend/systemd/1pdb-api-zm.service ]; then
+            if sudo test -f /opt/1pdb-zm/.env && [ -f /opt/cc-portal/backend/systemd/1pdb-api-zm.service ]; then
               sudo install -m 644 -o root -g root \
                 /opt/cc-portal/backend/systemd/1pdb-api-zm.service \
                 /etc/systemd/system/1pdb-api-zm.service
