@@ -2,16 +2,56 @@
 
 ## Current production finding (2026-07-29)
 
-Factory units are documented as v1.1.56. The newest full application currently
-found in `s3://1pwr-ota-firmware/firmware-releases/` is v1.1.53 and is organized
-as per-Thing builds. It is older than the factory image and is not an approved
-factory-promotion target.
+The factory-installed archive has now been identified and verified:
 
-Because the firmware enforces OTA anti-rollback, CC must remain fail-closed until
-an approved full application with an OTA version strictly above 1.1.56 is built,
-published with an immutable S3 VersionId, and canary-tested.
+- archive: `1meter-fw-v1.1.56-OEM-factory(1).zip`;
+- application SHA-256:
+  `63adecc88282118b28cd6c97d6dbf0eeb5e986b048f871c6f0339f104b91ea45`;
+- source: CI run `28239462541`, commit `e4f9b46`, `site_config=FACTORY`;
+- the binary is byte-for-byte identical to the preserved repository copy.
 
-Do not configure CC to use a v1.1.53 artifact for the factory fleet.
+### Important architecture finding
+
+The shipped v1.1.56 image behaves like a bootstrap before provisioning, but it
+is not a stripped commissioning-only binary. It contains meter/RS485, mesh,
+MQTT, OTA, diagnostics, relay command, and publish-timer code. Before runtime
+identity/TLS exists it suppresses the MQTT manager; after CC writes runtime
+identity/TLS/Wi-Fi and the unit reboots, the same binary enables its operational
+cloud path.
+
+An earlier, genuinely stripped commissioning build was implemented in March
+2026 in the disposable clone `/tmp/onepwr-aws-mesh-review` using
+`CONFIG_ONEPWR_COMMISSIONING_BUILD`. That work was not merged into firmware
+`main`, its package is no longer in the repository, and its required
+factory-to-full bench canary remained unexecuted. See
+`onepwr-aws-mesh/Docs/migrated-from-cc/SESSION_LOG_1M_extract_from_CC.md`
+(session 2026-03-28 and follow-ups).
+
+The June HQ test that cleared v1.1.56 proved the web/bootstrap flow: discovery,
+runtime identity/TLS/Wi-Fi delivery, reboot, cloud connection, reconciliation,
+and rename. It did not install a second application image. The prior successful
+v1.1.53 AWS OTA canary was performed on an already operational gateway, not on
+the stripped commissioning build.
+
+### What is actually blocking Comfort
+
+The newest application currently found under
+`s3://1pwr-ota-firmware/firmware-releases/` is v1.1.53 and is organized as
+per-Thing builds. There is no approved, immutable, canary-tested full release
+for factory promotion and the production CC environment has no OTA artifact
+key, S3 VersionId, or target version configured. CC therefore correctly remains
+fail-closed.
+
+Do not configure CC to use a v1.1.53 artifact for the factory fleet. Although
+the v1.1.56 OTA implementation would technically accept it, that would be an
+unreviewed downgrade which predates the factory provisioning/runtime-identity
+fixes.
+
+The device OTA code logs `MAJOR.MINOR.BUILD` but does not compare the running
+semantic version with the job's `fileVersion`. The strict
+`target > factory_baseline` check is a CC release-safety policy, not a firmware
+anti-rollback mechanism. Keep that policy: the next approved target should be
+v1.1.57 or later so installed state and release provenance remain unambiguous.
 
 ## Starlink credential model
 
@@ -42,7 +82,8 @@ valid runtime Starlink credentials on each boot.
 
 1. Start from reviewed firmware source; do not release from a dirty working tree.
 2. Set the OTA application version strictly above the highest factory version
-   (minimum next candidate: 1.1.57).
+   (minimum next candidate: 1.1.57). This is the CC release policy; the current
+   device agent does not provide semantic anti-rollback.
 3. Build the full operational application with OTA enabled.
 4. Confirm the application:
    - fits the OTA partition;
@@ -52,13 +93,18 @@ valid runtime Starlink credentials on each boot.
    - preserves the provisioning registry/Thing identity across OTA.
 5. Publish the application binary to the versioned
    `1pwr-ota-firmware` bucket and record its immutable S3 VersionId.
-6. Run the signed OTA against one controlled gateway first.
+6. Run the signed OTA against one controlled unit carrying the exact v1.1.56
+   OEM factory image first. Provision its runtime identity/TLS/Wi-Fi through
+   the same CC/station flow that will be used in Benin; do not substitute an
+   already operational legacy gateway for this acceptance test.
 7. Confirm:
    - AWS OTA creation is complete;
    - the per-Thing Job is `SUCCEEDED`;
    - the gateway reconnects through its Starlink network;
    - telemetry reports the target version;
    - meter acquisition/normal operational tasks work.
+   - runtime Thing identity, TLS material, and Starlink Wi-Fi remain intact
+     across the OTA reboot.
 8. Soak the canary for the agreed period.
 9. Approve the release per site in CC configuration.
 10. Only then enable a field/depot batch.
@@ -128,4 +174,5 @@ The field UI must show **not ready** if:
 
 An identity bootstrap can technically succeed while OTA is unavailable. The
 operator must treat that as incomplete provisioning and must not release the
-gateway.
+gateway. Comfort should not proceed past the release-readiness gate until the
+factory-image canary above has passed and the approved release is configured.
