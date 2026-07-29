@@ -37,18 +37,33 @@
         "Track funnel position on the Pipeline page."
       ]
     },
+    "countryActivation": {
+      "title": "Country activation readiness (Benin / Zambia)",
+      "description": "Resolve the commercial, site, metering, payment, firmware, and evidence gates before a field batch is released.",
+      "steps": [
+        "Select the intended country in the CC header, open Provisioning → Country readiness, and refresh the checks. Never use another country's site code or database as a workaround.",
+        "Country lead and Engineering approve the canonical site roster. A missing greenfield site is a backend country-configuration change; Starlink passwords are not part of this roster.",
+        "Country lead/Finance approve the electricity tariff plus connection and readyboard fees. An authorized Finance/O&M user records the approved values on Tariffs.",
+        "Engineering configures the country metering organisation and per-site platform IDs. The country team confirms that the displayed sites match the real deployment.",
+        "Finance and Engineering validate real mobile-money provider samples and credentials before automatic ingestion and meter credit are enabled.",
+        "Firmware/Engineering registers an immutable signed OTA candidate for each site. Country O&M uses Guide & download to allocate exactly one test gateway and run the first canary.",
+        "After OTA succeeds, run the recommended physical Batch validation. Engineering/superadmin records the passed validation session—or an explicit audited waiver—and approves that immutable release for controlled batches."
+      ]
+    },
     "provisioning": {
       "title": "Gateway provisioning & commissioning",
       "description": "Take sealed factory-boot gateways through Starlink configuration, signed full-firmware OTA, and customer commissioning.",
       "steps": [
         "A sealed factory-virgin gateway already has boot firmware. Do not open it, erase it, or use USB; it is programmed to recognize the approved provisioning LAN.",
-        "Open the Provisioning page (superadmin / O&M). Use the Guide & download tab to download and fully extract the station. Read START_HERE_FACTORY_VIRGIN_GATEWAYS.md in the extracted folder.",
-        "On a laptop on the same 1Meter provisioning network as the gateways (with internet to CC), run the station. When the terminal shows Open: http://localhost:8787, leave it open, open that address in a browser, sign in, confirm the subnet, and Scan.",
+        "Open Provisioning → Country readiness first. Continue only when the site roster and site-specific OTA candidate are ready; then use Guide & download to download and fully extract the station. Read START_HERE_FACTORY_VIRGIN_GATEWAYS.md.",
+        "On a laptop on the same 1Meter provisioning network as the gateways (with internet to CC), run the station. When the terminal shows Open: http://localhost:8787, leave it open, open that address, select the deployment country, sign in, confirm the subnet, and Scan.",
         "Pick the destination site, confirm its approved firmware release, and enter that site's exact Starlink SSID/password. CC records the SSID/config version but never the password.",
         "Optional HQ validation: if the real site Starlink is unavailable, use the guided mirrored-network path to configure a controlled 2.4 GHz access point with the identical SSID/password and internet. This validates credential handoff and OTA, not the real site router or RF path.",
-        "Select the units and Confirm. CC allocates stable <SITE>-GW-#### identities, the station delivers the bootstrap, and CC queues the signed full-firmware OTA.",
+        "For a candidate-only release, select exactly one unit. CC allocates its stable <SITE>-GW-#### identity, records it as the authorized test unit, delivers the bootstrap, and queues the signed OTA canary. After release approval, controlled batches can contain more units.",
         "Keep every unit powered while CC shows live OTA progress (queued, in progress, succeeded, failed) for each gateway. Continue only when every Job is SUCCEEDED.",
-        "Commission each unit: link its acquired meter serial to the customer account via Assign Meter. The gateway name never changes."
+        "Download the meter-addressing kit. Address and label each meter individually, scan the combined RS485 string, then connect the sorted string to the gateway with power off.",
+        "Recommended for every batch: use Provisioning → Batch validation with a protected dummy load. Prove telemetry, consumption, zero-balance relay opening, synthetic payment, relay closing, and load restart; retain the evidence session ID.",
+        "After release approval and site installation, reconcile telemetry and use Assign Meter to link the acquired serial/gateway to the customer account. Enable 1Meter billing/relay control only when intended, then complete the customer commissioning wizard. The gateway name never changes."
       ]
     },
     "payments": {

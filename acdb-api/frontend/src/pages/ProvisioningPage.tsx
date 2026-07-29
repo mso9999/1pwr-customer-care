@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   updateDeviceConfig,
   getFactoryOtaReadiness,
@@ -15,6 +16,8 @@ import {
   observeMeterValidationLoad,
   applyMeterValidationPayment,
   completeMeterValidation,
+  getCountryProvisioningReadiness,
+  approveFactoryOtaRelease,
   type UpdateConfigResult,
   type OtaReadiness,
   type OtaPromotionStatus,
@@ -22,9 +25,11 @@ import {
   type ProvisioningRegistryRow,
   type ProvisionedMeter,
   type MeterValidationStatus,
+  type CountryProvisioningReadiness,
 } from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
 
-type Mode = 'guide' | 'canary' | 'batch-test' | 'config' | 'meters' | 'registry';
+type Mode = 'readiness' | 'guide' | 'canary' | 'batch-test' | 'config' | 'meters' | 'registry';
 type ValidationNetworkMode = 'site' | 'mirror';
 type GuideCheckKey =
   | 'sealed'
@@ -45,7 +50,10 @@ const inputCls =
 const labelCls = 'block text-xs font-medium text-gray-500 mb-1';
 
 export default function ProvisioningPage() {
-  const [mode, setMode] = useState<Mode>('guide');
+  const { user } = useAuth();
+  const [mode, setMode] = useState<Mode>('readiness');
+  const [countryReadiness, setCountryReadiness] = useState<CountryProvisioningReadiness | null>(null);
+  const [countryReadinessLoading, setCountryReadinessLoading] = useState(false);
   const [otaReadiness, setOtaReadiness] = useState<OtaReadiness | null>(null);
   const [otaReadinessError, setOtaReadinessError] = useState('');
   const [guideStep, setGuideStep] = useState(1);
@@ -75,6 +83,12 @@ export default function ProvisioningPage() {
   const [canaryConfirmation, setCanaryConfirmation] = useState('');
   const [canaryNote, setCanaryNote] = useState('');
   const [canaryStarting, setCanaryStarting] = useState(false);
+  const [approvalValidationId, setApprovalValidationId] = useState('');
+  const [approvalWaive, setApprovalWaive] = useState(false);
+  const [approvalWaiverReason, setApprovalWaiverReason] = useState('');
+  const [approvalConfirmation, setApprovalConfirmation] = useState('');
+  const [approvalBusy, setApprovalBusy] = useState(false);
+  const [approvalSuccess, setApprovalSuccess] = useState('');
   const [validationTarget, setValidationTarget] = useState('');
   const [batchReference, setBatchReference] = useState('');
   const [startingCredit, setStartingCredit] = useState(0.01);
@@ -102,6 +116,14 @@ export default function ProvisioningPage() {
 
   const [meters, setMeters] = useState<ProvisionedMeter[]>([]);
   const [metersLoading, setMetersLoading] = useState(false);
+
+  const loadCountryReadiness = () => {
+    setCountryReadinessLoading(true);
+    getCountryProvisioningReadiness()
+      .then(setCountryReadiness)
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setCountryReadinessLoading(false));
+  };
 
   const loadRegistry = () => {
     setRegistryLoading(true);
@@ -158,6 +180,7 @@ export default function ProvisioningPage() {
   };
 
   useEffect(() => {
+    if (mode === 'readiness') loadCountryReadiness();
     if (mode === 'registry') loadRegistry();
     if (mode === 'meters') loadMeters();
     if (mode === 'config') loadConfigRegistry();
@@ -318,6 +341,30 @@ export default function ProvisioningPage() {
     }
   };
 
+  const handleApproveRelease = async () => {
+    if (!otaReadiness?.release.target_firmware_version) return;
+    setError('');
+    setApprovalSuccess('');
+    setApprovalBusy(true);
+    try {
+      const result = await approveFactoryOtaRelease({
+        site_code: guideSite,
+        canary_ota_update_id: trackedOtaId,
+        validation_session_id: approvalWaive ? undefined : approvalValidationId || undefined,
+        waive_physical_validation: approvalWaive,
+        waiver_reason: approvalWaive ? approvalWaiverReason : undefined,
+        confirmation: approvalConfirmation,
+      });
+      setApprovalSuccess(result.note);
+      setOtaReadiness(await getFactoryOtaReadiness(guideSite));
+      loadCountryReadiness();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setApprovalBusy(false);
+    }
+  };
+
   const runValidationAction = async (action: () => Promise<MeterValidationStatus>) => {
     setError('');
     setValidationBusy(true);
@@ -345,6 +392,7 @@ export default function ProvisioningPage() {
     ['FAILED', 'REJECTED', 'CANCELED', 'REMOVED'].includes(x.status || '')).length || 0;
   const otaQueued = Math.max(0, otaExpected - otaSucceeded - otaInProgress - otaFailed);
   const otaPercent = otaExpected ? Math.round((otaSucceeded / otaExpected) * 100) : 0;
+  const canApproveRelease = ['superadmin', 'engineering'].includes(String(user?.role || ''));
 
   return (
     <div className="max-w-5xl mx-auto p-4 sm:p-6">
@@ -359,6 +407,7 @@ export default function ProvisioningPage() {
 
       <div className="flex gap-1 mb-5 border-b border-gray-200">
         {([
+          ['readiness', 'Country readiness'],
           ['guide', 'Guide & download'],
           ['canary', 'OTA canary'],
           ['batch-test', 'Batch validation'],
@@ -386,7 +435,99 @@ export default function ProvisioningPage() {
         </div>
       )}
 
-      {mode === 'batch-test' ? (
+      {mode === 'readiness' ? (
+        <div className="space-y-5">
+          {countryReadinessLoading && !countryReadiness ? (
+            <div className="p-5 rounded-xl border bg-white text-sm text-gray-500">
+              Checking country activation gates…
+            </div>
+          ) : countryReadiness && (
+            <>
+              <div className={`p-5 rounded-xl border ${
+                countryReadiness.end_to_end_ready
+                  ? 'border-green-300 bg-green-50'
+                  : countryReadiness.field_batch_ready
+                    ? 'border-amber-300 bg-amber-50'
+                    : 'border-red-300 bg-red-50'
+              }`}>
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                  <div>
+                    <div className="text-xs uppercase tracking-wide font-semibold text-gray-600">
+                      {countryReadiness.country_code} · {countryReadiness.currency}
+                    </div>
+                    <h2 className="text-lg font-semibold text-gray-900 mt-1">
+                      {countryReadiness.country_name} activation
+                    </h2>
+                    <p className="text-sm text-gray-700 mt-1">
+                      {countryReadiness.end_to_end_ready
+                        ? 'Provisioning, commissioning, payments, and meter control gates are ready.'
+                        : countryReadiness.field_batch_ready
+                          ? 'Gateway batches are enabled, but commissioning/payment gates still need action.'
+                          : 'Do not release a field batch until every provisioning gate below is green.'}
+                    </p>
+                  </div>
+                  <button onClick={loadCountryReadiness} disabled={countryReadinessLoading}
+                    className="px-3 py-2 rounded-lg border bg-white text-sm disabled:opacity-50">
+                    {countryReadinessLoading ? 'Refreshing…' : 'Refresh checks'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                {([
+                  ['Provisioned', countryReadiness.stats.provisioned_gateways],
+                  ['OTA succeeded', countryReadiness.stats.ota_succeeded],
+                  ['Test gateways', countryReadiness.stats.test_gateways],
+                  ['Validations passed', countryReadiness.stats.passed_validations],
+                  ['Commissioned', countryReadiness.stats.commissioned],
+                ] as [string, number][]).map(([label, value]) => (
+                  <div key={label} className="p-3 rounded-xl border bg-white">
+                    <div className="text-2xl font-semibold text-gray-900">{value}</div>
+                    <div className="text-xs text-gray-500 mt-1">{label}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="space-y-3">
+                {countryReadiness.gates.map((gate) => (
+                  <div key={gate.key} className={`rounded-xl border p-4 ${
+                    gate.ready ? 'border-green-200 bg-green-50' : 'border-red-200 bg-white'
+                  }`}>
+                    <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                      <div className="flex gap-3">
+                        <span className={`mt-0.5 inline-flex w-6 h-6 items-center justify-center rounded-full text-xs font-bold ${
+                          gate.ready ? 'bg-green-600 text-white' : 'bg-red-100 text-red-700'
+                        }`}>{gate.ready ? '✓' : '!'}</span>
+                        <div>
+                          <div className="font-semibold text-gray-900">{gate.label}</div>
+                          <div className="text-xs text-gray-500 mt-0.5">
+                            Owner: {gate.owner} · Scope: {gate.scope}
+                          </div>
+                          <div className="text-sm text-gray-700 mt-2">{gate.action}</div>
+                        </div>
+                      </div>
+                      {gate.route && (
+                        <Link to={gate.route}
+                          className="shrink-0 px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold">
+                          Open required page
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {!Object.keys(countryReadiness.sites).length && (
+                <div className="p-4 rounded-xl border border-amber-300 bg-amber-50 text-sm text-amber-950">
+                  <b>Country-team input required:</b> provide the approved site name, canonical code,
+                  district/province, metering platform site ID, and the responsible deployment lead.
+                  Starlink passwords are entered later in the local station and must not be put in tickets or chat.
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      ) : mode === 'batch-test' ? (
         <div className="grid lg:grid-cols-2 gap-5">
           <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
             <div>
@@ -460,6 +601,7 @@ export default function ProvisioningPage() {
             ) : (
               <>
                 <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div className="p-3 rounded bg-gray-50 col-span-2"><b>Evidence session ID</b><br /><span className="font-mono text-xs">{validationRun.session.id}</span></div>
                   <div className="p-3 rounded bg-gray-50"><b>Gateway</b><br /><span className="font-mono">{validationRun.session.thing_name}</span></div>
                   <div className="p-3 rounded bg-gray-50"><b>Meter</b><br /><span className="font-mono">{validationRun.session.meter_id}</span></div>
                   <div className="p-3 rounded bg-gray-50"><b>Load delta</b><br />{validationRun.session.load_delta_kwh.toFixed(4)} kWh</div>
@@ -501,14 +643,19 @@ export default function ProvisioningPage() {
                     || validationRun.reconnect_command?.status !== 'completed'
                     || validationRun.reconnect_command?.relay_after !== '1'
                     || validationRun.session.load_delta_kwh <= 0}
-                  onClick={() => runValidationAction(() => completeMeterValidation(validationRun.session.id))}
+                  onClick={() => runValidationAction(async () => {
+                    const result = await completeMeterValidation(validationRun.session.id);
+                    if (result.session.status === 'passed') setApprovalValidationId(result.session.id);
+                    return result;
+                  })}
                   className="w-full px-4 py-3 rounded-lg bg-gray-900 text-white text-sm font-semibold disabled:opacity-40"
                 >
                   Complete and record passing validation
                 </button>
                 {validationRun.session.status === 'passed' && (
                   <div className="p-4 rounded-lg border border-green-300 bg-green-50 text-green-900 font-semibold">
-                    Batch validation passed and evidence was recorded.
+                    Batch validation passed and evidence was recorded. Use session
+                    <span className="font-mono"> {validationRun.session.id}</span> for OTA release approval.
                   </div>
                 )}
               </>
@@ -594,10 +741,81 @@ export default function ProvisioningPage() {
                 {otaProgressError && <div className="text-sm text-red-700">{otaProgressError}</div>}
                 {otaPercent === 100 && (
                   <div className="p-3 rounded-lg border border-green-200 bg-green-50 text-sm text-green-900">
-                    OTA succeeded. Continue to the recommended batch validation; the release is not automatically approved for field rollout.
+                    OTA succeeded. Continue to the recommended batch validation, then record release approval below.
                   </div>
                 )}
               </>
+            )}
+            {otaReadiness?.release.approval && (
+              <div className="p-4 rounded-lg border border-green-300 bg-green-50 text-sm text-green-900">
+                <div className="font-semibold">✓ Release approved for controlled batches</div>
+                <div className="mt-1">
+                  Approved by {otaReadiness.release.approval.approved_by || 'authorized reviewer'}
+                  {otaReadiness.release.approval.approved_at ? ` at ${otaReadiness.release.approval.approved_at}` : ''}.
+                </div>
+              </div>
+            )}
+            {otaPercent === 100 && trackedOtaId && !otaReadiness?.release.approval && (
+              <div className="border-t pt-4 space-y-3">
+                <div>
+                  <h3 className="font-semibold text-gray-900">Approve immutable release for batches</h3>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Engineering/superadmin only. Physical validation is recommended; skipping it requires an audited reason.
+                  </p>
+                </div>
+                {!canApproveRelease ? (
+                  <div className="p-3 rounded-lg border border-amber-200 bg-amber-50 text-sm text-amber-900">
+                    Canary evidence is ready. Engineering or a superadmin must review and approve the release.
+                  </div>
+                ) : (
+                  <>
+                    <label className="block">
+                      <span className={labelCls}>Passed Batch validation session ID</span>
+                      <input className={inputCls} value={approvalValidationId}
+                        disabled={approvalWaive}
+                        onChange={(e) => setApprovalValidationId(e.target.value.trim())}
+                        placeholder="Paste the passed session ID" />
+                    </label>
+                    <label className="flex gap-3 items-start p-3 rounded-lg border cursor-pointer">
+                      <input type="checkbox" className="mt-0.5" checked={approvalWaive}
+                        onChange={(e) => setApprovalWaive(e.target.checked)} />
+                      <span className="text-sm text-gray-700">
+                        Waive optional physical validation for this release approval.
+                      </span>
+                    </label>
+                    {approvalWaive && (
+                      <label className="block">
+                        <span className={labelCls}>Waiver reason (minimum 20 characters)</span>
+                        <textarea className={inputCls} value={approvalWaiverReason}
+                          onChange={(e) => setApprovalWaiverReason(e.target.value)}
+                          placeholder="Explain why OTA-only evidence is sufficient for this approval." />
+                      </label>
+                    )}
+                    <label className="block">
+                      <span className={labelCls}>
+                        Type APPROVE {guideSite || '&lt;SITE&gt;'} {otaReadiness?.release.target_firmware_version || '&lt;VERSION&gt;'}
+                      </span>
+                      <input className={inputCls} value={approvalConfirmation}
+                        onChange={(e) => setApprovalConfirmation(e.target.value)} />
+                    </label>
+                    <button
+                      onClick={handleApproveRelease}
+                      disabled={approvalBusy
+                        || (!approvalWaive && !approvalValidationId)
+                        || (approvalWaive && approvalWaiverReason.trim().length < 20)
+                        || approvalConfirmation !== `APPROVE ${guideSite} ${otaReadiness?.release.target_firmware_version}`}
+                      className="w-full px-4 py-3 rounded-lg bg-green-700 text-white text-sm font-semibold disabled:opacity-40"
+                    >
+                      {approvalBusy ? 'Recording approval…' : 'Approve this immutable release'}
+                    </button>
+                  </>
+                )}
+                {approvalSuccess && (
+                  <div className="p-3 rounded-lg border border-green-300 bg-green-50 text-sm text-green-900">
+                    {approvalSuccess}
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -668,6 +886,15 @@ export default function ProvisioningPage() {
                       {' '}<b>{otaReadiness.release.factory_baseline_version}</b>; the immutable artifact and active signing profile passed.
                     </div>
                   </div>
+                ) : otaReadiness?.candidate_ready && otaReadiness?.release.canary_only ? (
+                  <div className="p-4 rounded-lg border border-amber-300 bg-amber-50 text-sm text-amber-950">
+                    <div className="font-semibold">Candidate ready — first canary required</div>
+                    <div className="mt-1">
+                      Signed firmware <b>{otaReadiness.release.target_firmware_version}</b> passed artifact,
+                      signer, and anti-rollback checks. Continue with exactly one gateway; the station will
+                      record it as the authorized test unit. Batch rollout remains locked.
+                    </div>
+                  </div>
                 ) : (
                   <div className="p-4 rounded-lg border border-red-200 bg-red-50 text-sm text-red-900">
                     <div className="font-semibold">Stop — this site is not ready for provisioning</div>
@@ -682,7 +909,7 @@ export default function ProvisioningPage() {
                 )}
                 <div className="flex justify-end">
                   <button
-                    disabled={!otaReadiness?.ready}
+                    disabled={!otaReadiness?.ready && !otaReadiness?.candidate_ready}
                     onClick={() => setGuideStep(2)}
                     className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium disabled:opacity-40"
                   >
@@ -855,7 +1082,7 @@ export default function ProvisioningPage() {
                 </ol>
                 <div className="space-y-2">
                   {([
-                    ['stationSignedIn', 'The station is signed in and its OTA readiness card says ready.'],
+                    ['stationSignedIn', 'The station is signed in and its OTA card says ready or candidate ready.'],
                     ['canarySelected', 'Exactly one verified virgin gateway is selected as the canary.'],
                   ] as [GuideCheckKey, string][]).map(([key, label]) => (
                     <label key={key} className="flex gap-3 items-start p-3 rounded-lg border border-gray-200 cursor-pointer">
@@ -1015,7 +1242,9 @@ export default function ProvisioningPage() {
                       Record the result. {validationNetworkMode === 'mirror'
                         ? 'This gateway still requires an actual-site Starlink connectivity check during installation. '
                         : ''}
-                      For a larger batch, return to Step 4 and increase gradually only after the canary remains healthy.
+                      {otaReadiness?.release.canary_only
+                        ? 'Run the recommended Batch validation, then have Engineering/superadmin approve this immutable release in the OTA canary tab before any larger batch.'
+                        : 'For a larger batch, return to Step 4 and increase gradually only after the canary remains healthy.'}
                     </div>
                   </div>
                 )}
@@ -1075,7 +1304,10 @@ export default function ProvisioningPage() {
               <tbody className="divide-y divide-gray-100">
                 {meters.map((r, i) => (
                   <tr key={i} className="hover:bg-gray-50">
-                    <td className="px-4 py-2 font-mono text-gray-900">{r.thing_name}</td>
+                    <td className="px-4 py-2 font-mono text-gray-900">
+                      {r.thing_name}
+                      {r.is_test ? <span className="ml-2 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px]">TEST</span> : null}
+                    </td>
                     <td className="px-4 py-2 font-mono">{r.meter_serial || '—'}</td>
                     <td className="px-4 py-2">{r.site || r.meter_community || '—'}</td>
                     <td className="px-4 py-2 font-mono">{r.account_number || '—'}</td>

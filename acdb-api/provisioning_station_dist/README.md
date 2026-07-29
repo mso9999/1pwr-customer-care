@@ -66,7 +66,9 @@ If `py` is unavailable:
 python provisioning_station.py --cc https://cc.1pwrafrica.com
 ```
 
-Then open `http://localhost:8787`. The page checks CC’s approved OTA release
+Then open `http://localhost:8787`, select the deployment country, and sign in.
+The country selection controls the database, canonical sites, currency, and OTA
+catalog. The page checks CC’s approved OTA release
 before it permits a batch. Scan, verify serial/MAC matches, choose the canonical
 site and operational Wi-Fi, and confirm.
 

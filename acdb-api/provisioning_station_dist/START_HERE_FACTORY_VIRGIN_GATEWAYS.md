@@ -176,11 +176,18 @@ installation.
 
 For a new location or shipment:
 
-1. Provision one gateway.
-2. Confirm its OTA job is `SUCCEEDED`.
-3. Confirm it reports online with the expected full firmware.
-4. Then do a small batch.
-5. Scale up only after the small batch passes.
+1. In CC, select the country and open **Provisioning → Country readiness**.
+2. Confirm the site roster and immutable OTA candidate gates are green.
+3. If the release says **candidate ready**, select exactly one gateway in the
+   station. CC records it as the authorized test unit.
+4. Provision that one gateway.
+5. Confirm its OTA job is `SUCCEEDED`.
+6. Confirm it reports online with the expected full firmware.
+7. Run the recommended physical **Batch validation**, or record an explicit
+   validation waiver.
+8. Engineering/superadmin approves the immutable release in **OTA canary**.
+9. Then do a small controlled batch.
+10. Scale up only after the small batch passes.
 
 Do not start with all units in a shipment.
 
@@ -188,10 +195,14 @@ Do not start with all units in a shipment.
 
 ## Part A — prepare the laptop
 
-1. In CC, open **Provisioning → Guide & download**.
-2. Check the **Full-firmware OTA readiness** box.
-3. Continue only when it shows **ready** and names an approved target firmware
-   version.
+1. In CC, select the intended country and open **Provisioning → Country
+   readiness**. Do not use another country's site code or database.
+2. Continue to **Guide & download** only when the approved site exists and its
+   OTA gate identifies the expected target firmware.
+3. The OTA box may show:
+   - **candidate ready** — select exactly one first-canary gateway;
+   - **ready** — the immutable release has already passed canary approval and
+     controlled batches are permitted.
 4. Download **provisioning-station.zip**.
 5. In Windows File Explorer, right-click the ZIP and choose **Extract All**.
 6. Open the extracted `provisioning-station` folder.
@@ -281,7 +292,10 @@ Open in Chrome/Edge:
 http://localhost:8787
 ```
 
-Sign in with the CC employee account.
+Select the deployment country (**Benin**, **Zambia**, or **Lesotho**) and sign
+in with the CC employee account. This selection controls the database,
+canonical sites, currency, and OTA catalog. If the expected site is absent,
+stop; do not select another country as a workaround.
 
 ### OTA readiness gate
 
@@ -403,6 +417,11 @@ After successful bootstrap delivery, the station asks CC to:
 - create an AWS IoT OTA update and Job;
 - show the update ID and per-gateway job status.
 
+For a candidate-only release, the station permits exactly one gateway, marks it
+as the authorized test unit in both CC and the device registry, and supplies
+the required canary confirmation. Batch scheduling remains locked until an
+authorized reviewer records the successful canary evidence in CC.
+
 Keep the gateways powered. Do not disconnect the access point or internet.
 
 ---
@@ -475,7 +494,8 @@ is assigned.
 
 Stop and escalate if any of these occurs:
 
-- CC OTA readiness is not `ready`;
+- CC OTA readiness is neither `candidate ready` for exactly one canary nor
+  `ready` for a controlled batch;
 - the approved target firmware version is blank or unexpected;
 - no MAC appears, or a row shows `unknown`;
 - the printed serial does not match the factory manifest;

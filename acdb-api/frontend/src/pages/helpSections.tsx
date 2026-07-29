@@ -1369,6 +1369,21 @@ function ProvisioningContent() {
         gateways through identity, deployment Starlink access, signed full-firmware OTA, and commissioning. It is
         for <Bold>superadmin</Bold> / <Bold>O&amp;M team</Bold>.
       </P>
+      <SubHead>Country readiness comes first</SubHead>
+      <P>
+        Select the intended country in the CC header, then open <Bold>Country readiness</Bold>.
+        It shows each activation gate, its owner, the affected scope, and the next action.
+        Do not use another country&apos;s site code, tariff, database, or metering setup as a workaround.
+      </P>
+      <Ul>
+        <li><Bold>Country lead + Engineering:</Bold> approve the canonical site roster. Adding a missing site code is a controlled backend country-configuration change.</li>
+        <li><Bold>Country lead + Finance/O&amp;M:</Bold> approve and enter the tariff plus connection/readyboard fees on <PageLink to="/tariffs">Tariffs</PageLink>.</li>
+        <li><Bold>Engineering:</Bold> configure the metering organisation/site IDs and immutable signed OTA candidate.</li>
+        <li><Bold>Finance + Engineering:</Bold> validate real mobile-money samples and credentials before enabling automatic ingestion.</li>
+        <li><Bold>Country O&amp;M:</Bold> run the first OTA canary and recommended physical batch validation.</li>
+        <li><Bold>Engineering/superadmin:</Bold> approve the immutable release for controlled batches using the recorded evidence.</li>
+      </Ul>
+      <Warning>Zambia remains intentionally fail-closed until its site roster, tariff/fees, metering mapping, payment integration, OTA candidate, and canary evidence are approved. The readiness tab is the source of truth for the remaining gates.</Warning>
       <SubHead>Factory-virgin means boot firmware is already installed</SubHead>
       <Ul>
         <li><Bold>Sealed factory unit:</Bold> do not open, erase, or connect it by USB. Its boot firmware recognizes the approved provisioning LAN.</li>
@@ -1397,11 +1412,30 @@ function ProvisioningContent() {
       <Ol>
         <li>In PowerShell inside the extracted folder, run <Code>py -3 provisioning_station.py --cc https://cc.1pwrafrica.com</Code> (or use <Code>python</Code> if <Code>py</Code> is unavailable).</li>
         <li>When the terminal shows <Code>Open: http://localhost:8787</Code>, leave it open. The station is running; it is not frozen.</li>
-        <li>Open <Code>http://localhost:8787</Code> in Chrome/Edge and sign in.</li>
+        <li>Open <Code>http://localhost:8787</Code> in Chrome/Edge, select the deployment country, and sign in. The country controls the database, canonical sites, currency, and OTA catalog.</li>
         <li>Confirm the displayed subnet is the gateway provisioning network, Scan, and select only known virgin PCB MACs.</li>
         <li>Select the actual destination site, verify its approved firmware release, enter the exact deployment Starlink credentials, review the unit list, then Confirm.</li>
         <li><Bold>done (rebooted)</Bold> means bootstrap delivery succeeded. Wait for each OTA Job to become <Bold>SUCCEEDED</Bold>, then verify the installed firmware version under Provisioned meters.</li>
       </Ol>
+      <SubHead>First canary and batch release approval</SubHead>
+      <P>
+        If the site shows <Bold>candidate ready</Bold>, select exactly one virgin gateway in the station.
+        CC records that newly allocated Thing as the authorized test unit and queues the signed canary.
+        After its Job reads <Bold>SUCCEEDED</Bold>, perform the recommended Batch validation or explicitly
+        record why it is being waived. An Engineering/superadmin reviewer then types the displayed
+        approval phrase in the <Bold>OTA canary</Bold> tab. The approval is bound to the exact immutable
+        artifact version and target firmware; changing either requires another canary.
+      </P>
+      <Warning>Never allocate a second test identity merely because bootstrap or OTA needs investigation. Preserve and reuse the recorded Thing, MAC, OTA ID, and evidence.</Warning>
+      <SubHead>Meter addressing and recommended physical validation</SubHead>
+      <P>
+        Download the meter-addressing kit from <Bold>Batch validation</Bold>. Address one powered meter at
+        a time through a USB-to-RS485 adapter connected to the meter—not the gateway—then scan the combined
+        RS485 string. Connect the sorted string and protected dummy load with power off. The isolated CC
+        validation proves telemetry, positive consumption, zero-balance relay opening, synthetic payment,
+        relay closing, and load restart without creating customer revenue or transactions. Retain the
+        displayed validation session ID as release-approval evidence.
+      </P>
       <Tip>The downloaded folder contains <Code>START_HERE_FACTORY_VIRGIN_GATEWAYS.md</Code>, the detailed no-USB Windows SOP, including Comfort&apos;s localhost screen, Starlink handoff, OTA gates, records, and troubleshooting.</Tip>
       <Warning>If CC allocates a Thing but delivery fails, do not immediately provision again. Check Provisioned meters and preserve the MAC, assigned Thing, terminal output, and result before retrying or escalating.</Warning>
       <SubHead>Updating WiFi configuration</SubHead>
@@ -1413,10 +1447,12 @@ function ProvisioningContent() {
       </P>
       <SubHead>Customer association (commissioning)</SubHead>
       <P>
-        Gateway Things are associated with customer accounts during the normal
-        <PageLink to="/commission">commissioning</PageLink> flow — not during provisioning. The
-        commissioning form includes an optional gateway selector that links the gateway to the customer's
-        account in <Code>meter_provisioning</Code> without renaming anything.
+        Gateway Things are associated with customer accounts after provisioning. Use
+        <PageLink to="/assign-meter">Assign Meter</PageLink>: select the site, then choose a provisioned
+        gateway that completed OTA and reported its meter serial. This locks the assignment to device
+        telemetry. Enable 1Meter billing/relay control only when intended, then continue to the normal
+        <PageLink to="/commission">customer commissioning</PageLink> wizard. The Thing is linked in
+        <Code>meter_provisioning</Code> without being renamed.
       </P>
       <SubHead>Lifecycle</SubHead>
       <Ol>
@@ -1424,7 +1460,7 @@ function ProvisioningContent() {
         <li><Bold>OTA SUCCEEDED</Bold> — the signed full firmware is installed and its version is recorded.</li>
         <li><Bold>online</Bold> — reached AWS IoT through the destination Starlink network.</li>
         <li><Bold>serial-acquired</Bold> — telemetry seen; CC auto-binds the gateway to its meter serial.</li>
-        <li><Bold>allocated</Bold> — meter serial linked to a customer account via the <PageLink to="/commission">commissioning</PageLink> flow (gateway association optional).</li>
+        <li><Bold>allocated</Bold> — meter serial and gateway linked to a customer account through <PageLink to="/assign-meter">Assign Meter</PageLink>.</li>
       </Ol>
       <P>Track every unit and its locational assignment in the <Bold>Provisioned meters</Bold> tab.</P>
       <Tip>Batch-provision gateways ahead of installation. The customer-account link is the last step (commissioning), not part of provisioning.</Tip>

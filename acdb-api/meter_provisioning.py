@@ -123,10 +123,24 @@ OTA_CANARY_THINGS = {
 _BENCH_PREFIXES = ("HQTEST", "TEST-", "TESTSITE")
 
 PROVISIONING_ROLES = (CCRole.superadmin, CCRole.onm_team, CCRole.engineering)
+RELEASE_APPROVAL_ROLES = (CCRole.superadmin, CCRole.engineering)
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _active_site_map() -> dict[str, str]:
+    """Country-local canonical sites for the active API lane.
+
+    Tests and legacy one-process tools without COUNTRY_CODE retain the global
+    map, while deployed /api, /api/bn and /api/zm services fail closed to their
+    own country roster.
+    """
+    if not os.environ.get("COUNTRY_CODE"):
+        return ALL_SITE_ABBREV
+    from country_config import COUNTRY
+    return COUNTRY.site_abbrev
 
 
 def _norm_mac(mac: str) -> str:
@@ -165,11 +179,12 @@ def derive_thing_name(site_code: str, account: str) -> str:
     if the account carries a trailing site suffix it must match.
     """
     site = (site_code or "").strip().upper()
-    if site not in ALL_SITE_ABBREV:
+    active_sites = _active_site_map()
+    if site not in active_sites:
         raise HTTPException(
             status_code=400,
             detail=f"Unknown site code '{site}'. It must be a canonical CC site "
-                   f"code (one of: {', '.join(sorted(ALL_SITE_ABBREV))}).",
+                   f"code (one of: {', '.join(sorted(active_sites)) or 'none configured'}).",
         )
 
     acct = (account or "").strip().upper()
@@ -239,7 +254,15 @@ def _registry_get_by_mac(mac: str) -> Optional[dict]:
         return None
 
 
-def _registry_claim(mac: str, thing: str, *, site: str, operator: str, allow_rebind: bool = False):
+def _registry_claim(
+    mac: str,
+    thing: str,
+    *,
+    site: str,
+    operator: str,
+    allow_rebind: bool = False,
+    is_test: bool = False,
+):
     """Atomic claim with the same guarantees as provisioning_registry.py claim.
 
     allow_rebind=True is used by the rename/rotate flow: the PCB is intentionally
@@ -267,10 +290,14 @@ def _registry_claim(mac: str, thing: str, *, site: str, operator: str, allow_reb
                    f"use the Migrate / rename (rotate) flow.",
         )
 
+    existing_is_test = bool((existing or {}).get("is_test", {}).get("BOOL"))
     item = {
         "pcb_mac": {"S": mac},
         "thing_name": {"S": thing},
-        "is_test": {"BOOL": False},
+        # A first-canary gateway is deliberately marked at allocation time.
+        # This removes the field-team deadlock where an engineer previously had
+        # to edit a server allow-list before CC would permit the first OTA.
+        "is_test": {"BOOL": bool(is_test or (allow_rebind and existing_is_test))},
         "status": {"S": "claimed"},
         "claimed_at": {"S": _now()},
         "site": {"S": site},
@@ -374,6 +401,24 @@ def ensure_meter_provisioning_table():
             cur.execute("ALTER TABLE meter_provisioning ADD COLUMN IF NOT EXISTS wifi_config_version INTEGER")
             cur.execute("ALTER TABLE meter_provisioning ADD COLUMN IF NOT EXISTS wifi_configured_at TIMESTAMPTZ")
             cur.execute("ALTER TABLE meter_provisioning ADD COLUMN IF NOT EXISTS commissioned_at TIMESTAMPTZ")
+            cur.execute("ALTER TABLE meter_provisioning ADD COLUMN IF NOT EXISTS is_test BOOLEAN NOT NULL DEFAULT FALSE")
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS onemeter_ota_release_approvals (
+                    id                      BIGSERIAL PRIMARY KEY,
+                    site_code               VARCHAR(16) NOT NULL,
+                    artifact_version_id     TEXT NOT NULL,
+                    target_firmware_version VARCHAR(32) NOT NULL,
+                    canary_ota_update_id    VARCHAR(64) NOT NULL,
+                    validation_session_id   UUID,
+                    validation_waived       BOOLEAN NOT NULL DEFAULT FALSE,
+                    waiver_reason           TEXT,
+                    approved_by             TEXT NOT NULL,
+                    approved_at             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    revoked_at              TIMESTAMPTZ,
+                    revoked_by              TEXT,
+                    UNIQUE (site_code, artifact_version_id, target_firmware_version)
+                )
+            """)
             # Atomic per-site gateway sequence allocator (MAK-GW-0007 ...).
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS gateway_pool_seq (
@@ -449,7 +494,7 @@ def _allocate_gateway_block(conn, site: str, count: int) -> list[int]:
 def _record_provisioning_1pdb(conn, *, thing, meter_serial, pcb_mac, site, account,
                               cert_id, cert_arn, status, fw_version, operator, legacy_id,
                               box_label=None, deployment_wifi_ssid=None,
-                              wifi_config_version=None):
+                              wifi_config_version=None, is_test=False):
     """Upsert the CC-side provisioning record (caller owns the transaction).
 
     Also best-effort tags the meters row (platform/community/account) so the
@@ -462,8 +507,9 @@ def _record_provisioning_1pdb(conn, *, thing, meter_serial, pcb_mac, site, accou
         INSERT INTO meter_provisioning
             (thing_name, meter_serial, pcb_mac, site, account_number, cert_id,
              cert_arn, status, legacy_id, fw_version, provisioned_by, box_label,
-             deployment_wifi_ssid, wifi_config_version, wifi_configured_at, updated_at)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+             deployment_wifi_ssid, wifi_config_version, is_test,
+             wifi_configured_at, updated_at)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
                 CASE WHEN %s IS NULL THEN NULL ELSE NOW() END, NOW())
         ON CONFLICT (thing_name) DO UPDATE SET
             meter_serial   = COALESCE(EXCLUDED.meter_serial, meter_provisioning.meter_serial),
@@ -479,12 +525,13 @@ def _record_provisioning_1pdb(conn, *, thing, meter_serial, pcb_mac, site, accou
             box_label      = COALESCE(EXCLUDED.box_label, meter_provisioning.box_label),
             deployment_wifi_ssid = COALESCE(EXCLUDED.deployment_wifi_ssid, meter_provisioning.deployment_wifi_ssid),
             wifi_config_version = COALESCE(EXCLUDED.wifi_config_version, meter_provisioning.wifi_config_version),
+            is_test        = EXCLUDED.is_test,
             wifi_configured_at = COALESCE(EXCLUDED.wifi_configured_at, meter_provisioning.wifi_configured_at),
             updated_at     = NOW()
         """,
         (thing, meter_serial, pcb_mac, site, account, cert_id, cert_arn,
          status, legacy_id, fw_version, operator, box_label, deployment_wifi_ssid,
-         wifi_config_version, deployment_wifi_ssid),
+         wifi_config_version, bool(is_test), deployment_wifi_ssid),
     )
     # Best-effort: ensure a meters row exists for this serial, tagged to the site.
     # Wrapped in a SAVEPOINT so a failure here (e.g. a NOT NULL column) cannot
@@ -591,6 +638,13 @@ class GatewayBatchRequest(BaseModel):
                                             description="Optional SoftAP password for the device hotspot")
     policy_name: str = Field(default="")
     version: int = Field(default=1, ge=1)
+    canary: bool = Field(
+        default=False,
+        description=(
+            "Mark this single newly allocated gateway as the authorized first "
+            "OTA/physical-validation test unit."
+        ),
+    )
 
 
 class RotateRequest(BaseModel):
@@ -638,6 +692,15 @@ class OtaPromotionRequest(BaseModel):
         max_length=160,
         description="For a canary, must exactly equal 'CANARY <ThingName>'.",
     )
+
+
+class OtaReleaseApprovalRequest(BaseModel):
+    site_code: str
+    canary_ota_update_id: str = Field(..., min_length=1, max_length=64)
+    validation_session_id: Optional[str] = None
+    waive_physical_validation: bool = False
+    waiver_reason: Optional[str] = Field(default=None, max_length=500)
+    confirmation: str = Field(..., min_length=1, max_length=160)
 
 
 # ---------------------------------------------------------------------------
@@ -721,15 +784,269 @@ def download_meter_validation_kit(
 @router.get("/site-codes", response_model=list[SiteCode])
 def list_site_codes(_user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES))):
     """Canonical site codes from CC's country config — the only valid prefixes."""
+    from country_config import COUNTRY
     out = []
-    for code, name in sorted(ALL_SITE_ABBREV.items()):
+    for code, name in sorted(_active_site_map().items()):
         out.append(SiteCode(
             code=code,
             name=name,
             district=ALL_SITE_DISTRICTS.get(code),
-            country=get_country_for_site(code),
+            country=COUNTRY.code,
         ))
     return out
+
+
+@router.get("/readiness")
+def country_provisioning_readiness(
+    _user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES)),
+):
+    """Country activation gates, ownership, and concrete next actions."""
+    from country_config import COUNTRY
+
+    sites = dict(_active_site_map())
+    effective_tariff = COUNTRY.default_tariff_rate
+    stats = {
+        "provisioned_gateways": 0,
+        "ota_succeeded": 0,
+        "commissioned": 0,
+        "test_gateways": 0,
+        "passed_validations": 0,
+    }
+    try:
+        from customer_api import get_connection
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT value FROM system_config WHERE key = 'tariff_rate' LIMIT 1"
+            )
+            row = cur.fetchone()
+            if row:
+                effective_tariff = float(row[0])
+            cur.execute(
+                """
+                SELECT COUNT(*),
+                       COUNT(*) FILTER (WHERE UPPER(COALESCE(ota_status, '')) = 'SUCCEEDED'),
+                       COUNT(*) FILTER (WHERE status = 'commissioned'),
+                       COUNT(*) FILTER (WHERE is_test = TRUE)
+                  FROM meter_provisioning
+                """
+            )
+            counts = cur.fetchone() or (0, 0, 0, 0)
+            stats.update(
+                provisioned_gateways=int(counts[0]),
+                ota_succeeded=int(counts[1]),
+                commissioned=int(counts[2]),
+                test_gateways=int(counts[3]),
+            )
+            cur.execute(
+                "SELECT COUNT(*) FROM onemeter_validation_sessions WHERE status = 'passed'"
+            )
+            stats["passed_validations"] = int((cur.fetchone() or [0])[0])
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Unable to load provisioning readiness stats: %s", exc)
+
+    ota_candidate_sites: list[str] = []
+    ota_batch_sites: list[str] = []
+    for site in sites:
+        release = _ota_release(site)
+        if not _ota_missing_config(release):
+            ota_candidate_sites.append(site)
+            if not release.get("canary_only"):
+                ota_batch_sites.append(site)
+
+    payment_automation = os.environ.get(
+        "PAYMENT_AUTOMATION_ENABLED",
+        "0" if COUNTRY.code == "ZM" else "1",
+    ).lower() in ("1", "true", "yes")
+    meter_credit = os.environ.get(
+        "METER_CREDIT_ENABLED",
+        "0" if COUNTRY.code == "ZM" else "1",
+    ).lower() in ("1", "true", "yes")
+
+    gates = [
+        {
+            "key": "sites",
+            "label": "Approved site roster",
+            "ready": bool(sites),
+            "scope": "provisioning",
+            "owner": "Country lead + Engineering",
+            "action": (
+                "Use the approved canonical site codes shown below."
+                if sites
+                else "Country lead must approve site names/codes; Engineering then adds them to the country configuration."
+            ),
+            "route": None,
+        },
+        {
+            "key": "tariff",
+            "label": "Commercial tariff",
+            "ready": effective_tariff > 0,
+            "scope": "payments",
+            "owner": "Country lead + Finance/O&M",
+            "action": (
+                f"Configured at {effective_tariff:g} {COUNTRY.currency}/kWh."
+                if effective_tariff > 0
+                else "Approve the country tariff, then enter it on Tariffs."
+            ),
+            "route": "/tariffs",
+        },
+        {
+            "key": "metering",
+            "label": "Metering platform mapping",
+            "ready": bool(COUNTRY.koios_org_id and COUNTRY.koios_sites),
+            "scope": "commissioning",
+            "owner": "Engineering",
+            "action": (
+                "Country metering organisation and sites are mapped."
+                if COUNTRY.koios_org_id and COUNTRY.koios_sites
+                else "Configure the approved metering organisation and per-site IDs."
+            ),
+            "route": None,
+        },
+        {
+            "key": "payment_ingest",
+            "label": "Automatic mobile-money ingestion",
+            "ready": payment_automation,
+            "scope": "payments",
+            "owner": "Finance + Engineering",
+            "action": (
+                "Automatic payment ingestion is enabled."
+                if payment_automation
+                else "Provide real provider message samples and credentials; validate the parser before enabling ingestion."
+            ),
+            "route": "/payment-verification" if payment_automation else None,
+        },
+        {
+            "key": "meter_credit",
+            "label": "Meter credit and relay workflow",
+            "ready": meter_credit,
+            "scope": "commissioning",
+            "owner": "O&M + Engineering",
+            "action": (
+                "Meter credit is enabled; prove relay behavior with Batch validation."
+                if meter_credit
+                else "Keep meter credit disabled until tariff, metering, and payment tests pass."
+            ),
+            "route": "/provisioning",
+        },
+        {
+            "key": "ota_candidate",
+            "label": "Site-specific OTA candidate",
+            "ready": bool(sites) and len(ota_candidate_sites) == len(sites),
+            "scope": "provisioning",
+            "owner": "Firmware/Engineering",
+            "action": (
+                "Every configured site has an immutable OTA candidate."
+                if sites and len(ota_candidate_sites) == len(sites)
+                else "Publish and register an immutable signed OTA candidate for every deployment site."
+            ),
+            "route": "/provisioning",
+        },
+        {
+            "key": "ota_canary",
+            "label": "Successful OTA canary",
+            "ready": stats["ota_succeeded"] > 0,
+            "scope": "provisioning",
+            "owner": "Country O&M",
+            "action": (
+                f"{stats['ota_succeeded']} gateway OTA result(s) are recorded as SUCCEEDED."
+                if stats["ota_succeeded"] > 0
+                else "Use Guide & download to allocate exactly one test gateway and run the first OTA canary."
+            ),
+            "route": "/provisioning",
+        },
+        {
+            "key": "ota_batch",
+            "label": "Batch release approval",
+            "ready": bool(sites) and len(ota_batch_sites) == len(sites),
+            "scope": "provisioning",
+            "owner": "Engineering/Superadmin",
+            "action": (
+                "Every configured site candidate is approved for controlled batches."
+                if sites and len(ota_batch_sites) == len(sites)
+                else "After a successful canary, record physical validation or an explicit waiver and approve the immutable release in CC."
+            ),
+            "route": "/provisioning",
+        },
+    ]
+    return {
+        "country_code": COUNTRY.code,
+        "country_name": COUNTRY.name,
+        "currency": COUNTRY.currency,
+        "sites": sites,
+        "effective_tariff": effective_tariff,
+        "ota_candidate_sites": ota_candidate_sites,
+        "ota_batch_sites": ota_batch_sites,
+        "stats": stats,
+        "gates": gates,
+        "field_batch_ready": bool(gates) and all(
+            gate["ready"] for gate in gates
+            if gate["key"] in {"sites", "ota_candidate", "ota_canary", "ota_batch"}
+        ),
+        "end_to_end_ready": bool(gates) and all(gate["ready"] for gate in gates),
+    }
+
+
+def _approved_test_things(site_code: Optional[str] = None) -> set[str]:
+    """Return environment-allowlisted and CC-allocated test gateways."""
+    things = set(OTA_CANARY_THINGS)
+    try:
+        from customer_api import get_connection
+        with get_connection() as conn:
+            cur = conn.cursor()
+            if site_code:
+                cur.execute(
+                    """
+                    SELECT thing_name
+                      FROM meter_provisioning
+                     WHERE is_test = TRUE AND site = %s
+                    """,
+                    (site_code.strip().upper(),),
+                )
+            else:
+                cur.execute(
+                    "SELECT thing_name FROM meter_provisioning WHERE is_test = TRUE"
+                )
+            things.update(str(row[0]) for row in cur.fetchall() if row and row[0])
+    except Exception as exc:  # noqa: BLE001 - readiness remains useful pre-migration
+        logger.debug("Unable to load CC test gateways: %s", exc)
+    return things
+
+
+def _release_approval(site: str, artifact_version_id: str, target_version: str) -> Optional[dict]:
+    if not site or not artifact_version_id or not target_version:
+        return None
+    try:
+        from customer_api import get_connection
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT canary_ota_update_id, validation_session_id,
+                       validation_waived, waiver_reason, approved_by, approved_at
+                  FROM onemeter_ota_release_approvals
+                 WHERE site_code = %s
+                   AND artifact_version_id = %s
+                   AND target_firmware_version = %s
+                   AND revoked_at IS NULL
+                 LIMIT 1
+                """,
+                (site, artifact_version_id, target_version),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            return {
+                "canary_ota_update_id": row[0],
+                "validation_session_id": str(row[1]) if row[1] else None,
+                "validation_waived": bool(row[2]),
+                "waiver_reason": row[3],
+                "approved_by": row[4],
+                "approved_at": str(row[5]) if row[5] else None,
+            }
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Unable to load OTA release approval: %s", exc)
+        return None
 
 
 def _ota_release(site_code: Optional[str] = None) -> dict:
@@ -759,6 +1076,8 @@ def _ota_release(site_code: Optional[str] = None) -> dict:
         "credentials_mode": "runtime_nvs",
         "fallback_ssid": None,
         "canary_only": False,
+        "catalog_canary_only": False,
+        "approval": None,
         "approved_sites": [],
         "config_error": None,
     }
@@ -801,6 +1120,15 @@ def _ota_release(site_code: Optional[str] = None) -> dict:
     ):
         if key in site_release:
             release[key] = site_release[key]
+    release["catalog_canary_only"] = bool(release.get("canary_only"))
+    approval = _release_approval(
+        site,
+        str(release.get("artifact_version_id") or ""),
+        str(release.get("target_firmware_version") or ""),
+    )
+    if approval:
+        release["approval"] = approval
+        release["canary_only"] = False
     return release
 
 
@@ -826,7 +1154,7 @@ def _ota_public_config(release: dict) -> dict:
             "artifact_version_id", "target_firmware_version", "signing_profile",
             "factory_baseline_version",
             "max_per_minute", "credentials_mode", "fallback_ssid",
-            "approved_sites", "canary_only",
+            "approved_sites", "canary_only", "catalog_canary_only", "approval",
         )
     }
 
@@ -907,8 +1235,9 @@ def ota_readiness(
     result = {
         "configured": not missing,
         "ready": False,
+        "candidate_ready": False,
         "canary_ready": False,
-        "canary_things": sorted(OTA_CANARY_THINGS),
+        "canary_things": [],
         "site_required": bool(release.get("approved_sites")) and not release.get("site_code"),
         "missing": missing,
         "release": _ota_public_config(release),
@@ -919,7 +1248,13 @@ def ota_readiness(
 
     result["checks"] = _ota_release_checks(release)
     checks_ok = all(check.get("ok") for check in result["checks"].values())
-    result["canary_ready"] = checks_ok and bool(OTA_CANARY_THINGS)
+    test_things = _approved_test_things(release.get("site_code"))
+    result["canary_things"] = sorted(test_things)
+    # Candidate readiness deliberately does not require a pre-existing Thing:
+    # the station can allocate exactly one new gateway and mark it as the
+    # authorized test unit in the same audited operation.
+    result["candidate_ready"] = checks_ok
+    result["canary_ready"] = checks_ok and bool(test_things)
     result["ready"] = checks_ok and not bool(release.get("canary_only"))
     return result
 
@@ -937,7 +1272,7 @@ def promote_factory_gateways(
     reboots/joins the site LAN and starts as soon as it connects to AWS IoT.
     """
     site = payload.site_code.strip().upper()
-    if site not in ALL_SITE_ABBREV:
+    if site not in _active_site_map():
         raise HTTPException(status_code=400, detail=f"Unknown canonical site code '{site}'.")
     release = _ota_release(site)
     missing = _ota_missing_config(release)
@@ -1110,6 +1445,174 @@ def promote_factory_gateways(
         "status_url": f"/api/provisioning/ota/{ota_id}",
         "note": "OTA is queued. Leave the gateways powered and connected to the internet; "
                 "completion must be confirmed per Thing before installation.",
+    }
+
+
+@router.post("/ota/release-approval")
+def approve_ota_release(
+    payload: OtaReleaseApprovalRequest,
+    user: CurrentUser = Depends(require_role(*RELEASE_APPROVAL_ROLES)),
+):
+    """Approve one immutable candidate for batch use after a successful canary.
+
+    Physical meter/load/relay validation remains optional, but skipping it is
+    an explicit, audited waiver rather than an invisible engineering action.
+    """
+    site = payload.site_code.strip().upper()
+    if site not in _active_site_map():
+        raise HTTPException(status_code=400, detail=f"Unknown canonical site code '{site}'.")
+    release = _ota_release(site)
+    missing = _ota_missing_config(release)
+    if missing:
+        raise HTTPException(
+            status_code=503,
+            detail="Candidate release is not configured: " + ", ".join(missing),
+        )
+    expected = f"APPROVE {site} {release['target_firmware_version']}"
+    if payload.confirmation != expected:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Type '{expected}' exactly to approve this immutable release.",
+        )
+    checks = _ota_release_checks(release)
+    failed_checks = [name for name, check in checks.items() if not check.get("ok")]
+    if failed_checks:
+        raise HTTPException(
+            status_code=503,
+            detail="Release preflight failed: " + ", ".join(failed_checks),
+        )
+
+    from customer_api import get_connection
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT thing_name, site, ota_status, ota_target_version, is_test
+              FROM meter_provisioning
+             WHERE ota_update_id = %s
+             ORDER BY updated_at DESC
+            """,
+            (payload.canary_ota_update_id.strip(),),
+        )
+        rows = cur.fetchall()
+        if len(rows) != 1:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Release approval requires exactly one recorded canary "
+                    f"gateway; CC found {len(rows)} for this OTA update."
+                ),
+            )
+        thing, row_site, ota_status, ota_target, is_test = rows[0]
+        if str(row_site or "").upper() != site:
+            raise HTTPException(status_code=409, detail="Canary site does not match this release.")
+        if not is_test:
+            raise HTTPException(status_code=409, detail="The canary gateway is not marked as a test unit.")
+        if str(ota_status or "").upper() != "SUCCEEDED":
+            raise HTTPException(
+                status_code=409,
+                detail="The canary OTA must be SUCCEEDED before release approval.",
+            )
+        if str(ota_target or "").lstrip("v") != str(release["target_firmware_version"]).lstrip("v"):
+            raise HTTPException(
+                status_code=409,
+                detail="The canary target version does not match the candidate release.",
+            )
+
+        validation_id = payload.validation_session_id.strip() if payload.validation_session_id else None
+        waiver_reason = (payload.waiver_reason or "").strip()
+        if validation_id:
+            cur.execute(
+                """
+                SELECT status, thing_name, site_code
+                  FROM onemeter_validation_sessions
+                 WHERE id = %s::uuid
+                """,
+                (validation_id,),
+            )
+            validation = cur.fetchone()
+            if not validation:
+                raise HTTPException(status_code=404, detail="Physical validation session not found.")
+            if validation[0] != "passed" or validation[1] != thing or str(validation[2]).upper() != site:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Physical validation must be passed for this same canary gateway and site.",
+                )
+        elif not payload.waive_physical_validation:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Select a passed physical validation session, or explicitly "
+                    "waive the optional validation with a reason."
+                ),
+            )
+        elif len(waiver_reason) < 20:
+            raise HTTPException(
+                status_code=400,
+                detail="A physical-validation waiver requires a reason of at least 20 characters.",
+            )
+
+        cur.execute(
+            """
+            INSERT INTO onemeter_ota_release_approvals
+                (site_code, artifact_version_id, target_firmware_version,
+                 canary_ota_update_id, validation_session_id,
+                 validation_waived, waiver_reason, approved_by,
+                 approved_at, revoked_at, revoked_by)
+            VALUES (%s, %s, %s, %s, %s::uuid, %s, %s, %s, NOW(), NULL, NULL)
+            ON CONFLICT (site_code, artifact_version_id, target_firmware_version)
+            DO UPDATE SET
+                canary_ota_update_id = EXCLUDED.canary_ota_update_id,
+                validation_session_id = EXCLUDED.validation_session_id,
+                validation_waived = EXCLUDED.validation_waived,
+                waiver_reason = EXCLUDED.waiver_reason,
+                approved_by = EXCLUDED.approved_by,
+                approved_at = NOW(),
+                revoked_at = NULL,
+                revoked_by = NULL
+            """,
+            (
+                site,
+                str(release["artifact_version_id"]),
+                str(release["target_firmware_version"]),
+                payload.canary_ota_update_id.strip(),
+                validation_id,
+                bool(payload.waive_physical_validation),
+                waiver_reason or None,
+                str(user.user_id),
+            ),
+        )
+        try_log_mutation(
+            user,
+            "update",
+            "onemeter_ota_release_approvals",
+            f"{site}:{release['target_firmware_version']}",
+            new_values={
+                "site": site,
+                "artifact_version_id": release["artifact_version_id"],
+                "target_firmware_version": release["target_firmware_version"],
+                "canary_ota_update_id": payload.canary_ota_update_id,
+                "validation_session_id": validation_id,
+                "validation_waived": payload.waive_physical_validation,
+            },
+            metadata={
+                "kind": "approve_ota_release",
+                "endpoint": "POST /api/provisioning/ota/release-approval",
+                "canary_thing": thing,
+                "waiver_reason": waiver_reason or None,
+            },
+            conn=conn,
+        )
+        conn.commit()
+
+    approved = _ota_release(site)
+    return {
+        "site_code": site,
+        "target_firmware_version": approved["target_firmware_version"],
+        "artifact_version_id": approved["artifact_version_id"],
+        "ready": not approved["canary_only"],
+        "approval": approved.get("approval"),
+        "note": "The immutable release is approved for controlled batch provisioning.",
     }
 
 
@@ -1289,12 +1792,29 @@ def provision_gateway_batch(
     station to deliver on the local network.
     """
     site = payload.site_code.strip().upper()
-    if site not in ALL_SITE_ABBREV:
+    active_sites = _active_site_map()
+    if site not in active_sites:
         raise HTTPException(
             status_code=400,
             detail=f"Unknown site code '{site}'. Must be canonical "
-                   f"(one of: {', '.join(sorted(ALL_SITE_ABBREV))}).",
+                   f"(one of: {', '.join(sorted(active_sites)) or 'none configured'}).",
         )
+    if payload.canary and len(payload.units) != 1:
+        raise HTTPException(
+            status_code=400,
+            detail="A first-canary allocation must contain exactly one gateway.",
+        )
+    if payload.canary:
+        existing_tests = _approved_test_things(site)
+        if existing_tests:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "This site already has an authorized test gateway: "
+                    f"{', '.join(sorted(existing_tests))}. Use that recorded unit "
+                    "or have Engineering retire it before allocating another."
+                ),
+            )
     policy = payload.policy_name.strip() or DEFAULT_POLICY
 
     # Reserve a contiguous gateway-number block for this site, atomically.
@@ -1310,8 +1830,19 @@ def provision_gateway_batch(
         mac = _norm_mac(unit.pcb_mac)
         try:
             _validate_thing_name(thing)
-            _registry_claim(mac, thing, site=site, operator=f"cc:{user.user_id}")
-            attrs = {"site": site, "role": "gateway", "legacy_id": ""}
+            _registry_claim(
+                mac,
+                thing,
+                site=site,
+                operator=f"cc:{user.user_id}",
+                is_test=payload.canary,
+            )
+            attrs = {
+                "site": site,
+                "role": "gateway",
+                "legacy_id": "",
+                "test_unit": "true" if payload.canary else "false",
+            }
             cert_arn, cert_id, cert_pem, key_pem = _issue_cert_and_payload(thing, attrs, policy)
             _registry_record_cert(mac, cert_arn=cert_arn, cert_id=cert_id, meter_serial="")
             try:
@@ -1324,12 +1855,17 @@ def provision_gateway_batch(
                         box_label=unit.box_label,
                         deployment_wifi_ssid=payload.wifi_ssid,
                         wifi_config_version=payload.version,
+                        is_test=payload.canary,
                     )
                     try_log_mutation(
                         user, "create", "meter_provisioning", thing,
                         new_values={"thing_name": thing, "site": site, "pcb_mac": mac,
-                                    "cert_id": cert_id, "box_label": unit.box_label},
-                        metadata={"kind": "provision_gateway", "endpoint": "POST /api/provisioning/gateways"},
+                                    "cert_id": cert_id, "box_label": unit.box_label,
+                                    "is_test": payload.canary},
+                        metadata={
+                            "kind": "provision_gateway_canary" if payload.canary else "provision_gateway",
+                            "endpoint": "POST /api/provisioning/gateways",
+                        },
                         conn=conn,
                     )
                     conn.commit()
@@ -1354,6 +1890,7 @@ def provision_gateway_batch(
                 "thing_name": thing,
                 "certificate_id": cert_id,
                 "box_label": unit.box_label,
+                "is_test": payload.canary,
                 "bootstrap": bootstrap_payload,
             })
         except HTTPException as exc:
@@ -1367,6 +1904,7 @@ def provision_gateway_batch(
         "provisioned": len(results),
         "failed": len(errors),
         "mqtt_endpoint": IOT_ENDPOINT,
+        "canary": payload.canary,
         "gateways": results,
         "errors": errors,
     }
@@ -1645,6 +2183,7 @@ def list_provisioned_meters(
                mp.deployment_wifi_ssid, mp.wifi_config_version,
                mp.fw_version, mp.ota_target_version, mp.ota_update_id,
                mp.ota_status, mp.ota_updated_at,
+               mp.is_test,
                mp.provisioned_at, mp.provisioned_by, mp.updated_at,
                m.community AS meter_community, m.village_name, m.latitude,
                m.longitude, m.status AS meter_status, m.customer_type,

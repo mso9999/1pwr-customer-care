@@ -191,14 +191,13 @@ def start_validation(
     user: CurrentUser = Depends(require_role(*ROLES)),
 ):
     thing = body.thing_name.strip()
-    if thing not in VALIDATION_THINGS:
-        raise HTTPException(status_code=403, detail="This gateway is not authorized for physical validation.")
 
     with _get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
             """
-            SELECT meter_serial, site, ota_status, fw_version, ota_target_version
+            SELECT meter_serial, site, ota_status, fw_version,
+                   ota_target_version, is_test
               FROM meter_provisioning
              WHERE thing_name = %s
             """,
@@ -207,7 +206,15 @@ def start_validation(
         row = cur.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="Provisioned test gateway not found.")
-        meter_id, site, ota_status, fw_version, ota_target = row
+        meter_id, site, ota_status, fw_version, ota_target, is_test = row
+        if thing not in VALIDATION_THINGS and not is_test:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "This gateway is not authorized for physical validation. "
+                    "Allocate the first canary through CC so it is recorded as a test unit."
+                ),
+            )
         if not meter_id:
             raise HTTPException(status_code=409, detail="The test gateway has not discovered a meter.")
         if str(ota_status or "").upper() != "SUCCEEDED":

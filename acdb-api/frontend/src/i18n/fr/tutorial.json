@@ -37,18 +37,33 @@
         "Suivre l’avancement dans le Pipeline."
       ]
     },
+    "countryActivation": {
+      "title": "Préparation de l’activation pays (Bénin / Zambie)",
+      "description": "Résoudre les prérequis commerciaux, sites, comptage, paiements, firmware et preuves avant de libérer un lot terrain.",
+      "steps": [
+        "Sélectionnez le pays prévu dans l’en-tête CC, ouvrez Provisionnement → Préparation pays et actualisez les contrôles. N’utilisez jamais le code site ou la base d’un autre pays comme contournement.",
+        "Le responsable pays et l’Ingénierie approuvent la liste canonique des sites. Un site absent exige une modification de configuration pays ; les mots de passe Starlink ne font pas partie de cette liste.",
+        "Le responsable pays/Finance approuve le tarif électrique et les frais de raccordement/tableau. Un utilisateur Finance/O&M autorisé saisit les valeurs approuvées dans Tarifs.",
+        "L’Ingénierie configure l’organisation de comptage et les identifiants plateforme par site. L’équipe pays confirme que les sites affichés correspondent au déploiement réel.",
+        "Finance et Ingénierie valident des exemples réels du fournisseur mobile money et les identifiants avant d’activer l’ingestion automatique et le crédit compteur.",
+        "Firmware/Ingénierie enregistre un candidat OTA signé et immuable pour chaque site. L’équipe O&M utilise Guide et téléchargement pour allouer exactement une passerelle de test et lancer le premier canari.",
+        "Après réussite de l’OTA, exécutez la Validation de lot recommandée. Ingénierie/superadmin enregistre la session réussie — ou une dérogation explicite auditée — puis approuve cette version immuable pour des lots contrôlés."
+      ]
+    },
     "provisioning": {
       "title": "Provisionnement et mise en service des passerelles",
       "description": "Faire passer les passerelles scellees du firmware de demarrage usine au firmware complet signe, via le Wi-Fi Starlink du site.",
       "steps": [
-        "Une passerelle vierge et scellee contient deja le firmware de demarrage usine. Ne l'ouvrez pas, ne l'effacez pas et n'utilisez pas l'USB.",
-        "Ouvrez la page Provisionnement (superadmin / equipe O&M). Dans Guide & telechargement, telechargez puis extrayez completement la station. Lisez START_HERE_FACTORY_VIRGIN_GATEWAYS.md dans le dossier extrait.",
-        "Sur un portable connecte au meme reseau de provisionnement 1Meter que les passerelles (avec acces internet a CC), lancez la station. Lorsque le terminal affiche Open: http://localhost:8787, laissez-le ouvert, ouvrez cette adresse dans le navigateur, connectez-vous, verifiez le sous-reseau, puis lancez Scan.",
-        "Choisissez le site, verifiez sa version de firmware approuvee et saisissez exactement le SSID/mot de passe Starlink du site. CC conserve le SSID et la version de configuration, jamais le mot de passe.",
-        "Validation HQ facultative : si le Starlink reel du site n'est pas disponible, utilisez le parcours reseau miroir pour configurer un point d'acces 2,4 GHz controle avec le meme SSID/mot de passe et Internet. Cela valide les identifiants et l'OTA, pas le routeur reel ni la radio du site.",
-        "Selectionnez les unites et confirmez. CC alloue les identites <SITE>-GW-####, la station livre le bootstrap et CC programme l'OTA signee du firmware complet.",
-        "Gardez chaque unite alimentee pendant que CC affiche la progression OTA en direct (en attente, en cours, reussie, echouee) pour chaque passerelle. Continuez seulement lorsque tous les Jobs indiquent SUCCEEDED.",
-        "Mettez en service chaque unite : reliez son numero de serie au compte client via Affecter un compteur. Le nom de la passerelle ne change jamais."
+        "Une passerelle vierge et scellée contient déjà le firmware de démarrage usine. Ne l’ouvrez pas, ne l’effacez pas et n’utilisez pas l’USB.",
+        "Ouvrez d’abord Provisionnement → Préparation pays. Continuez seulement lorsque la liste des sites et le candidat OTA du site sont prêts ; téléchargez et extrayez ensuite toute la station depuis Guide et téléchargement. Lisez START_HERE_FACTORY_VIRGIN_GATEWAYS.md.",
+        "Sur un portable connecté au même réseau de provisionnement 1Meter que les passerelles (avec accès Internet à CC), lancez la station. Lorsque le terminal affiche Open: http://localhost:8787, laissez-le ouvert, ouvrez cette adresse, sélectionnez le pays de déploiement, connectez-vous, vérifiez le sous-réseau puis lancez Scan.",
+        "Choisissez le site, vérifiez sa version de firmware et saisissez exactement le SSID/mot de passe Starlink du site. CC conserve le SSID et la version de configuration, jamais le mot de passe.",
+        "Validation HQ facultative : si le Starlink réel du site n’est pas disponible, configurez un point d’accès 2,4 GHz contrôlé avec le même SSID/mot de passe et Internet. Cela valide les identifiants et l’OTA, pas le routeur réel ni la radio du site.",
+        "Pour une version candidate uniquement, sélectionnez exactement une unité. CC lui attribue une identité <SITE>-GW-####, l’enregistre comme unité de test autorisée, livre le bootstrap et lance le canari OTA signé. Après approbation, les lots contrôlés peuvent contenir davantage d’unités.",
+        "Gardez chaque unité alimentée pendant que CC affiche la progression OTA (en attente, en cours, réussie, échouée). Continuez seulement lorsque tous les Jobs indiquent SUCCEEDED.",
+        "Téléchargez le kit d’adressage. Adressez et étiquetez chaque compteur séparément, scannez la chaîne RS485 combinée puis connectez-la à la passerelle hors tension.",
+        "Recommandé pour chaque lot : utilisez Provisionnement → Validation de lot avec une charge fictive protégée. Prouvez la télémétrie, la consommation, l’ouverture du relais à solde nul, le paiement synthétique, la fermeture du relais et le redémarrage de la charge ; conservez l’ID de session.",
+        "Après approbation et installation sur site, rapprochez la télémétrie et utilisez Affecter un compteur pour relier le numéro acquis/la passerelle au compte client. Activez la facturation/commande relais 1Meter uniquement si prévu, puis terminez l’assistant de mise en service. Le nom de la passerelle ne change jamais."
       ]
     },
     "payments": {

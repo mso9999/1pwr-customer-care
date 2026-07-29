@@ -3786,6 +3786,7 @@ export interface UpdateConfigResult {
 export interface OtaReadiness {
   configured: boolean;
   ready: boolean;
+  candidate_ready?: boolean;
   canary_ready?: boolean;
   canary_things?: string[];
   site_required?: boolean;
@@ -3804,6 +3805,15 @@ export interface OtaReadiness {
     fallback_ssid?: string | null;
     approved_sites?: string[];
     canary_only?: boolean;
+    catalog_canary_only?: boolean;
+    approval?: {
+      canary_ota_update_id?: string | null;
+      validation_session_id?: string | null;
+      validation_waived?: boolean;
+      waiver_reason?: string | null;
+      approved_by?: string | null;
+      approved_at?: string | null;
+    } | null;
   };
   checks: Record<string, { ok: boolean; error?: string; bytes?: number; etag?: string | null }>;
 }
@@ -3839,6 +3849,63 @@ export async function startFactoryOtaCanary(body: {
 export async function getFactoryOtaReadiness(siteCode?: string): Promise<OtaReadiness> {
   const query = siteCode ? `?site_code=${encodeURIComponent(siteCode)}` : '';
   return request<OtaReadiness>(`/provisioning/ota/readiness${query}`);
+}
+
+export interface CountryProvisioningGate {
+  key: string;
+  label: string;
+  ready: boolean;
+  scope: 'provisioning' | 'commissioning' | 'payments' | string;
+  owner: string;
+  action: string;
+  route?: string | null;
+}
+
+export interface CountryProvisioningReadiness {
+  country_code: string;
+  country_name: string;
+  currency: string;
+  sites: Record<string, string>;
+  effective_tariff: number;
+  ota_candidate_sites: string[];
+  ota_batch_sites: string[];
+  stats: {
+    provisioned_gateways: number;
+    ota_succeeded: number;
+    commissioned: number;
+    test_gateways: number;
+    passed_validations: number;
+  };
+  gates: CountryProvisioningGate[];
+  field_batch_ready: boolean;
+  end_to_end_ready: boolean;
+}
+
+export async function getCountryProvisioningReadiness(): Promise<CountryProvisioningReadiness> {
+  return request<CountryProvisioningReadiness>('/provisioning/readiness');
+}
+
+export interface OtaReleaseApprovalResult {
+  site_code: string;
+  target_firmware_version: string;
+  artifact_version_id: string;
+  ready: boolean;
+  approval?: OtaReadiness['release']['approval'];
+  note: string;
+}
+
+export async function approveFactoryOtaRelease(body: {
+  site_code: string;
+  canary_ota_update_id: string;
+  validation_session_id?: string;
+  waive_physical_validation?: boolean;
+  waiver_reason?: string;
+  confirmation: string;
+}): Promise<OtaReleaseApprovalResult> {
+  return request<OtaReleaseApprovalResult>('/provisioning/ota/release-approval', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 }
 
 export interface OtaExecutionStatus {
@@ -3889,6 +3956,7 @@ export interface ProvisionedMeter {
   site?: string;
   account_number?: string;
   status?: string;
+  is_test?: boolean;
   cert_id?: string;
   legacy_id?: string;
   provisioned_at?: string;

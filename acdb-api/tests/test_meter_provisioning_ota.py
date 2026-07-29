@@ -26,6 +26,8 @@ def approved_release(site: str = "GBO") -> dict:
         "credentials_mode": "runtime_nvs",
         "fallback_ssid": None,
         "canary_only": False,
+        "catalog_canary_only": False,
+        "approval": None,
         "approved_sites": ["GBO"],
         "config_error": None,
     }
@@ -57,6 +59,88 @@ class TestOtaReleaseSelection(unittest.TestCase):
             release = mp._ota_release("SAM")
         self.assertIn("artifact_key", mp._ota_missing_config(release))
         self.assertEqual(release["approved_sites"], ["GBO"])
+
+    def test_recorded_approval_unlocks_exact_candidate(self):
+        catalog = {
+            "GBO": {
+                "artifact_key": "firmware/GBO/full.bin",
+                "artifact_version_id": "s3-version-123",
+                "target_firmware_version": "1.2.3",
+                "factory_baseline_version": "1.1.56",
+                "canary_only": True,
+            }
+        }
+        approval = {
+            "canary_ota_update_id": "ota-canary-1",
+            "approved_by": "engineer",
+        }
+        with (
+            patch.object(mp, "OTA_RELEASES_JSON", json.dumps(catalog)),
+            patch.object(mp, "_release_approval", return_value=approval),
+        ):
+            release = mp._ota_release("GBO")
+        self.assertTrue(release["catalog_canary_only"])
+        self.assertFalse(release["canary_only"])
+        self.assertEqual(release["approval"], approval)
+
+
+class TestCanarySelfService(unittest.TestCase):
+    def test_candidate_readiness_allows_first_allocation_without_allowlist(self):
+        release = approved_release()
+        release["canary_only"] = True
+        release["catalog_canary_only"] = True
+        with (
+            patch.object(mp, "_ota_release", return_value=release),
+            patch.object(mp, "_ota_missing_config", return_value=[]),
+            patch.object(
+                mp,
+                "_ota_release_checks",
+                return_value={
+                    "anti_rollback": {"ok": True},
+                    "artifact": {"ok": True},
+                    "signing_profile": {"ok": True},
+                },
+            ),
+            patch.object(mp, "_approved_test_things", return_value=set()),
+        ):
+            result = mp.ota_readiness("GBO", MagicMock())
+        self.assertTrue(result["candidate_ready"])
+        self.assertFalse(result["canary_ready"])
+        self.assertFalse(result["ready"])
+
+    def test_canary_registry_claim_is_persisted_as_test_unit(self):
+        ddb = MagicMock()
+        with (
+            patch.object(mp, "_client", return_value=ddb),
+            patch.object(mp, "_registry_get_by_thing", return_value=[]),
+            patch.object(mp, "_registry_get_by_mac", return_value=None),
+        ):
+            mp._registry_claim(
+                "aa:bb:cc:dd:ee:ff",
+                "GBO-GW-0001",
+                site="GBO",
+                operator="cc:comfort",
+                is_test=True,
+            )
+        item = ddb.put_item.call_args.kwargs["Item"]
+        self.assertEqual(item["is_test"], {"BOOL": True})
+
+    def test_first_canary_allocation_rejects_multiple_gateways(self):
+        request = mp.GatewayBatchRequest(
+            site_code="GBO",
+            units=[
+                mp.GatewayUnit(pcb_mac="aa:bb:cc:dd:ee:01"),
+                mp.GatewayUnit(pcb_mac="aa:bb:cc:dd:ee:02"),
+            ],
+            wifi_ssid="site-starlink",
+            wifi_password="secret",
+            canary=True,
+        )
+        with patch.object(mp, "_active_site_map", return_value={"GBO": "Gbo"}):
+            with self.assertRaises(mp.HTTPException) as ctx:
+                mp.provision_gateway_batch(request, MagicMock(user_id="comfort"))
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("exactly one", ctx.exception.detail)
 
 
 class TestFactoryPromotion(unittest.TestCase):
@@ -230,6 +314,59 @@ class TestFactoryPromotion(unittest.TestCase):
                     MagicMock(user_id="comfort"),
                 )
         self.assertEqual(ctx.exception.status_code, 403)
+
+
+class TestReleaseApproval(unittest.TestCase):
+    def test_successful_canary_can_be_approved_with_audited_validation_waiver(self):
+        candidate = approved_release()
+        candidate["canary_only"] = True
+        candidate["catalog_canary_only"] = True
+        approved = dict(candidate)
+        approved["canary_only"] = False
+        approved["approval"] = {"approved_by": "engineer"}
+
+        cursor = MagicMock()
+        cursor.fetchall.return_value = [
+            ("GBO-GW-0001", "GBO", "SUCCEEDED", "1.2.3", True)
+        ]
+        conn = MagicMock()
+        conn.cursor.return_value = cursor
+        cm = MagicMock()
+        cm.__enter__.return_value = conn
+        cm.__exit__.return_value = False
+        fake_customer_api = types.SimpleNamespace(get_connection=MagicMock(return_value=cm))
+
+        with (
+            patch.object(mp, "_active_site_map", return_value={"GBO": "Gbo"}),
+            patch.object(mp, "_ota_release", side_effect=[candidate, approved]),
+            patch.object(mp, "_ota_missing_config", return_value=[]),
+            patch.object(
+                mp,
+                "_ota_release_checks",
+                return_value={
+                    "anti_rollback": {"ok": True},
+                    "artifact": {"ok": True},
+                    "signing_profile": {"ok": True},
+                },
+            ),
+            patch.dict("sys.modules", {"customer_api": fake_customer_api}),
+            patch.object(mp, "try_log_mutation"),
+        ):
+            result = mp.approve_ota_release(
+                mp.OtaReleaseApprovalRequest(
+                    site_code="GBO",
+                    canary_ota_update_id="ota-canary-1",
+                    waive_physical_validation=True,
+                    waiver_reason="Meter bench is unavailable; OTA-only proof approved.",
+                    confirmation="APPROVE GBO 1.2.3",
+                ),
+                MagicMock(user_id="engineer"),
+            )
+
+        self.assertTrue(result["ready"])
+        conn.commit.assert_called_once()
+        insert_sql = cursor.execute.call_args_list[-1].args[0]
+        self.assertIn("onemeter_ota_release_approvals", insert_sql)
 
 
 if __name__ == "__main__":

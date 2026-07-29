@@ -46,6 +46,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(HERE, "static")
 MAC_RE = re.compile(r"(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}", re.I)
+COUNTRY_API_PREFIX = {
+    "LS": "/api",
+    "BN": "/api/bn",
+    "ZM": "/api/zm",
+}
 
 # ---------------------------------------------------------------------------
 # In-memory session (single technician per running station)
@@ -53,9 +58,10 @@ MAC_RE = re.compile(r"(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}", re.I)
 
 
 class Session:
-    def __init__(self, cc_base: str, subnet: str | None):
+    def __init__(self, cc_base: str, subnet: str | None, country: str | None = None):
         self.cc_base = cc_base.rstrip("/")
         self.subnet = subnet
+        self.country = (country or "").strip().upper()
         self.token: str | None = None
         self.user: dict | None = None
         # pcb_mac -> {"ip":..., "bootstrap":..., "thing_name":...}
@@ -72,7 +78,10 @@ SESSION: Session
 
 
 def cc_request(method: str, path: str, body: dict | None = None, auth: bool = True) -> dict:
-    url = f"{SESSION.cc_base}/api{path}"
+    prefix = COUNTRY_API_PREFIX.get(SESSION.country)
+    if not prefix:
+        raise RuntimeError("Select the deployment country before connecting to CC.")
+    url = f"{SESSION.cc_base}{prefix}{path}"
     data = json.dumps(body).encode() if body is not None else None
     headers = {"Content-Type": "application/json"}
     if auth and SESSION.token:
@@ -321,6 +330,7 @@ class Handler(BaseHTTPRequestHandler):
                 "logged_in": SESSION.token is not None,
                 "user": SESSION.user,
                 "cc_base": SESSION.cc_base,
+                "country": SESSION.country,
                 # Default to ALL local subnets (comma-separated) so a laptop
                 # hotspot subnet is scanned alongside the internet-facing one.
                 "subnet": SESSION.subnet or ", ".join(local_subnets()),
@@ -366,6 +376,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if self.path == "/api/login":
             try:
+                country = str(body.get("country") or SESSION.country or "").strip().upper()
+                if country not in COUNTRY_API_PREFIX:
+                    return self._send(400, {"error": "Select Lesotho, Benin, or Zambia."})
+                SESSION.country = country
                 resp = cc_request("POST", "/auth/employee-login", {
                     "employee_id": body.get("employee_id"),
                     "password": body.get("password"),
@@ -416,6 +430,8 @@ class Handler(BaseHTTPRequestHandler):
                     "thing_names": body.get("thing_names") or [],
                     "site_code": body.get("site_code"),
                     "note": body.get("note") or "Provisioning station factory batch",
+                    "canary": bool(body.get("canary")),
+                    "confirmation": body.get("confirmation"),
                 }))
             except Exception as e:
                 return self._send(502, {"error": str(e)})
@@ -442,6 +458,7 @@ class Handler(BaseHTTPRequestHandler):
                 "units": cc_units,
                 "wifi_ssid": body.get("wifi_ssid"),
                 "wifi_password": body.get("wifi_password"),
+                "canary": bool(body.get("canary")),
             })
         except Exception as e:
             return self._send(502, {"error": str(e)})
@@ -499,15 +516,22 @@ def main():
                     help="CC portal base URL")
     ap.add_argument("--subnet", default=os.environ.get("PROV_SUBNET"),
                     help="provisioning LAN CIDR (default: auto-detect /24)")
+    ap.add_argument(
+        "--country",
+        choices=sorted(COUNTRY_API_PREFIX),
+        default=os.environ.get("CC_COUNTRY"),
+        help="deployment country code (LS, BN, or ZM); may also be selected in the UI",
+    )
     ap.add_argument("--port", type=int, default=int(os.environ.get("PROV_PORT", "8787")))
     a = ap.parse_args()
 
     global SESSION
-    SESSION = Session(a.cc, a.subnet)
+    SESSION = Session(a.cc, a.subnet, a.country)
     sub = a.subnet or default_subnet()
     print("=" * 64)
     print(" 1Meter Provisioning Station")
     print(f"   CC:      {SESSION.cc_base}")
+    print(f"   Country: {SESSION.country or 'select in browser'}")
     print(f"   Subnet:  {sub}")
     print(f"   Open:    http://localhost:{a.port}")
     print("=" * 64)
