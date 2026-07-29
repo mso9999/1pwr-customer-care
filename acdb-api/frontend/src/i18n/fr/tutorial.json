@@ -39,12 +39,15 @@
     },
     "provisioning": {
       "title": "Provisionnement et mise en service des passerelles",
-      "description": "Mettre en ligne les passerelles 1Meter flashees en usine et les suivre jusqu'au compte client.",
+      "description": "Faire passer les passerelles scellees du firmware de demarrage usine au firmware complet signe, via le Wi-Fi Starlink du site.",
       "steps": [
-        "Ouvrez la page Provisionnement (superadmin / equipe O&M). Onglet Guide & telechargement : telechargez la station de provisionnement et lisez la vue d'ensemble.",
-        "Sur un portable connecte au Wi-Fi de provisionnement 1Meter (avec acces internet a CC), lancez la station, connectez-vous, puis Scan pour enumerer les passerelles vierges.",
-        "Choisissez le site de destination et le Wi-Fi du site, selectionnez les unites et Confirmez. CC alloue des Things <SITE>-GW-#### stables + certificats (sans compte client) et la station ecrit chaque bootstrap sur l'appareil.",
-        "Suivez les unites dans Compteurs provisionnes : provisioned -> online -> serial-acquired une fois installees et en service.",
+        "Une passerelle vierge et scellee contient deja le firmware de demarrage usine. Ne l'ouvrez pas, ne l'effacez pas et n'utilisez pas l'USB.",
+        "Ouvrez la page Provisionnement (superadmin / equipe O&M). Dans Guide & telechargement, telechargez puis extrayez completement la station. Lisez START_HERE_FACTORY_VIRGIN_GATEWAYS.md dans le dossier extrait.",
+        "Sur un portable connecte au meme reseau de provisionnement 1Meter que les passerelles (avec acces internet a CC), lancez la station. Lorsque le terminal affiche Open: http://localhost:8787, laissez-le ouvert, ouvrez cette adresse dans le navigateur, connectez-vous, verifiez le sous-reseau, puis lancez Scan.",
+        "Choisissez le site, verifiez sa version de firmware approuvee et saisissez exactement le SSID/mot de passe Starlink du site. CC conserve le SSID et la version de configuration, jamais le mot de passe.",
+        "Validation HQ facultative : si le Starlink reel du site n'est pas disponible, utilisez le parcours reseau miroir pour configurer un point d'acces 2,4 GHz controle avec le meme SSID/mot de passe et Internet. Cela valide les identifiants et l'OTA, pas le routeur reel ni la radio du site.",
+        "Selectionnez les unites et confirmez. CC alloue les identites <SITE>-GW-####, la station livre le bootstrap et CC programme l'OTA signee du firmware complet.",
+        "Gardez chaque unite alimentee pendant que CC affiche la progression OTA en direct (en attente, en cours, reussie, echouee) pour chaque passerelle. Continuez seulement lorsque tous les Jobs indiquent SUCCEEDED.",
         "Mettez en service chaque unite : reliez son numero de serie au compte client via Affecter un compteur. Le nom de la passerelle ne change jamais."
       ]
     },

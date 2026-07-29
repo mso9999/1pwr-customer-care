@@ -695,6 +695,13 @@ function AdvancesContent() {
         A <Code>cc-advance-accrual.timer</Code> systemd unit runs on the 1st of each month at 02:00 UTC.
         For every active advance with <Code>monthly_fee_pct &gt; 0</Code>, the script:
       </P>
+      <Tip>
+        If the real site Starlink is unavailable at HQ, the guided workflow offers an optional
+        mirrored-network path. Configure a controlled 2.4 GHz access point with the exact site
+        SSID/password, internet access, no captive portal/client isolation, and outbound MQTT
+        8883. This validates credential handoff and OTA only; validate the actual Starlink and site
+        RF/internet during installation.
+      </Tip>
       <Ol>
         <li>Computes <Code>outstanding × monthly_fee_pct</Code>.</li>
         <li>Increases <Code>outstanding</Code> by that amount.</li>
@@ -1358,10 +1365,17 @@ function ProvisioningContent() {
   return (
     <>
       <P>
-        The <PageLink to="/provisioning">Provisioning</PageLink> page brings factory-flashed 1Meter
-        gateways online as registered AWS IoT Things and tracks them through to commissioning. It is
+        The <PageLink to="/provisioning">Provisioning</PageLink> page takes sealed, factory-boot 1Meter
+        gateways through identity, deployment Starlink access, signed full-firmware OTA, and commissioning. It is
         for <Bold>superadmin</Bold> / <Bold>O&amp;M team</Bold>.
       </P>
+      <SubHead>Factory-virgin means boot firmware is already installed</SubHead>
+      <Ul>
+        <li><Bold>Sealed factory unit:</Bold> do not open, erase, or connect it by USB. Its boot firmware recognizes the approved provisioning LAN.</li>
+        <li><Bold>Factory-boot but unprovisioned:</Bold> use the station to write identity, TLS certificate, destination site, and that site&apos;s unique Starlink Wi-Fi; CC then queues the approved full firmware OTA.</li>
+        <li><Bold>Already has a permanent &lt;SITE&gt;-GW-#### name:</Bold> do not flash or provision it again. Use Update Configuration or escalate for controlled recovery.</li>
+      </Ul>
+      <Warning>Identity delivery is not completion. Keep every gateway powered on the destination Starlink network until its individual AWS IoT OTA Job reads SUCCEEDED.</Warning>
       <SubHead>Naming</SubHead>
       <Ul>
         <li><Bold>Gateway pool</Bold> (batch, account unknown): <Code>&lt;SITE&gt;-GW-####</Code> (e.g. <Code>MAK-GW-0007</Code>) — a stable, account-free device identity allocated by CC. This name is permanent and never changes.</li>
@@ -1370,11 +1384,26 @@ function ProvisioningContent() {
       <SubHead>Batch provisioning with the station</SubHead>
       <P>
         A virgin gateway has no certificate, so CC cannot reach it directly. Download the
-        <Bold> provisioning station</Bold> (Guide &amp; download tab) and run it on a laptop that is on the
-        <Code>1Meter</Code> provisioning Wi-Fi and has internet to CC. It scans/enumerates virgin gateways,
-        you pick the destination site + Wi-Fi and confirm, CC issues the Things + certs, and the station
-        delivers each bootstrap to the device with a progress bar.
+        <Bold> provisioning station</Bold> (Guide &amp; download tab) and extract the whole ZIP. For a batch,
+        use the approved provisioning access point (currently SSID <Code>1Meter</Code> and password <Code>1Meter00</Code>); the laptop and
+        factory-boot gateways must be on that same network, and the laptop must have internet to CC.
+        It scans/enumerates virgin gateways,
+        you pick the destination site and enter that site&apos;s exact Starlink SSID/password. CC issues
+        the Things + certs, the station delivers each bootstrap, and CC queues the site-approved OTA.
+        The actual destination Starlink router must be powered, online, and within range because the
+        gateway leaves the provisioning network after bootstrap. CC records the SSID/config version
+        but never stores or redisplays the password.
       </P>
+      <Ol>
+        <li>In PowerShell inside the extracted folder, run <Code>py -3 provisioning_station.py --cc https://cc.1pwrafrica.com</Code> (or use <Code>python</Code> if <Code>py</Code> is unavailable).</li>
+        <li>When the terminal shows <Code>Open: http://localhost:8787</Code>, leave it open. The station is running; it is not frozen.</li>
+        <li>Open <Code>http://localhost:8787</Code> in Chrome/Edge and sign in.</li>
+        <li>Confirm the displayed subnet is the gateway provisioning network, Scan, and select only known virgin PCB MACs.</li>
+        <li>Select the actual destination site, verify its approved firmware release, enter the exact deployment Starlink credentials, review the unit list, then Confirm.</li>
+        <li><Bold>done (rebooted)</Bold> means bootstrap delivery succeeded. Wait for each OTA Job to become <Bold>SUCCEEDED</Bold>, then verify the installed firmware version under Provisioned meters.</li>
+      </Ol>
+      <Tip>The downloaded folder contains <Code>START_HERE_FACTORY_VIRGIN_GATEWAYS.md</Code>, the detailed no-USB Windows SOP, including Comfort&apos;s localhost screen, Starlink handoff, OTA gates, records, and troubleshooting.</Tip>
+      <Warning>If CC allocates a Thing but delivery fails, do not immediately provision again. Check Provisioned meters and preserve the MAC, assigned Thing, terminal output, and result before retrying or escalating.</Warning>
       <SubHead>Updating WiFi configuration</SubHead>
       <P>
         After provisioning, use the <Bold>Update Configuration</Bold> tab to push new WiFi/SoftAP settings
@@ -1391,8 +1420,9 @@ function ProvisioningContent() {
       </P>
       <SubHead>Lifecycle</SubHead>
       <Ol>
-        <li><Bold>provisioned</Bold> — identity + cert + site Wi-Fi written; no customer account yet (the "unallocated" bucket).</li>
-        <li><Bold>online</Bold> — installed at site, reached AWS IoT.</li>
+        <li><Bold>identity-delivered</Bold> — identity + cert + deployment Starlink settings written; this is not yet full-firmware completion.</li>
+        <li><Bold>OTA SUCCEEDED</Bold> — the signed full firmware is installed and its version is recorded.</li>
+        <li><Bold>online</Bold> — reached AWS IoT through the destination Starlink network.</li>
         <li><Bold>serial-acquired</Bold> — telemetry seen; CC auto-binds the gateway to its meter serial.</li>
         <li><Bold>allocated</Bold> — meter serial linked to a customer account via the <PageLink to="/commission">commissioning</PageLink> flow (gateway association optional).</li>
       </Ol>

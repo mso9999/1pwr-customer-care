@@ -3779,6 +3779,56 @@ export interface UpdateConfigResult {
   note: string;
 }
 
+export interface OtaReadiness {
+  configured: boolean;
+  ready: boolean;
+  site_required?: boolean;
+  missing: string[];
+  release: {
+    region: string;
+    bucket: string;
+    artifact_key?: string | null;
+    artifact_version_id?: string | null;
+    target_firmware_version?: string | null;
+    factory_baseline_version?: string | null;
+    signing_profile: string;
+    max_per_minute: number;
+    site_code?: string | null;
+    credentials_mode?: string;
+    fallback_ssid?: string | null;
+    approved_sites?: string[];
+  };
+  checks: Record<string, { ok: boolean; error?: string; bytes?: number; etag?: string | null }>;
+}
+
+export async function getFactoryOtaReadiness(siteCode?: string): Promise<OtaReadiness> {
+  const query = siteCode ? `?site_code=${encodeURIComponent(siteCode)}` : '';
+  return request<OtaReadiness>(`/provisioning/ota/readiness${query}`);
+}
+
+export interface OtaExecutionStatus {
+  thing_name: string;
+  status?: string | null;
+  queued_at?: string | null;
+  started_at?: string | null;
+  last_updated_at?: string | null;
+  execution_number?: number | null;
+}
+
+export interface OtaPromotionStatus {
+  ota_update_id: string;
+  ota_status?: string | null;
+  aws_iot_job_id?: string | null;
+  target_version?: string | null;
+  targets: string[];
+  executions: OtaExecutionStatus[];
+  error_info?: { code?: string; message?: string } | null;
+}
+
+export async function getOtaPromotionStatus(updateId: string): Promise<OtaPromotionStatus> {
+  return request<OtaPromotionStatus>(`/provisioning/ota/${encodeURIComponent(updateId)}`);
+}
+
 export async function updateDeviceConfig(body: {
   thing_name: string;
   wifi_ssid: string;
@@ -3815,6 +3865,13 @@ export interface ProvisionedMeter {
   meter_status?: string;
   customer_type?: string;
   customer_id?: string | number;
+  deployment_wifi_ssid?: string;
+  wifi_config_version?: number;
+  fw_version?: string;
+  ota_target_version?: string;
+  ota_update_id?: string;
+  ota_status?: string;
+  ota_updated_at?: string;
   [k: string]: unknown;
 }
 
@@ -4230,4 +4287,3 @@ export interface MakConnectivityResponse {
 export async function getMakConnectivity(): Promise<MakConnectivityResponse> {
   return request('/mak-connectivity');
 }
-

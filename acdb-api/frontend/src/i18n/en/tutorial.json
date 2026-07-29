@@ -39,12 +39,15 @@
     },
     "provisioning": {
       "title": "Gateway provisioning & commissioning",
-      "description": "Bring factory-flashed 1Meter gateways online and track them to a customer account.",
+      "description": "Take sealed factory-boot gateways through Starlink configuration, signed full-firmware OTA, and customer commissioning.",
       "steps": [
-        "Open the Provisioning page (superadmin / O&M). Use the Guide & download tab to download the provisioning station and read the workstream overview.",
-        "On a laptop on the 1Meter provisioning Wi-Fi (with internet to CC), run the station, sign in, and Scan to enumerate virgin gateways.",
-        "Pick the destination site and site Wi-Fi, select the units, and Confirm. CC allocates stable <SITE>-GW-#### Things + certs (no customer account yet) and the station writes each bootstrap to the device.",
-        "Watch the units appear under Provisioned meters as provisioned -> online -> serial-acquired once installed and reporting.",
+        "A sealed factory-virgin gateway already has boot firmware. Do not open it, erase it, or use USB; it is programmed to recognize the approved provisioning LAN.",
+        "Open the Provisioning page (superadmin / O&M). Use the Guide & download tab to download and fully extract the station. Read START_HERE_FACTORY_VIRGIN_GATEWAYS.md in the extracted folder.",
+        "On a laptop on the same 1Meter provisioning network as the gateways (with internet to CC), run the station. When the terminal shows Open: http://localhost:8787, leave it open, open that address in a browser, sign in, confirm the subnet, and Scan.",
+        "Pick the destination site, confirm its approved firmware release, and enter that site's exact Starlink SSID/password. CC records the SSID/config version but never the password.",
+        "Optional HQ validation: if the real site Starlink is unavailable, use the guided mirrored-network path to configure a controlled 2.4 GHz access point with the identical SSID/password and internet. This validates credential handoff and OTA, not the real site router or RF path.",
+        "Select the units and Confirm. CC allocates stable <SITE>-GW-#### identities, the station delivers the bootstrap, and CC queues the signed full-firmware OTA.",
+        "Keep every unit powered while CC shows live OTA progress (queued, in progress, succeeded, failed) for each gateway. Continue only when every Job is SUCCEEDED.",
         "Commission each unit: link its acquired meter serial to the customer account via Assign Meter. The gateway name never changes."
       ]
     },

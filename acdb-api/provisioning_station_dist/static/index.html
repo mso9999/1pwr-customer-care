@@ -62,6 +62,12 @@
 
   <!-- App -->
   <div id="app" class="hide">
+    <div id="otaCard" class="card">
+      <h3 style="margin-top:0">Full-firmware OTA readiness</h3>
+      <div id="otaReadyText" class="muted">Checking CC’s approved firmware release…</div>
+      <p class="muted" style="margin-bottom:0">Keep the selected site's actual Starlink router powered, online, and within range. After bootstrap the gateway leaves the provisioning LAN and must join Starlink to receive its OTA Job.</p>
+    </div>
+
     <div class="tabs">
       <button data-tab="detect" class="active" onclick="setTab('detect')">1 · Detect &amp; assign</button>
       <button data-tab="provisioned" onclick="setTab('provisioned')">Provisioned meters (CC)</button>
@@ -104,9 +110,9 @@
       <div id="assignCard" class="card hide">
         <h3 style="margin-top:0">Assignment (batch)</h3>
         <div class="row">
-          <div><label>Destination site (canonical CC)</label><select id="site"></select></div>
-          <div><label>Site Wi-Fi SSID</label><input id="ssid" placeholder="MAK_Wifi-ext" /></div>
-          <div><label>Site Wi-Fi password</label><input id="wpw" /></div>
+          <div><label>Destination site (canonical CC)</label><select id="site" onchange="siteChanged()"></select></div>
+          <div><label>Deployment Starlink Wi-Fi SSID</label><input id="ssid" placeholder="exact Starlink network name" /></div>
+          <div><label>Deployment Starlink Wi-Fi password</label><input id="wpw" type="password" autocomplete="new-password" /></div>
         </div>
         <p class="muted" style="margin:12px 0 0">
           <span id="selCount">0</span> gateway(s) selected. Names <b>&lt;SITE&gt;-GW-####</b> are
@@ -126,6 +132,7 @@
         <div style="margin-top:12px">
           <button class="ghost" onclick="downloadCsv()">Export CSV</button>
         </div>
+        <div id="otaProgress" style="margin-top:12px"></div>
       </div>
     </div>
 
@@ -140,8 +147,8 @@
           </div>
         </div>
         <table style="margin-top:10px"><thead><tr>
-          <th>Thing</th><th>Serial</th><th>Site</th><th>Account</th><th>Village</th>
-          <th>Stage</th><th>Provisioned</th>
+          <th>Thing</th><th>Serial</th><th>Site</th><th>Starlink SSID</th><th>Firmware</th>
+          <th>OTA</th><th>Account</th><th>Village</th><th>Stage</th><th>Provisioned</th>
         </tr></thead><tbody id="provBody"></tbody></table>
       </div>
     </div>
@@ -150,6 +157,7 @@
 
 <script>
 let SITES = [], SCAN = [], RESULTS = [];
+let OTA_READY = false, OTA_UPDATE_ID = '';
 let MAC_TO_SERIAL = {};  // normalized mac -> serial, from the factory CSV
 
 function showError(m){ const e=document.getElementById('error'); e.textContent=m; e.classList.remove('hide'); }
@@ -180,6 +188,7 @@ function onLoggedIn(user){
   document.getElementById('loginCard').classList.add('hide');
   document.getElementById('app').classList.remove('hide');
   loadSites();
+  loadOtaReadiness();
 }
 async function login(){
   clearError();
@@ -196,6 +205,30 @@ async function loadSites(){
     sel.innerHTML = '<option value="">Select site…</option>' +
       SITES.map(s=>`<option value="${s.code}">${s.code} — ${s.name}${s.country?` (${s.country})`:''}</option>`).join('');
   }catch(e){ showError(e.message); }
+}
+
+function siteChanged(){ loadOtaReadiness(document.getElementById('site').value); }
+async function loadOtaReadiness(site=''){
+  const el=document.getElementById('otaReadyText');
+  try{
+    const r=await api('/api/ota-readiness'+(site?'?site_code='+encodeURIComponent(site):''));
+    OTA_READY=!!r.ready;
+    const rel=r.release||{};
+    if(OTA_READY){
+      el.innerHTML=`<span class="state s-done">ready</span> Site <b>${rel.site_code||site}</b> is approved for signed full firmware <b>${rel.target_firmware_version||''}</b>. Deployment Starlink credentials will be stored as runtime configuration; CC does not retain the password.`;
+    }else if(r.site_required){
+      el.innerHTML='<span class="state s-queued">select site</span> Choose the destination site to verify its approved firmware release.';
+    }else{
+      const missing=(r.missing||[]).join(', ');
+      const failed=Object.entries(r.checks||{}).filter(([,v])=>!v.ok).map(([k])=>k).join(', ');
+      el.innerHTML=`<span class="state s-failed">not ready</span> Stop: CC cannot yet promote factory-boot gateways. ${missing?`Missing configuration: ${missing}. `:''}${failed?`Failed checks: ${failed}.`:''} Contact Engineering; do not treat identity delivery as completed provisioning.`;
+    }
+    document.getElementById('provBtn').disabled=!OTA_READY;
+  }catch(e){
+    OTA_READY=false;
+    el.innerHTML=`<span class="state s-failed">check failed</span> ${e.message}`;
+    document.getElementById('provBtn').disabled=true;
+  }
 }
 
 // Parse a MAC cell that may be: bare colon/dash form, bare 12-hex, OR the
@@ -342,13 +375,16 @@ async function confirmProvision(){
   const wpw=document.getElementById('wpw').value;
   const units=selectedUnits();
   if(!site) return showError('Pick a destination site.');
-  if(!ssid) return showError('Enter the site Wi-Fi SSID.');
+  if(!ssid) return showError('Enter the destination site’s exact Starlink Wi-Fi SSID.');
+  if(!wpw) return showError('Enter the destination site’s Starlink Wi-Fi password.');
   if(!units.length) return showError('Select at least one virgin gateway.');
+  if(!OTA_READY) return showError('CC full-firmware OTA is not ready. Stop and ask Engineering to configure the approved release.');
   const names = units.length;
-  if(!confirm(`Provision ${names} gateway(s) for site ${site}?\nWi-Fi: ${ssid}\nCC will allocate ${site}-GW-#### names and certs. No customer account is set now.`)) return;
+  if(!confirm(`Provision ${names} gateway(s) for site ${site}?\nWi-Fi: ${ssid}\nCC will allocate ${site}-GW-#### names and certs, then queue the approved full firmware OTA. No customer account is set now.`)) return;
 
   const prov=document.getElementById('provBtn'); prov.disabled=true;
   document.getElementById('progressCard').classList.remove('hide');
+  document.getElementById('otaProgress').innerHTML='';
   const body=document.getElementById('progBody'); body.innerHTML='';
   setProg(0, units.length, 'Allocating Things + certs from CC…');
 
@@ -378,8 +414,32 @@ async function confirmProvision(){
     }
     done++; setProg(done, gws.length, `Delivered ${done}/${gws.length}`);
   }
-  setProg(gws.length, gws.length, `Complete — ${RESULTS.filter(r=>r.status==='done').length} provisioned, ${RESULTS.filter(r=>r.status==='failed').length} failed.`);
-  prov.disabled=false;
+  const successful=RESULTS.filter(r=>r.status.startsWith('done'));
+  if(!successful.length){
+    setProg(gws.length, gws.length, 'Identity delivery failed; no OTA was scheduled.');
+    prov.disabled=false;
+    return;
+  }
+
+  setProg(gws.length, gws.length, `Identity delivered to ${successful.length}/${gws.length}. Asking CC to queue the full firmware OTA…`);
+  const otaEl=document.getElementById('otaProgress');
+  try{
+    const ota=await api('/api/promote','POST',{
+      thing_names:successful.map(r=>r.thing_name),
+      site_code:site,
+      note:`Factory batch for site ${site}`,
+    });
+    OTA_UPDATE_ID=ota.ota_update_id;
+    RESULTS.forEach(r=>{ if(r.status.startsWith('done')) r.ota_update_id=OTA_UPDATE_ID; });
+    otaEl.innerHTML=`<span class="state s-working">OTA queued</span> Signed firmware <b>${ota.target_version}</b>, update <span class="mono">${OTA_UPDATE_ID}</span>. Keep all gateways powered and online. <button class="ghost" onclick="refreshOtaStatus()">Check OTA status</button><div id="otaStatus" class="muted" style="margin-top:8px">Waiting for gateways to join the internet and accept the AWS IoT Job.</div>`;
+    setProg(gws.length, gws.length, `Bootstrap complete; full firmware OTA queued for ${successful.length} gateway(s). Provisioning is not complete until every OTA status is SUCCEEDED.`);
+    window.setTimeout(refreshOtaStatus, 8000);
+  }catch(e){
+    otaEl.innerHTML=`<span class="state s-failed">OTA NOT QUEUED</span> ${e.message}<br><b>Stop:</b> the gateways have identity/network settings but full-firmware provisioning is incomplete.`;
+    setProg(gws.length, gws.length, 'Incomplete — identity delivered, but CC did not queue the required full firmware OTA.');
+    showError(e.message);
+  }
+  prov.disabled=!OTA_READY;
 }
 function setProg(done,total,msg){
   const pct = total? Math.round(done/total*100):0;
@@ -387,9 +447,25 @@ function setProg(done,total,msg){
   document.getElementById('progText').textContent = msg;
 }
 function downloadCsv(){
-  const rows=[['pcb_mac','thing_name','box_label','ip','status'], ...RESULTS.map(r=>[r.pcb_mac,r.thing_name,r.box_label,r.ip,r.status])];
+  const rows=[['pcb_mac','thing_name','box_label','ip','bootstrap_status','ota_update_id'], ...RESULTS.map(r=>[r.pcb_mac,r.thing_name,r.box_label,r.ip,r.status,r.ota_update_id||''])];
   const csv=rows.map(r=>r.map(x=>`"${(x||'').toString().replace(/"/g,'""')}"`).join(',')).join('\n');
   const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download='provisioned-gateways.csv'; a.click();
+}
+
+async function refreshOtaStatus(){
+  if(!OTA_UPDATE_ID) return;
+  const el=document.getElementById('otaStatus');
+  try{
+    const r=await api('/api/ota-status?update_id='+encodeURIComponent(OTA_UPDATE_ID));
+    const xs=r.executions||[];
+    const done=xs.filter(x=>x.status==='SUCCEEDED').length;
+    const failed=xs.filter(x=>['FAILED','REJECTED','CANCELED','REMOVED'].includes(x.status)).length;
+    el.innerHTML=`OTA creation: <b>${r.ota_status||'unknown'}</b>. Device jobs: <b>${done}/${RESULTS.filter(x=>x.status.startsWith('done')).length} SUCCEEDED</b>${failed?`, <b style="color:#991b1b">${failed} failed</b>`:''}. `+
+      xs.map(x=>`<span class="mono">${x.thing_name}</span>: ${x.status}`).join(' · ');
+    if(done < RESULTS.filter(x=>x.status.startsWith('done')).length && !failed){
+      window.setTimeout(refreshOtaStatus, 15000);
+    }
+  }catch(e){ el.textContent='Could not refresh OTA status: '+e.message; }
 }
 
 async function reconcile(){
@@ -406,10 +482,11 @@ async function loadProvisioned(){
     const seg = s => `<span class="state seg-${s}">${s}</span>`;
     document.getElementById('provBody').innerHTML = (r.meters||[]).map(m=>`<tr>
       <td class="mono">${m.thing_name||''}</td><td class="mono">${m.meter_serial||'—'}</td>
-      <td>${m.site||m.meter_community||'—'}</td><td class="mono">${m.account_number||'—'}</td>
-      <td>${m.village_name||'—'}</td><td>${seg(m.allocation||'unallocated')}</td>
+      <td>${m.site||m.meter_community||'—'}</td><td>${m.deployment_wifi_ssid||'—'}${m.wifi_config_version?` (cfg v${m.wifi_config_version})`:''}</td>
+      <td class="mono">${m.fw_version||'—'}</td><td>${m.ota_status||'—'}${m.ota_target_version?` → ${m.ota_target_version}`:''}</td>
+      <td class="mono">${m.account_number||'—'}</td><td>${m.village_name||'—'}</td><td>${seg(m.allocation||'unallocated')}</td>
       <td class="muted">${(m.provisioned_at||'').slice(0,16)}</td></tr>`).join('')
-      || '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">No provisioned meters yet.</td></tr>';
+      || '<tr><td colspan="10" class="muted" style="text-align:center;padding:24px">No provisioned meters yet.</td></tr>';
   }catch(e){ showError(e.message); }
 }
 

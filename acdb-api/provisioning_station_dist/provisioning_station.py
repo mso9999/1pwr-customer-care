@@ -38,6 +38,7 @@ import socket
 import subprocess
 import threading
 import urllib.error
+import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -334,6 +335,26 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, cc_request("GET", "/provisioning/meters"))
             except Exception as e:
                 return self._send(502, {"error": str(e)})
+        if self.path.startswith("/api/ota-readiness"):
+            try:
+                query = urllib.parse.urlsplit(self.path).query
+                suffix = f"?{query}" if query else ""
+                return self._send(200, cc_request("GET", f"/provisioning/ota/readiness{suffix}"))
+            except Exception as e:
+                return self._send(502, {"error": str(e)})
+        if self.path.startswith("/api/ota-status?"):
+            if not SESSION.token:
+                return self._send(401, {"error": "not logged in to CC"})
+            update_id = urllib.parse.parse_qs(
+                urllib.parse.urlsplit(self.path).query
+            ).get("update_id", [""])[0]
+            if not update_id:
+                return self._send(400, {"error": "update_id is required"})
+            try:
+                safe_id = urllib.parse.quote(update_id, safe="")
+                return self._send(200, cc_request("GET", f"/provisioning/ota/{safe_id}"))
+            except Exception as e:
+                return self._send(502, {"error": str(e)})
         return self._send(404, {"error": "not found"})
 
     # ---- POST ----
@@ -384,6 +405,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(401, {"error": "not logged in to CC"})
             try:
                 return self._send(200, cc_request("POST", "/provisioning/reconcile"))
+            except Exception as e:
+                return self._send(502, {"error": str(e)})
+
+        if self.path == "/api/promote":
+            if not SESSION.token:
+                return self._send(401, {"error": "not logged in to CC"})
+            try:
+                return self._send(200, cc_request("POST", "/provisioning/ota/promote", {
+                    "thing_names": body.get("thing_names") or [],
+                    "site_code": body.get("site_code"),
+                    "note": body.get("note") or "Provisioning station factory batch",
+                }))
             except Exception as e:
                 return self._send(502, {"error": str(e)})
 

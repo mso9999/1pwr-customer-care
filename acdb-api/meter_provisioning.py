@@ -30,6 +30,12 @@ Flow
 5. ``POST /api/provisioning/rotate``          -> publish ``cfg/identity`` to an
    already-online unit's *current* client id (superadmin-only, exceptional use
    for PCB reuse at another site).
+6. ``GET  /api/provisioning/ota/readiness``   -> verify that CC has an approved,
+   signed full-firmware artifact configured for factory-unit promotion.
+7. ``POST /api/provisioning/ota/promote``     -> create one AWS IoT OTA update
+   targeting the newly provisioned Things.
+8. ``GET  /api/provisioning/ota/{id}``        -> report OTA creation and
+   per-Thing job-execution status to the operator.
 
 The bootstrap / cfg-identity payload schema is dictated by the firmware
 (``local_api_server.c`` and ``device_control.c``): keys ``thing_name``, ``ssid``,
@@ -39,7 +45,10 @@ Boto3 credentials: the CC host's IAM role/profile must allow the IoT control
 plane (``iot:CreateThing``, ``CreateThingType``, ``DescribeThing*``,
 ``CreateKeysAndCertificate``, ``AttachThingPrincipal``, ``AttachPolicy``),
 ``iot-data:Publish`` (already used by relay_control), and DynamoDB read/write on
-``1meter_provisioning_registry``.
+``1meter_provisioning_registry``. OTA promotion additionally requires
+``iot:CreateOTAUpdate``, ``iot:GetOTAUpdate``, ``iot:ListJobExecutionsForJob``,
+``s3:GetObjectVersion``, ``signer:StartSigningJob``, and ``iam:PassRole`` for
+the OTA service role.
 """
 
 from __future__ import annotations
@@ -49,6 +58,7 @@ import json
 import logging
 import os
 import re
+import hashlib
 import zipfile
 from datetime import datetime, timezone
 from typing import Optional
@@ -74,6 +84,29 @@ DEFAULT_POLICY = os.environ.get("IOT_DEVICE_POLICY", "DevicePolicy")
 IOT_ENDPOINT = os.environ.get("IOT_ENDPOINT", "a3p95svnbmzyit-ats.iot.us-east-1.amazonaws.com")
 IDENTITY_TOPIC_FMT = os.environ.get("IOT_IDENTITY_TOPIC_FMT", "oneMeter/{client_id}/cfg/identity")
 NETWORK_TOPIC_FMT = os.environ.get("IOT_NETWORK_TOPIC_FMT", "oneMeter/{client_id}/cfg/network")
+
+# Factory boot -> approved full-firmware OTA promotion. The non-secret AWS
+# resource names have safe project defaults. The release-specific S3 key,
+# immutable S3 VersionId, and target firmware version are intentionally
+# fail-closed: an operator cannot schedule an OTA until deployment explicitly
+# selects an approved artifact.
+OTA_ACCOUNT_ID = os.environ.get("IOT_ACCOUNT_ID", "758201218523")
+OTA_BUCKET = os.environ.get("ONEMETER_OTA_BUCKET", "1pwr-ota-firmware")
+OTA_APP_KEY = os.environ.get("ONEMETER_OTA_APP_KEY", "")
+OTA_APP_VERSION_ID = os.environ.get("ONEMETER_OTA_APP_VERSION_ID", "")
+OTA_TARGET_VERSION = os.environ.get("ONEMETER_OTA_TARGET_VERSION", "")
+OTA_FACTORY_BASELINE_VERSION = os.environ.get(
+    "ONEMETER_FACTORY_BASELINE_VERSION", "1.1.56"
+)
+OTA_SIGNING_PROFILE = os.environ.get("ONEMETER_OTA_SIGNING_PROFILE", "1PWR_OTA_ESP32_v2")
+OTA_ROLE_ARN = os.environ.get(
+    "ONEMETER_OTA_ROLE_ARN",
+    "arn:aws:iam::758201218523:role/1pwr-ota-service-role",
+)
+OTA_SIGNED_PREFIX = os.environ.get("ONEMETER_OTA_SIGNED_PREFIX", "signed/factory-promotion")
+OTA_CERT_PATH = os.environ.get("ONEMETER_OTA_CERT_PATH_ON_DEVICE", "/")
+OTA_MAX_PER_MINUTE = int(os.environ.get("ONEMETER_OTA_MAX_PER_MINUTE", "10"))
+OTA_RELEASES_JSON = os.environ.get("ONEMETER_OTA_RELEASES_JSON", "")
 
 # Names we must never silently overwrite from the GUI. Bench/test identities
 # belong to the HQ PowerShell flow; ad-hoc field names are exactly what this
@@ -324,6 +357,13 @@ def ensure_meter_provisioning_table():
             cur.execute("ALTER TABLE meter_provisioning ADD COLUMN IF NOT EXISTS box_label VARCHAR(64)")
             cur.execute("ALTER TABLE meter_provisioning ADD COLUMN IF NOT EXISTS first_seen_online TIMESTAMPTZ")
             cur.execute("ALTER TABLE meter_provisioning ADD COLUMN IF NOT EXISTS last_seen_online TIMESTAMPTZ")
+            cur.execute("ALTER TABLE meter_provisioning ADD COLUMN IF NOT EXISTS ota_update_id VARCHAR(64)")
+            cur.execute("ALTER TABLE meter_provisioning ADD COLUMN IF NOT EXISTS ota_target_version VARCHAR(32)")
+            cur.execute("ALTER TABLE meter_provisioning ADD COLUMN IF NOT EXISTS ota_status VARCHAR(24)")
+            cur.execute("ALTER TABLE meter_provisioning ADD COLUMN IF NOT EXISTS ota_updated_at TIMESTAMPTZ")
+            cur.execute("ALTER TABLE meter_provisioning ADD COLUMN IF NOT EXISTS deployment_wifi_ssid VARCHAR(64)")
+            cur.execute("ALTER TABLE meter_provisioning ADD COLUMN IF NOT EXISTS wifi_config_version INTEGER")
+            cur.execute("ALTER TABLE meter_provisioning ADD COLUMN IF NOT EXISTS wifi_configured_at TIMESTAMPTZ")
             # Atomic per-site gateway sequence allocator (MAK-GW-0007 ...).
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS gateway_pool_seq (
@@ -398,7 +438,8 @@ def _allocate_gateway_block(conn, site: str, count: int) -> list[int]:
 
 def _record_provisioning_1pdb(conn, *, thing, meter_serial, pcb_mac, site, account,
                               cert_id, cert_arn, status, fw_version, operator, legacy_id,
-                              box_label=None):
+                              box_label=None, deployment_wifi_ssid=None,
+                              wifi_config_version=None):
     """Upsert the CC-side provisioning record (caller owns the transaction).
 
     Also best-effort tags the meters row (platform/community/account) so the
@@ -410,8 +451,10 @@ def _record_provisioning_1pdb(conn, *, thing, meter_serial, pcb_mac, site, accou
         """
         INSERT INTO meter_provisioning
             (thing_name, meter_serial, pcb_mac, site, account_number, cert_id,
-             cert_arn, status, legacy_id, fw_version, provisioned_by, box_label, updated_at)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, NOW())
+             cert_arn, status, legacy_id, fw_version, provisioned_by, box_label,
+             deployment_wifi_ssid, wifi_config_version, wifi_configured_at, updated_at)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,
+                CASE WHEN %s IS NULL THEN NULL ELSE NOW() END, NOW())
         ON CONFLICT (thing_name) DO UPDATE SET
             meter_serial   = COALESCE(EXCLUDED.meter_serial, meter_provisioning.meter_serial),
             pcb_mac        = EXCLUDED.pcb_mac,
@@ -424,10 +467,14 @@ def _record_provisioning_1pdb(conn, *, thing, meter_serial, pcb_mac, site, accou
             fw_version     = EXCLUDED.fw_version,
             provisioned_by = EXCLUDED.provisioned_by,
             box_label      = COALESCE(EXCLUDED.box_label, meter_provisioning.box_label),
+            deployment_wifi_ssid = COALESCE(EXCLUDED.deployment_wifi_ssid, meter_provisioning.deployment_wifi_ssid),
+            wifi_config_version = COALESCE(EXCLUDED.wifi_config_version, meter_provisioning.wifi_config_version),
+            wifi_configured_at = COALESCE(EXCLUDED.wifi_configured_at, meter_provisioning.wifi_configured_at),
             updated_at     = NOW()
         """,
         (thing, meter_serial, pcb_mac, site, account, cert_id, cert_arn,
-         status, legacy_id, fw_version, operator, box_label),
+         status, legacy_id, fw_version, operator, box_label, deployment_wifi_ssid,
+         wifi_config_version, deployment_wifi_ssid),
     )
     # Best-effort: ensure a meters row exists for this serial, tagged to the site.
     # Wrapped in a SAVEPOINT so a failure here (e.g. a NOT NULL column) cannot
@@ -506,7 +553,7 @@ class ProvisionRequest(BaseModel):
     meter_serial: str = Field(..., min_length=3, max_length=32, description="Modbus serial, e.g. 23022613")
     pcb_mac: str = Field(..., description="Device PCB MAC (registry key)")
     wifi_ssid: str = Field(..., min_length=1, max_length=64)
-    wifi_password: str = Field(..., max_length=128)
+    wifi_password: str = Field(..., min_length=1, max_length=128)
     policy_name: str = Field(default="", description="IoT policy to attach; defaults to DevicePolicy")
     version: int = Field(default=1, ge=1)
     legacy_id: Optional[str] = Field(default=None, description="Prior client id, recorded as an attribute")
@@ -527,7 +574,7 @@ class GatewayBatchRequest(BaseModel):
     site_code: str = Field(..., description="Destination site (canonical CC code)")
     units: list[GatewayUnit] = Field(..., min_length=1, max_length=200)
     wifi_ssid: str = Field(..., min_length=1, max_length=64)
-    wifi_password: str = Field(..., max_length=128)
+    wifi_password: str = Field(..., min_length=1, max_length=128)
     softap_ssid: Optional[str] = Field(default=None, max_length=64,
                                         description="Optional SoftAP SSID for the device hotspot")
     softap_password: Optional[str] = Field(default=None, max_length=128,
@@ -556,10 +603,22 @@ class UpdateConfigRequest(BaseModel):
     """
     thing_name: str = Field(..., description="The gateway's permanent Thing name (e.g. MAK-GW-0001)")
     wifi_ssid: str = Field(..., min_length=1, max_length=64)
-    wifi_password: str = Field(..., max_length=128)
+    wifi_password: str = Field(..., min_length=1, max_length=128)
     softap_ssid: Optional[str] = Field(default=None, max_length=64)
     softap_password: Optional[str] = Field(default=None, max_length=128)
     version: int = Field(default=1, ge=1, description="Monotonic version — must be higher than the device's current config version")
+
+
+class OtaPromotionRequest(BaseModel):
+    """Promote factory-boot gateways to CC's approved full firmware."""
+
+    thing_names: list[str] = Field(..., min_length=1, max_length=200)
+    site_code: str = Field(..., description="Canonical destination site; selects the approved release")
+    note: Optional[str] = Field(
+        default=None,
+        max_length=256,
+        description="Optional operator note recorded in the mutation audit",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -606,6 +665,414 @@ def list_site_codes(_user: CurrentUser = Depends(require_role(*PROVISIONING_ROLE
             country=get_country_for_site(code),
         ))
     return out
+
+
+def _ota_release(site_code: Optional[str] = None) -> dict:
+    """Resolve the immutable approved OTA release for a destination site.
+
+    ``ONEMETER_OTA_RELEASES_JSON`` supports per-site release tracking without
+    putting Wi-Fi passwords in CC configuration. Example value:
+    ``{"GBO":{"artifact_key":"firmware/...bin","artifact_version_id":"...",
+    "target_firmware_version":"1.1.57","fallback_ssid":"GBO-1Meter"}}``.
+    Runtime SSID/password still come from the operator form and are stored in
+    device NVS; ``fallback_ssid`` is non-secret build provenance only.
+    """
+    release = {
+        "site_code": (site_code or "").strip().upper() or None,
+        "region": AWS_REGION,
+        "account_id": OTA_ACCOUNT_ID,
+        "bucket": OTA_BUCKET,
+        "artifact_key": OTA_APP_KEY,
+        "artifact_version_id": OTA_APP_VERSION_ID,
+        "target_firmware_version": OTA_TARGET_VERSION,
+        "factory_baseline_version": OTA_FACTORY_BASELINE_VERSION,
+        "signing_profile": OTA_SIGNING_PROFILE,
+        "role_arn": OTA_ROLE_ARN,
+        "signed_prefix": OTA_SIGNED_PREFIX,
+        "certificate_path_on_device": OTA_CERT_PATH,
+        "max_per_minute": OTA_MAX_PER_MINUTE,
+        "credentials_mode": "runtime_nvs",
+        "fallback_ssid": None,
+        "approved_sites": [],
+        "config_error": None,
+    }
+    if not OTA_RELEASES_JSON:
+        return release
+    try:
+        catalog = json.loads(OTA_RELEASES_JSON)
+        if not isinstance(catalog, dict):
+            raise ValueError("root must be an object keyed by canonical site code")
+    except Exception as exc:  # noqa: BLE001
+        release["config_error"] = f"ONEMETER_OTA_RELEASES_JSON is invalid: {exc}"
+        return release
+
+    release["approved_sites"] = sorted(str(key).upper() for key in catalog)
+    site = release["site_code"]
+    if not site:
+        return release
+    site_release = catalog.get(site) or catalog.get(site.lower())
+    if not isinstance(site_release, dict):
+        # Fail closed rather than silently applying another site's artifact.
+        release["artifact_key"] = ""
+        release["artifact_version_id"] = ""
+        release["target_firmware_version"] = ""
+        return release
+    for key in (
+        "region", "account_id", "bucket", "artifact_key", "artifact_version_id",
+        "target_firmware_version", "factory_baseline_version",
+        "signing_profile", "role_arn",
+        "signed_prefix", "certificate_path_on_device", "max_per_minute",
+        "credentials_mode", "fallback_ssid",
+    ):
+        if key in site_release:
+            release[key] = site_release[key]
+    return release
+
+
+def _ota_missing_config(release: dict) -> list[str]:
+    required = {
+        "artifact_key": release.get("artifact_key"),
+        "artifact_version_id": release.get("artifact_version_id"),
+        "target_firmware_version": release.get("target_firmware_version"),
+        "signing_profile": release.get("signing_profile"),
+        "role_arn": release.get("role_arn"),
+    }
+    if release.get("config_error"):
+        return [release["config_error"]]
+    return [name for name, value in required.items() if not value]
+
+
+def _ota_public_config(release: dict) -> dict:
+    """Return non-secret release metadata suitable for the operator UI."""
+    return {
+        key: release.get(key)
+        for key in (
+            "site_code", "region", "bucket", "artifact_key",
+            "artifact_version_id", "target_firmware_version", "signing_profile",
+            "factory_baseline_version",
+            "max_per_minute", "credentials_mode", "fallback_ssid",
+            "approved_sites",
+        )
+    }
+
+
+def _ota_update_id(things: list[str], target_version: str) -> str:
+    version = re.sub(r"[^A-Za-z0-9_-]+", "-", target_version).strip("-")
+    version = version[:18] or "full-fw"
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    digest = hashlib.sha256(",".join(sorted(things)).encode("utf-8")).hexdigest()[:8]
+    # AWS IoT OTA IDs (and their generated Jobs IDs) have a strict length cap.
+    return f"1m-factory-{version}-{stamp}-{digest}"[:64]
+
+
+def _firmware_version_tuple(value: object) -> tuple[int, int, int]:
+    """Parse the OTA agent's MAJOR.MINOR.BUILD version format."""
+    match = re.fullmatch(r"\s*v?(\d+)\.(\d+)\.(\d+)\s*", str(value or ""))
+    if not match:
+        raise ValueError("expected MAJOR.MINOR.BUILD (for example 1.1.57)")
+    return tuple(int(part) for part in match.groups())
+
+
+def _ota_release_checks(release: dict) -> dict:
+    """Run the non-mutating release checks used by both readiness and promote."""
+    checks: dict[str, dict] = {}
+    target = release.get("target_firmware_version")
+    baseline = release.get("factory_baseline_version")
+    try:
+        target_tuple = _firmware_version_tuple(target)
+        baseline_tuple = _firmware_version_tuple(baseline)
+        if target_tuple <= baseline_tuple:
+            raise ValueError(
+                f"target {target} must be strictly newer than factory baseline {baseline}"
+            )
+        checks["anti_rollback"] = {
+            "ok": True,
+            "target_version": str(target),
+            "factory_baseline_version": str(baseline),
+        }
+    except Exception as exc:  # noqa: BLE001
+        checks["anti_rollback"] = {"ok": False, "error": str(exc)}
+
+    try:
+        head = _client("s3").head_object(
+            Bucket=release["bucket"],
+            Key=release["artifact_key"],
+            VersionId=release["artifact_version_id"],
+        )
+        checks["artifact"] = {
+            "ok": True,
+            "bytes": head.get("ContentLength"),
+            "etag": str(head.get("ETag") or "").strip('"') or None,
+        }
+    except Exception as exc:  # noqa: BLE001
+        checks["artifact"] = {"ok": False, "error": str(exc)}
+
+    try:
+        profile = _client("signer").get_signing_profile(
+            profileName=release["signing_profile"]
+        )
+        status = profile.get("status")
+        if status != "Active":
+            raise ValueError(f"signing profile status is {status or 'unknown'}, not Active")
+        checks["signing_profile"] = {"ok": True, "status": status}
+    except Exception as exc:  # noqa: BLE001
+        checks["signing_profile"] = {"ok": False, "error": str(exc)}
+
+    return checks
+
+
+@router.get("/ota/readiness")
+def ota_readiness(
+    site_code: Optional[str] = None,
+    _user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES)),
+):
+    """Fail-closed preflight for the factory-boot -> full-firmware OTA stage."""
+    release = _ota_release(site_code)
+    missing = _ota_missing_config(release)
+    result = {
+        "configured": not missing,
+        "ready": False,
+        "site_required": bool(release.get("approved_sites")) and not release.get("site_code"),
+        "missing": missing,
+        "release": _ota_public_config(release),
+        "checks": {},
+    }
+    if missing:
+        return result
+
+    result["checks"] = _ota_release_checks(release)
+    result["ready"] = all(check.get("ok") for check in result["checks"].values())
+    return result
+
+
+@router.post("/ota/promote")
+def promote_factory_gateways(
+    payload: OtaPromotionRequest,
+    user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES)),
+):
+    """Create a signed AWS IoT OTA update for newly provisioned factory units.
+
+    The local station first gives each unit its durable Thing identity, TLS
+    certificate, and operational Wi-Fi. This endpoint then queues the approved
+    full application for those Things. The IoT Job remains queued while a unit
+    reboots/joins the site LAN and starts as soon as it connects to AWS IoT.
+    """
+    site = payload.site_code.strip().upper()
+    if site not in ALL_SITE_ABBREV:
+        raise HTTPException(status_code=400, detail=f"Unknown canonical site code '{site}'.")
+    release = _ota_release(site)
+    missing = _ota_missing_config(release)
+    if missing:
+        raise HTTPException(
+            status_code=503,
+            detail="Factory OTA promotion is not configured on CC. Missing: "
+                   + ", ".join(missing),
+        )
+    checks = _ota_release_checks(release)
+    failed_checks = [name for name, check in checks.items() if not check.get("ok")]
+    if failed_checks:
+        detail = "; ".join(
+            f"{name}: {checks[name].get('error', 'failed')}" for name in failed_checks
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=f"Factory OTA release failed preflight: {detail}",
+        )
+
+    things = list(dict.fromkeys(name.strip() for name in payload.thing_names if name.strip()))
+    if not things:
+        raise HTTPException(status_code=400, detail="At least one Thing name is required.")
+
+    for thing in things:
+        _validate_thing_name(thing)
+        rows = _registry_get_by_thing(thing)
+        if not rows:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Thing '{thing}' is not in the provisioning registry. "
+                       "Allocate its identity/certificate before scheduling OTA.",
+            )
+        if any(row.get("is_test", {}).get("BOOL") for row in rows):
+            raise HTTPException(status_code=400, detail=f"Thing '{thing}' is marked as a test unit.")
+        row_sites = {row.get("site", {}).get("S") for row in rows}
+        if row_sites - {None, "", site}:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Thing '{thing}' is registered for {sorted(row_sites)}, not site {site}.",
+            )
+
+    target_version = str(release["target_firmware_version"])
+    ota_id = _ota_update_id(things, target_version)
+    target_arns = [
+        f"arn:aws:iot:{release['region']}:{release['account_id']}:thing/{thing}"
+        for thing in things
+    ]
+    signed_version = re.sub(r"[^A-Za-z0-9._-]+", "-", target_version).strip("-")
+    signing: dict = {
+        "startSigningJobParameter": {
+            "signingProfileName": release["signing_profile"],
+            "destination": {
+                "s3Destination": {
+                    "bucket": release["bucket"],
+                    "prefix": f"{str(release['signed_prefix']).rstrip('/')}/{site}/{signed_version}",
+                }
+            },
+        }
+    }
+    if release.get("certificate_path_on_device"):
+        signing["startSigningJobParameter"]["signingProfileParameter"] = {
+            "certificatePathOnDevice": release["certificate_path_on_device"]
+        }
+
+    file_entry = {
+        "fileName": os.path.basename(release["artifact_key"]) or "FeaturedFreeRTOSIoTIntegration.bin",
+        "fileType": 0,
+        "fileVersion": target_version,
+        "fileLocation": {
+            "s3Location": {
+                "bucket": release["bucket"],
+                "key": release["artifact_key"],
+                "version": release["artifact_version_id"],
+            }
+        },
+        "codeSigning": signing,
+        "attributes": {
+            "workflow": "factory_boot_promotion",
+            "target_version": target_version,
+            "site": site,
+            "credentials_mode": str(release.get("credentials_mode") or "runtime_nvs"),
+        },
+    }
+
+    try:
+        response = _client("iot").create_ota_update(
+            otaUpdateId=ota_id,
+            description=f"1Meter {site} factory boot promotion to {target_version}",
+            targets=target_arns,
+            protocols=["MQTT"],
+            targetSelection="SNAPSHOT",
+            files=[file_entry],
+            roleArn=release["role_arn"],
+            awsJobExecutionsRolloutConfig={"maximumPerMinute": int(release["max_per_minute"])},
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=502,
+            detail=f"AWS rejected the OTA promotion request: {exc}",
+        ) from exc
+
+    try:
+        from customer_api import get_connection
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE meter_provisioning
+                   SET ota_update_id = %s, ota_target_version = %s,
+                       ota_status = 'QUEUED', ota_updated_at = NOW(),
+                       updated_at = NOW()
+                 WHERE thing_name = ANY(%s)
+                """,
+                (ota_id, target_version, things),
+            )
+            try_log_mutation(
+                user, "update", "meter_provisioning", ota_id,
+                new_values={
+                    "ota_update_id": ota_id,
+                    "target_version": target_version,
+                    "site": site,
+                    "thing_names": things,
+                },
+                metadata={
+                    "kind": "factory_ota_promotion",
+                    "endpoint": "POST /api/provisioning/ota/promote",
+                    "operator_note": payload.note,
+                },
+                conn=conn,
+            )
+            conn.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("OTA promotion audit failed for %s: %s", ota_id, exc)
+
+    return {
+        "ota_update_id": response.get("otaUpdateId", ota_id),
+        "aws_iot_job_id": response.get("awsIotJobId"),
+        "status": response.get("otaUpdateStatus"),
+        "target_version": target_version,
+        "site_code": site,
+        "credentials_mode": release.get("credentials_mode"),
+        "thing_names": things,
+        "status_url": f"/api/provisioning/ota/{ota_id}",
+        "note": "OTA is queued. Leave the gateways powered and connected to the internet; "
+                "completion must be confirmed per Thing before installation.",
+    }
+
+
+@router.get("/ota/{ota_update_id}")
+def ota_promotion_status(
+    ota_update_id: str,
+    _user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES)),
+):
+    """Return OTA creation state and per-Thing AWS IoT Job execution state."""
+    if not re.match(r"^[A-Za-z0-9_-]{1,64}$", ota_update_id):
+        raise HTTPException(status_code=400, detail="Invalid OTA update id.")
+    try:
+        info = _client("iot").get_ota_update(otaUpdateId=ota_update_id).get("otaUpdateInfo", {})
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Unable to read OTA update: {exc}") from exc
+
+    job_id = info.get("awsIotJobId")
+    executions = []
+    if job_id:
+        try:
+            resp = _client("iot").list_job_executions_for_job(jobId=job_id, maxResults=250)
+            for item in resp.get("executionSummaries", []):
+                summary = item.get("jobExecutionSummary", {})
+                executions.append({
+                    "thing_name": str(item.get("thingArn") or "").rsplit("/", 1)[-1],
+                    "status": summary.get("status"),
+                    "queued_at": str(summary.get("queuedAt") or "") or None,
+                    "started_at": str(summary.get("startedAt") or "") or None,
+                    "last_updated_at": str(summary.get("lastUpdatedAt") or "") or None,
+                    "execution_number": summary.get("executionNumber"),
+                })
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Unable to list OTA job executions for %s: %s", job_id, exc)
+
+    target_version = (info.get("files") or [{}])[0].get("fileVersion")
+    if executions:
+        try:
+            from customer_api import get_connection
+            with get_connection() as conn:
+                cur = conn.cursor()
+                for execution in executions:
+                    status = execution.get("status")
+                    thing = execution.get("thing_name")
+                    cur.execute(
+                        """
+                        UPDATE meter_provisioning
+                           SET ota_status = %s, ota_updated_at = NOW(),
+                               fw_version = CASE WHEN %s = 'SUCCEEDED'
+                                                 THEN COALESCE(%s, fw_version)
+                                                 ELSE fw_version END,
+                               updated_at = NOW()
+                         WHERE thing_name = %s AND ota_update_id = %s
+                        """,
+                        (status, status, target_version, thing, ota_update_id),
+                    )
+                conn.commit()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Unable to persist OTA status for %s: %s", ota_update_id, exc)
+
+    return {
+        "ota_update_id": ota_update_id,
+        "ota_status": info.get("otaUpdateStatus"),
+        "aws_iot_job_id": job_id,
+        "target_version": target_version,
+        "targets": info.get("targets", []),
+        "executions": executions,
+        "error_info": info.get("errorInfo"),
+    }
 
 
 def _issue_cert_and_payload(thing: str, attrs: dict, policy: str):
@@ -665,6 +1132,8 @@ def provision_thing(
                 site=site, account=payload.account.strip(), cert_id=cert_id,
                 cert_arn=cert_arn, status="provisioned", fw_version=None,
                 operator=f"cc:{user.user_id}", legacy_id=payload.legacy_id,
+                deployment_wifi_ssid=payload.wifi_ssid,
+                wifi_config_version=payload.version,
             )
             try_log_mutation(
                 user, "create", "meter_provisioning", thing,
@@ -748,6 +1217,8 @@ def provision_gateway_batch(
                         status="provisioned", fw_version=None,
                         operator=f"cc:{user.user_id}", legacy_id=None,
                         box_label=unit.box_label,
+                        deployment_wifi_ssid=payload.wifi_ssid,
+                        wifi_config_version=payload.version,
                     )
                     try_log_mutation(
                         user, "create", "meter_provisioning", thing,
@@ -973,8 +1444,15 @@ def update_device_config(
         with get_connection() as conn:
             cur = conn.cursor()
             cur.execute(
-                "UPDATE meter_provisioning SET updated_at = NOW() WHERE thing_name = %s",
-                (thing,),
+                """
+                UPDATE meter_provisioning
+                   SET deployment_wifi_ssid = %s,
+                       wifi_config_version = %s,
+                       wifi_configured_at = NOW(),
+                       updated_at = NOW()
+                 WHERE thing_name = %s
+                """,
+                (payload.wifi_ssid, payload.version, thing),
             )
             try_log_mutation(
                 user, "update", "meter_provisioning", thing,
@@ -1013,6 +1491,9 @@ def list_provisioned_meters(
         SELECT mp.thing_name, mp.meter_serial, mp.pcb_mac, mp.site,
                mp.account_number, mp.status, mp.cert_id, mp.legacy_id,
                mp.box_label, mp.first_seen_online, mp.last_seen_online,
+               mp.deployment_wifi_ssid, mp.wifi_config_version,
+               mp.fw_version, mp.ota_target_version, mp.ota_update_id,
+               mp.ota_status, mp.ota_updated_at,
                mp.provisioned_at, mp.provisioned_by, mp.updated_at,
                m.community AS meter_community, m.village_name, m.latitude,
                m.longitude, m.status AS meter_status, m.customer_type,
