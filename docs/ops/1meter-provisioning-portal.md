@@ -4,6 +4,10 @@ GUI + API for taking a sealed 1Meter from factory boot firmware to a canonical
 AWS IoT Thing and approved full firmware over signed OTA — without USB or AWS
 credentials on the field laptop.
 
+Zambia uses this same workflow, but must remain fail-closed until its country
+database/API and authoritative site roster are live. See
+[`1meter-zambia-readiness.md`](1meter-zambia-readiness.md).
+
 - **UI:** Portal → **Provisioning** (superadmin / O&M team). `src/pages/ProvisioningPage.tsx`.
 - **API:** `acdb-api/meter_provisioning.py`, mounted at `/api/provisioning`.
 - **SOP:** `onepwr-aws-mesh/Docs/SOP-1meter-operational-ota-provisioning.md` (primary path).
