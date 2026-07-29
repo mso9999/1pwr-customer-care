@@ -1,6 +1,7 @@
 # 1Meter Zambia OTA and commissioning readiness
 
-**Status:** software workstream prepared; Zambia production lane is not active.
+**Status:** Zambia database/API infrastructure installed; field customer and
+payment activation remains gated by authoritative Zambia operating inputs.
 
 Zambia must use the same sealed-gateway workflow as Lesotho and Benin:
 
@@ -20,9 +21,9 @@ The workflow remains fail-closed until all of the following are complete:
 
 - [ ] The authoritative Zambia site roster is published by the PR/Ops source of truth, including stable three-letter site codes and names.
 - [ ] `country_config.py` contains those sites and their districts.
-- [ ] `onepower_zm` exists and has all current migrations.
-- [ ] `1pdb-api-zm` is active with `COUNTRY_CODE=ZM` and its own `DATABASE_URL`.
-- [ ] Caddy routes `/api/zm/*` to that service and `/api/zm/health` returns `200`.
+- [x] `onepower_zm` exists and has all current migrations (62 SQL files through `060`).
+- [x] `1pdb-api-zm` has a dedicated fail-closed environment (`COUNTRY_CODE=ZM`, port 8103, its own `DATABASE_URL`).
+- [x] Caddy routes `/api/zm/*` to port 8103. Production health is a required deployment check.
 - [ ] The CC country selector can load Zambia configuration without falling back to another country.
 - [ ] The real Zambia tariff, metering platform, payment provider, and mobile-money message formats are approved.
 - [ ] `ONEPDB_ZM_SITE_PREFIXES` on the ingestion Lambda contains only the confirmed Zambia site codes.
@@ -31,6 +32,12 @@ The workflow remains fail-closed until all of the following are complete:
 - [ ] Site or mirrored Starlink credentials are available for the canary.
 
 Do not copy Benin or Lesotho site codes, payment credentials, customer data, or database settings into Zambia. A missing Zambia prerequisite must produce a visible readiness failure rather than silently routing to another country.
+
+The Zambia process environment intentionally contains no Lesotho/Benin Koios,
+ThunderCloud, mobile-money, SMS, or bridge credentials. Automatic payment
+ingestion, meter crediting, relay automation, and payment receipts are disabled.
+The tariff is `0`, so electricity transactions are rejected until an approved
+ZMW/kWh tariff is configured.
 
 ## Current source-of-truth gap
 

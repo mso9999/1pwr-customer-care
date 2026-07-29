@@ -60,7 +60,7 @@ def _build_site_country_map() -> Tuple[Dict[str, str], Dict[str, Tuple[str, str]
 
     Imports country_config lazily to avoid circular deps at module level.
     """
-    from country_config import LESOTHO, BENIN, _REGISTRY
+    from country_config import COUNTRY, _REGISTRY
 
     site_to_country: Dict[str, str] = {}
     for cc, cfg in _REGISTRY.items():
@@ -69,11 +69,11 @@ def _build_site_country_map() -> Tuple[Dict[str, str], Dict[str, Tuple[str, str]
 
     country_creds: Dict[str, Tuple[str, str]] = {}
     for cc in _REGISTRY:
-        key = os.environ.get(
-            f"KOIOS_WRITE_API_KEY_{cc}", _GLOBAL_WRITE_KEY,
+        key = os.environ.get(f"KOIOS_WRITE_API_KEY_{cc}") or (
+            _GLOBAL_WRITE_KEY if cc == COUNTRY.code else ""
         )
-        secret = os.environ.get(
-            f"KOIOS_WRITE_API_SECRET_{cc}", _GLOBAL_WRITE_SECRET,
+        secret = os.environ.get(f"KOIOS_WRITE_API_SECRET_{cc}") or (
+            _GLOBAL_WRITE_SECRET if cc == COUNTRY.code else ""
         )
         country_creds[cc] = (key, secret)
 
@@ -231,7 +231,7 @@ def _tc_credit(
 # ---------------------------------------------------------------------------
 
 def _koios_headers(country_code: str) -> dict:
-    key, secret = _country_creds.get(country_code, (_GLOBAL_WRITE_KEY, _GLOBAL_WRITE_SECRET))
+    key, secret = _country_creds.get(country_code, ("", ""))
     return {
         "Content-Type": "application/json",
         "X-API-KEY": key,

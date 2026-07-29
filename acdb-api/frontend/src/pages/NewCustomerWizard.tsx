@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { listSites, listUGPConnections, registerCustomerRecord, type CustomerRegistrationResult, type UGPConnection } from '../lib/api';
+import { useCountry } from '../contexts/CountryContext';
 
 // ---------------------------------------------------------------------------
 // Wizard step definitions
@@ -370,6 +371,7 @@ function ProgressBar({ current, total }: { current: number; total: number }) {
 
 export default function NewCustomerWizard() {
   const { t } = useTranslation(['newCustomer', 'common']);
+  const { config } = useCountry();
   const navigate = useNavigate();
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<Record<string, string>>({});
@@ -674,6 +676,18 @@ export default function NewCustomerWizard() {
 
       {!createdCustomer && (
         <>
+          {config?.readiness && !config.readiness.customer_onboarding_enabled && (
+            <div className="mb-5 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+              <p className="font-semibold">
+                {config.country_name} customer onboarding is not open yet
+              </p>
+              <p className="mt-1">
+                Operations must publish the approved site roster before accounts can be
+                created. Tariff, payment, and metering activation remain separate safety
+                checks and will not be inferred from another country.
+              </p>
+            </div>
+          )}
           <ProgressBar current={step} total={TOTAL_STEPS} />
 
           <div className="bg-white rounded-2xl shadow-sm border p-5 sm:p-6 min-h-[320px]">
@@ -724,6 +738,9 @@ export default function NewCustomerWizard() {
             ) : (
               <button
                 onClick={goNext}
+                disabled={Boolean(
+                  config?.readiness && !config.readiness.customer_onboarding_enabled,
+                )}
                 className="flex-1 py-4 bg-blue-600 text-white rounded-xl font-semibold text-base hover:bg-blue-700 active:bg-blue-800 transition"
               >
                 {t('newCustomer:next')}

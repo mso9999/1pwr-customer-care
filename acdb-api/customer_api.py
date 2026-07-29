@@ -410,6 +410,26 @@ warm_stats_cache()
 def country_config_endpoint():
     """Return country-specific metadata for the frontend."""
     from country_config import COUNTRY
+    effective_tariff = COUNTRY.default_tariff_rate
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "SELECT value FROM system_config WHERE key = 'tariff_rate' LIMIT 1"
+            )
+            row = cursor.fetchone()
+            if row:
+                effective_tariff = float(row[0])
+    except Exception:
+        logger.debug("Could not read live tariff for /api/config", exc_info=True)
+    payment_automation = os.environ.get(
+        "PAYMENT_AUTOMATION_ENABLED",
+        "0" if COUNTRY.code == "ZM" else "1",
+    ).lower() in ("1", "true", "yes")
+    meter_credit = os.environ.get(
+        "METER_CREDIT_ENABLED",
+        "0" if COUNTRY.code == "ZM" else "1",
+    ).lower() in ("1", "true", "yes")
     return {
         "country_code": COUNTRY.code,
         "country_name": COUNTRY.name,
@@ -417,6 +437,15 @@ def country_config_endpoint():
         "currency_symbol": COUNTRY.currency_symbol,
         "dial_code": COUNTRY.dial_code,
         "sites": COUNTRY.site_abbrev,
+        "readiness": {
+            "customer_onboarding_enabled": bool(COUNTRY.site_abbrev),
+            "tariff_configured": effective_tariff > 0,
+            "metering_platform_configured": bool(
+                COUNTRY.koios_org_id and COUNTRY.koios_sites
+            ),
+            "automatic_payment_ingest_enabled": payment_automation,
+            "meter_credit_enabled": meter_credit,
+        },
     }
 
 
@@ -685,7 +714,7 @@ def list_sites():
 
     Each entry carries a ``country`` field so UIs can group/badge by country.
     """
-    from country_config import ALL_KNOWN_SITES, get_country_for_site
+    from country_config import COUNTRY, KNOWN_SITES
 
     sql = """
         SELECT community, COUNT(*) AS customer_count
@@ -707,12 +736,14 @@ def list_sites():
                 code = row[0].strip().upper()
                 counts[code] = counts.get(code, 0) + (row[1] or 0)
 
-            all_codes = set(ALL_KNOWN_SITES) | set(counts.keys())
+            # Each API process owns one country database. Never leak another
+            # country's static site list into this lane's onboarding UI.
+            all_codes = set(KNOWN_SITES) | set(counts.keys())
             sites = [
                 {
                     "concession": code,
                     "customer_count": counts.get(code, 0),
-                    "country": get_country_for_site(code),
+                    "country": COUNTRY.code,
                 }
                 for code in sorted(all_codes)
             ]

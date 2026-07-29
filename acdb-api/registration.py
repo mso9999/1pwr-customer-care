@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
-from country_config import COUNTRY
+from country_config import COUNTRY, KNOWN_SITES
 from country_fees import get_country_fees
 from middleware import require_employee, require_role
 from models import CurrentUser
@@ -176,6 +176,34 @@ def _normalize_gender_for_storage(raw: Optional[str]) -> Optional[str]:
     return normalized
 
 
+def _validate_active_community(raw: str) -> str:
+    """Return a configured site code for the active country.
+
+    A fresh country lane intentionally has no sites until Operations publishes
+    the authoritative roster. Refusing unknown codes prevents a typo—or a site
+    from another country—from becoming part of account numbers and the ledger.
+    """
+    community = str(raw or "").strip().upper()
+    if not KNOWN_SITES:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{COUNTRY.name} customer onboarding is not open yet: no approved "
+                "site codes are configured. Ask Operations to publish the site "
+                "roster before creating customers."
+            ),
+        )
+    if community not in KNOWN_SITES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Site '{community}' is not configured for {COUNTRY.name}. "
+                f"Choose one of: {', '.join(sorted(KNOWN_SITES))}."
+            ),
+        )
+    return community
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -194,7 +222,7 @@ def register_customer(
     with _get_connection() as conn:
         cursor = conn.cursor()
         try:
-            community = req.community.upper()
+            community = _validate_active_community(req.community)
 
             manual_account = (req.account_number or "").strip().upper()
             if manual_account:
@@ -238,11 +266,11 @@ def register_customer(
                 INSERT INTO customers (
                     first_name, middle_name, gender, last_name, community, phone, cell_phone_1,
                     cell_phone_2, email, national_id, plot_number,
-                    street_address, city, district, customer_type,
+                    street_address, city, district, country, customer_type,
                     gps_lat, gps_lon, date_service_connected, is_active,
                     created_by, updated_by
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     TRUE, %s, %s
                 ) RETURNING id, customer_id_legacy
             """, (
@@ -250,7 +278,8 @@ def register_customer(
                 phone, cell_phone_1, cell_phone_2,
                 req.email, req.national_id, req.plot_number,
                 req.street_address, req.city, req.district,
-                resolved_customer_type, req.gps_lat, req.gps_lon, req.date_service_connected,
+                COUNTRY.name, resolved_customer_type, req.gps_lat, req.gps_lon,
+                req.date_service_connected,
                 user.user_id, user.user_id,
             ))
 
@@ -304,6 +333,7 @@ def register_customer(
                 "street_address": req.street_address,
                 "city": req.city,
                 "district": req.district,
+                "country": COUNTRY.name,
                 "customer_type": resolved_customer_type,
                 "gps_lat": req.gps_lat,
                 "gps_lon": req.gps_lon,
@@ -429,10 +459,11 @@ def preview_next_account(
 ):
     """Preview the next account number that would be generated for a site."""
     with _get_connection() as conn:
-        account_number = generate_account_number(conn, community.upper())
+        community_code = _validate_active_community(community)
+        account_number = generate_account_number(conn, community_code)
         # Don't commit — this is a preview, not a reservation
         conn.rollback()
-        return {"community": community.upper(), "next_account_number": account_number}
+        return {"community": community_code, "next_account_number": account_number}
 
 
 @router.post("/bulk-import", response_model=BulkImportResult)
@@ -470,7 +501,7 @@ async def bulk_import_customers(
             detail=f"Excel must have columns: {', '.join(required)}. Found: {headers}",
         )
 
-    community_upper = community.upper()
+    community_upper = _validate_active_community(community)
     imported = 0
     skipped = 0
     errors = []
@@ -501,16 +532,16 @@ async def bulk_import_customers(
 
                 cursor.execute("""
                     INSERT INTO customers (
-                        first_name, gender, last_name, community, phone,
+                        first_name, gender, last_name, community, country, phone,
                         national_id, plot_number, customer_type,
                         gps_lat, gps_lon, is_active,
                         created_by
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, %s)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, %s)
                     RETURNING id, customer_id_legacy
                 """, (
                     # Preserve explicit HH1/HH2/HH3/etc. when present, but do not
                     # persist aggregate HH as though it were an atomic type.
-                    first_name, gender, last_name, community_upper,
+                    first_name, gender, last_name, community_upper, COUNTRY.name,
                     _normalize_phone_for_storage(str(row_dict.get("phone", "") or "").strip() or None),
                     str(row_dict.get("national_id", "") or "").strip() or None,
                     str(row_dict.get("plot_number", "") or "").strip() or None,
@@ -552,6 +583,7 @@ async def bulk_import_customers(
                     "gender": gender,
                     "last_name": last_name,
                     "community": community_upper,
+                    "country": COUNTRY.name,
                     "phone": _normalize_phone_for_storage(str(row_dict.get("phone", "") or "").strip() or None),
                     "national_id": str(row_dict.get("national_id", "") or "").strip() or None,
                     "plot_number": str(row_dict.get("plot_number", "") or "").strip() or None,

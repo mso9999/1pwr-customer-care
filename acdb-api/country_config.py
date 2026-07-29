@@ -142,14 +142,18 @@ ZAMBIA = CountryConfig(
     koios_org_id="",  # TBD -- set once SparkMeter / metering platform is selected
     timezone="Africa/Lusaka",
     utc_offset_hours=2,
-    default_tariff_rate=5.0,  # placeholder; align with ZESCO / ZEDSI tariff schedule before go-live
+    # Fail closed until the Zambia commercial tariff is approved. Payment
+    # endpoints reject electricity transactions while the effective rate is 0.
+    default_tariff_rate=0.0,
     site_abbrev={},  # populate per UEF ZEDSI commissioning roadmap
     site_districts={},  # provinces enumerated in customer.locationDistrictHidden of the claim template:
         # Central, Copperbelt, Eastern, Luapula, Lusaka, Muchinga,
         # North-Western, Northern, Southern, Western. Map per-site once sites are confirmed.
     koios_sites={},  # populate when SparkMeter org / sites are provisioned
-    payment_regex_id="momo_zm",  # parser stub; implement when SMS gateway samples are available
-    active=False,  # flip to True once 1PDB-ZM and the API service are live
+    payment_regex_id="momo_zm",  # parser stub; implement from real provider samples
+    # The employee CC web portal has its own Zambia route. Keep the customer
+    # mobile-app registry disabled until a Zambia app pack and PIN authority exist.
+    active=False,
     display_name="Zambia",
 )
 

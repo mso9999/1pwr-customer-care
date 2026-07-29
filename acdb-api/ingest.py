@@ -154,10 +154,10 @@ KOIOS_BASE = "https://www.sparkmeter.cloud"
 _CC = COUNTRY.code
 KOIOS_ORG = COUNTRY.koios_org_id
 KOIOS_KEY = os.environ.get(f"KOIOS_API_KEY_{_CC}") or os.environ.get(
-    "KOIOS_API_KEY", "SGWcnZpgCj-R0fGoVRtjbwMcElV7BvZGz00EEmJDv54"
+    "KOIOS_API_KEY", ""
 )
 KOIOS_SECRET = os.environ.get(f"KOIOS_API_SECRET_{_CC}") or os.environ.get(
-    "KOIOS_API_SECRET", "gJ5gHPsw21W8Jwl&!aId9O5uoywpg#2G"
+    "KOIOS_API_SECRET", ""
 )
 
 _sync_lock = threading.Lock()
@@ -722,13 +722,26 @@ def _parse_gateway_payment(content: str, sender: str = ""):
     """M-Pesa + EcoCash (LS) or MTN MoMo (BN) depending on COUNTRY_CODE."""
     if COUNTRY.code == "BN":
         return parse_momo_bn_sms(content)
-    return parse_ls_sms_payment(content, sender)
+    if COUNTRY.code == "LS":
+        return parse_ls_sms_payment(content, sender)
+    raise HTTPException(
+        status_code=503,
+        detail=(
+            f"SMS payment parsing is not enabled for {COUNTRY.name}; "
+            "real provider message samples are required first."
+        ),
+    )
 
 
 def _resolve_gateway_account(conn, content: str, parsed: dict) -> tuple:
     if COUNTRY.code == "BN":
         return resolve_bn_momo_account(conn, content, parsed)
-    return resolve_sms_account(conn, content, parsed)
+    if COUNTRY.code == "LS":
+        return resolve_sms_account(conn, content, parsed)
+    raise HTTPException(
+        status_code=503,
+        detail=f"SMS account resolution is not enabled for {COUNTRY.name}.",
+    )
 
 
 def _default_tariff_fallback() -> float:
@@ -776,6 +789,14 @@ def _sms_incoming_process_raw(
     *,
     contract_fee_gateway: bool,
 ) -> dict:
+    if COUNTRY.code not in {"LS", "BN"}:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"Automatic SMS payments are not enabled for {COUNTRY.name}. "
+                "Use a verified manual transaction only after tariff approval."
+            ),
+        )
     try:
         payload = json.loads(raw_body)
     except (json.JSONDecodeError, ValueError):

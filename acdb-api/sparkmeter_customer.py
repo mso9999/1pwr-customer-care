@@ -65,7 +65,7 @@ _GLOBAL_SECRET = os.environ.get("KOIOS_API_SECRET", "")
 
 
 def _build_country_creds() -> Tuple[Dict[str, str], Dict[str, Tuple[str, str]]]:
-    from country_config import _REGISTRY
+    from country_config import COUNTRY, _REGISTRY
 
     site_to_country: Dict[str, str] = {}
     for cc, cfg in _REGISTRY.items():
@@ -77,12 +77,12 @@ def _build_country_creds() -> Tuple[Dict[str, str], Dict[str, Tuple[str, str]]]:
         key = (
             os.environ.get(f"KOIOS_MANAGE_API_KEY_{cc}")
             or os.environ.get(f"KOIOS_API_KEY_{cc}")
-            or _GLOBAL_KEY
+            or (_GLOBAL_KEY if cc == COUNTRY.code else "")
         )
         secret = (
             os.environ.get(f"KOIOS_MANAGE_API_SECRET_{cc}")
             or os.environ.get(f"KOIOS_API_SECRET_{cc}")
-            or _GLOBAL_SECRET
+            or (_GLOBAL_SECRET if cc == COUNTRY.code else "")
         )
         country_creds[cc] = (key, secret)
 
@@ -112,17 +112,20 @@ KOIOS_SERVICE_AREAS: Dict[str, str] = {
     "SAM": "43a81ea8-f5fd-4df3-ae6b-0b7f54a58fe2",
 }
 
-# Koios org IDs per country (for /sm/ web session endpoints)
+# Koios org IDs per country (for /sm/ web session endpoints).
+from country_config import _REGISTRY as _COUNTRY_REGISTRY
+
 KOIOS_ORG_IDS: Dict[str, str] = {
-    "LS": "1cddcb07-6647-40aa-aaaa-70d762922029",
-    "BN": "0123589c-7f1f-4eb4-8888-d8f8aa706ea4",
+    cc: cfg.koios_org_id
+    for cc, cfg in _COUNTRY_REGISTRY.items()
+    if cfg.koios_org_id
 }
 
 
 def _koios_org_id(site_code: str) -> str:
     """Return the Koios org UUID for a site code."""
-    cc = _site_to_country.get(site_code, "LS")
-    return KOIOS_ORG_IDS.get(cc, KOIOS_ORG_IDS["LS"])
+    cc = _site_to_country.get(site_code)
+    return KOIOS_ORG_IDS.get(cc or "", "")
 
 
 @dataclass
@@ -145,8 +148,8 @@ def is_thundercloud_account(account_number: str) -> bool:
 
 
 def _koios_headers(site_code: str) -> dict:
-    cc = _site_to_country.get(site_code, "LS")
-    key, secret = _country_creds.get(cc, (_GLOBAL_KEY, _GLOBAL_SECRET))
+    cc = _site_to_country.get(site_code)
+    key, secret = _country_creds.get(cc or "", ("", ""))
     return {
         "Content-Type": "application/json",
         "X-API-KEY": key,
@@ -170,7 +173,9 @@ def _get_koios_web_session(site_code: str = "") -> Optional[requests.Session]:
     """
     global _koios_web_session, _koios_web_session_country
 
-    cc = _site_to_country.get(site_code, "LS")
+    cc = _site_to_country.get(site_code)
+    if not cc:
+        return None
     email = (
         os.environ.get(f"KOIOS_WEB_EMAIL_{cc}")
         or os.environ.get("KOIOS_WEB_EMAIL", "")
@@ -306,6 +311,12 @@ def _koios_web_lookup_customer(account_number: str, site_code: str) -> Optional[
         return None
 
     org_id = _koios_org_id(site_code)
+    if not org_id:
+        logger.warning(
+            "Koios web lookup skipped for %s: no country org configured",
+            account_number,
+        )
+        return None
 
     # Check configured customers first
     try:

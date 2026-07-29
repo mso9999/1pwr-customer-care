@@ -147,7 +147,7 @@ Do **not** assume Lesotho M-Pesa regexes apply to Zambia—validate against samp
 
 ## 7. Deployment & systemd
 
-1. **systemd unit** for the new API (mirror `1pdb-api-bn`): same codebase path, different `.env`, different `WorkingDirectory`/`EnvironmentFile`, different **bind port** (e.g. 8102 for ZM if 8100=LS, 8101=BN).
+1. **systemd unit** for the new API (mirror `1pdb-api-bn`): same codebase path, different `.env`, different `WorkingDirectory`/`EnvironmentFile`, different **bind port**. Zambia uses **8103** because 8100=LS, 8101=BN, and 8102 is the ring-fenced CC sandbox.
 2. **GitHub Actions / deploy**: Extend `deploy.yml` (or equivalent) to **rsync** backend and **restart** the new service; add a **health check** job for `https://cc.1pwrafrica.com/api/zm/health` (pattern matches existing `/api/bn/health`).
 3. Document **server firewall** and **Caddy** snippets in internal runbooks.
 
@@ -198,10 +198,10 @@ Never point a **production** `DATABASE_URL` at another country’s DB. On the sh
 1. Populate `site_abbrev` / `site_districts` / `koios_sites` with the commissioned sites.
 2. Confirm tariff and metering platform; update `default_tariff_rate` and `koios_org_id`.
 3. Implement `momo_zm` SMS parser alongside `mpesa_sms.py` once SMS samples are available.
-4. Stand up `onepower_zm` DB (the deploy workflow already applies incremental migrations to it if the DB exists; same is true for the optional `1pdb-api-zm` systemd unit and the `/api/zm/health` health check).
+4. `onepower_zm` is created from the canonical 1PDB schema plus the complete CC migration chain. The deploy workflow applies future incremental migrations, installs/restarts `1pdb-api-zm`, and requires `/api/zm/health` to pass.
 5. Add a Caddy route for `/api/zm/*` and `/api/zm/health` to the new service.
 6. **SM→CC mirror & isolation:** set `DATABASE_URL_ZM` + the suffixed Koios vars (`KOIOS_ORG_ID_ZM`, `KOIOS_WEB_EMAIL_ZM`/`PASSWORD_ZM`, key/secret pairs) in `/opt/1pdb/.env`; add the `("ZM", "koios", db_zm)` job to `scripts/ops/run_sm_credit_mirror_incremental.py`. The mirror already resolves org per country and applies a site guard, so with ZM sites populated in `country_config` it will only mirror ZM accounts. Then run the isolation query against `onepower_zm` (expect 0 foreign-site rows).
-7. Flip `active=True` in `country_config.py` so the country selector starts surfacing Zambia.
+7. The employee CC selector includes Zambia independently. Flip `active=True` only when the **customer mobile app** has a Zambia country pack and PIN authority.
 8. Tick the checklist above (including **Cross-country isolation**).
 
 The Odyssey Standard API ([`docs/odyssey-standard-api.md`](odyssey-standard-api.md)) is country-agnostic — once `1pdb-api-zm` is up, the same `programs` / `program_memberships` migration (`017_*.sql`) wires UEF/ZEDSI customers into the API without code changes.

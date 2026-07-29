@@ -52,10 +52,14 @@ BEGIN
              || 'FOR EACH ROW EXECUTE FUNCTION normalize_account_number_upper()';
     END IF;
 
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_trigger
-        WHERE tgname = 'trg_meter_assignments_acct_upper' AND NOT tgisinternal
-    ) THEN
+    -- meter_assignments is created by the API's idempotent startup helper,
+    -- not the 1PDB base schema. A brand-new country DB may therefore apply
+    -- this migration before that table exists.
+    IF to_regclass('public.meter_assignments') IS NOT NULL
+       AND NOT EXISTS (
+           SELECT 1 FROM pg_trigger
+           WHERE tgname = 'trg_meter_assignments_acct_upper' AND NOT tgisinternal
+       ) THEN
         EXECUTE 'CREATE TRIGGER trg_meter_assignments_acct_upper '
              || 'BEFORE INSERT OR UPDATE OF account_number ON meter_assignments '
              || 'FOR EACH ROW EXECUTE FUNCTION normalize_account_number_upper()';

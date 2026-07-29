@@ -11,6 +11,13 @@ export interface CountryConfig {
   currency_symbol: string;
   dial_code: string;
   sites: Record<string, string>;
+  readiness?: {
+    customer_onboarding_enabled: boolean;
+    tariff_configured: boolean;
+    metering_platform_configured: boolean;
+    automatic_payment_ingest_enabled: boolean;
+    meter_credit_enabled: boolean;
+  };
 }
 
 interface CountryContextType {
@@ -51,6 +58,7 @@ function withAllCountries(entries: CountryEntry[]): CountryEntry[] {
 const FALLBACK_COUNTRIES: CountryEntry[] = [
   { code: 'LS', name: 'Lesotho', flag: '\u{1F1F1}\u{1F1F8}', baseCurrency: 'LSL', portfolios: [] },
   { code: 'BN', name: 'Benin',   flag: '\u{1F1E7}\u{1F1EF}', baseCurrency: 'XOF', portfolios: [] },
+  { code: 'ZM', name: 'Zambia',  flag: '\u{1F1FF}\u{1F1F2}', baseCurrency: 'ZMW', portfolios: [] },
 ];
 
 const CountryContext = createContext<CountryContextType | null>(null);

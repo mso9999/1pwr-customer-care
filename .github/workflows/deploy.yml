@@ -178,6 +178,17 @@ jobs:
             sudo chown -R cc_api:cc_api /opt/cc-portal/backend/
             rm -rf /tmp/cc-backend
 
+            # Install the Zambia API unit once its ring-fenced environment file
+            # exists. Port 8103 is reserved because 8102 is the CC sandbox.
+            if [ -f /opt/1pdb-zm/.env ] && [ -f /opt/cc-portal/backend/systemd/1pdb-api-zm.service ]; then
+              sudo install -m 644 -o root -g root \
+                /opt/cc-portal/backend/systemd/1pdb-api-zm.service \
+                /etc/systemd/system/1pdb-api-zm.service
+              sudo systemctl daemon-reload
+              sudo systemctl enable 1pdb-api-zm.service
+              echo "Installed Zambia API unit"
+            fi
+
             # Install Python dependencies if requirements changed
             cd /opt/cc-portal/backend
             if [ -f venv/bin/pip ]; then
@@ -331,18 +342,16 @@ jobs:
           echo "WARNING: BN health check failed after 3 attempts"
           exit 1
 
-      # ZM is optional — health check passes silently if /api/zm/health is
-      # not yet routed through Caddy. Once Zambia goes live this becomes a
-      # hard check (mirror BN above by removing the 404 short-circuit).
-      - name: Health check (ZM, optional)
+      - name: Health check (ZM)
         run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://cc.1pwrafrica.com/api/zm/health || echo 000)
-          echo "ZM health check: HTTP $STATUS"
-          if [ "$STATUS" = "200" ]; then
-            curl -s https://cc.1pwrafrica.com/api/zm/health | python3 -m json.tool
-          elif [ "$STATUS" = "404" ] || [ "$STATUS" = "000" ]; then
-            echo "ZM API not yet deployed on this host — skipping (per SOP)"
-          else
-            echo "WARNING: ZM endpoint reachable but returned $STATUS"
-            exit 1
-          fi
+          for i in 1 2 3; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://cc.1pwrafrica.com/api/zm/health)
+            echo "ZM health check attempt $i: HTTP $STATUS"
+            if [ "$STATUS" = "200" ]; then
+              curl -s https://cc.1pwrafrica.com/api/zm/health | python3 -m json.tool
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Zambia API health check failed"
+          exit 1

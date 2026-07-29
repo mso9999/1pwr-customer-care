@@ -1,0 +1,21 @@
+[Unit]
+Description=1PWR Customer Care API — Zambia (FastAPI)
+After=postgresql.service network-online.target
+Requires=postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cc_api
+Group=cc_api
+WorkingDirectory=/opt/cc-portal/backend
+EnvironmentFile=/opt/1pdb-zm/.env
+ExecStart=/opt/cc-portal/backend/venv/bin/uvicorn customer_api:app --host 127.0.0.1 --port 8103
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cc-api-zm
+
+[Install]
+WantedBy=multi-user.target

@@ -56,6 +56,34 @@ router = APIRouter(prefix="/api/payments", tags=["payments"])
 GATEWAY_KEY = os.environ.get("SMS_GATEWAY_KEY", "1pwr-sms-gateway-2026")
 
 
+def _flag(name: str, default: bool) -> bool:
+    return os.environ.get(name, "1" if default else "0").lower() in (
+        "1", "true", "yes",
+    )
+
+
+def _payment_automation_enabled() -> bool:
+    from country_config import COUNTRY
+    return _flag("PAYMENT_AUTOMATION_ENABLED", COUNTRY.code != "ZM")
+
+
+def _meter_credit_enabled() -> bool:
+    from country_config import COUNTRY
+    return _flag("METER_CREDIT_ENABLED", COUNTRY.code != "ZM")
+
+
+def _require_positive_tariff(rate: float) -> None:
+    from country_config import COUNTRY
+    if rate <= 0:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{COUNTRY.name} electricity transactions are not open yet: "
+                "an approved tariff must be configured first."
+            ),
+        )
+
+
 class PaymentWebhook(BaseModel):
     account_number: str
     amount: float
@@ -197,6 +225,11 @@ def payment_webhook(
       payment  → balance += amount / rate
       (consumption deductions happen in the import pipeline)
     """
+    if not _payment_automation_enabled():
+        raise HTTPException(
+            status_code=503,
+            detail="Automatic payment ingestion is not enabled for this country.",
+        )
     if payload.amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be positive")
     if not payload.account_number:
@@ -226,6 +259,7 @@ def payment_webhook(
 
             meter_id = _resolve_meter(conn, payload.account_number, payload.meter_id)
             rate = _get_tariff_rate(conn, payload.account_number)
+            _require_positive_tariff(rate)
 
             classification = classify_payment(conn, payload.account_number, payload.amount)
             category = classification["category"]
@@ -342,7 +376,7 @@ def payment_webhook(
             conn.commit()
 
             sm_credit_amount = elec_amount if elec_amount > 0 else 0
-            if sm_credit_amount > 0:
+            if sm_credit_amount > 0 and _meter_credit_enabled():
                 memo = (
                     f"ref {ext_ref} sms_gateway txn {txn_id}"
                     if ext_ref
@@ -441,6 +475,7 @@ def record_manual_payment(
 
             meter_id = _resolve_meter(conn, payload.account_number, payload.meter_id)
             rate = _get_tariff_rate(conn, payload.account_number)
+            _require_positive_tariff(rate)
 
             classification = classify_payment(conn, payload.account_number, payload.amount)
             category = classification["category"]
@@ -616,7 +651,7 @@ def record_manual_payment(
 
             sm_credit_amount = elec_amount if elec_amount > 0 else 0
             sm_result = None
-            if sm_credit_amount > 0:
+            if sm_credit_amount > 0 and _meter_credit_enabled():
                 note_part = (payload.note or "").strip()
                 memo = (
                     f"ref {pref} {note_part}"
