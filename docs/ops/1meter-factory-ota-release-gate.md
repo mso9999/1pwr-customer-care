@@ -33,19 +33,29 @@ and rename. It did not install a second application image. The prior successful
 v1.1.53 AWS OTA canary was performed on an already operational gateway, not on
 the stripped commissioning build.
 
-### What is actually blocking Comfort
+### Current candidate and remaining blocker
 
-The newest application currently found under
-`s3://1pwr-ota-firmware/firmware-releases/` is v1.1.53 and is organized as
-per-Thing builds. There is no approved, immutable, canary-tested full release
-for factory promotion and the production CC environment has no OTA artifact
-key, S3 VersionId, or target version configured. CC therefore correctly remains
-fail-closed.
+A no-functional-delta v1.1.57 candidate was built from firmware commit
+`6ea321048c8fc23564e5d9de91fccc1d821162ae` by GitHub Actions run
+`30465978595`. The build, binary sanity check, workflow artifact, and S3
+publication succeeded. No OTA Job was created by the release workflow.
 
-Do not configure CC to use a v1.1.53 artifact for the factory fleet. Although
-the v1.1.56 OTA implementation would technically accept it, that would be an
-unreviewed downgrade which predates the factory provisioning/runtime-identity
-fixes.
+The immutable candidate application is:
+
+- bucket: `1pwr-ota-firmware`;
+- key:
+  `firmware-releases/v1.1.57/HQTEST-1/FeaturedFreeRTOSIoTIntegration.bin`;
+- S3 VersionId: `Xmr6xlSeZrdyVDZX1hm3zXtuREbcECGl`;
+- size: `1,189,920` bytes;
+- ETag: `308b287a13c82d8d11c01e72c333d0aa`;
+- signing profile: `1PWR_OTA_ESP32_v2` (Active);
+- OTA service role: `arn:aws:iam::758201218523:role/1pwr-ota-service-role`.
+
+This is a **candidate only**, not an approved field release. The remaining
+blocker is physical proof on one controlled gateway carrying the exact OEM
+factory v1.1.56 image. The operator must power and identify that unit, provision
+it as an explicitly authorized test Thing, then use CC's **OTA canary** tab.
+Do not reuse a field gateway or either known older v1.1.53 HQ test gateway.
 
 The device OTA code logs `MAJOR.MINOR.BUILD` but does not compare the running
 semantic version with the job's `fileVersion`. The strict
@@ -126,23 +136,30 @@ For per-site release tracking, use `ONEMETER_OTA_RELEASES_JSON`. Example
 ```json
 {
   "GBO": {
-    "artifact_key": "firmware-releases/v1.1.57/GBO/FeaturedFreeRTOSIoTIntegration.bin",
-    "artifact_version_id": "<immutable-s3-version-id>",
+    "artifact_key": "firmware-releases/v1.1.57/HQTEST-1/FeaturedFreeRTOSIoTIntegration.bin",
+    "artifact_version_id": "Xmr6xlSeZrdyVDZX1hm3zXtuREbcECGl",
     "target_firmware_version": "1.1.57",
     "factory_baseline_version": "1.1.56",
     "credentials_mode": "runtime_nvs",
-    "fallback_ssid": "<optional non-secret fallback SSID>"
+    "fallback_ssid": null,
+    "canary_only": true
   },
   "SAM": {
-    "artifact_key": "firmware-releases/v1.1.57/SAM/FeaturedFreeRTOSIoTIntegration.bin",
-    "artifact_version_id": "<immutable-s3-version-id>",
+    "artifact_key": "firmware-releases/v1.1.57/HQTEST-1/FeaturedFreeRTOSIoTIntegration.bin",
+    "artifact_version_id": "Xmr6xlSeZrdyVDZX1hm3zXtuREbcECGl",
     "target_firmware_version": "1.1.57",
     "factory_baseline_version": "1.1.56",
     "credentials_mode": "runtime_nvs",
-    "fallback_ssid": "<optional non-secret fallback SSID>"
+    "fallback_ssid": null,
+    "canary_only": true
   }
 }
 ```
+
+Also set `ONEMETER_OTA_CANARY_THINGS` only after the controlled factory unit has
+been allocated a test Thing. Keep `RELAY_AUTO_TRIGGER_ENABLED=0` until the OTA
+canary and the protected dummy-load disconnect/payment/reconnect validation
+both pass.
 
 Do not put Starlink passwords in environment variables, source control, build
 manifests, release metadata, or operator documentation.

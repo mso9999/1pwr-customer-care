@@ -1,0 +1,26 @@
+{
+  "GBO": {
+    "artifact_key": "firmware-releases/v1.1.57/HQTEST-1/FeaturedFreeRTOSIoTIntegration.bin",
+    "artifact_version_id": "Xmr6xlSeZrdyVDZX1hm3zXtuREbcECGl",
+    "target_firmware_version": "1.1.57",
+    "factory_baseline_version": "1.1.56",
+    "signing_profile": "1PWR_OTA_ESP32_v2",
+    "role_arn": "arn:aws:iam::758201218523:role/1pwr-ota-service-role",
+    "credentials_mode": "runtime_nvs",
+    "fallback_ssid": null,
+    "canary_only": true,
+    "max_per_minute": 1
+  },
+  "SAM": {
+    "artifact_key": "firmware-releases/v1.1.57/HQTEST-1/FeaturedFreeRTOSIoTIntegration.bin",
+    "artifact_version_id": "Xmr6xlSeZrdyVDZX1hm3zXtuREbcECGl",
+    "target_firmware_version": "1.1.57",
+    "factory_baseline_version": "1.1.56",
+    "signing_profile": "1PWR_OTA_ESP32_v2",
+    "role_arn": "arn:aws:iam::758201218523:role/1pwr-ota-service-role",
+    "credentials_mode": "runtime_nvs",
+    "fallback_ssid": null,
+    "canary_only": true,
+    "max_per_minute": 1
+  }
+}

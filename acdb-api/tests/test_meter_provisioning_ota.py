@@ -25,6 +25,7 @@ def approved_release(site: str = "GBO") -> dict:
         "max_per_minute": 10,
         "credentials_mode": "runtime_nvs",
         "fallback_ssid": None,
+        "canary_only": False,
         "approved_sites": ["GBO"],
         "config_error": None,
     }
@@ -149,6 +150,86 @@ class TestFactoryPromotion(unittest.TestCase):
             checks = mp._ota_release_checks(release)
         self.assertFalse(checks["anti_rollback"]["ok"])
         self.assertIn("strictly newer", checks["anti_rollback"]["error"])
+
+    def test_candidate_only_release_blocks_batch_promotion(self):
+        release = approved_release()
+        release["canary_only"] = True
+        with (
+            patch.object(mp, "_ota_release", return_value=release),
+            patch.object(
+                mp,
+                "_ota_release_checks",
+                return_value={
+                    "anti_rollback": {"ok": True},
+                    "artifact": {"ok": True},
+                    "signing_profile": {"ok": True},
+                },
+            ),
+        ):
+            with self.assertRaises(mp.HTTPException) as ctx:
+                mp.promote_factory_gateways(
+                    mp.OtaPromotionRequest(
+                        site_code="GBO",
+                        thing_names=["GBO-GW-0001"],
+                    ),
+                    MagicMock(user_id="comfort"),
+                )
+        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertIn("candidate-only", ctx.exception.detail)
+
+    def test_canary_requires_exact_typed_confirmation(self):
+        with (
+            patch.object(mp, "_ota_release", return_value=approved_release()),
+            patch.object(
+                mp,
+                "_ota_release_checks",
+                return_value={
+                    "anti_rollback": {"ok": True},
+                    "artifact": {"ok": True},
+                    "signing_profile": {"ok": True},
+                },
+            ),
+        ):
+            with self.assertRaises(mp.HTTPException) as ctx:
+                mp.promote_factory_gateways(
+                    mp.OtaPromotionRequest(
+                        site_code="GBO",
+                        thing_names=["HQTEST-1"],
+                        canary=True,
+                        confirmation="yes",
+                    ),
+                    MagicMock(user_id="comfort"),
+                )
+        self.assertEqual(ctx.exception.status_code, 400)
+        self.assertIn("CANARY HQTEST-1", ctx.exception.detail)
+
+    def test_canary_rejects_non_test_non_allowlisted_gateway(self):
+        row = {"site": {"S": "GBO"}, "is_test": {"BOOL": False}}
+        with (
+            patch.object(mp, "_ota_release", return_value=approved_release()),
+            patch.object(
+                mp,
+                "_ota_release_checks",
+                return_value={
+                    "anti_rollback": {"ok": True},
+                    "artifact": {"ok": True},
+                    "signing_profile": {"ok": True},
+                },
+            ),
+            patch.object(mp, "_registry_get_by_thing", return_value=[row]),
+            patch.object(mp, "OTA_CANARY_THINGS", set()),
+        ):
+            with self.assertRaises(mp.HTTPException) as ctx:
+                mp.promote_factory_gateways(
+                    mp.OtaPromotionRequest(
+                        site_code="GBO",
+                        thing_names=["GBO-GW-0001"],
+                        canary=True,
+                        confirmation="CANARY GBO-GW-0001",
+                    ),
+                    MagicMock(user_id="comfort"),
+                )
+        self.assertEqual(ctx.exception.status_code, 403)
 
 
 if __name__ == "__main__":

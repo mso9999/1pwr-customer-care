@@ -281,6 +281,19 @@ def record_payment_kwh(
                 "auto-cutoff hook failed for %s after txn=%d: %s",
                 account_number, txn_id, exc,
             )
+    elif prev_balance <= 0 < new_balance:
+        try:
+            from relay_control import maybe_auto_close_relay
+            maybe_auto_close_relay(
+                conn,
+                account_number,
+                reason="positive_balance_after_payment",
+            )
+        except Exception as exc:  # noqa: BLE001 - never break the payment path
+            logger.warning(
+                "auto-reconnect hook failed for %s after txn=%d: %s",
+                account_number, txn_id, exc,
+            )
 
     return txn_id, kwh_vended, new_balance
 

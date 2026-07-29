@@ -60,6 +60,7 @@ import os
 import re
 import hashlib
 import zipfile
+from urllib import request as urllib_request
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -107,6 +108,15 @@ OTA_SIGNED_PREFIX = os.environ.get("ONEMETER_OTA_SIGNED_PREFIX", "signed/factory
 OTA_CERT_PATH = os.environ.get("ONEMETER_OTA_CERT_PATH_ON_DEVICE", "/")
 OTA_MAX_PER_MINUTE = int(os.environ.get("ONEMETER_OTA_MAX_PER_MINUTE", "10"))
 OTA_RELEASES_JSON = os.environ.get("ONEMETER_OTA_RELEASES_JSON", "")
+OTA_RELEASE_CATALOG_PATH = os.environ.get(
+    "ONEMETER_OTA_RELEASE_CATALOG_PATH",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "ota_releases.json"),
+)
+OTA_CANARY_THINGS = {
+    item.strip()
+    for item in os.environ.get("ONEMETER_OTA_CANARY_THINGS", "").split(",")
+    if item.strip()
+}
 
 # Names we must never silently overwrite from the GUI. Bench/test identities
 # belong to the HQ PowerShell flow; ad-hoc field names are exactly what this
@@ -364,6 +374,7 @@ def ensure_meter_provisioning_table():
             cur.execute("ALTER TABLE meter_provisioning ADD COLUMN IF NOT EXISTS deployment_wifi_ssid VARCHAR(64)")
             cur.execute("ALTER TABLE meter_provisioning ADD COLUMN IF NOT EXISTS wifi_config_version INTEGER")
             cur.execute("ALTER TABLE meter_provisioning ADD COLUMN IF NOT EXISTS wifi_configured_at TIMESTAMPTZ")
+            cur.execute("ALTER TABLE meter_provisioning ADD COLUMN IF NOT EXISTS commissioned_at TIMESTAMPTZ")
             # Atomic per-site gateway sequence allocator (MAK-GW-0007 ...).
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS gateway_pool_seq (
@@ -619,6 +630,15 @@ class OtaPromotionRequest(BaseModel):
         max_length=256,
         description="Optional operator note recorded in the mutation audit",
     )
+    canary: bool = Field(
+        default=False,
+        description="Restrict this request to one server-authorized test gateway.",
+    )
+    confirmation: Optional[str] = Field(
+        default=None,
+        max_length=160,
+        description="For a canary, must exactly equal 'CANARY <ThingName>'.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -627,6 +647,11 @@ class OtaPromotionRequest(BaseModel):
 
 
 STATION_DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "provisioning_station_dist")
+METER_KIT_FIRMWARE_COMMIT = "6ea321048c8fc23564e5d9de91fccc1d821162ae"
+METER_KIT_FILES = {
+    "METER_ADDRESSING.md": "Docs/field/METER_ADDRESSING.md",
+    "set_meter_address.py": "scripts/set_meter_address.py",
+}
 
 
 @router.get("/station/download")
@@ -650,6 +675,39 @@ def download_station(_user: CurrentUser = Depends(require_role(*PROVISIONING_ROL
         content=buf.getvalue(),
         media_type="application/zip",
         headers={"Content-Disposition": "attachment; filename=provisioning-station.zip"},
+    )
+
+
+@router.get("/meter-kit/download")
+def download_meter_validation_kit(
+    _user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES)),
+):
+    """Download pinned meter-addressing code plus CC's batch-validation SOP."""
+    buf = io.BytesIO()
+    base = (
+        "https://raw.githubusercontent.com/onepowerLS/onepwr-aws-mesh/"
+        f"{METER_KIT_FIRMWARE_COMMIT}/"
+    )
+    try:
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+            local_sop = os.path.join(STATION_DIST, "METER_GATEWAY_BATCH_VALIDATION.md")
+            z.write(local_sop, "1meter-validation/METER_GATEWAY_BATCH_VALIDATION.md")
+            for filename, repo_path in METER_KIT_FILES.items():
+                with urllib_request.urlopen(base + repo_path, timeout=15) as response:
+                    z.writestr(f"1meter-validation/{filename}", response.read())
+            z.writestr(
+                "1meter-validation/SOURCE.txt",
+                f"Firmware repository commit: {METER_KIT_FIRMWARE_COMMIT}\n",
+            )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=502,
+            detail=f"Unable to assemble the pinned meter-validation kit: {exc}",
+        ) from exc
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=1meter-validation-kit.zip"},
     )
 
 
@@ -693,13 +751,22 @@ def _ota_release(site_code: Optional[str] = None) -> dict:
         "max_per_minute": OTA_MAX_PER_MINUTE,
         "credentials_mode": "runtime_nvs",
         "fallback_ssid": None,
+        "canary_only": False,
         "approved_sites": [],
         "config_error": None,
     }
-    if not OTA_RELEASES_JSON:
+    catalog_json = OTA_RELEASES_JSON
+    if not catalog_json and os.path.isfile(OTA_RELEASE_CATALOG_PATH):
+        try:
+            with open(OTA_RELEASE_CATALOG_PATH, encoding="utf-8") as catalog_file:
+                catalog_json = catalog_file.read()
+        except OSError as exc:
+            release["config_error"] = f"Unable to read OTA release catalog: {exc}"
+            return release
+    if not catalog_json:
         return release
     try:
-        catalog = json.loads(OTA_RELEASES_JSON)
+        catalog = json.loads(catalog_json)
         if not isinstance(catalog, dict):
             raise ValueError("root must be an object keyed by canonical site code")
     except Exception as exc:  # noqa: BLE001
@@ -723,6 +790,7 @@ def _ota_release(site_code: Optional[str] = None) -> dict:
         "signing_profile", "role_arn",
         "signed_prefix", "certificate_path_on_device", "max_per_minute",
         "credentials_mode", "fallback_ssid",
+        "canary_only",
     ):
         if key in site_release:
             release[key] = site_release[key]
@@ -751,7 +819,7 @@ def _ota_public_config(release: dict) -> dict:
             "artifact_version_id", "target_firmware_version", "signing_profile",
             "factory_baseline_version",
             "max_per_minute", "credentials_mode", "fallback_ssid",
-            "approved_sites",
+            "approved_sites", "canary_only",
         )
     }
 
@@ -832,6 +900,8 @@ def ota_readiness(
     result = {
         "configured": not missing,
         "ready": False,
+        "canary_ready": False,
+        "canary_things": sorted(OTA_CANARY_THINGS),
         "site_required": bool(release.get("approved_sites")) and not release.get("site_code"),
         "missing": missing,
         "release": _ota_public_config(release),
@@ -841,7 +911,9 @@ def ota_readiness(
         return result
 
     result["checks"] = _ota_release_checks(release)
-    result["ready"] = all(check.get("ok") for check in result["checks"].values())
+    checks_ok = all(check.get("ok") for check in result["checks"].values())
+    result["canary_ready"] = checks_ok and bool(OTA_CANARY_THINGS)
+    result["ready"] = checks_ok and not bool(release.get("canary_only"))
     return result
 
 
@@ -883,8 +955,27 @@ def promote_factory_gateways(
     if not things:
         raise HTTPException(status_code=400, detail="At least one Thing name is required.")
 
+    if payload.canary:
+        if len(things) != 1:
+            raise HTTPException(status_code=400, detail="A canary must target exactly one gateway.")
+        expected_confirmation = f"CANARY {things[0]}"
+        if payload.confirmation != expected_confirmation:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Type '{expected_confirmation}' exactly to start this canary.",
+            )
+    elif release.get("canary_only"):
+        raise HTTPException(
+            status_code=409,
+            detail="This release is candidate-only. Complete and approve a single-gateway canary before batch rollout.",
+        )
+
     for thing in things:
-        _validate_thing_name(thing)
+        if payload.canary:
+            if not re.match(r"^[A-Za-z0-9_-]+$", thing):
+                raise HTTPException(status_code=400, detail=f"Thing name '{thing}' has invalid characters.")
+        else:
+            _validate_thing_name(thing)
         rows = _registry_get_by_thing(thing)
         if not rows:
             raise HTTPException(
@@ -892,7 +983,13 @@ def promote_factory_gateways(
                 detail=f"Thing '{thing}' is not in the provisioning registry. "
                        "Allocate its identity/certificate before scheduling OTA.",
             )
-        if any(row.get("is_test", {}).get("BOOL") for row in rows):
+        marked_test = any(row.get("is_test", {}).get("BOOL") for row in rows)
+        if payload.canary and thing not in OTA_CANARY_THINGS and not marked_test:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Thing '{thing}' is not authorized by the server as an OTA canary.",
+            )
+        if not payload.canary and marked_test:
             raise HTTPException(status_code=400, detail=f"Thing '{thing}' is marked as a test unit.")
         row_sites = {row.get("site", {}).get("S") for row in rows}
         if row_sites - {None, "", site}:
@@ -984,7 +1081,7 @@ def promote_factory_gateways(
                     "thing_names": things,
                 },
                 metadata={
-                    "kind": "factory_ota_promotion",
+                    "kind": "factory_ota_canary" if payload.canary else "factory_ota_promotion",
                     "endpoint": "POST /api/provisioning/ota/promote",
                     "operator_note": payload.note,
                 },
@@ -1002,6 +1099,7 @@ def promote_factory_gateways(
         "site_code": site,
         "credentials_mode": release.get("credentials_mode"),
         "thing_names": things,
+        "canary": payload.canary,
         "status_url": f"/api/provisioning/ota/{ota_id}",
         "note": "OTA is queued. Leave the gateways powered and connected to the internet; "
                 "completion must be confirmed per Thing before installation.",
@@ -1300,10 +1398,51 @@ def reconcile_from_telemetry(_user: CurrentUser = Depends(require_role(*PROVISIO
         raise HTTPException(status_code=502, detail=f"meter_last_seen scan failed: {exc}") from exc
 
     updated = 0
+    conflicts: list[dict] = []
     from customer_api import get_connection
     with get_connection() as conn:
         cur = conn.cursor()
         for thing, (serial, _ts) in seen.items():
+            cur.execute(
+                "SELECT meter_serial, account_number, status "
+                "FROM meter_provisioning WHERE thing_name = %s FOR UPDATE",
+                (thing,),
+            )
+            current = cur.fetchone()
+            if not current:
+                continue
+            current_serial = str(current[0] or "").strip()
+            if current_serial and (current_serial.lstrip("0") or current_serial) != (
+                str(serial).lstrip("0") or str(serial)
+            ):
+                conflicts.append({
+                    "thing_name": thing,
+                    "reported_meter_serial": serial,
+                    "recorded_meter_serial": current_serial,
+                    "reason": "gateway_reported_a_different_meter",
+                })
+                continue
+            cur.execute(
+                """
+                SELECT thing_name
+                  FROM meter_provisioning
+                 WHERE meter_serial = %s
+                   AND thing_name <> %s
+                   AND status = 'commissioned'
+                   AND NULLIF(account_number, '') IS NOT NULL
+                 LIMIT 1
+                """,
+                (serial, thing),
+            )
+            owner = cur.fetchone()
+            if owner:
+                conflicts.append({
+                    "thing_name": thing,
+                    "reported_meter_serial": serial,
+                    "recorded_meter_serial": current_serial or None,
+                    "reason": f"meter_already_commissioned_through_{owner[0]}",
+                })
+                continue
             cur.execute(
                 """
                 UPDATE meter_provisioning
@@ -1318,7 +1457,12 @@ def reconcile_from_telemetry(_user: CurrentUser = Depends(require_role(*PROVISIO
             )
             updated += cur.rowcount
         conn.commit()
-    return {"matched_things": len(seen), "rows_updated": updated}
+    return {
+        "matched_things": len(seen),
+        "rows_updated": updated,
+        "conflicts": conflicts,
+        "conflict_count": len(conflicts),
+    }
 
 
 @router.post("/rotate")

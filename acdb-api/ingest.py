@@ -317,6 +317,7 @@ def _resolve_meter(conn, raw_id: str) -> tuple[str, str | None, str | None]:
 
 class MeterReading(BaseModel):
     meter_id: str
+    thing_name: Optional[str] = None
     timestamp: str            # YYYYMMDDHHMM
     energy_active: float = 0
     energy_integrated: Optional[float] = None
@@ -350,6 +351,29 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
                     status_code=404,
                     detail=f"Unknown prototype meter: {reading.meter_id}",
                 )
+            if reading.thing_name:
+                cur.execute(
+                    """
+                    SELECT account_number, status
+                      FROM meter_provisioning
+                     WHERE thing_name = %s
+                       AND regexp_replace(meter_serial, '^0+', '') =
+                           regexp_replace(%s, '^0+', '')
+                     LIMIT 1
+                    """,
+                    (reading.thing_name, reading.meter_id),
+                )
+                binding = cur.fetchone()
+                if not binding or str(binding[0] or "") != str(account):
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Gateway, meter serial, and customer assignment do not match.",
+                    )
+                if str(binding[1] or "") != "commissioned":
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Gateway telemetry cannot enter billing until commissioning is complete.",
+                    )
 
             cur.execute(
                 "SELECT last_energy_kwh FROM prototype_meter_state WHERE meter_id = %s",
@@ -407,6 +431,25 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
                 meter_id, account, energy_for_delta,
                 reading.relay, ts, fw,
             ))
+
+            # Consumption, not payment entry, is what normally crosses a
+            # prepaid balance through zero. The relay hook remains fail-closed
+            # behind RELAY_AUTO_TRIGGER_ENABLED and its own billing-priority,
+            # online, debounce, and gateway-binding checks.
+            if delta_kwh > 0:
+                try:
+                    from relay_control import maybe_auto_open_relay
+                    maybe_auto_open_relay(
+                        conn,
+                        account,
+                        reason="zero_balance_after_consumption",
+                    )
+                except Exception as exc:  # noqa: BLE001 - never drop telemetry
+                    logger.warning(
+                        "auto-cutoff hook failed for %s after meter reading: %s",
+                        account,
+                        exc,
+                    )
 
             conn.commit()
 

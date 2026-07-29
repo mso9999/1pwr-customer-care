@@ -30,8 +30,14 @@ PowerShell flow (`onepwr-aws-mesh/scripts/provisioning_registry.py`).
 | POST | `/api/provisioning/rotate` | Issue cert for the new Thing and publish `cfg/identity` to an online unit's *current* client id to rename it in place (migration). |
 | POST | `/api/provisioning/reconcile` | Bind provisioned gateways to acquired meter serials by reading DynamoDB `meter_last_seen` (`thingName`→`meterId`), filling `meter_serial` + online timestamps. Run periodically. |
 | GET | `/api/provisioning/ota/readiness?site_code=GBO` | Fail-closed check that the selected site has an immutable approved artifact/version and that CC can access S3 + the signing profile. |
-| POST | `/api/provisioning/ota/promote` | Create the signed AWS IoT OTA update for the selected site and newly provisioned Things. |
+| POST | `/api/provisioning/ota/promote` | Create the signed AWS IoT OTA update. Candidate releases require one server-authorized test Thing and exact typed `CANARY <Thing>` confirmation; candidate-only releases cannot be batch-promoted. |
 | GET | `/api/provisioning/ota/{update_id}` | Return creation status and per-Thing Job execution; persist OTA status and installed version on success. |
+| GET | `/api/provisioning/meter-kit/download` | Download the pinned meter-addressing SOP/code plus the gateway/meter-string batch-validation SOP. |
+| POST | `/api/provisioning/validation/sessions` | Start an isolated physical batch-validation session on an authorized test gateway. |
+| GET | `/api/provisioning/validation/sessions/{id}` | Return fresh meter telemetry and the disconnect/reconnect command acknowledgements. |
+| POST | `/api/provisioning/validation/sessions/{id}/observe` | Apply the physical load's energy increment to the synthetic test balance; zero queues relay-open. |
+| POST | `/api/provisioning/validation/sessions/{id}/payment` | Add an isolated synthetic payment after acknowledged cutoff; queues relay-close. |
+| POST | `/api/provisioning/validation/sessions/{id}/complete` | Pass only after positive load, acknowledged read-back `0`, and acknowledged read-back `1`. |
 | GET  | `/api/provisioning/meters` | CC system-of-record view: provisioned meters joined to `meters`/`accounts` for locational assignment (site, village, GPS, customer) + `allocation` stage. Optional `?site=MAK`. |
 | GET  | `/api/provisioning/registry` | List the DynamoDB device/cert registry (bench + field). |
 
@@ -103,6 +109,31 @@ failed counts, target version/update ID, and one status row per Thing. The
 operator must confirm that CC’s auto-detected update ID matches the station
 before the guide accepts completion.
 
+The **OTA canary** tab is the engineering acceptance path for a new candidate.
+CC displays only server-authorized test gateways, requires exact typed
+confirmation, creates an OTA for one Thing, and shows live per-Thing progress.
+A release configured with `canary_only: true` cannot be used for batch
+promotion, even if its artifact/signing preflight passes.
+
+The **Batch validation** tab is optional but recommended once per received or
+assembled batch. Its downloadable kit includes:
+
+- the pinned `set_meter_address.py` utility and full DDS8888 addressing SOP;
+- the explicit reminder that USB-to-RS485 is used only on individual meters,
+  never to provision a gateway;
+- wiring/integration steps for combining uniquely addressed meters on the
+  gateway RS-485 bus;
+- a protected dummy-load test;
+- an isolated synthetic balance/payment ledger that exercises the real
+  CC → AWS IoT → gateway → meter relay → acknowledgement channel without
+  creating customer revenue or production financial transactions.
+
+The batch test cannot start unless the Thing is allowlisted, telemetry is
+fresh, the Thing/meter binding matches, AWS reports OTA success, and gateway
+telemetry reports the exact OTA target firmware. Completion requires a positive
+physical energy delta, relay-open acknowledgement/read-back `0`, and
+relay-close acknowledgement/read-back `1`.
+
 All are role-gated to `superadmin` / `onm_team`.
 
 The returned `bootstrap` object matches the firmware local-API schema
@@ -171,6 +202,13 @@ anti-rollback (currently `1.1.56`). For site-specific release approval use
 `ONEMETER_OTA_RELEASES_JSON` keyed by canonical
 site. A per-site entry tracks the immutable artifact, version, optional
 non-secret fallback SSID, signing profile/role overrides, and rollout rate.
+When that environment variable is absent, CC reads the audited, non-secret
+`acdb-api/ota_releases.json` catalog shipped with the deployment.
+Set `canary_only: true` until the exact factory-v1.1.56 physical canary passes.
+`ONEMETER_OTA_CANARY_THINGS` is a comma-separated server allowlist for the
+single-device canary UI. `ONEMETER_VALIDATION_THINGS` separately allowlists
+gateways that may operate a protected dummy load; if omitted it inherits the
+canary allowlist. Never add an installed customer/field gateway to either list.
 
 ## Multi-site
 

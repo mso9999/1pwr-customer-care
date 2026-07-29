@@ -8,15 +8,23 @@ import {
   getProvisionedMeters,
   reconcileProvisioning,
   downloadProvisioningStation,
+  downloadMeterValidationKit,
+  startFactoryOtaCanary,
+  startMeterValidation,
+  getMeterValidation,
+  observeMeterValidationLoad,
+  applyMeterValidationPayment,
+  completeMeterValidation,
   type UpdateConfigResult,
   type OtaReadiness,
   type OtaPromotionStatus,
   type ProvisioningSiteCode,
   type ProvisioningRegistryRow,
   type ProvisionedMeter,
+  type MeterValidationStatus,
 } from '../lib/api';
 
-type Mode = 'guide' | 'config' | 'meters' | 'registry';
+type Mode = 'guide' | 'canary' | 'batch-test' | 'config' | 'meters' | 'registry';
 type ValidationNetworkMode = 'site' | 'mirror';
 type GuideCheckKey =
   | 'sealed'
@@ -63,6 +71,16 @@ export default function ProvisioningPage() {
   const [trackedOtaId, setTrackedOtaId] = useState('');
   const [otaProgress, setOtaProgress] = useState<OtaPromotionStatus | null>(null);
   const [otaProgressError, setOtaProgressError] = useState('');
+  const [canaryTarget, setCanaryTarget] = useState('');
+  const [canaryConfirmation, setCanaryConfirmation] = useState('');
+  const [canaryNote, setCanaryNote] = useState('');
+  const [canaryStarting, setCanaryStarting] = useState(false);
+  const [validationTarget, setValidationTarget] = useState('');
+  const [batchReference, setBatchReference] = useState('');
+  const [startingCredit, setStartingCredit] = useState(0.01);
+  const [validationRun, setValidationRun] = useState<MeterValidationStatus | null>(null);
+  const [validationBusy, setValidationBusy] = useState(false);
+  const [kitDownloading, setKitDownloading] = useState(false);
 
   // config form state
   const [thingName, setThingName] = useState('');
@@ -224,6 +242,22 @@ export default function ProvisioningPage() {
     };
   }, [trackedOtaId]);
 
+  useEffect(() => {
+    const sessionId = validationRun?.session.id;
+    if (!sessionId || validationRun?.session.status === 'passed') return;
+    let cancelled = false;
+    const poll = () => {
+      getMeterValidation(sessionId)
+        .then((result) => { if (!cancelled) setValidationRun(result); })
+        .catch(() => {});
+    };
+    const timer = window.setInterval(poll, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [validationRun?.session.id, validationRun?.session.status]);
+
   const toggleGuideCheck = (key: GuideCheckKey) => {
     setGuideChecks((prev) => ({ ...prev, [key]: !prev[key] }));
   };
@@ -265,6 +299,37 @@ export default function ProvisioningPage() {
     }
   };
 
+  const handleStartCanary = async () => {
+    setError('');
+    setCanaryStarting(true);
+    try {
+      const result = await startFactoryOtaCanary({
+        site_code: guideSite,
+        thing_name: canaryTarget,
+        confirmation: canaryConfirmation,
+        note: canaryNote || undefined,
+      });
+      setTrackedOtaId(result.ota_update_id);
+      setGuideChecks((prev) => ({ ...prev, otaQueued: true }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCanaryStarting(false);
+    }
+  };
+
+  const runValidationAction = async (action: () => Promise<MeterValidationStatus>) => {
+    setError('');
+    setValidationBusy(true);
+    try {
+      setValidationRun(await action());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setValidationBusy(false);
+    }
+  };
+
   const guideSteps = [
     'Choose site',
     'Prepare networks',
@@ -295,6 +360,8 @@ export default function ProvisioningPage() {
       <div className="flex gap-1 mb-5 border-b border-gray-200">
         {([
           ['guide', 'Guide & download'],
+          ['canary', 'OTA canary'],
+          ['batch-test', 'Batch validation'],
           ['config', 'Update Configuration'],
           ['meters', 'Provisioned meters'],
           ['registry', 'Registry'],
@@ -319,7 +386,222 @@ export default function ProvisioningPage() {
         </div>
       )}
 
-      {mode === 'guide' ? (
+      {mode === 'batch-test' ? (
+        <div className="grid lg:grid-cols-2 gap-5">
+          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-blue-600">Optional · recommended for every batch</div>
+              <h2 className="text-lg font-semibold text-gray-900 mt-1">Meter, load, balance, and relay validation</h2>
+              <p className="text-sm text-gray-600 mt-1">
+                Uses an isolated synthetic ledger and dummy customer label. It never creates customer revenue or financial transactions.
+              </p>
+            </div>
+            <button
+              onClick={async () => {
+                setKitDownloading(true);
+                try { await downloadMeterValidationKit(); } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+                finally { setKitDownloading(false); }
+              }}
+              disabled={kitDownloading}
+              className="w-full px-4 py-3 rounded-lg border border-blue-300 bg-blue-50 text-blue-800 text-sm font-semibold disabled:opacity-50"
+            >
+              {kitDownloading ? 'Preparing kit…' : 'Download meter addressing SOP + code'}
+            </button>
+            <div>
+              <label className={labelCls}>Site release</label>
+              <select className={inputCls} value={guideSite} onChange={(e) => {
+                setGuideSite(e.target.value);
+                setValidationTarget('');
+              }}>
+                <option value="">Select site…</option>
+                {guideSites.map((site) => <option key={site.code} value={site.code}>{site.code} — {site.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Authorized physical test gateway</label>
+              <select className={inputCls} value={validationTarget} onChange={(e) => setValidationTarget(e.target.value)}>
+                <option value="">Select one gateway…</option>
+                {(otaReadiness?.canary_things || []).map((name) => <option key={name} value={name}>{name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Batch or shipment reference</label>
+              <input className={inputCls} value={batchReference} onChange={(e) => setBatchReference(e.target.value)} placeholder="Example: Benin batch 2026-07" />
+            </div>
+            <div>
+              <label className={labelCls}>Small synthetic starting credit (kWh)</label>
+              <input type="number" min="0.001" max="1" step="0.001" className={inputCls} value={startingCredit}
+                onChange={(e) => setStartingCredit(Number(e.target.value))} />
+              <p className="text-xs text-gray-500 mt-1">Choose an amount the protected dummy load can consume during the bench test.</p>
+            </div>
+            <button
+              disabled={validationBusy || !validationTarget || !batchReference || Boolean(validationRun)}
+              onClick={() => runValidationAction(() => startMeterValidation({
+                thing_name: validationTarget,
+                batch_reference: batchReference,
+                starting_credit_kwh: startingCredit,
+              }))}
+              className="w-full px-4 py-3 bg-blue-600 text-white rounded-lg text-sm font-semibold disabled:opacity-40"
+            >
+              Start isolated batch validation
+            </button>
+            <ol className="list-decimal pl-5 space-y-2 text-sm text-gray-700">
+              <li>Address and label meters one at a time; scan the combined RS485 string.</li>
+              <li>Connect the string and protected dummy load; reconcile the expected serial.</li>
+              <li>Confirm signed OTA, firmware version, telemetry, and the synthetic test identity.</li>
+              <li>Run the load until the synthetic balance reaches zero and relay read-back is 0.</li>
+              <li>Apply the synthetic payment and confirm relay read-back is 1 and the load restarts.</li>
+            </ol>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+            <h2 className="text-lg font-semibold text-gray-900">Validation evidence</h2>
+            {!validationRun ? (
+              <p className="text-sm text-gray-500">Start a session after the addressed meter string and dummy load are safely connected.</p>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div className="p-3 rounded bg-gray-50"><b>Gateway</b><br /><span className="font-mono">{validationRun.session.thing_name}</span></div>
+                  <div className="p-3 rounded bg-gray-50"><b>Meter</b><br /><span className="font-mono">{validationRun.session.meter_id}</span></div>
+                  <div className="p-3 rounded bg-gray-50"><b>Load delta</b><br />{validationRun.session.load_delta_kwh.toFixed(4)} kWh</div>
+                  <div className="p-3 rounded bg-gray-50"><b>Synthetic balance</b><br />{validationRun.session.simulated_balance_kwh.toFixed(4)} kWh</div>
+                  <div className="p-3 rounded bg-gray-50"><b>Relay telemetry</b><br />{validationRun.telemetry.relay ?? '—'}</div>
+                  <div className="p-3 rounded bg-gray-50"><b>Status</b><br />{validationRun.session.status}</div>
+                </div>
+                <button
+                  disabled={validationBusy || Boolean(validationRun.session.reconnect_cmd_id)}
+                  onClick={() => runValidationAction(() => observeMeterValidationLoad(validationRun.session.id))}
+                  className="w-full px-4 py-3 rounded-lg bg-indigo-600 text-white text-sm font-semibold disabled:opacity-40"
+                >
+                  Observe load and update synthetic balance
+                </button>
+                <div className="p-3 rounded-lg border text-sm">
+                  <b>Zero-balance disconnect:</b>{' '}
+                  {validationRun.disconnect_command
+                    ? `${validationRun.disconnect_command.status} · relay ${validationRun.disconnect_command.relay_after ?? '?'} · ${validationRun.disconnect_command.cmd_id}`
+                    : 'waiting for positive load and zero balance'}
+                </div>
+                <button
+                  disabled={validationBusy
+                    || validationRun.disconnect_command?.status !== 'completed'
+                    || validationRun.disconnect_command?.relay_after !== '0'
+                    || Boolean(validationRun.reconnect_command)}
+                  onClick={() => runValidationAction(() => applyMeterValidationPayment(validationRun.session.id, 0.05))}
+                  className="w-full px-4 py-3 rounded-lg bg-green-600 text-white text-sm font-semibold disabled:opacity-40"
+                >
+                  Apply synthetic payment and reconnect
+                </button>
+                <div className="p-3 rounded-lg border text-sm">
+                  <b>Payment reconnect:</b>{' '}
+                  {validationRun.reconnect_command
+                    ? `${validationRun.reconnect_command.status} · relay ${validationRun.reconnect_command.relay_after ?? '?'} · ${validationRun.reconnect_command.cmd_id}`
+                    : 'not started'}
+                </div>
+                <button
+                  disabled={validationBusy
+                    || validationRun.reconnect_command?.status !== 'completed'
+                    || validationRun.reconnect_command?.relay_after !== '1'
+                    || validationRun.session.load_delta_kwh <= 0}
+                  onClick={() => runValidationAction(() => completeMeterValidation(validationRun.session.id))}
+                  className="w-full px-4 py-3 rounded-lg bg-gray-900 text-white text-sm font-semibold disabled:opacity-40"
+                >
+                  Complete and record passing validation
+                </button>
+                {validationRun.session.status === 'passed' && (
+                  <div className="p-4 rounded-lg border border-green-300 bg-green-50 text-green-900 font-semibold">
+                    Batch validation passed and evidence was recorded.
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      ) : mode === 'canary' ? (
+        <div className="grid lg:grid-cols-2 gap-5">
+          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+            <div>
+              <div className="text-xs font-semibold uppercase tracking-wide text-amber-600">Single test gateway only</div>
+              <h2 className="text-lg font-semibold text-gray-900 mt-1">Start a signed OTA canary</h2>
+              <p className="text-sm text-gray-600 mt-1">
+                This does not approve a batch or field rollout. CC permits only a server-authorized test gateway and requires exact typed confirmation.
+              </p>
+            </div>
+            <div>
+              <label className={labelCls}>Destination site release</label>
+              <select className={inputCls} value={guideSite} onChange={(e) => {
+                setGuideSite(e.target.value);
+                setCanaryTarget('');
+                setCanaryConfirmation('');
+              }}>
+                <option value="">Select site…</option>
+                {guideSites.map((site) => <option key={site.code} value={site.code}>{site.code} — {site.name}</option>)}
+              </select>
+            </div>
+            {!guideSite ? null : otaReadiness?.canary_ready ? (
+              <div className="p-3 rounded-lg border border-green-200 bg-green-50 text-sm text-green-900">
+                Candidate <b>{otaReadiness.release.target_firmware_version}</b> passed artifact, anti-rollback, and signer checks.
+                {otaReadiness.release.canary_only ? ' Batch promotion remains locked.' : ''}
+              </div>
+            ) : (
+              <div className="p-3 rounded-lg border border-amber-200 bg-amber-50 text-sm text-amber-900">
+                {otaReadinessError || 'No authorized canary target and candidate release are configured for this site.'}
+              </div>
+            )}
+            <div>
+              <label className={labelCls}>Authorized test gateway</label>
+              <select className={inputCls} value={canaryTarget} onChange={(e) => {
+                setCanaryTarget(e.target.value);
+                setCanaryConfirmation('');
+              }} disabled={!otaReadiness?.canary_ready}>
+                <option value="">Select one gateway…</option>
+                {(otaReadiness?.canary_things || []).map((name) => <option key={name} value={name}>{name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className={labelCls}>Type CANARY {canaryTarget || '&lt;gateway&gt;'}</label>
+              <input className={inputCls} value={canaryConfirmation} onChange={(e) => setCanaryConfirmation(e.target.value)} />
+            </div>
+            <div>
+              <label className={labelCls}>Operator note (optional)</label>
+              <input className={inputCls} value={canaryNote} onChange={(e) => setCanaryNote(e.target.value)} placeholder="Batch, shipment, or test bench reference" />
+            </div>
+            <button
+              onClick={handleStartCanary}
+              disabled={canaryStarting || !guideSite || !canaryTarget || canaryConfirmation !== `CANARY ${canaryTarget}` || !otaReadiness?.canary_ready}
+              className="w-full px-4 py-3 bg-amber-600 text-white rounded-lg text-sm font-semibold disabled:opacity-40"
+            >
+              {canaryStarting ? 'Creating OTA canary…' : 'Start one-gateway OTA canary'}
+            </button>
+          </div>
+          <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Live OTA status</h2>
+              <p className="text-sm text-gray-500 mt-1">{trackedOtaId || 'No canary started in this session.'}</p>
+            </div>
+            {trackedOtaId && (
+              <>
+                <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
+                  <div className={`h-full ${otaFailed ? 'bg-red-500' : otaPercent === 100 ? 'bg-green-600' : 'bg-blue-600'}`} style={{ width: `${otaPercent}%` }} />
+                </div>
+                <div className="text-sm font-semibold">{otaPercent}% complete</div>
+                {(otaProgress?.executions || []).map((execution) => (
+                  <div key={execution.thing_name} className="flex justify-between gap-4 p-3 rounded-lg bg-gray-50 border text-sm">
+                    <span className="font-mono">{execution.thing_name}</span>
+                    <span className={execution.status === 'SUCCEEDED' ? 'text-green-700 font-semibold' : otaFailed ? 'text-red-700 font-semibold' : 'text-blue-700'}>
+                      {execution.status || 'QUEUED'}
+                    </span>
+                  </div>
+                ))}
+                {otaProgressError && <div className="text-sm text-red-700">{otaProgressError}</div>}
+                {otaPercent === 100 && (
+                  <div className="p-3 rounded-lg border border-green-200 bg-green-50 text-sm text-green-900">
+                    OTA succeeded. Continue to the recommended batch validation; the release is not automatically approved for field rollout.
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      ) : mode === 'guide' ? (
         <div className="space-y-4">
           <div className="bg-white rounded-xl border border-gray-200 p-4">
             <div className="grid grid-cols-2 md:grid-cols-6 gap-2">

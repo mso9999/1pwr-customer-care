@@ -438,6 +438,8 @@ export async function decommissionMeter(
 export interface AssignMeterRequest {
   customer_identifier: string;
   meter_id: string;
+  thing_name?: string;
+  activate_1meter_billing?: boolean;
   community: string;
   customer_type: string;
   account_number: string;
@@ -452,6 +454,8 @@ export interface AssignMeterResult {
   meter_id: string;
   account_number: string;
   customer_id_legacy: number | null;
+  thing_name?: string | null;
+  billing_meter_priority?: string | null;
 }
 
 export async function assignMeter(data: AssignMeterRequest): Promise<AssignMeterResult> {
@@ -3782,6 +3786,8 @@ export interface UpdateConfigResult {
 export interface OtaReadiness {
   configured: boolean;
   ready: boolean;
+  canary_ready?: boolean;
+  canary_things?: string[];
   site_required?: boolean;
   missing: string[];
   release: {
@@ -3797,8 +3803,37 @@ export interface OtaReadiness {
     credentials_mode?: string;
     fallback_ssid?: string | null;
     approved_sites?: string[];
+    canary_only?: boolean;
   };
   checks: Record<string, { ok: boolean; error?: string; bytes?: number; etag?: string | null }>;
+}
+
+export interface OtaPromotionResult {
+  ota_update_id: string;
+  aws_iot_job_id?: string | null;
+  status?: string | null;
+  target_version: string;
+  site_code: string;
+  thing_names: string[];
+  canary?: boolean;
+}
+
+export async function startFactoryOtaCanary(body: {
+  site_code: string;
+  thing_name: string;
+  confirmation: string;
+  note?: string;
+}): Promise<OtaPromotionResult> {
+  return request<OtaPromotionResult>('/provisioning/ota/promote', {
+    method: 'POST',
+    body: JSON.stringify({
+      site_code: body.site_code,
+      thing_names: [body.thing_name],
+      canary: true,
+      confirmation: body.confirmation,
+      note: body.note,
+    }),
+  });
 }
 
 export async function getFactoryOtaReadiness(siteCode?: string): Promise<OtaReadiness> {
@@ -3880,8 +3915,13 @@ export async function getProvisionedMeters(site?: string): Promise<{ count: numb
   return request<{ count: number; meters: ProvisionedMeter[] }>(`/provisioning/meters${qs}`);
 }
 
-export async function reconcileProvisioning(): Promise<{ matched_things: number; rows_updated: number }> {
-  return request<{ matched_things: number; rows_updated: number }>('/provisioning/reconcile', { method: 'POST' });
+export async function reconcileProvisioning(): Promise<{
+  matched_things: number;
+  rows_updated: number;
+  conflict_count?: number;
+  conflicts?: Array<Record<string, unknown>>;
+}> {
+  return request('/provisioning/reconcile', { method: 'POST' });
 }
 
 /** Download the provisioning-station local app (zip) with the auth token. */
@@ -3898,6 +3938,89 @@ export async function downloadProvisioningStation(): Promise<void> {
   a.download = 'provisioning-station.zip';
   a.click();
   URL.revokeObjectURL(url);
+}
+
+export async function downloadMeterValidationKit(): Promise<void> {
+  const token = getToken();
+  const res = await fetch(`${getApiBase()}/provisioning/meter-kit/download`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = '1meter-validation-kit.zip';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export interface MeterValidationCommand {
+  cmd_id: string;
+  action: 'open' | 'close';
+  status: string;
+  relay_after?: string | null;
+  acked_at?: string | null;
+  error?: string | null;
+}
+
+export interface MeterValidationStatus {
+  session: {
+    id: string;
+    batch_reference: string;
+    thing_name: string;
+    meter_id: string;
+    site_code: string;
+    dummy_customer_label: string;
+    status: string;
+    simulated_balance_kwh: number;
+    baseline_energy_kwh: number;
+    latest_energy_kwh: number;
+    load_delta_kwh: number;
+    disconnect_cmd_id?: string | null;
+    reconnect_cmd_id?: string | null;
+  };
+  telemetry: {
+    thing_name?: string | null;
+    meter_id: string;
+    energy_kwh: number;
+    relay?: string | null;
+    last_seen?: string | null;
+  };
+  disconnect_command?: MeterValidationCommand | null;
+  reconnect_command?: MeterValidationCommand | null;
+}
+
+export async function startMeterValidation(body: {
+  thing_name: string;
+  batch_reference: string;
+  dummy_customer_label?: string;
+  starting_credit_kwh?: number;
+  notes?: string;
+}): Promise<MeterValidationStatus> {
+  return request('/provisioning/validation/sessions', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getMeterValidation(sessionId: string): Promise<MeterValidationStatus> {
+  return request(`/provisioning/validation/sessions/${encodeURIComponent(sessionId)}`);
+}
+
+export async function observeMeterValidationLoad(sessionId: string): Promise<MeterValidationStatus> {
+  return request(`/provisioning/validation/sessions/${encodeURIComponent(sessionId)}/observe`, { method: 'POST' });
+}
+
+export async function applyMeterValidationPayment(sessionId: string, kwh: number): Promise<MeterValidationStatus> {
+  return request(`/provisioning/validation/sessions/${encodeURIComponent(sessionId)}/payment`, {
+    method: 'POST',
+    body: JSON.stringify({ kwh }),
+  });
+}
+
+export async function completeMeterValidation(sessionId: string): Promise<MeterValidationStatus> {
+  return request(`/provisioning/validation/sessions/${encodeURIComponent(sessionId)}/complete`, { method: 'POST' });
 }
 
 // ---------------------------------------------------------------------------

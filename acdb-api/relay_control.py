@@ -105,6 +105,8 @@ class RelayAck(BaseModel):
     relay_after: Optional[str] = Field(default=None, description="'1' (closed) or '0' (open) after the action")
     error: Optional[str] = Field(default=None, max_length=500)
     extra: Optional[dict] = Field(default=None)
+    thing_name: Optional[str] = Field(default=None, max_length=128)
+    meter_id: Optional[str] = Field(default=None, max_length=80)
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +176,29 @@ def _account_for_thing(cur, thing_name: str) -> tuple[Optional[str], Optional[st
     """
     cur.execute(
         """
+        SELECT mp.meter_serial, COALESCE(NULLIF(mp.account_number, ''), m.account_number)
+          FROM meter_provisioning mp
+          LEFT JOIN meters m
+            ON m.meter_id = mp.meter_serial
+            OR regexp_replace(m.meter_id, '^0+', '') =
+               regexp_replace(mp.meter_serial, '^0+', '')
+         WHERE mp.thing_name = %s
+           AND NULLIF(mp.meter_serial, '') IS NOT NULL
+           AND mp.status = 'commissioned'
+           AND NULLIF(mp.account_number, '') IS NOT NULL
+         ORDER BY CASE WHEN mp.status = 'commissioned' THEN 0 ELSE 1 END,
+                  mp.updated_at DESC
+         LIMIT 1
+        """,
+        (thing_name,),
+    )
+    row = cur.fetchone()
+    if row:
+        return (str(row[0]) if row[0] else None, str(row[1]) if row[1] else None)
+
+    # Compatibility fallback for pre-gateway-pool identities.
+    cur.execute(
+        """
         SELECT meter_id, account_number
         FROM meters
         WHERE platform = 'prototype'
@@ -187,6 +212,33 @@ def _account_for_thing(cur, thing_name: str) -> tuple[Optional[str], Optional[st
     if not row:
         return None, None
     return (str(row[0]) if row[0] else None, str(row[1]) if row[1] else None)
+
+
+def _thing_for_meter(cur, meter_id: str, account_number: str) -> Optional[str]:
+    """Resolve the permanent provisioned Thing for a physical meter."""
+    cur.execute(
+        """
+        SELECT thing_name
+          FROM meter_provisioning
+         WHERE regexp_replace(meter_serial, '^0+', '') =
+               regexp_replace(%s, '^0+', '')
+           AND account_number = %s
+           AND status = 'commissioned'
+         ORDER BY updated_at DESC
+         LIMIT 2
+        """,
+        (meter_id, account_number),
+    )
+    rows = cur.fetchall()
+    if not rows:
+        return None
+    if len(rows) > 1 and rows[0][0] != rows[1][0]:
+        logger.error(
+            "ambiguous gateway binding for meter=%s account=%s: %s",
+            meter_id, account_number, [row[0] for row in rows],
+        )
+        return None
+    return str(rows[0][0])
 
 
 def _recent_payment_seconds(cur, account_number: Optional[str]) -> Optional[int]:
@@ -260,6 +312,11 @@ def request_relay(
     with get_connection() as conn:
         cur = conn.cursor()
         meter_id, account_number = _account_for_thing(cur, thing_name)
+        if not meter_id or not account_number:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{thing_name} is not commissioned to one unambiguous meter and account.",
+            )
 
         skipped_safeguards: list[str] = []
 
@@ -416,7 +473,8 @@ def receive_relay_ack(
     with get_connection() as conn:
         cur = conn.cursor()
         cur.execute(
-            "SELECT id, status FROM relay_commands WHERE cmd_id = %s::uuid LIMIT 1",
+            "SELECT id, status, thing_name, meter_id "
+            "FROM relay_commands WHERE cmd_id = %s::uuid LIMIT 1",
             (ack.cmd_id,),
         )
         row = cur.fetchone()
@@ -424,6 +482,15 @@ def receive_relay_ack(
             raise HTTPException(status_code=404, detail=f"unknown cmd_id {ack.cmd_id}")
         relay_row_id = int(row[0])
         prev_status = row[1]
+        expected_thing = str(row[2] or "")
+        expected_meter = str(row[3] or "")
+
+        if ack.thing_name and ack.thing_name != expected_thing:
+            raise HTTPException(status_code=409, detail="ack Thing does not match command target")
+        if ack.meter_id and (ack.meter_id.lstrip("0") or ack.meter_id) != (
+            expected_meter.lstrip("0") or expected_meter
+        ):
+            raise HTTPException(status_code=409, detail="ack meter does not match command target")
 
         if prev_status in ("completed", "rejected", "failed", "timed_out"):
             return {"status": "noop", "current_status": prev_status}
@@ -452,6 +519,80 @@ def receive_relay_ack(
         "cmd_id": ack.cmd_id,
         "status": new_status,
     }
+
+
+def queue_validation_relay(
+    *,
+    thing_name: str,
+    meter_id: str,
+    action: str,
+    reason: str,
+    requested_by: str,
+) -> str:
+    """Queue a relay command for an isolated batch-validation session.
+
+    Authorization and test-Thing allowlisting are owned by
+    ``onemeter_validation``. This helper deliberately uses the same MQTT
+    payload, relay_commands state, firmware path, and acknowledgement path as
+    production control without requiring a real customer financial account.
+    """
+    if action not in VALID_ACTIONS:
+        raise ValueError(f"invalid relay action {action}")
+    cmd_id = str(uuid.uuid4())
+    now = _now_utc()
+    request_payload = {
+        "cmd_id": cmd_id,
+        "thing_name": thing_name,
+        "meter_id": meter_id,
+        "account_number": None,
+        "action": action,
+        "reason": reason,
+        "ttl_seconds": DEFAULT_TTL_SECONDS,
+        "validation": True,
+    }
+    with get_connection() as conn:
+        cur = conn.cursor()
+        recent = _recent_command_for_thing(cur, thing_name, DEBOUNCE_WINDOW_SECONDS)
+        if recent and recent.get("status") in ("queued", "published", "acked"):
+            raise RuntimeError("another relay command for this test gateway is still within the debounce window")
+        cur.execute(
+            """
+            INSERT INTO relay_commands
+                (cmd_id, thing_name, meter_id, account_number,
+                 command, platform, action, reason, requested_by,
+                 ttl_seconds, status, payload)
+            VALUES (%s::uuid, %s, %s, NULL,
+                    %s, 'prototype', %s, %s, %s,
+                    %s, 'queued', %s::jsonb)
+            """,
+            (
+                cmd_id,
+                thing_name,
+                meter_id,
+                "disconnect" if action == "open" else "connect",
+                action,
+                reason,
+                requested_by,
+                DEFAULT_TTL_SECONDS,
+                json.dumps(request_payload),
+            ),
+        )
+        if _iot_publish(thing_name, {
+            "cmd_id": cmd_id,
+            "meter_id": meter_id,
+            "action": action,
+            "reason": reason,
+            "requested_at": now.isoformat(),
+            "requested_at_unix": int(now.timestamp()),
+            "ttl_seconds": DEFAULT_TTL_SECONDS,
+        }):
+            cur.execute(
+                "UPDATE relay_commands SET status = 'published', published_at = NOW() "
+                "WHERE cmd_id = %s::uuid",
+                (cmd_id,),
+            )
+        conn.commit()
+    return cmd_id
 
 
 # ---------------------------------------------------------------------------
@@ -490,7 +631,7 @@ def maybe_auto_open_relay(conn, account_number: str, *, reason: str = "zero_bala
         cur.execute(
             "SELECT meter_id FROM meters "
             "WHERE account_number = %s AND platform = 'prototype' AND status = 'active' "
-            "LIMIT 1",
+            "ORDER BY CASE WHEN role = 'primary' THEN 0 ELSE 1 END LIMIT 1",
             (account_number,),
         )
         row = cur.fetchone()
@@ -512,7 +653,13 @@ def maybe_auto_open_relay(conn, account_number: str, *, reason: str = "zero_bala
             )
             return None
 
-        thing_name = f"OneMeter{int(meter_id):d}" if meter_id.isdigit() else meter_id
+        thing_name = _thing_for_meter(cur, meter_id, account_number)
+        if not thing_name:
+            logger.warning(
+                "auto_open_relay: no unambiguous provisioned gateway for meter %s account %s",
+                meter_id, account_number,
+            )
+            return None
 
         # Debounce
         if _recent_command_for_thing(cur, thing_name, DEBOUNCE_WINDOW_SECONDS):
@@ -575,4 +722,93 @@ def maybe_auto_open_relay(conn, account_number: str, *, reason: str = "zero_bala
         return cmd_id
     except Exception as exc:  # noqa: BLE001 - never break the caller
         logger.error("maybe_auto_open_relay failed for %s: %s", account_number, exc)
+        return None
+
+
+def maybe_auto_close_relay(
+    conn,
+    account_number: str,
+    *,
+    reason: str = "positive_balance_after_payment",
+) -> Optional[str]:
+    """Reconnect a 1Meter-primary account after payment restores credit.
+
+    Uses the same production safety flag, canonical commissioned gateway
+    binding, online check, command ledger, MQTT payload, and firmware
+    acknowledgement as zero-balance cutoff.
+    """
+    if not RELAY_AUTO_TRIGGER_ENABLED:
+        return None
+
+    try:
+        from balance_engine import _resolve_billing_priority, get_balance_kwh
+
+        cur = conn.cursor()
+        if _resolve_billing_priority(cur, account_number) != "1m":
+            return None
+        balance, _ = get_balance_kwh(conn, account_number)
+        if balance <= 0:
+            return None
+        cur.execute(
+            "SELECT meter_id, safety_override FROM meters "
+            "WHERE account_number = %s AND platform = 'prototype' AND status = 'active' "
+            "ORDER BY CASE WHEN role = 'primary' THEN 0 ELSE 1 END LIMIT 1",
+            (account_number,),
+        )
+        row = cur.fetchone()
+        if not row or row[1] == "off":
+            return None
+        meter_id = str(row[0])
+        thing_name = _thing_for_meter(cur, meter_id, account_number)
+        if not thing_name or not _device_online(cur, meter_id):
+            return None
+        recent = _recent_command_for_thing(cur, thing_name, DEBOUNCE_WINDOW_SECONDS)
+        if recent and recent.get("status") in ("queued", "published", "acked"):
+            return None
+
+        cmd_id = str(uuid.uuid4())
+        request_payload = {
+            "cmd_id": cmd_id,
+            "thing_name": thing_name,
+            "meter_id": meter_id,
+            "account_number": account_number,
+            "action": "close",
+            "reason": reason,
+            "ttl_seconds": DEFAULT_TTL_SECONDS,
+            "force": False,
+            "note": "auto-triggered by restored positive balance",
+        }
+        cur.execute(
+            """
+            INSERT INTO relay_commands
+                (cmd_id, thing_name, meter_id, account_number,
+                 command, platform, action, reason, requested_by,
+                 ttl_seconds, status, payload)
+            VALUES (%s::uuid, %s, %s, %s,
+                    'connect', 'prototype', 'close', %s, %s,
+                    %s, 'queued', %s::jsonb)
+            """,
+            (
+                cmd_id, thing_name, meter_id, account_number, reason,
+                f"auto:{reason}", DEFAULT_TTL_SECONDS, json.dumps(request_payload),
+            ),
+        )
+        now_auto = _now_utc()
+        if _iot_publish(thing_name, {
+            "cmd_id": cmd_id,
+            "meter_id": meter_id,
+            "action": "close",
+            "reason": reason,
+            "requested_at": now_auto.isoformat(),
+            "requested_at_unix": int(now_auto.timestamp()),
+            "ttl_seconds": DEFAULT_TTL_SECONDS,
+        }):
+            cur.execute(
+                "UPDATE relay_commands SET status = 'published', published_at = NOW() "
+                "WHERE cmd_id = %s::uuid",
+                (cmd_id,),
+            )
+        return cmd_id
+    except Exception as exc:  # noqa: BLE001
+        logger.error("maybe_auto_close_relay failed for %s: %s", account_number, exc)
         return None

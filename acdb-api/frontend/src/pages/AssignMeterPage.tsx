@@ -1,7 +1,15 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { assignMeter, getCommissionData, getRecord, listSites, previewNextAccount } from '../lib/api';
+import {
+  assignMeter,
+  getCommissionData,
+  getProvisionedMeters,
+  getRecord,
+  listSites,
+  previewNextAccount,
+  type ProvisionedMeter,
+} from '../lib/api';
 
 // ---------------------------------------------------------------------------
 // Types & constants
@@ -86,6 +94,10 @@ export default function AssignMeterPage() {
   // Form state
   const [customerId, setCustomerId] = useState(prefilledCustomerId);
   const [meterid, setMeterid] = useState('');
+  const [thingName, setThingName] = useState('');
+  const [provisionedGateways, setProvisionedGateways] = useState<ProvisionedMeter[]>([]);
+  const [gatewaysLoading, setGatewaysLoading] = useState(false);
+  const [activate1MeterBilling, setActivate1MeterBilling] = useState(false);
   const [community, setCommunity] = useState('');
   const [customerType, setCustomerType] = useState('');
   const [villageName, setVillageName] = useState('');
@@ -121,6 +133,14 @@ export default function AssignMeterPage() {
         setSites(fetched);
       })
       .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    setGatewaysLoading(true);
+    getProvisionedMeters()
+      .then((data) => setProvisionedGateways(data.meters || []))
+      .catch(() => setProvisionedGateways([]))
+      .finally(() => setGatewaysLoading(false));
   }, []);
 
   // Auto-generate account number when community changes
@@ -210,6 +230,8 @@ export default function AssignMeterPage() {
       const result = await assignMeter({
         customer_identifier: customerId.trim(),
         meter_id: meterid.trim(),
+        thing_name: thingName || undefined,
+        activate_1meter_billing: thingName ? activate1MeterBilling : false,
         community: community.toUpperCase(),
         customer_type: customerType,
         account_number: accountNumber.trim().toUpperCase(),
@@ -310,9 +332,11 @@ export default function AssignMeterPage() {
             type="text"
             value={meterid}
             onChange={e => setMeterid(e.target.value)}
+            readOnly={Boolean(thingName)}
             placeholder="e.g. SMRSD-26-00000000"
-            className="w-full px-4 py-3.5 border border-gray-300 rounded-xl text-base focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none"
+            className={`w-full px-4 py-3.5 border border-gray-300 rounded-xl text-base focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none ${thingName ? 'bg-gray-100' : ''}`}
           />
+          {thingName && <p className="text-xs text-green-700 mt-1">Read from {thingName} telemetry; manual editing is disabled.</p>}
         </div>
 
         {/* Site / Community */}
@@ -328,6 +352,58 @@ export default function AssignMeterPage() {
             <option value="">{t('assignMeter:fields.selectSite')}</option>
             {sites.map(s => <option key={s.code} value={s.code}>{s.label}</option>)}
           </select>
+        </div>
+
+        {/* Provisioned 1Meter gateway — telemetry-derived, no manual serial entry */}
+        <div className="p-4 rounded-xl border border-blue-200 bg-blue-50 space-y-3">
+          <div>
+            <label className="block text-sm font-medium text-blue-900 mb-2">
+              Provisioned 1Meter gateway <span className="font-normal text-blue-600">(recommended for 1Meter)</span>
+            </label>
+            <select
+              value={thingName}
+              disabled={!community || gatewaysLoading}
+              onChange={(e) => {
+                const selected = e.target.value;
+                setThingName(selected);
+                const gateway = provisionedGateways.find((row) => row.thing_name === selected);
+                if (gateway?.meter_serial) setMeterid(String(gateway.meter_serial));
+                if (!selected) setActivate1MeterBilling(false);
+              }}
+              className="w-full px-4 py-3 border border-blue-200 rounded-xl text-base bg-white focus:ring-2 focus:ring-blue-400 outline-none"
+            >
+              <option value="">
+                {!community ? 'Select the site first' : gatewaysLoading ? 'Loading gateways…' : 'Legacy/manual meter assignment'}
+              </option>
+              {provisionedGateways
+                .filter((row) =>
+                  String(row.site || '').toUpperCase() === community.toUpperCase()
+                  && Boolean(row.meter_serial)
+                  && !row.account_number
+                  && String(row.ota_status || '').toUpperCase() === 'SUCCEEDED')
+                .map((row) => (
+                  <option key={row.thing_name} value={row.thing_name}>
+                    {row.thing_name} — meter {row.meter_serial} — FW {row.fw_version || row.ota_target_version || 'verified'}
+                  </option>
+                ))}
+            </select>
+            <p className="text-xs text-blue-700 mt-2">
+              Only gateways that reported a meter serial and completed full-firmware OTA are shown. Selecting one locks the assignment to the serial reported by the device.
+            </p>
+          </div>
+          {thingName && (
+            <label className="flex gap-3 items-start p-3 rounded-lg border border-blue-200 bg-white cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={activate1MeterBilling}
+                onChange={(e) => setActivate1MeterBilling(e.target.checked)}
+              />
+              <span className="text-sm text-gray-700">
+                <b>Use this 1Meter for billing and relay control.</b> This makes it the account’s primary meter and enables zero-balance control once the server safety flag is approved.
+              </span>
+            </label>
+          )}
         </div>
 
         {/* Customer Type */}

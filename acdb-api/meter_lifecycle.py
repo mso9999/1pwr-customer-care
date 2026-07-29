@@ -126,6 +126,8 @@ class ReplaceRequest(BaseModel):
 class AssignMeterRequest(BaseModel):
     customer_identifier: str
     meter_id: str
+    thing_name: Optional[str] = None
+    activate_1meter_billing: bool = False
     community: str
     customer_type: str
     account_number: str
@@ -133,6 +135,113 @@ class AssignMeterRequest(BaseModel):
     village_name: Optional[str] = None
     latitude: Optional[str] = None
     longitude: Optional[str] = None
+
+
+def _normalise_meter_serial(value: str) -> str:
+    serial = str(value or "").strip()
+    return serial.lstrip("0") or serial
+
+
+def _lock_provisioned_gateway_for_assignment(
+    cursor,
+    *,
+    thing_name: str,
+    requested_meter_id: str,
+    community: str,
+    account_number: str,
+) -> tuple[str, dict[str, Any]]:
+    """Validate and lock CC's discovered gateway/meter binding.
+
+    Operators must select a gateway whose serial was learned from live
+    telemetry. This removes manual serial transcription from the 1Meter
+    commissioning path and makes the gateway, meter, site, and account update
+    one database transaction.
+    """
+    cursor.execute(
+        """
+        SELECT thing_name, meter_serial, site, account_number, status,
+               last_seen_online, ota_status, fw_version, ota_target_version
+          FROM meter_provisioning
+         WHERE thing_name = %s
+         FOR UPDATE
+        """,
+        (thing_name,),
+    )
+    row = cursor.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Provisioned gateway {thing_name} not found")
+
+    columns = [d[0] for d in cursor.description]
+    gateway = dict(zip(columns, row))
+    detected_serial = str(gateway.get("meter_serial") or "").strip()
+    if not detected_serial:
+        raise HTTPException(
+            status_code=409,
+            detail="This gateway has not discovered a meter yet. Power the meter and gateway, "
+                   "wait for telemetry, then reconcile provisioning before assignment.",
+        )
+    if _normalise_meter_serial(requested_meter_id) != _normalise_meter_serial(detected_serial):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Meter serial does not match the serial reported by {thing_name}.",
+        )
+    if str(gateway.get("site") or "").strip().upper() != community:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Gateway {thing_name} belongs to {gateway.get('site')}, not {community}.",
+        )
+    existing_account = str(gateway.get("account_number") or "").strip().upper()
+    if existing_account and existing_account != account_number:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Gateway {thing_name} is already commissioned to {existing_account}.",
+        )
+    if not gateway.get("last_seen_online"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Gateway {thing_name} has not been observed online.",
+        )
+    if str(gateway.get("ota_status") or "").upper() != "SUCCEEDED":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Gateway {thing_name} has not completed the required full-firmware OTA.",
+        )
+
+    cursor.execute(
+        """
+        SELECT thing_name
+          FROM meter_provisioning
+         WHERE meter_serial = %s
+           AND thing_name <> %s
+           AND NULLIF(account_number, '') IS NOT NULL
+           AND status = 'commissioned'
+         LIMIT 1
+        """,
+        (detected_serial, thing_name),
+    )
+    conflict = cursor.fetchone()
+    if conflict:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Meter {detected_serial} is already commissioned through {conflict[0]}.",
+        )
+
+    # Reuse the canonical short serial already present in `meters`, if any.
+    stripped = _normalise_meter_serial(detected_serial)
+    cursor.execute(
+        """
+        SELECT meter_id
+          FROM meters
+         WHERE platform = 'prototype'
+           AND meter_id = ANY(%s)
+         ORDER BY CASE WHEN meter_id = %s THEN 0 ELSE 1 END
+         LIMIT 1
+        """,
+        ([detected_serial, stripped], stripped),
+    )
+    existing_meter = cursor.fetchone()
+    canonical_meter_id = str(existing_meter[0]) if existing_meter else detected_serial
+    return canonical_meter_id, gateway
 
 
 def _row_to_dict(cursor, row) -> dict[str, Any]:
@@ -269,6 +378,7 @@ def assign_meter(
 
     customer_identifier = str(req.customer_identifier or "").strip()
     meter_id = str(req.meter_id or "").strip()
+    thing_name = str(req.thing_name or "").strip()
     community = str(req.community or "").strip().upper()
     customer_type = str(req.customer_type or "").strip().upper()
     account_number = str(req.account_number or "").strip().upper()
@@ -298,6 +408,16 @@ def assign_meter(
             customer_pg_id = customer.get("id")
             if customer_pg_id is None:
                 raise HTTPException(status_code=500, detail="Resolved customer is missing id")
+
+            gateway = None
+            if thing_name:
+                meter_id, gateway = _lock_provisioned_gateway_for_assignment(
+                    cursor,
+                    thing_name=thing_name,
+                    requested_meter_id=meter_id,
+                    community=community,
+                    account_number=account_number,
+                )
 
             before_state = _snapshot_meter_lifecycle_state(cursor, meter_id, account_number)
 
@@ -351,6 +471,37 @@ def assign_meter(
                     meter_values,
                 )
 
+            if gateway is not None:
+                target_role = "primary" if req.activate_1meter_billing else "check"
+                if req.activate_1meter_billing:
+                    cursor.execute(
+                        """
+                        UPDATE meters
+                           SET role = 'check', updated_at = NOW()
+                         WHERE account_number = %s
+                           AND role = 'primary'
+                           AND meter_id <> %s
+                        """,
+                        (account_number, meter_id),
+                    )
+                    cursor.execute(
+                        """
+                        UPDATE accounts
+                           SET billing_meter_priority = '1m'
+                         WHERE account_number = %s
+                        """,
+                        (account_number,),
+                    )
+                cursor.execute(
+                    """
+                    UPDATE meters
+                       SET platform = 'prototype', role = %s, status = 'active',
+                           account_number = %s, community = %s, updated_at = NOW()
+                     WHERE meter_id = %s
+                    """,
+                    (target_role, account_number, community, meter_id),
+                )
+
             cursor.execute(
                 "SELECT 1 FROM meter_assignments "
                 "WHERE meter_id = %s AND account_number = %s AND removed_at IS NULL",
@@ -376,6 +527,19 @@ def assign_meter(
                     ),
                 )
 
+            if gateway is not None:
+                cursor.execute(
+                    """
+                    UPDATE meter_provisioning
+                       SET account_number = %s,
+                           status = 'commissioned',
+                           commissioned_at = COALESCE(commissioned_at, NOW()),
+                           updated_at = NOW()
+                     WHERE thing_name = %s
+                    """,
+                    (account_number, thing_name),
+                )
+
             after_state = _snapshot_meter_lifecycle_state(cursor, meter_id, account_number)
             log_mutation(
                 user,
@@ -384,7 +548,12 @@ def assign_meter(
                 meter_id,
                 old_values=before_state,
                 new_values=after_state,
-                metadata={"customer_identifier": customer_identifier},
+                metadata={
+                    "customer_identifier": customer_identifier,
+                    "thing_name": thing_name or None,
+                    "source": "gateway_telemetry" if thing_name else "manual_meter_entry",
+                    "activate_1meter_billing": bool(req.activate_1meter_billing),
+                },
                 conn=conn,
             )
             conn.commit()
@@ -396,25 +565,28 @@ def assign_meter(
             raise HTTPException(status_code=400, detail=f"Assign failed: {e}")
 
         sm_sync = None
-        try:
-            full_name = " ".join(
-                filter(None, [customer.get("first_name"), customer.get("last_name")])
-            )
-            sm_sync = sync_sparkmeter_customer_and_meter(
-                account_number=account_number,
-                name=full_name.strip() or account_number,
-                meter_serial=meter_id,
-                phone=None,
-            )
-        except Exception as e:
-            logger.warning("SM customer sync on assign failed for %s: %s", account_number, e)
-            sm_sync = {"success": False, "error": str(e)}
+        if not thing_name:
+            try:
+                full_name = " ".join(
+                    filter(None, [customer.get("first_name"), customer.get("last_name")])
+                )
+                sm_sync = sync_sparkmeter_customer_and_meter(
+                    account_number=account_number,
+                    name=full_name.strip() or account_number,
+                    meter_serial=meter_id,
+                    phone=None,
+                )
+            except Exception as e:
+                logger.warning("SM customer sync on assign failed for %s: %s", account_number, e)
+                sm_sync = {"success": False, "error": str(e)}
 
         result = {
             "message": f"Meter {meter_id} assigned to account {account_number}",
             "meter_id": meter_id,
             "account_number": account_number,
             "customer_id_legacy": customer.get("customer_id_legacy"),
+            "thing_name": thing_name or None,
+            "billing_meter_priority": "1m" if thing_name and req.activate_1meter_billing else None,
         }
         if sm_sync:
             result["sm_sync"] = sm_sync
