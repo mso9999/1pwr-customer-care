@@ -17,6 +17,7 @@ import {
   applyMeterValidationPayment,
   completeMeterValidation,
   getCountryProvisioningReadiness,
+  updateProvisioningActivationStep,
   approveFactoryOtaRelease,
   type UpdateConfigResult,
   type OtaReadiness,
@@ -29,7 +30,7 @@ import {
 } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
-type Mode = 'readiness' | 'guide' | 'canary' | 'batch-test' | 'config' | 'meters' | 'registry';
+type Mode = 'walkthrough' | 'readiness' | 'guide' | 'canary' | 'batch-test' | 'config' | 'meters' | 'registry';
 type ValidationNetworkMode = 'site' | 'mirror';
 type GuideCheckKey =
   | 'sealed'
@@ -51,7 +52,7 @@ const labelCls = 'block text-xs font-medium text-gray-500 mb-1';
 
 export default function ProvisioningPage() {
   const { user } = useAuth();
-  const [mode, setMode] = useState<Mode>('readiness');
+  const [mode, setMode] = useState<Mode>('walkthrough');
   const [countryReadiness, setCountryReadiness] = useState<CountryProvisioningReadiness | null>(null);
   const [countryReadinessLoading, setCountryReadinessLoading] = useState(false);
   const [otaReadiness, setOtaReadiness] = useState<OtaReadiness | null>(null);
@@ -95,6 +96,8 @@ export default function ProvisioningPage() {
   const [validationRun, setValidationRun] = useState<MeterValidationStatus | null>(null);
   const [validationBusy, setValidationBusy] = useState(false);
   const [kitDownloading, setKitDownloading] = useState(false);
+  const [activationStepBusy, setActivationStepBusy] = useState('');
+  const [activationEvidence, setActivationEvidence] = useState<Record<string, string>>({});
 
   // config form state
   const [thingName, setThingName] = useState('');
@@ -180,7 +183,7 @@ export default function ProvisioningPage() {
   };
 
   useEffect(() => {
-    if (mode === 'readiness') loadCountryReadiness();
+    if (mode === 'walkthrough' || mode === 'readiness') loadCountryReadiness();
     if (mode === 'registry') loadRegistry();
     if (mode === 'meters') loadMeters();
     if (mode === 'config') loadConfigRegistry();
@@ -188,7 +191,10 @@ export default function ProvisioningPage() {
 
   useEffect(() => {
     getProvisioningSiteCodes()
-      .then(setGuideSites)
+      .then((sites) => {
+        setGuideSites(sites);
+        if (sites.length === 1) setGuideSite((current) => current || sites[0].code);
+      })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
 
@@ -377,6 +383,27 @@ export default function ProvisioningPage() {
     }
   };
 
+  const handleActivationStep = async (stepKey: string, completed: boolean) => {
+    if (!guideSite) return;
+    setError('');
+    setActivationStepBusy(stepKey);
+    try {
+      await updateProvisioningActivationStep({
+        site_code: guideSite,
+        step_key: stepKey,
+        completed,
+        evidence_note: activationEvidence[stepKey]
+          || countryReadiness?.site_progress?.[guideSite]?.operator_steps?.[stepKey]?.evidence_note
+          || undefined,
+      });
+      loadCountryReadiness();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setActivationStepBusy('');
+    }
+  };
+
   const guideSteps = [
     'Choose site',
     'Prepare networks',
@@ -393,6 +420,150 @@ export default function ProvisioningPage() {
   const otaQueued = Math.max(0, otaExpected - otaSucceeded - otaInProgress - otaFailed);
   const otaPercent = otaExpected ? Math.round((otaSucceeded / otaExpected) * 100) : 0;
   const canApproveRelease = ['superadmin', 'engineering'].includes(String(user?.role || ''));
+  const selectedSiteProgress = guideSite ? countryReadiness?.site_progress?.[guideSite] : undefined;
+  const foundationKeys = new Set(['sites', 'tariff', 'metering', 'payment_ingest', 'meter_credit']);
+  const foundationsReady = Boolean(countryReadiness?.gates
+    .filter((gate) => foundationKeys.has(gate.key))
+    .every((gate) => gate.ready));
+  const operatorStep = (key: string) => selectedSiteProgress?.operator_steps?.[key];
+  const physicalValidationPassed = (selectedSiteProgress?.passed_validations || 0) > 0;
+  const walkthroughSteps: Array<{
+    key: string;
+    title: string;
+    owner: string;
+    done: boolean;
+    description: string;
+    actionLabel: string;
+    mode?: Mode;
+    route?: string;
+    secondaryRoute?: string;
+    secondaryLabel?: string;
+    manualKey?: string;
+    evidenceRequired?: boolean;
+    evidenceHint?: string;
+    note?: string;
+  }> = [
+    {
+      key: 'country-foundations',
+      title: 'Activate the country foundations',
+      owner: 'Country lead, Finance, O&M, Engineering',
+      done: foundationsReady,
+      description: 'Approve the site roster and tariff, then configure metering, payment ingestion, and meter credit. CC keeps provisioning fail-closed until these gates are ready.',
+      actionLabel: 'Review country gates',
+      mode: 'readiness' as Mode,
+    },
+    {
+      key: 'site-release',
+      title: 'Select the deployment site and OTA candidate',
+      owner: 'Firmware / Engineering',
+      done: Boolean(selectedSiteProgress?.ota_candidate_ready),
+      description: 'Choose the real destination site. CC must find an immutable signed full-firmware candidate for that exact site.',
+      actionLabel: 'Review site release',
+      mode: 'readiness' as Mode,
+    },
+    {
+      key: 'deployment_wifi_ready',
+      title: 'Prepare the site Starlink credentials',
+      owner: 'Country O&M',
+      done: Boolean(operatorStep('deployment_wifi_ready')?.completed),
+      description: 'Have the exact site SSID/password available. Optionally create a controlled 2.4 GHz HQ mirror with identical credentials and test its internet access. Never paste the password into CC notes.',
+      actionLabel: 'Open network preparation',
+      mode: 'guide' as Mode,
+      manualKey: 'deployment_wifi_ready',
+      evidenceRequired: false,
+      evidenceHint: 'Optional reference only—never enter the Wi-Fi password',
+    },
+    {
+      key: 'first-gateway',
+      title: 'Allocate one factory gateway as the canary',
+      owner: 'Country O&M',
+      done: (selectedSiteProgress?.test_gateways || 0) > 0,
+      description: 'Download the station, select the country and site, scan the provisioning LAN, match the printed unit, and allocate exactly one factory v1.1.56 gateway.',
+      actionLabel: 'Start gateway guide',
+      mode: 'guide' as Mode,
+    },
+    {
+      key: 'ota-canary',
+      title: 'Complete and verify the v1.1.57 OTA canary',
+      owner: 'Country O&M + Firmware',
+      done: (selectedSiteProgress?.ota_succeeded || 0) > 0,
+      description: 'Keep the gateway online while CC displays queued, in-progress, succeeded, or failed. Confirm the installed firmware telemetry reports the target version after reboot.',
+      actionLabel: 'Open OTA monitor',
+      mode: 'canary' as Mode,
+    },
+    {
+      key: 'meter_string_ready',
+      title: 'Address meters and connect the protected test load',
+      owner: 'Country O&M',
+      done: Boolean(operatorStep('meter_string_ready')?.completed),
+      description: 'Download the addressing kit, address and label meters one at a time, verify the sorted RS485 string, power down, then connect the string and a protected dummy load.',
+      actionLabel: 'Open addressing and validation',
+      mode: 'batch-test' as Mode,
+      manualKey: 'meter_string_ready',
+      evidenceRequired: true,
+      evidenceHint: 'Meter serials, batch label, or bench/photo reference',
+    },
+    {
+      key: 'physical-validation',
+      title: 'Prove consumption, zero-balance shutoff, and payment restart',
+      owner: 'Country O&M',
+      done: physicalValidationPassed || Boolean(selectedSiteProgress?.ota_batch_approved),
+      description: 'Run the isolated dummy-customer test: observe positive load, consume the synthetic balance, verify relay open, apply synthetic payment, verify relay close, and confirm the load restarts.',
+      actionLabel: 'Run batch validation',
+      mode: 'batch-test' as Mode,
+      note: !physicalValidationPassed && selectedSiteProgress?.ota_batch_approved
+        ? 'Physical validation was waived during release approval; the waiver remains in the audit trail.'
+        : undefined,
+    },
+    {
+      key: 'release-approval',
+      title: 'Approve the immutable release for controlled batches',
+      owner: 'Engineering / Superadmin',
+      done: Boolean(selectedSiteProgress?.ota_batch_approved),
+      description: 'Review the successful canary and validation session. Approval is bound to the exact artifact version and target firmware.',
+      actionLabel: 'Review and approve release',
+      mode: 'canary' as Mode,
+    },
+    {
+      key: 'controlled-batch',
+      title: 'Provision the controlled gateway batch',
+      owner: 'Country O&M',
+      done: (selectedSiteProgress?.production_gateways || 0) > 0,
+      description: 'Return to the station, provision a controlled batch, and do not move forward until every gateway reports a successful OTA and the expected site/SSID.',
+      actionLabel: 'Open batch provisioning guide',
+      mode: 'guide' as Mode,
+    },
+    {
+      key: 'test_customer_assigned',
+      title: 'Onboard the test customer and assign the meter',
+      owner: 'Country O&M',
+      done: Boolean(operatorStep('test_customer_assigned')?.completed),
+      description: 'Create or identify the approved test customer, reconcile the acquired meter serial, assign the meter/gateway to that account, and record the account reference below.',
+      actionLabel: 'Assign meter',
+      route: '/assign-meter',
+      secondaryRoute: '/customers/new',
+      secondaryLabel: 'Create customer',
+      manualKey: 'test_customer_assigned',
+      evidenceRequired: true,
+      evidenceHint: 'Test account number and assigned meter serial',
+    },
+    {
+      key: 'site_commissioning_verified',
+      title: 'Verify actual-site Starlink and complete commissioning',
+      owner: 'Country O&M',
+      done: Boolean(operatorStep('site_commissioning_verified')?.completed),
+      description: 'At the real site, confirm cloud reconnect, fresh consumption, the correct customer mapping, a test payment, relay behavior, and final commissioning records.',
+      actionLabel: 'Open commissioning',
+      route: '/commission',
+      secondaryRoute: '/record-payment',
+      secondaryLabel: 'Record test payment',
+      manualKey: 'site_commissioning_verified',
+      evidenceRequired: true,
+      evidenceHint: 'Commissioning/customer reference and actual-site test result',
+    },
+  ];
+  const walkthroughDone = walkthroughSteps.filter((step) => step.done).length;
+  const walkthroughPercent = Math.round((walkthroughDone / walkthroughSteps.length) * 100);
 
   return (
     <div className="max-w-5xl mx-auto p-4 sm:p-6">
@@ -407,6 +578,7 @@ export default function ProvisioningPage() {
 
       <div className="flex gap-1 mb-5 border-b border-gray-200">
         {([
+          ['walkthrough', 'Operator walkthrough'],
           ['readiness', 'Country readiness'],
           ['guide', 'Guide & download'],
           ['canary', 'OTA canary'],
@@ -435,7 +607,207 @@ export default function ProvisioningPage() {
         </div>
       )}
 
-      {mode === 'readiness' ? (
+      {mode === 'walkthrough' ? (
+        <div className="space-y-5">
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-5">
+            <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+              <div>
+                <div className="text-xs uppercase tracking-wide font-semibold text-blue-700">
+                  Guided country and site activation
+                </div>
+                <h2 className="text-xl font-semibold text-gray-900 mt-1">
+                  {countryReadiness?.country_name || 'Loading country…'} operator walkthrough
+                </h2>
+                <p className="text-sm text-gray-700 mt-1 max-w-2xl">
+                  Work from top to bottom. CC completes cloud-observable steps automatically and records
+                  your confirmation only where a physical bench or site check cannot be observed remotely.
+                </p>
+              </div>
+              <div className="min-w-48">
+                <div className="flex justify-between text-xs font-semibold text-gray-700 mb-1">
+                  <span>{walkthroughDone} of {walkthroughSteps.length} complete</span>
+                  <span>{walkthroughPercent}%</span>
+                </div>
+                <div className="h-3 bg-white rounded-full overflow-hidden border border-blue-100">
+                  <div className="h-full bg-blue-600 transition-all" style={{ width: `${walkthroughPercent}%` }} />
+                </div>
+              </div>
+            </div>
+            <div className="grid md:grid-cols-[1fr_auto] gap-3 items-end mt-5">
+              <div>
+                <label className={labelCls}>Deployment site</label>
+                <select
+                  className={inputCls}
+                  value={guideSite}
+                  onChange={(e) => {
+                    setGuideSite(e.target.value);
+                    setActivationEvidence({});
+                    setCanaryTarget('');
+                    setValidationTarget('');
+                  }}
+                >
+                  <option value="">Select the site this equipment will serve…</option>
+                  {guideSites.map((site) => (
+                    <option key={site.code} value={site.code}>{site.code} — {site.name}</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                onClick={loadCountryReadiness}
+                disabled={countryReadinessLoading}
+                className="px-4 py-2 rounded-lg border bg-white text-sm font-medium disabled:opacity-50"
+              >
+                {countryReadinessLoading ? 'Refreshing…' : 'Refresh evidence'}
+              </button>
+            </div>
+            {!guideSites.length && !countryReadinessLoading && (
+              <div className="mt-3 p-3 rounded-lg bg-amber-50 border border-amber-300 text-sm text-amber-950">
+                No deployment sites are configured for this country. Complete step 1 with the country lead
+                and Engineering before an operator can provision equipment.
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            {walkthroughSteps.map((step, index) => {
+              const manual = step.manualKey ? operatorStep(step.manualKey) : undefined;
+              const evidence = step.manualKey
+                ? activationEvidence[step.manualKey] ?? manual?.evidence_note ?? ''
+                : '';
+              const blockedBySite = index > 0 && !guideSite;
+              return (
+                <div
+                  key={step.key}
+                  className={`rounded-xl border p-4 ${
+                    step.done
+                      ? 'border-green-200 bg-green-50'
+                      : blockedBySite
+                        ? 'border-gray-200 bg-gray-50'
+                        : 'border-amber-200 bg-white'
+                  }`}
+                >
+                  <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                    <div className="flex gap-3 min-w-0">
+                      <span className={`shrink-0 inline-flex w-8 h-8 items-center justify-center rounded-full text-sm font-bold ${
+                        step.done
+                          ? 'bg-green-600 text-white'
+                          : blockedBySite
+                            ? 'bg-gray-200 text-gray-500'
+                            : 'bg-amber-100 text-amber-800'
+                      }`}>
+                        {step.done ? '✓' : index + 1}
+                      </span>
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="font-semibold text-gray-900">{step.title}</h3>
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                            step.done ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'
+                          }`}>
+                            {step.done ? 'Complete' : blockedBySite ? 'Select site first' : 'Action required'}
+                          </span>
+                        </div>
+                        <div className="text-xs text-gray-500 mt-1">Owner: {step.owner}</div>
+                        <p className="text-sm text-gray-700 mt-2">{step.description}</p>
+                        {step.note && (
+                          <div className="text-xs text-amber-800 mt-2">{step.note}</div>
+                        )}
+                        {manual?.completed && (
+                          <div className="text-xs text-green-800 mt-2">
+                            Confirmed by {manual.completed_by || 'operator'}
+                            {manual.completed_at ? ` · ${manual.completed_at}` : ''}
+                            {manual.evidence_note ? ` · ${manual.evidence_note}` : ''}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div className="shrink-0 flex flex-wrap gap-2">
+                      {step.mode && (
+                        <button
+                          onClick={() => setMode(step.mode!)}
+                          disabled={blockedBySite && step.key !== 'country-foundations'}
+                          className="px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold disabled:opacity-40"
+                        >
+                          {step.actionLabel}
+                        </button>
+                      )}
+                      {step.route && (
+                        <Link
+                          to={step.route}
+                          className={`px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold ${
+                            blockedBySite ? 'pointer-events-none opacity-40' : ''
+                          }`}
+                        >
+                          {step.actionLabel}
+                        </Link>
+                      )}
+                      {step.secondaryRoute && (
+                        <Link
+                          to={step.secondaryRoute}
+                          className={`px-3 py-2 rounded-lg border bg-white text-xs font-semibold ${
+                            blockedBySite ? 'pointer-events-none opacity-40' : ''
+                          }`}
+                        >
+                          {step.secondaryLabel}
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+
+                  {step.manualKey && !blockedBySite && (
+                    <div className="mt-4 ml-0 sm:ml-11 p-3 rounded-lg border bg-white">
+                      <label className={labelCls}>
+                        {step.evidenceRequired ? 'Evidence/reference required' : 'Operator reference (optional)'}
+                      </label>
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <input
+                          className={inputCls}
+                          value={evidence}
+                          placeholder={step.evidenceHint}
+                          onChange={(e) => setActivationEvidence((current) => ({
+                            ...current,
+                            [step.manualKey!]: e.target.value,
+                          }))}
+                        />
+                        <button
+                          onClick={() => handleActivationStep(step.manualKey!, !step.done)}
+                          disabled={activationStepBusy === step.manualKey
+                            || (!step.done && Boolean(step.evidenceRequired) && evidence.trim().length < 5)}
+                          className={`shrink-0 px-4 py-2 rounded-lg text-sm font-semibold disabled:opacity-40 ${
+                            step.done
+                              ? 'border border-gray-300 bg-white text-gray-700'
+                              : 'bg-green-600 text-white'
+                          }`}
+                        >
+                          {activationStepBusy === step.manualKey
+                            ? 'Saving…'
+                            : step.done
+                              ? 'Reopen step'
+                              : 'Confirm complete'}
+                        </button>
+                      </div>
+                      {step.manualKey === 'deployment_wifi_ready' && (
+                        <p className="text-xs text-red-700 mt-2">
+                          Do not enter the Starlink password here. It is entered only in the local provisioning station.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {walkthroughDone === walkthroughSteps.length && (
+            <div className="p-5 rounded-xl border border-green-300 bg-green-50 text-green-950">
+              <div className="font-semibold text-lg">Site activation walkthrough complete</div>
+              <p className="text-sm mt-1">
+                CC has the cloud evidence and operator confirmations for this site. Retain the validation,
+                release, customer, and commissioning references with the deployment record.
+              </p>
+            </div>
+          )}
+        </div>
+      ) : mode === 'readiness' ? (
         <div className="space-y-5">
           {countryReadinessLoading && !countryReadiness ? (
             <div className="p-5 rounded-xl border bg-white text-sm text-gray-500">

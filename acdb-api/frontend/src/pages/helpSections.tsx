@@ -1369,12 +1369,16 @@ function ProvisioningContent() {
         gateways through identity, deployment Starlink access, signed full-firmware OTA, and commissioning. It is
         for <Bold>superadmin</Bold> / <Bold>O&amp;M team</Bold>.
       </P>
-      <SubHead>Country readiness comes first</SubHead>
+      <SubHead>Start with the Operator walkthrough</SubHead>
       <P>
-        Select the intended country in the CC header, then open <Bold>Country readiness</Bold>.
-        It shows each activation gate, its owner, the affected scope, and the next action.
-        Do not use another country&apos;s site code, tariff, database, or metering setup as a workaround.
+        Select the intended country in the CC header, open <Bold>Operator walkthrough</Bold>, and
+        choose the exact deployment site. It covers country activation, Starlink preparation,
+        first-gateway OTA, meter/load testing, release approval, controlled batches, test-customer
+        assignment, and actual-site commissioning. CC completes cloud-observable steps automatically
+        and records the named operator plus evidence reference for physical steps. Do not use another
+        country&apos;s site code, tariff, database, or metering setup as a workaround.
       </P>
+      <Warning>Never enter a Starlink password in a walkthrough evidence field. Enter it only in the local provisioning station. Evidence should be a batch, meter, customer, photo, ticket, or commissioning reference.</Warning>
       <Ul>
         <li><Bold>Country lead + Engineering:</Bold> approve the canonical site roster. Adding a missing site code is a controlled backend country-configuration change.</li>
         <li><Bold>Country lead + Finance/O&amp;M:</Bold> approve and enter the tariff plus connection/readyboard fees on <PageLink to="/tariffs">Tariffs</PageLink>.</li>
@@ -1383,7 +1387,7 @@ function ProvisioningContent() {
         <li><Bold>Country O&amp;M:</Bold> run the first OTA canary and recommended physical batch validation.</li>
         <li><Bold>Engineering/superadmin:</Bold> approve the immutable release for controlled batches using the recorded evidence.</li>
       </Ul>
-      <Warning>Zambia remains intentionally fail-closed until its site roster, tariff/fees, metering mapping, payment integration, OTA candidate, and canary evidence are approved. The readiness tab is the source of truth for the remaining gates.</Warning>
+      <Warning>Zambia remains intentionally fail-closed until its site roster, tariff/fees, metering mapping, payment integration, OTA candidate, and canary evidence are approved. The Operator walkthrough and Country readiness tab are the source of truth for the remaining gates.</Warning>
       <SubHead>Factory-virgin means boot firmware is already installed</SubHead>
       <Ul>
         <li><Bold>Sealed factory unit:</Bold> do not open, erase, or connect it by USB. Its boot firmware recognizes the approved provisioning LAN.</li>

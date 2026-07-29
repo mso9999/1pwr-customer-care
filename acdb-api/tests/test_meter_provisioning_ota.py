@@ -369,5 +369,51 @@ class TestReleaseApproval(unittest.TestCase):
         self.assertIn("onemeter_ota_release_approvals", insert_sql)
 
 
+class TestActivationWalkthrough(unittest.TestCase):
+    def test_physical_step_requires_evidence(self):
+        with patch.object(mp, "_active_site_map", return_value={"GBO": "Gbo"}):
+            with self.assertRaises(mp.HTTPException) as ctx:
+                mp.update_activation_step(
+                    mp.ActivationStepUpdateRequest(
+                        site_code="GBO",
+                        step_key="meter_string_ready",
+                        completed=True,
+                        evidence_note="",
+                    ),
+                    MagicMock(user_id="comfort"),
+                )
+        self.assertEqual(ctx.exception.status_code, 400)
+
+    def test_operator_confirmation_is_persisted_and_audited(self):
+        cursor = MagicMock()
+        conn = MagicMock()
+        conn.cursor.return_value = cursor
+        cm = MagicMock()
+        cm.__enter__.return_value = conn
+        cm.__exit__.return_value = False
+        fake_customer_api = types.SimpleNamespace(get_connection=MagicMock(return_value=cm))
+
+        with (
+            patch.object(mp, "_active_site_map", return_value={"GBO": "Gbo"}),
+            patch.dict("sys.modules", {"customer_api": fake_customer_api}),
+            patch.object(mp, "try_log_mutation") as audit,
+        ):
+            result = mp.update_activation_step(
+                mp.ActivationStepUpdateRequest(
+                    site_code="gbo",
+                    step_key="test_customer_assigned",
+                    completed=True,
+                    evidence_note="TEST-GBO-001 / meter 240017",
+                ),
+                MagicMock(user_id="comfort"),
+            )
+
+        self.assertTrue(result["completed"])
+        self.assertEqual(result["site_code"], "GBO")
+        self.assertIn("onemeter_activation_steps", cursor.execute.call_args.args[0])
+        conn.commit.assert_called_once()
+        audit.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -3869,6 +3869,23 @@ export interface CountryProvisioningReadiness {
   effective_tariff: number;
   ota_candidate_sites: string[];
   ota_batch_sites: string[];
+  site_progress: Record<string, {
+    provisioned_gateways: number;
+    production_gateways: number;
+    test_gateways: number;
+    ota_succeeded: number;
+    passed_validations: number;
+    commissioned: number;
+    ota_candidate_ready: boolean;
+    ota_batch_approved: boolean;
+    operator_steps: Record<string, {
+      completed: boolean;
+      evidence_note?: string | null;
+      completed_by?: string | null;
+      completed_at?: string | null;
+      updated_at?: string | null;
+    }>;
+  }>;
   stats: {
     provisioned_gateways: number;
     ota_succeeded: number;
@@ -3883,6 +3900,25 @@ export interface CountryProvisioningReadiness {
 
 export async function getCountryProvisioningReadiness(): Promise<CountryProvisioningReadiness> {
   return request<CountryProvisioningReadiness>('/provisioning/readiness');
+}
+
+export async function updateProvisioningActivationStep(body: {
+  site_code: string;
+  step_key: string;
+  completed: boolean;
+  evidence_note?: string;
+}): Promise<{
+  site_code: string;
+  step_key: string;
+  completed: boolean;
+  evidence_note?: string | null;
+  label: string;
+  owner: string;
+}> {
+  return request('/provisioning/activation-steps', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
 }
 
 export interface OtaReleaseApprovalResult {

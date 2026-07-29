@@ -124,6 +124,28 @@ _BENCH_PREFIXES = ("HQTEST", "TEST-", "TESTSITE")
 
 PROVISIONING_ROLES = (CCRole.superadmin, CCRole.onm_team, CCRole.engineering)
 RELEASE_APPROVAL_ROLES = (CCRole.superadmin, CCRole.engineering)
+ACTIVATION_STEP_DEFS = {
+    "deployment_wifi_ready": {
+        "label": "Deployment Wi-Fi prepared",
+        "owner": "Country O&M",
+        "requires_evidence": False,
+    },
+    "meter_string_ready": {
+        "label": "Meter string addressed and safely connected",
+        "owner": "Country O&M",
+        "requires_evidence": True,
+    },
+    "test_customer_assigned": {
+        "label": "Test customer onboarded and meter assigned",
+        "owner": "Country O&M",
+        "requires_evidence": True,
+    },
+    "site_commissioning_verified": {
+        "label": "Actual-site connectivity and commissioning verified",
+        "owner": "Country O&M",
+        "requires_evidence": True,
+    },
+}
 
 
 def _now() -> str:
@@ -419,6 +441,18 @@ def ensure_meter_provisioning_table():
                     UNIQUE (site_code, artifact_version_id, target_firmware_version)
                 )
             """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS onemeter_activation_steps (
+                    site_code       VARCHAR(16) NOT NULL,
+                    step_key        VARCHAR(64) NOT NULL,
+                    completed       BOOLEAN NOT NULL DEFAULT FALSE,
+                    evidence_note   TEXT,
+                    completed_by    TEXT,
+                    completed_at    TIMESTAMPTZ,
+                    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (site_code, step_key)
+                )
+            """)
             # Atomic per-site gateway sequence allocator (MAK-GW-0007 ...).
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS gateway_pool_seq (
@@ -703,6 +737,13 @@ class OtaReleaseApprovalRequest(BaseModel):
     confirmation: str = Field(..., min_length=1, max_length=160)
 
 
+class ActivationStepUpdateRequest(BaseModel):
+    site_code: str
+    step_key: str
+    completed: bool = True
+    evidence_note: Optional[str] = Field(default=None, max_length=500)
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -805,6 +846,20 @@ def country_provisioning_readiness(
 
     sites = dict(_active_site_map())
     effective_tariff = COUNTRY.default_tariff_rate
+    site_progress = {
+        site: {
+            "provisioned_gateways": 0,
+            "production_gateways": 0,
+            "test_gateways": 0,
+            "ota_succeeded": 0,
+            "passed_validations": 0,
+            "commissioned": 0,
+            "ota_candidate_ready": False,
+            "ota_batch_approved": False,
+            "operator_steps": {},
+        }
+        for site in sites
+    }
     stats = {
         "provisioned_gateways": 0,
         "ota_succeeded": 0,
@@ -839,9 +894,58 @@ def country_provisioning_readiness(
                 test_gateways=int(counts[3]),
             )
             cur.execute(
+                """
+                SELECT site,
+                       COUNT(*),
+                       COUNT(*) FILTER (WHERE is_test = FALSE),
+                       COUNT(*) FILTER (WHERE is_test = TRUE),
+                       COUNT(*) FILTER (WHERE UPPER(COALESCE(ota_status, '')) = 'SUCCEEDED'),
+                       COUNT(*) FILTER (WHERE status = 'commissioned')
+                  FROM meter_provisioning
+                 WHERE site IS NOT NULL
+                 GROUP BY site
+                """
+            )
+            for site, provisioned, production, test, ota_ok, commissioned in cur.fetchall():
+                if site in site_progress:
+                    site_progress[site].update(
+                        provisioned_gateways=int(provisioned),
+                        production_gateways=int(production),
+                        test_gateways=int(test),
+                        ota_succeeded=int(ota_ok),
+                        commissioned=int(commissioned),
+                    )
+            cur.execute(
                 "SELECT COUNT(*) FROM onemeter_validation_sessions WHERE status = 'passed'"
             )
             stats["passed_validations"] = int((cur.fetchone() or [0])[0])
+            cur.execute(
+                """
+                SELECT site_code, COUNT(*)
+                  FROM onemeter_validation_sessions
+                 WHERE status = 'passed'
+                 GROUP BY site_code
+                """
+            )
+            for site, passed in cur.fetchall():
+                if site in site_progress:
+                    site_progress[site]["passed_validations"] = int(passed)
+            cur.execute(
+                """
+                SELECT site_code, step_key, completed, evidence_note,
+                       completed_by, completed_at, updated_at
+                  FROM onemeter_activation_steps
+                """
+            )
+            for site, key, completed, note, operator, completed_at, updated_at in cur.fetchall():
+                if site in site_progress and key in ACTIVATION_STEP_DEFS:
+                    site_progress[site]["operator_steps"][key] = {
+                        "completed": bool(completed),
+                        "evidence_note": note,
+                        "completed_by": operator,
+                        "completed_at": str(completed_at) if completed_at else None,
+                        "updated_at": str(updated_at) if updated_at else None,
+                    }
     except Exception as exc:  # noqa: BLE001
         logger.debug("Unable to load provisioning readiness stats: %s", exc)
 
@@ -851,8 +955,10 @@ def country_provisioning_readiness(
         release = _ota_release(site)
         if not _ota_missing_config(release):
             ota_candidate_sites.append(site)
+            site_progress[site]["ota_candidate_ready"] = True
             if not release.get("canary_only"):
                 ota_batch_sites.append(site)
+                site_progress[site]["ota_batch_approved"] = True
 
     payment_automation = os.environ.get(
         "PAYMENT_AUTOMATION_ENABLED",
@@ -977,6 +1083,7 @@ def country_provisioning_readiness(
         "effective_tariff": effective_tariff,
         "ota_candidate_sites": ota_candidate_sites,
         "ota_batch_sites": ota_batch_sites,
+        "site_progress": site_progress,
         "stats": stats,
         "gates": gates,
         "field_batch_ready": bool(gates) and all(
@@ -984,6 +1091,76 @@ def country_provisioning_readiness(
             if gate["key"] in {"sites", "ota_candidate", "ota_canary", "ota_batch"}
         ),
         "end_to_end_ready": bool(gates) and all(gate["ready"] for gate in gates),
+    }
+
+
+@router.put("/activation-steps")
+def update_activation_step(
+    body: ActivationStepUpdateRequest,
+    user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES)),
+):
+    """Record or clear an operator-confirmed physical activation step."""
+    site = body.site_code.strip().upper()
+    key = body.step_key.strip()
+    definition = ACTIVATION_STEP_DEFS.get(key)
+    if site not in _active_site_map():
+        raise HTTPException(status_code=400, detail="Select a configured site in the active country.")
+    if not definition:
+        raise HTTPException(status_code=400, detail="Unknown activation checklist step.")
+    note = (body.evidence_note or "").strip()
+    if body.completed and definition["requires_evidence"] and len(note) < 5:
+        raise HTTPException(
+            status_code=400,
+            detail="Add a short evidence reference before completing this physical step.",
+        )
+
+    from customer_api import get_connection
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO onemeter_activation_steps
+                (site_code, step_key, completed, evidence_note, completed_by,
+                 completed_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s,
+                    CASE WHEN %s THEN NOW() ELSE NULL END, NOW())
+            ON CONFLICT (site_code, step_key) DO UPDATE SET
+                completed = EXCLUDED.completed,
+                evidence_note = EXCLUDED.evidence_note,
+                completed_by = EXCLUDED.completed_by,
+                completed_at = CASE WHEN EXCLUDED.completed THEN NOW() ELSE NULL END,
+                updated_at = NOW()
+            """,
+            (
+                site, key, body.completed, note or None, str(user.user_id),
+                body.completed,
+            ),
+        )
+        try_log_mutation(
+            user,
+            "update",
+            "onemeter_activation_steps",
+            f"{site}:{key}",
+            new_values={
+                "site_code": site,
+                "step_key": key,
+                "completed": body.completed,
+                "evidence_note": note or None,
+            },
+            metadata={
+                "kind": "onemeter_activation_walkthrough",
+                "endpoint": "PUT /api/provisioning/activation-steps",
+            },
+            conn=conn,
+        )
+        conn.commit()
+    return {
+        "site_code": site,
+        "step_key": key,
+        "completed": body.completed,
+        "evidence_note": note or None,
+        "label": definition["label"],
+        "owner": definition["owner"],
     }
 
 
