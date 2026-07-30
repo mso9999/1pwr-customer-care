@@ -979,9 +979,13 @@ def country_provisioning_readiness(
             "action": (
                 "Use the approved canonical site codes shown below."
                 if sites
-                else "Country lead must approve site names/codes; Engineering then adds them to the country configuration."
+                else (
+                    "Country lead must approve the official name, unique site code, district/province, "
+                    "deployment lead, and metering platform IDs. Engineering then adds the site to the "
+                    "country configuration and deploys it. Open the site instructions for the exact sequence."
+                )
             ),
-            "route": None,
+            "route": "/help#sites",
         },
         {
             "key": "tariff",

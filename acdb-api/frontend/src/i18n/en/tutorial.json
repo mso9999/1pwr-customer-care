@@ -42,7 +42,7 @@
       "description": "Resolve the commercial, site, metering, payment, firmware, and evidence gates before a field batch is released.",
       "steps": [
         "Select the intended country in the CC header, open Provisioning → Operator walkthrough, choose the deployment site, and refresh the evidence. Never use another country's site code or database as a workaround.",
-        "Country lead and Engineering approve the canonical site roster. A missing greenfield site is a backend country-configuration change; Starlink passwords are not part of this roster.",
+        "If a site is missing, expand “Site missing from the list?” in the Operator walkthrough. The country lead supplies the official name, proposed unique three-letter code, province/district, deployment lead, go-live date, tariff/fees, metering site ID and uGridPLAN project ID if used. Engineering deploys the canonical country configuration before any downstream Sync or equipment-commissioning page is used.",
         "Country lead/Finance approve the electricity tariff plus connection and readyboard fees. An authorized Finance/O&M user records the approved values on Tariffs.",
         "Engineering configures the country metering organisation and per-site platform IDs. The country team confirms that the displayed sites match the real deployment.",
         "Finance and Engineering validate real mobile-money provider samples and credentials before automatic ingestion and meter credit are enabled.",

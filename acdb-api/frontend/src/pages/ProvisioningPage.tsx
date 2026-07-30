@@ -50,6 +50,76 @@ const inputCls =
   'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none';
 const labelCls = 'block text-xs font-medium text-gray-500 mb-1';
 
+function SiteAdditionGuide({
+  countryCode,
+  countryName,
+  open,
+  showAdminLinks,
+}: {
+  countryCode?: string;
+  countryName?: string;
+  open?: boolean;
+  showAdminLinks?: boolean;
+}) {
+  return (
+    <details open={open} className="rounded-xl border border-amber-300 bg-amber-50 p-4">
+      <summary className="cursor-pointer font-semibold text-amber-950">
+        Site missing from the list? How to add a deployment site
+      </summary>
+      <div className="mt-3 space-y-3 text-sm text-amber-950">
+        <p>
+          A canonical site cannot be created from the provisioning dropdown. For{' '}
+          <b>{countryName || countryCode || 'this country'}</b>, complete this controlled sequence:
+        </p>
+        <ol className="list-decimal pl-5 space-y-2">
+          <li>
+            <b>Country lead approves the site package:</b> official display name, proposed unique
+            three-letter uppercase code, district/province, GPS coordinates if known, deployment
+            lead, expected go-live date, and approved tariff/fees.
+          </li>
+          <li>
+            <b>Engineering confirms the system mappings:</b> metering organisation and site ID,
+            uGridPLAN project ID if used, payment scope, and the signed OTA release assignment.
+          </li>
+          <li>
+            <b>Engineering adds and deploys the canonical country configuration.</b> This is the
+            step that makes the site appear in CC. The uGridPLAN Sync and generation-site pages do
+            not create the canonical code.
+          </li>
+          <li>
+            After deployment, return here, select the country again, click <b>Refresh evidence</b>,
+            and confirm the new site appears before creating customers, gateways, meters, or payments.
+          </li>
+          <li>
+            Only after the code appears: add its uGridPLAN mapping where applicable, commission
+            generation equipment/credentials, configure the tariff and metering IDs, and register
+            the site-specific OTA candidate.
+          </li>
+        </ol>
+        <div className="rounded-lg border border-red-200 bg-white p-3 text-red-800">
+          Do not borrow another country&apos;s code, create a first customer to force a dropdown entry,
+          or put Starlink/provider passwords in chat or evidence notes.
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Link to="/help#sites" className="px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold">
+            Open full site setup instructions
+          </Link>
+          {showAdminLinks && (
+            <>
+              <Link to="/sync" className="px-3 py-2 rounded-lg border bg-white text-xs font-semibold">
+                Map uGridPLAN after activation
+              </Link>
+              <Link to="/gensite/commission" className="px-3 py-2 rounded-lg border bg-white text-xs font-semibold">
+                Commission equipment after activation
+              </Link>
+            </>
+          )}
+        </div>
+      </div>
+    </details>
+  );
+}
+
 export default function ProvisioningPage() {
   const { user } = useAuth();
   const [mode, setMode] = useState<Mode>('walkthrough');
@@ -420,6 +490,7 @@ export default function ProvisioningPage() {
   const otaQueued = Math.max(0, otaExpected - otaSucceeded - otaInProgress - otaFailed);
   const otaPercent = otaExpected ? Math.round((otaSucceeded / otaExpected) * 100) : 0;
   const canApproveRelease = ['superadmin', 'engineering'].includes(String(user?.role || ''));
+  const canConfigureSiteSystems = ['superadmin', 'engineering'].includes(String(user?.role || ''));
   const selectedSiteProgress = guideSite ? countryReadiness?.site_progress?.[guideSite] : undefined;
   const foundationKeys = new Set(['sites', 'tariff', 'metering', 'payment_ingest', 'meter_credit']);
   const foundationsReady = Boolean(countryReadiness?.gates
@@ -660,13 +731,16 @@ export default function ProvisioningPage() {
                 {countryReadinessLoading ? 'Refreshing…' : 'Refresh evidence'}
               </button>
             </div>
-            {!guideSites.length && !countryReadinessLoading && (
-              <div className="mt-3 p-3 rounded-lg bg-amber-50 border border-amber-300 text-sm text-amber-950">
-                No deployment sites are configured for this country. Complete step 1 with the country lead
-                and Engineering before an operator can provision equipment.
-              </div>
-            )}
           </div>
+
+          {!countryReadinessLoading && (
+            <SiteAdditionGuide
+              countryCode={countryReadiness?.country_code}
+              countryName={countryReadiness?.country_name}
+              open={!guideSites.length}
+              showAdminLinks={canConfigureSiteSystems}
+            />
+          )}
 
           <div className="space-y-3">
             {walkthroughSteps.map((step, index) => {
@@ -881,7 +955,7 @@ export default function ProvisioningPage() {
                       {gate.route && (
                         <Link to={gate.route}
                           className="shrink-0 px-3 py-2 rounded-lg bg-blue-600 text-white text-xs font-semibold">
-                          Open required page
+                          {gate.key === 'sites' ? 'How to add a site' : 'Open required page'}
                         </Link>
                       )}
                     </div>
@@ -889,13 +963,12 @@ export default function ProvisioningPage() {
                 ))}
               </div>
 
-              {!Object.keys(countryReadiness.sites).length && (
-                <div className="p-4 rounded-xl border border-amber-300 bg-amber-50 text-sm text-amber-950">
-                  <b>Country-team input required:</b> provide the approved site name, canonical code,
-                  district/province, metering platform site ID, and the responsible deployment lead.
-                  Starlink passwords are entered later in the local station and must not be put in tickets or chat.
-                </div>
-              )}
+              <SiteAdditionGuide
+                countryCode={countryReadiness.country_code}
+                countryName={countryReadiness.country_name}
+                open={!Object.keys(countryReadiness.sites).length}
+                showAdminLinks={canConfigureSiteSystems}
+              />
             </>
           )}
         </div>

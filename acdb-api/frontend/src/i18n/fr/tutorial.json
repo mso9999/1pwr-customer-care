@@ -42,7 +42,7 @@
       "description": "Résoudre les prérequis commerciaux, sites, comptage, paiements, firmware et preuves avant de libérer un lot terrain.",
       "steps": [
         "Sélectionnez le pays prévu dans l’en-tête CC, ouvrez Provisionnement → Parcours opérateur, choisissez le site de déploiement et actualisez les preuves. N’utilisez jamais le code site ou la base d’un autre pays comme contournement.",
-        "Le responsable pays et l’Ingénierie approuvent la liste canonique des sites. Un site absent exige une modification de configuration pays ; les mots de passe Starlink ne font pas partie de cette liste.",
+        "Si un site est absent, ouvrez « Site missing from the list? » dans le Parcours opérateur. Le responsable pays fournit le nom officiel, le code unique proposé de trois lettres, la province/le district, le responsable, la date de mise en service, les tarifs/frais, l’ID du site de comptage et l’ID uGridPLAN si utilisé. L’Ingénierie déploie la configuration canonique avant toute synchronisation ou mise en service d’équipements.",
         "Le responsable pays/Finance approuve le tarif électrique et les frais de raccordement/tableau. Un utilisateur Finance/O&M autorisé saisit les valeurs approuvées dans Tarifs.",
         "L’Ingénierie configure l’organisation de comptage et les identifiants plateforme par site. L’équipe pays confirme que les sites affichés correspondent au déploiement réel.",
         "Finance et Ingénierie valident des exemples réels du fournisseur mobile money et les identifiants avant d’activer l’ingestion automatique et le crédit compteur.",

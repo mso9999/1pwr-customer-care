@@ -292,8 +292,18 @@ function SitesContent() {
         </P>
         <Warning>
           Les listes déroulantes de sites sont souvent construites à partir des communautés qui ont <Bold>déjà au moins un client</Bold>.
-          Pour un nouveau site sans client, contactez l&apos;administration — l&apos;ajout d&apos;un code site est une configuration backend, pas un simple interrupteur dans le portail.
+          Pour un nouveau site, ne créez pas un premier client afin de forcer son apparition. Le code canonique doit être activé avant les clients, passerelles, compteurs et paiements.
         </Warning>
+        <SubHead>Ajouter un nouveau site pays</SubHead>
+        <Ol>
+          <li>Le responsable pays approuve le nom officiel, un code unique de trois lettres majuscules, la province/le district, les coordonnées GPS si disponibles, le responsable du déploiement, la date de mise en service et les tarifs/frais.</li>
+          <li>L&apos;Ingénierie confirme l&apos;organisation et l&apos;ID du site de comptage, l&apos;ID du projet uGridPLAN si utilisé, le périmètre de paiement et la version OTA signée.</li>
+          <li>L&apos;Ingénierie ajoute le site à la configuration canonique du pays et la déploie. C&apos;est cette étape qui fait apparaître le site dans CC.</li>
+          <li>Après déploiement, sélectionnez de nouveau le pays dans CC, ouvrez Provisionnement → Parcours opérateur et actualisez les preuves.</li>
+          <li>Une fois le code visible seulement, ajoutez la correspondance uGridPLAN, mettez en service les équipements/identifiants, saisissez le tarif et les IDs de comptage, puis enregistrez le candidat OTA du site.</li>
+        </Ol>
+        <Tip>Les pages Synchronisation uGridPLAN et Mise en service du site de production sont des étapes en aval. Elles ne créent pas le code canonique du pays.</Tip>
+        <Warning>N&apos;utilisez jamais le code d&apos;un autre pays et ne placez aucun mot de passe Starlink, fournisseur ou API dans un chat ou une note de preuve.</Warning>
       </>
     );
   }
@@ -305,8 +315,18 @@ function SitesContent() {
       </P>
       <Warning>
         Site dropdowns are often built from communities that <Bold>already have at least one customer</Bold>.
-        For a greenfield site that does not appear, contact your admin — adding a site code is a backend configuration change, not a portal toggle.
+        For a greenfield site, do not create a first customer to force it into a dropdown. The canonical code must be activated before customers, gateways, meters, or payments are created.
       </Warning>
+      <SubHead>Adding a new country deployment site</SubHead>
+      <Ol>
+        <li>The country lead approves the official display name, unique three-letter uppercase code, province/district, GPS coordinates if known, deployment lead, expected go-live date, and approved tariff/fees.</li>
+        <li>Engineering confirms the metering organisation/site ID, uGridPLAN project ID if used, payment scope, and signed OTA release assignment.</li>
+        <li>Engineering adds the site to the canonical country configuration and deploys it. This is the step that makes the site appear in CC.</li>
+        <li>After deployment, reselect the country in CC, open Provisioning → Operator walkthrough, and refresh the evidence.</li>
+        <li>Only after the code appears: add the uGridPLAN mapping, commission equipment/credentials, enter the tariff and metering IDs, and register the site-specific OTA candidate.</li>
+      </Ol>
+      <Tip>The uGridPLAN Sync and generation-site commissioning pages are downstream steps. They do not create the canonical country code.</Tip>
+      <Warning>Never borrow another country&apos;s code or put Starlink, provider, or API passwords in chat or evidence notes.</Warning>
     </>
   );
 }
