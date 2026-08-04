@@ -128,6 +128,7 @@ class AssignMeterRequest(BaseModel):
     meter_id: str
     thing_name: Optional[str] = None
     activate_1meter_billing: bool = False
+    platform: str = "sparkmeter"
     community: str
     customer_type: str
     account_number: str
@@ -135,6 +136,47 @@ class AssignMeterRequest(BaseModel):
     village_name: Optional[str] = None
     latitude: Optional[str] = None
     longitude: Optional[str] = None
+
+
+class MeterAssignmentUpdate(BaseModel):
+    platform: str
+    role: str
+    note: Optional[str] = None
+
+
+VALID_METER_PLATFORMS = {"sparkmeter", "prototype"}
+OPERATOR_TO_DB_ROLE = {
+    "primary": "primary",
+    "secondary": "check",
+    # Keep accepting the database label for API compatibility. The CC UI calls
+    # this role "secondary", which is clearer to country operators.
+    "check": "check",
+}
+
+
+def _normalise_platform(value: str) -> str:
+    platform = str(value or "").strip().lower()
+    if platform not in VALID_METER_PLATFORMS:
+        raise HTTPException(
+            status_code=400,
+            detail="platform must be sparkmeter or prototype (1Meter)",
+        )
+    return platform
+
+
+def _normalise_assignment_role(value: str) -> str:
+    role = str(value or "").strip().lower()
+    if role not in OPERATOR_TO_DB_ROLE:
+        raise HTTPException(status_code=400, detail="role must be primary or secondary")
+    return OPERATOR_TO_DB_ROLE[role]
+
+
+def _operator_role(db_role: str) -> str:
+    return "secondary" if db_role == "check" else db_role
+
+
+def _assignment_role(existing_primary_id: Optional[str], promote_1meter: bool) -> str:
+    return "primary" if promote_1meter or not existing_primary_id else "check"
 
 
 def _normalise_meter_serial(value: str) -> str:
@@ -379,6 +421,7 @@ def assign_meter(
     customer_identifier = str(req.customer_identifier or "").strip()
     meter_id = str(req.meter_id or "").strip()
     thing_name = str(req.thing_name or "").strip()
+    platform = _normalise_platform(req.platform)
     community = str(req.community or "").strip().upper()
     customer_type = str(req.customer_type or "").strip().upper()
     account_number = str(req.account_number or "").strip().upper()
@@ -394,6 +437,15 @@ def assign_meter(
         raise HTTPException(status_code=400, detail="customer_type is required")
     if not account_number:
         raise HTTPException(status_code=400, detail="account_number is required")
+    if platform == "prototype" and not thing_name:
+        raise HTTPException(
+            status_code=400,
+            detail="Select a provisioned 1Meter gateway; its meter serial must come from live telemetry.",
+        )
+    if platform == "sparkmeter" and thing_name:
+        raise HTTPException(status_code=400, detail="A provisioned gateway can only be assigned as 1Meter")
+    if req.activate_1meter_billing and platform != "prototype":
+        raise HTTPException(status_code=400, detail="1Meter billing can only be enabled for a 1Meter gateway")
 
     account_sequence = _parse_account_sequence(account_number)
     now = datetime.now(timezone.utc).isoformat()
@@ -409,6 +461,17 @@ def assign_meter(
             if customer_pg_id is None:
                 raise HTTPException(status_code=500, detail="Resolved customer is missing id")
 
+            # Serialize assignments to the same account before deciding which
+            # meter is primary. This keeps two near-simultaneous operator
+            # submissions from both becoming primary.
+            cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (account_number,))
+            cursor.execute(
+                "SELECT customer_id, meter_id FROM accounts "
+                "WHERE account_number = %s FOR UPDATE",
+                (account_number,),
+            )
+            account_row = cursor.fetchone()
+
             gateway = None
             if thing_name:
                 meter_id, gateway = _lock_provisioned_gateway_for_assignment(
@@ -419,13 +482,24 @@ def assign_meter(
                     account_number=account_number,
                 )
 
+            # The first active meter is primary. Every additional meter starts
+            # as the operator-facing "secondary" role (stored as the legacy
+            # `check` value so consumption reports continue to exclude it).
+            # Explicit 1Meter billing promotion is the sole assignment-time
+            # override and atomically demotes the prior primary.
+            cursor.execute(
+                "SELECT meter_id FROM meters "
+                "WHERE account_number = %s AND role = 'primary' "
+                "AND (status = 'active' OR status IS NULL) AND meter_id <> %s "
+                "ORDER BY meter_id LIMIT 1 FOR UPDATE",
+                (account_number, meter_id),
+            )
+            primary_row = cursor.fetchone()
+            existing_primary_id = str(primary_row[0]) if primary_row else None
+            target_role = _assignment_role(existing_primary_id, req.activate_1meter_billing)
+
             before_state = _snapshot_meter_lifecycle_state(cursor, meter_id, account_number)
 
-            cursor.execute(
-                "SELECT customer_id FROM accounts WHERE account_number = %s",
-                (account_number,),
-            )
-            account_row = cursor.fetchone()
             if account_row:
                 existing_customer_id = account_row[0]
                 if existing_customer_id and int(existing_customer_id) != int(customer_pg_id):
@@ -433,16 +507,23 @@ def assign_meter(
                         status_code=409,
                         detail=f"Account {account_number} is already linked to another customer",
                     )
-                cursor.execute(
-                    "UPDATE accounts SET meter_id = %s, community = %s WHERE account_number = %s",
-                    (meter_id, community, account_number),
-                )
+                if target_role == "primary":
+                    cursor.execute(
+                        "UPDATE accounts SET meter_id = %s, community = %s WHERE account_number = %s",
+                        (meter_id, community, account_number),
+                    )
+                else:
+                    cursor.execute(
+                        "UPDATE accounts SET community = %s WHERE account_number = %s",
+                        (community, account_number),
+                    )
             else:
+                current_meter_id = meter_id if target_role == "primary" else existing_primary_id
                 cursor.execute(
                     "INSERT INTO accounts "
                     "(account_number, customer_id, meter_id, community, account_sequence, created_by) "
                     "VALUES (%s, %s, %s, %s, %s, %s)",
-                    (account_number, customer_pg_id, meter_id, community, account_sequence, user.user_id),
+                    (account_number, customer_pg_id, current_meter_id, community, account_sequence, user.user_id),
                 )
 
             meter_values = (
@@ -471,36 +552,31 @@ def assign_meter(
                     meter_values,
                 )
 
-            if gateway is not None:
-                target_role = "primary" if req.activate_1meter_billing else "check"
-                if req.activate_1meter_billing:
-                    cursor.execute(
-                        """
-                        UPDATE meters
-                           SET role = 'check', updated_at = NOW()
-                         WHERE account_number = %s
-                           AND role = 'primary'
-                           AND meter_id <> %s
-                        """,
-                        (account_number, meter_id),
-                    )
-                    cursor.execute(
-                        """
-                        UPDATE accounts
-                           SET billing_meter_priority = '1m'
-                         WHERE account_number = %s
-                        """,
-                        (account_number,),
-                    )
+            if target_role == "primary":
                 cursor.execute(
                     """
                     UPDATE meters
-                       SET platform = 'prototype', role = %s, status = 'active',
-                           account_number = %s, community = %s, updated_at = NOW()
-                     WHERE meter_id = %s
+                       SET role = 'check', updated_at = NOW()
+                     WHERE account_number = %s
+                       AND role = 'primary'
+                       AND meter_id <> %s
                     """,
-                    (target_role, account_number, community, meter_id),
+                    (account_number, meter_id),
                 )
+                cursor.execute(
+                    "UPDATE accounts SET billing_meter_priority = %s WHERE account_number = %s",
+                    ("1m" if platform == "prototype" else "sm", account_number),
+                )
+
+            cursor.execute(
+                """
+                UPDATE meters
+                   SET platform = %s, role = %s, status = 'active',
+                       account_number = %s, community = %s, updated_at = NOW()
+                 WHERE meter_id = %s
+                """,
+                (platform, target_role, account_number, community, meter_id),
+            )
 
             cursor.execute(
                 "SELECT 1 FROM meter_assignments "
@@ -510,7 +586,7 @@ def assign_meter(
             if not cursor.fetchone():
                 cursor.execute(
                     "UPDATE meter_assignments SET removed_at = %s, removal_reason = %s "
-                    "WHERE removed_at IS NULL AND (meter_id = %s OR account_number = %s)",
+                    "WHERE removed_at IS NULL AND meter_id = %s AND account_number <> %s",
                     (now, "reassigned", meter_id, account_number),
                 )
                 cursor.execute(
@@ -552,6 +628,8 @@ def assign_meter(
                     "customer_identifier": customer_identifier,
                     "thing_name": thing_name or None,
                     "source": "gateway_telemetry" if thing_name else "manual_meter_entry",
+                    "platform": platform,
+                    "role": _operator_role(target_role),
                     "activate_1meter_billing": bool(req.activate_1meter_billing),
                 },
                 conn=conn,
@@ -565,7 +643,7 @@ def assign_meter(
             raise HTTPException(status_code=400, detail=f"Assign failed: {e}")
 
         sm_sync = None
-        if not thing_name:
+        if platform == "sparkmeter":
             try:
                 full_name = " ".join(
                     filter(None, [customer.get("first_name"), customer.get("last_name")])
@@ -586,11 +664,139 @@ def assign_meter(
             "account_number": account_number,
             "customer_id_legacy": customer.get("customer_id_legacy"),
             "thing_name": thing_name or None,
-            "billing_meter_priority": "1m" if thing_name and req.activate_1meter_billing else None,
+            "platform": platform,
+            "role": _operator_role(target_role),
+            "billing_meter_priority": ("1m" if platform == "prototype" else "sm") if target_role == "primary" else None,
         }
         if sm_sync:
             result["sm_sync"] = sm_sync
         return result
+
+
+@router.patch("/{meter_id}/assignment")
+def update_meter_assignment(
+    meter_id: str,
+    req: MeterAssignmentUpdate,
+    user: CurrentUser = Depends(require_employee),
+):
+    """Correct an existing meter's platform or primary/secondary role.
+
+    The account pointer, billing source, and any prior primary are updated in
+    the same transaction so the UI cannot leave an account with two primaries.
+    """
+    if user.role not in (CCRole.superadmin.value, CCRole.onm_team.value):
+        raise HTTPException(status_code=403, detail="Requires superadmin or onm_team role")
+
+    meter_id = str(meter_id or "").strip()
+    platform = _normalise_platform(req.platform)
+    target_role = _normalise_assignment_role(req.role)
+
+    with _get_connection() as conn:
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "SELECT account_number, platform, role, status FROM meters "
+                "WHERE meter_id = %s FOR UPDATE",
+                (meter_id,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail=f"Meter not found: {meter_id}")
+
+            account_number = str(row[0] or "").strip().upper()
+            old_values = {
+                "account_number": account_number or None,
+                "platform": row[1],
+                "role": _operator_role(str(row[2] or "")),
+                "status": row[3],
+            }
+
+            other_primary_id = None
+            if account_number:
+                cursor.execute(
+                    "SELECT meter_id FROM meters "
+                    "WHERE account_number = %s AND role = 'primary' AND meter_id <> %s "
+                    "AND (status = 'active' OR status IS NULL) "
+                    "ORDER BY meter_id LIMIT 1 FOR UPDATE",
+                    (account_number, meter_id),
+                )
+                other_primary = cursor.fetchone()
+                other_primary_id = str(other_primary[0]) if other_primary else None
+
+            if target_role == "check" and account_number and not other_primary_id:
+                raise HTTPException(
+                    status_code=409,
+                    detail="This is the account's only primary meter. Promote another meter before making it secondary.",
+                )
+
+            demoted_count = 0
+            if target_role == "primary" and account_number:
+                cursor.execute(
+                    "UPDATE meters SET role = 'check', updated_at = NOW() "
+                    "WHERE account_number = %s AND role = 'primary' AND meter_id <> %s",
+                    (account_number, meter_id),
+                )
+                demoted_count = cursor.rowcount
+
+            cursor.execute(
+                "UPDATE meters SET platform = %s, role = %s, updated_at = NOW() WHERE meter_id = %s",
+                (platform, target_role, meter_id),
+            )
+
+            if account_number:
+                primary_meter_id = meter_id if target_role == "primary" else other_primary_id
+                primary_platform = platform
+                if target_role == "check" and other_primary_id:
+                    cursor.execute(
+                        "SELECT platform FROM meters WHERE meter_id = %s",
+                        (other_primary_id,),
+                    )
+                    platform_row = cursor.fetchone()
+                    primary_platform = str(platform_row[0] or "sparkmeter") if platform_row else "sparkmeter"
+                cursor.execute(
+                    "UPDATE accounts SET meter_id = %s, billing_meter_priority = %s "
+                    "WHERE account_number = %s",
+                    (
+                        primary_meter_id,
+                        "1m" if primary_platform == "prototype" else "sm",
+                        account_number,
+                    ),
+                )
+
+            new_values = {
+                "account_number": account_number or None,
+                "platform": platform,
+                "role": _operator_role(target_role),
+                "status": row[3],
+            }
+            log_mutation(
+                user,
+                "update_assignment",
+                "meters",
+                meter_id,
+                old_values=old_values,
+                new_values=new_values,
+                metadata={
+                    "note": str(req.note or "").strip() or None,
+                    "demoted_count": demoted_count,
+                },
+                conn=conn,
+            )
+            conn.commit()
+            return {
+                "message": f"Meter {meter_id} assignment updated",
+                "meter_id": meter_id,
+                "account_number": account_number or None,
+                "platform": platform,
+                "role": _operator_role(target_role),
+                "demoted_count": demoted_count,
+            }
+        except HTTPException:
+            conn.rollback()
+            raise
+        except Exception as e:
+            conn.rollback()
+            raise HTTPException(status_code=400, detail=f"Assignment update failed: {e}")
 
 
 @router.post("/{meter_id}/decommission")

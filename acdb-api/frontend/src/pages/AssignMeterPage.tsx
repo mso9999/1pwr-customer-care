@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import {
   assignMeter,
   getCommissionData,
+  getMetersForAccount,
   getProvisionedMeters,
   getRecord,
   listSites,
@@ -95,6 +96,7 @@ export default function AssignMeterPage() {
   const [customerId, setCustomerId] = useState(prefilledCustomerId);
   const [meterid, setMeterid] = useState('');
   const [thingName, setThingName] = useState('');
+  const [platform, setPlatform] = useState<'sparkmeter' | 'prototype'>('sparkmeter');
   const [provisionedGateways, setProvisionedGateways] = useState<ProvisionedMeter[]>([]);
   const [gatewaysLoading, setGatewaysLoading] = useState(false);
   const [activate1MeterBilling, setActivate1MeterBilling] = useState(false);
@@ -121,6 +123,8 @@ export default function AssignMeterPage() {
   // Customer info preview
   const [customerName, setCustomerName] = useState('');
   const [customerLoading, setCustomerLoading] = useState(false);
+  const [existingPrimaryMeter, setExistingPrimaryMeter] = useState('');
+  const [roleLoading, setRoleLoading] = useState(false);
 
   // Load sites
   useEffect(() => {
@@ -214,6 +218,35 @@ export default function AssignMeterPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customerId]);
 
+  // Resolve the role before submission. The backend enforces the same rule:
+  // the first active meter is primary; additional meters are secondary.
+  useEffect(() => {
+    const account = accountNumber.trim().toUpperCase();
+    if (!account) {
+      setExistingPrimaryMeter('');
+      return;
+    }
+    let cancelled = false;
+    setRoleLoading(true);
+    const timer = setTimeout(() => {
+      getMetersForAccount(account)
+        .then(rows => {
+          if (cancelled) return;
+          const primary = rows.find(row =>
+            row.role === 'primary'
+            && (!row.status || row.status === 'active')
+            && row.meter_id !== meterid.trim(),
+          );
+          setExistingPrimaryMeter(primary?.meter_id || '');
+        })
+        .catch(() => { if (!cancelled) setExistingPrimaryMeter(''); })
+        .finally(() => { if (!cancelled) setRoleLoading(false); });
+    }, 300);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [accountNumber, meterid]);
+
+  const assignedRole = activate1MeterBilling || !existingPrimaryMeter ? 'primary' : 'secondary';
+
   // Submit
   const handleSubmit = async () => {
     if (!customerId.trim()) { setError(t('assignMeter:validation.customerIdRequired')); return; }
@@ -221,6 +254,10 @@ export default function AssignMeterPage() {
     if (!community) { setError(t('assignMeter:validation.siteRequired')); return; }
     if (!customerType) { setError(t('assignMeter:validation.typeRequired')); return; }
     if (!accountNumber.trim()) { setError('Account number is required'); return; }
+    if (platform === 'prototype' && !thingName) {
+      setError(t('assignMeter:validation.gatewayRequired'));
+      return;
+    }
 
     setSaving(true);
     setError('');
@@ -232,6 +269,7 @@ export default function AssignMeterPage() {
         meter_id: meterid.trim(),
         thing_name: thingName || undefined,
         activate_1meter_billing: thingName ? activate1MeterBilling : false,
+        platform,
         community: community.toUpperCase(),
         customer_type: customerType,
         account_number: accountNumber.trim().toUpperCase(),
@@ -323,6 +361,32 @@ export default function AssignMeterPage() {
           )}
         </div>
 
+        {/* Metering platform */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">
+            {t('assignMeter:fields.platform')} <span className="text-red-400">*</span>
+          </label>
+          <select
+            value={platform}
+            onChange={e => {
+              const next = e.target.value as 'sparkmeter' | 'prototype';
+              setPlatform(next);
+              setThingName('');
+              setActivate1MeterBilling(false);
+              if (next === 'prototype') setMeterid('');
+            }}
+            className="w-full px-4 py-3.5 border border-gray-300 rounded-xl text-base bg-white focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none"
+          >
+            <option value="sparkmeter">{t('assignMeter:fields.platformSparkMeter')}</option>
+            <option value="prototype">{t('assignMeter:fields.platform1Meter')}</option>
+          </select>
+          <p className="text-xs text-gray-500 mt-1">
+            {platform === 'prototype'
+              ? t('assignMeter:fields.platform1MeterHint')
+              : t('assignMeter:fields.platformSparkMeterHint')}
+          </p>
+        </div>
+
         {/* Meter ID (serial) */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -355,7 +419,7 @@ export default function AssignMeterPage() {
         </div>
 
         {/* Provisioned 1Meter gateway — telemetry-derived, no manual serial entry */}
-        <div className="p-4 rounded-xl border border-blue-200 bg-blue-50 space-y-3">
+        {platform === 'prototype' && <div className="p-4 rounded-xl border border-blue-200 bg-blue-50 space-y-3">
           <div>
             <label className="block text-sm font-medium text-blue-900 mb-2">
               Provisioned 1Meter gateway <span className="font-normal text-blue-600">(recommended for 1Meter)</span>
@@ -404,6 +468,25 @@ export default function AssignMeterPage() {
               </span>
             </label>
           )}
+        </div>}
+
+        {/* Assignment role preview */}
+        <div className={`p-4 rounded-xl border ${assignedRole === 'primary' ? 'border-green-200 bg-green-50' : 'border-blue-200 bg-blue-50'}`}>
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-gray-800">{t('assignMeter:fields.assignmentRole')}</p>
+              <p className="text-xs text-gray-600 mt-1">
+                {roleLoading
+                  ? t('assignMeter:fields.roleChecking')
+                  : assignedRole === 'secondary'
+                    ? t('assignMeter:fields.secondaryReason', { meter: existingPrimaryMeter })
+                    : t('assignMeter:fields.primaryReason')}
+              </p>
+            </div>
+            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${assignedRole === 'primary' ? 'bg-green-200 text-green-800' : 'bg-blue-200 text-blue-800'}`}>
+              {assignedRole === 'primary' ? t('assignMeter:fields.primary') : t('assignMeter:fields.secondary')}
+            </span>
+          </div>
         </div>
 
         {/* Customer Type */}

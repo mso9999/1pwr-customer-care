@@ -10,6 +10,11 @@
     "customerId": "ID client",
     "customerIdPlaceholder": "ex. 0045MAK ou 5846",
     "lookingUp": "Recherche du client…",
+    "platform": "Plateforme de comptage",
+    "platformSparkMeter": "SparkMeter",
+    "platform1Meter": "Passerelle 1Meter",
+    "platformSparkMeterHint": "Saisissez le numéro de série indiqué sur le compteur SparkMeter.",
+    "platform1MeterHint": "Sélectionnez ci-dessous une passerelle provisionnée. CC utilisera le numéro de série transmis par la télémétrie en direct.",
     "meterSerial": "Numéro de série du compteur",
     "site": "Site (Communauté)",
     "selectSite": "Sélectionner un site…",
@@ -25,7 +30,13 @@
     "longitude": "Longitude",
     "acquiringGps": "Acquisition du GPS…",
     "captureLocation": "Capturer la position actuelle",
-    "gpsNotSupported": "Géolocalisation non prise en charge"
+    "gpsNotSupported": "Géolocalisation non prise en charge",
+    "assignmentRole": "Rôle de l'affectation",
+    "roleChecking": "Vérification des compteurs actifs de ce compte…",
+    "primary": "Principal",
+    "secondary": "Secondaire",
+    "primaryReason": "Aucun autre compteur principal actif n'a été trouvé. Ce compteur deviendra le compteur de facturation actuel.",
+    "secondaryReason": "Le compteur principal {{meter}} dessert déjà ce compte. Ce compteur supplémentaire sera secondaire et exclu des totaux de consommation."
   },
   "assigning": "Affectation en cours…",
   "assignMeter": "Assigner le compteur",
@@ -33,7 +44,8 @@
     "customerIdRequired": "L'ID client est requis",
     "meterRequired": "Le numéro de série du compteur est requis",
     "siteRequired": "Le site est requis",
-    "typeRequired": "Le type de client est requis"
+    "typeRequired": "Le type de client est requis",
+    "gatewayRequired": "Sélectionnez une passerelle 1Meter provisionnée"
   },
   "assignFailed": "Échec de l'affectation"
 }

@@ -440,6 +440,7 @@ export interface AssignMeterRequest {
   meter_id: string;
   thing_name?: string;
   activate_1meter_billing?: boolean;
+  platform: 'sparkmeter' | 'prototype';
   community: string;
   customer_type: string;
   account_number: string;
@@ -456,12 +457,42 @@ export interface AssignMeterResult {
   customer_id_legacy: number | null;
   thing_name?: string | null;
   billing_meter_priority?: string | null;
+  platform: 'sparkmeter' | 'prototype';
+  role: 'primary' | 'secondary';
 }
 
 export async function assignMeter(data: AssignMeterRequest): Promise<AssignMeterResult> {
   return request('/meters/assign', {
     method: 'POST',
     body: JSON.stringify(data),
+  });
+}
+
+export interface AccountMeterRole {
+  meter_id: string;
+  platform: string | null;
+  role: string | null;
+  status: string | null;
+}
+
+export async function getMetersForAccount(accountNumber: string): Promise<AccountMeterRole[]> {
+  return request(`/meters/account/${encodeURIComponent(accountNumber)}`);
+}
+
+export async function updateMeterAssignment(
+  meterId: string,
+  body: { platform: 'sparkmeter' | 'prototype'; role: 'primary' | 'secondary'; note?: string },
+): Promise<{
+  message: string;
+  meter_id: string;
+  account_number: string | null;
+  platform: string;
+  role: string;
+  demoted_count: number;
+}> {
+  return request(`/meters/${encodeURIComponent(meterId)}/assignment`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
   });
 }
 

@@ -10,6 +10,11 @@
     "customerId": "Customer ID",
     "customerIdPlaceholder": "e.g. 0045MAK or 5846",
     "lookingUp": "Looking up customer…",
+    "platform": "Metering Platform",
+    "platformSparkMeter": "SparkMeter",
+    "platform1Meter": "1Meter gateway",
+    "platformSparkMeterHint": "Enter the SparkMeter serial shown on the meter.",
+    "platform1MeterHint": "Select a provisioned gateway below. CC will use the meter serial reported by live telemetry.",
     "meterSerial": "Meter Serial Number",
     "site": "Site (Community)",
     "selectSite": "Select site…",
@@ -25,7 +30,13 @@
     "longitude": "Longitude",
     "acquiringGps": "Acquiring GPS…",
     "captureLocation": "Capture Current Location",
-    "gpsNotSupported": "Geolocation not supported"
+    "gpsNotSupported": "Geolocation not supported",
+    "assignmentRole": "Assignment role",
+    "roleChecking": "Checking this account's active meters…",
+    "primary": "Primary",
+    "secondary": "Secondary",
+    "primaryReason": "No other active primary meter was found. This meter will become the billing/current meter.",
+    "secondaryReason": "Primary meter {{meter}} already serves this account. This additional meter will be secondary and excluded from consumption totals."
   },
   "assigning": "Assigning…",
   "assignMeter": "Assign Meter",
@@ -33,7 +44,8 @@
     "customerIdRequired": "Customer ID is required",
     "meterRequired": "Meter serial number is required",
     "siteRequired": "Site is required",
-    "typeRequired": "Customer type is required"
+    "typeRequired": "Customer type is required",
+    "gatewayRequired": "Select a provisioned 1Meter gateway"
   },
   "assignFailed": "Assignment failed"
 }

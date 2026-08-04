@@ -7,13 +7,14 @@ import {
   decommissionMeter,
   getMeterHistory,
   setMeterSafetyOverride,
+  updateMeterAssignment,
   type PaginatedResponse,
   type MeterAssignment,
 } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import CountryPill from '../components/CountryPill';
 
-type ModalKind = 'delete' | 'decommission' | 'history' | 'override' | null;
+type ModalKind = 'delete' | 'decommission' | 'history' | 'override' | 'edit' | null;
 interface Site { concession: string; country?: string | null }
 
 export default function MetersPage() {
@@ -41,6 +42,13 @@ export default function MetersPage() {
   const [historyMeterId, setHistoryMeterId] = useState('');
   const [historyData, setHistoryData] = useState<MeterAssignment[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+
+  const [editMeterId, setEditMeterId] = useState('');
+  const [editAccount, setEditAccount] = useState('');
+  const [editPlatform, setEditPlatform] = useState<'sparkmeter' | 'prototype'>('sparkmeter');
+  const [editRole, setEditRole] = useState<'primary' | 'secondary'>('primary');
+  const [editNote, setEditNote] = useState('');
+  const [editError, setEditError] = useState('');
 
   // Safety override modal state
   const [overrideMeterId, setOverrideMeterId] = useState('');
@@ -216,6 +224,35 @@ export default function MetersPage() {
     }
   };
 
+  const openEdit = (row: Record<string, unknown>) => {
+    const currentPlatform = String(row['platform'] || '').toLowerCase();
+    setEditMeterId(String(row['meter_id'] || ''));
+    setEditAccount(String(row['account_number'] || ''));
+    setEditPlatform(currentPlatform === 'prototype' ? 'prototype' : 'sparkmeter');
+    setEditRole(String(row['role'] || '').toLowerCase() === 'primary' ? 'primary' : 'secondary');
+    setEditNote('');
+    setEditError('');
+    setModal('edit');
+  };
+
+  const handleEdit = async () => {
+    setBusy(true);
+    setEditError('');
+    try {
+      await updateMeterAssignment(editMeterId, {
+        platform: editPlatform,
+        role: editRole,
+        note: editNote.trim() || undefined,
+      });
+      setModal(null);
+      fetchData();
+    } catch (err: unknown) {
+      setEditError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const platformBadge = (p: string) => {
     const colors: Record<string, string> = {
       sparkmeter: 'bg-purple-100 text-purple-700',
@@ -224,7 +261,7 @@ export default function MetersPage() {
     };
     return (
       <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${colors[p?.toLowerCase()] || 'bg-gray-100 text-gray-600'}`}>
-        {p || '--'}
+        {p?.toLowerCase() === 'prototype' ? '1Meter' : p?.toLowerCase() === 'sparkmeter' ? 'SparkMeter' : p || '--'}
       </span>
     );
   };
@@ -237,7 +274,7 @@ export default function MetersPage() {
     };
     return r ? (
       <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${colors[r?.toLowerCase()] || 'bg-gray-100 text-gray-600'}`}>
-        {r}
+        {r?.toLowerCase() === 'check' ? t('meters:secondary') : r}
       </span>
     ) : null;
   };
@@ -433,6 +470,61 @@ export default function MetersPage() {
               <button onClick={() => setModal(null)} className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-200 transition">{t('meters:cancel')}</button>
               <button onClick={handleDecommission} className="flex-1 py-2.5 bg-amber-600 text-white rounded-xl text-sm font-semibold hover:bg-amber-700 transition">
                 {t('meters:decommissionCount', { count: selected.size })}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modal === 'edit' && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setModal(null)}>
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full mx-4 p-6" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between mb-5">
+              <div>
+                <h3 className="text-lg font-semibold text-gray-800">{t('meters:editAssignment')}</h3>
+                <p className="text-sm text-gray-500 font-mono">{editMeterId}</p>
+                {editAccount && <p className="text-xs text-gray-400 mt-1">{t('meters:colAccount')}: {editAccount}</p>}
+              </div>
+              <button onClick={() => setModal(null)} className="p-1 text-gray-400 hover:text-gray-600" aria-label={t('meters:cancel')}>
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t('meters:colPlatform')}</label>
+                <select value={editPlatform} onChange={e => setEditPlatform(e.target.value as 'sparkmeter' | 'prototype')} className="w-full px-3 py-2.5 border rounded-lg text-sm bg-white">
+                  <option value="sparkmeter">SparkMeter</option>
+                  <option value="prototype">1Meter</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t('meters:colRole')}</label>
+                <select value={editRole} onChange={e => setEditRole(e.target.value as 'primary' | 'secondary')} className="w-full px-3 py-2.5 border rounded-lg text-sm bg-white">
+                  <option value="primary">{t('meters:primary')}</option>
+                  <option value="secondary">{t('meters:secondary')}</option>
+                </select>
+                <p className="text-xs text-gray-500 mt-1">
+                  {editRole === 'primary' ? t('meters:primaryHint') : t('meters:secondaryHint')}
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">{t('meters:changeNote')}</label>
+                <textarea value={editNote} onChange={e => setEditNote(e.target.value)} rows={2} maxLength={500} placeholder={t('meters:changeNotePlaceholder')} className="w-full px-3 py-2 border rounded-lg text-sm resize-none" />
+              </div>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mt-4">
+              <p className="text-xs text-amber-800">{t('meters:assignmentWarning')}</p>
+            </div>
+            {editError && <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{editError}</div>}
+
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setModal(null)} disabled={busy} className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-200 disabled:opacity-50">{t('meters:cancel')}</button>
+              <button onClick={handleEdit} disabled={busy} className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700 disabled:opacity-50">
+                {busy ? t('meters:processing') : t('meters:saveAssignment')}
               </button>
             </div>
           </div>
@@ -665,15 +757,24 @@ export default function MetersPage() {
                         </td>
                       )}
                       <td className="px-4 py-2">
-                        <button
-                          onClick={() => openHistory(mid)}
-                          className="p-1 text-gray-400 hover:text-blue-600 rounded transition"
-                          title={t('meters:viewHistory')}
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                        </button>
+                        <div className="flex items-center gap-1">
+                          {canWriteCustomers && (
+                            <button onClick={() => openEdit(row)} className="p-1 text-gray-400 hover:text-blue-600 rounded transition" title={t('meters:editAssignment')}>
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                            </button>
+                          )}
+                          <button
+                            onClick={() => openHistory(mid)}
+                            className="p-1 text-gray-400 hover:text-blue-600 rounded transition"
+                            title={t('meters:viewHistory')}
+                          >
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -728,6 +829,13 @@ export default function MetersPage() {
                         </div>
                         <div className="flex items-center gap-1 shrink-0 ml-2">
                           <span className="text-xs text-gray-400">{site}</span>
+                          {canWriteCustomers && (
+                            <button onClick={() => openEdit(row)} className="p-1 text-gray-400 hover:text-blue-600 rounded transition" title={t('meters:editAssignment')}>
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                            </button>
+                          )}
                           <button
                             onClick={() => openHistory(mid)}
                             className="p-1 text-gray-400 hover:text-blue-600 rounded transition"
