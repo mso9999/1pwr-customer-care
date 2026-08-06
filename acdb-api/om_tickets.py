@@ -192,6 +192,19 @@ _OM_PRIORITIES = {"P1", "P2", "P3", "P4"}
 
 def _om_to_cc(t: Dict[str, Any]) -> Dict[str, Any]:
     """Map an OM ticket dict to the legacy CC row shape the UI renders."""
+    # Older CC releases sent these two values under legacy OM field names.
+    # Only fall back when the canonical key is absent; an explicitly cleared
+    # canonical field must remain empty.
+    precautions = (
+        t.get("precautions")
+        if "precautions" in t
+        else t.get("preventive_action", "")
+    )
+    resolution_approach = (
+        t.get("resolution_approach")
+        if "resolution_approach" in t
+        else t.get("resolution_notes", "")
+    )
     return {
         "id": t.get("ticket_id", ""),
         "ugp_ticket_id": t.get("ticket_id", ""),
@@ -210,9 +223,9 @@ def _om_to_cc(t: Dict[str, Any]) -> Dict[str, Any]:
         "services_affected": t.get("services_affected", "") or "",
         "troubleshooting_steps": t.get("troubleshooting_steps", "") or "",
         "cause_of_fault": t.get("cause_of_fault", "") or "",
-        "precautions": t.get("preventive_action", "") or "",
+        "precautions": precautions or "",
         "restoration_time": t.get("resolved_at", "") or "",
-        "resolution_approach": t.get("resolution_notes", "") or "",
+        "resolution_approach": resolution_approach or "",
         "duration": str(t.get("downtime_hours") or "") if t.get("downtime_hours") else "",
         "status": _OM_TO_CC_STATUS.get(t.get("status", ""), t.get("status", "") or "open"),
         "updated_at": t.get("updated_at", "") or "",
@@ -250,6 +263,10 @@ def _cc_to_om_create(body: Dict[str, Any], user: CurrentUser) -> Dict[str, Any]:
         "equipment_category": (body.get("category") or "").strip() or None,
         "fault_description": fault or "(no description)",
         "services_affected": body.get("services_affected") or None,
+        "troubleshooting_steps": body.get("troubleshooting_steps") or None,
+        "cause_of_fault": body.get("cause_of_fault") or None,
+        "precautions": body.get("precautions") or None,
+        "resolution_approach": body.get("resolution_approach") or None,
         "reported_by": body.get("reported_by") or user.name or user.user_id,
         "ticket_type": "corrective",
         "priority": priority or None,
@@ -267,9 +284,9 @@ def _cc_to_om_update(body: Dict[str, Any]) -> Dict[str, Any]:
         "services_affected": "services_affected",
         "troubleshooting_steps": "troubleshooting_steps",
         "cause_of_fault": "cause_of_fault",
-        "precautions": "preventive_action",
+        "precautions": "precautions",
         "restoration_time": "resolved_at",
-        "resolution_approach": "resolution_notes",
+        "resolution_approach": "resolution_approach",
         "site_code": "site_id",
         "account_number": "customer_id",
         "category": "equipment_category",
@@ -413,7 +430,8 @@ def export_om_tickets(
             ("Reported", "created_at"), ("Description", "fault_description"),
             ("Category", "category"), ("Services affected", "services_affected"),
             ("Troubleshooting", "troubleshooting_steps"), ("Cause", "cause_of_fault"),
-            ("Preventive action", "precautions"), ("Restored", "restoration_time"),
+            ("Precautions", "precautions"), ("Resolution approach", "resolution_approach"),
+            ("Restored", "restoration_time"),
             ("Transaction ref", "transaction_ref"), ("Reported by", "reported_by"),
         ]
         ws.append([c[0] for c in cols])
