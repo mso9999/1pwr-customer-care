@@ -102,6 +102,15 @@ def cc_request(method: str, path: str, body: dict | None = None, auth: bool = Tr
         raise RuntimeError(f"CC unreachable ({e.reason}). Check internet / --cc URL.")
 
 
+def normalize_site_codes_response(payload) -> list[dict]:
+    """Accept the canonical list plus older/wrapped CC response shapes."""
+    if isinstance(payload, dict):
+        payload = payload.get("sites", payload.get("data", []))
+    if not isinstance(payload, list):
+        raise RuntimeError("CC returned an invalid site list. Re-download the station or contact Engineering.")
+    return [row for row in payload if isinstance(row, dict) and row.get("code")]
+
+
 # ---------------------------------------------------------------------------
 # Local network discovery
 # ---------------------------------------------------------------------------
@@ -337,7 +346,10 @@ class Handler(BaseHTTPRequestHandler):
             })
         if self.path == "/api/sitecodes":
             try:
-                return self._send(200, {"sites": cc_request("GET", "/provisioning/site-codes")})
+                sites = normalize_site_codes_response(
+                    cc_request("GET", "/provisioning/site-codes")
+                )
+                return self._send(200, {"sites": sites})
             except Exception as e:
                 return self._send(502, {"error": str(e)})
         if self.path == "/api/provisioned":

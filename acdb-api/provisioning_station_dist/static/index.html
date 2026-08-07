@@ -19,6 +19,10 @@
   .tabs button.active { color:var(--b); border-color:var(--b); font-weight:600; }
   label { display:block; font-size:12px; color:var(--muted); margin:10px 0 4px; }
   input, select { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px; font-size:14px; }
+  .site-picker input { min-height:44px; font-size:16px; font-weight:600; text-transform:uppercase; }
+  .site-choices { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+  .site-choice { background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; border-radius:8px; padding:8px 12px; cursor:pointer; }
+  .site-choice:hover, .site-choice.active { background:#2563eb; color:#fff; border-color:#2563eb; }
   button.primary { background:var(--b); color:#fff; border:none; border-radius:8px; padding:9px 16px; font-size:14px; cursor:pointer; }
   button.primary:disabled { opacity:.5; cursor:default; }
   button.ghost { background:#f3f4f6; border:none; border-radius:8px; padding:7px 12px; cursor:pointer; font-size:13px; }
@@ -119,7 +123,14 @@
       <div id="assignCard" class="card hide">
         <h3 style="margin-top:0">Assignment (batch)</h3>
         <div class="row">
-          <div><label>Destination site (canonical CC)</label><select id="site" onchange="siteChanged()"></select></div>
+          <div class="site-picker">
+            <label for="site">Destination site (select below or enter canonical CC code)</label>
+            <input id="site" list="siteOptions" maxlength="16" autocomplete="off"
+              placeholder="e.g. SAM" oninput="siteInputChanged()" onchange="siteChanged()" />
+            <datalist id="siteOptions"></datalist>
+            <div id="siteChoices" class="site-choices"></div>
+            <div id="siteHelp" class="muted" style="margin-top:6px">Loading country sites from CC…</div>
+          </div>
           <div><label>Deployment Starlink Wi-Fi SSID</label><input id="ssid" placeholder="exact Starlink network name" /></div>
           <div><label>Deployment Starlink Wi-Fi password</label><input id="wpw" type="password" autocomplete="new-password" /></div>
         </div>
@@ -166,6 +177,7 @@
 
 <script>
 let SITES = [], SCAN = [], RESULTS = [];
+let SITE_READINESS_TIMER = null;
 let OTA_READY = false, OTA_CANDIDATE_READY = false, OTA_CANARY_MODE = false, OTA_UPDATE_ID = '';
 let MAC_TO_SERIAL = {};  // normalized mac -> serial, from the factory CSV
 
@@ -210,16 +222,65 @@ async function login(){
   }catch(e){ showError(e.message); }
 }
 async function loadSites(){
+  const help = document.getElementById('siteHelp');
   try{
     const r = await api('/api/sitecodes');
-    SITES = r.sites || [];
-    const sel = document.getElementById('site');
-    sel.innerHTML = '<option value="">Select site…</option>' +
-      SITES.map(s=>`<option value="${s.code}">${s.code} — ${s.name}${s.country?` (${s.country})`:''}</option>`).join('');
-  }catch(e){ showError(e.message); }
+    SITES = Array.isArray(r.sites) ? r.sites : [];
+    const options = document.getElementById('siteOptions');
+    const choices = document.getElementById('siteChoices');
+    options.replaceChildren();
+    choices.replaceChildren();
+    SITES.forEach(s=>{
+      const code=String(s.code||'').trim().toUpperCase();
+      if(!code) return;
+      const option=document.createElement('option');
+      option.value=code;
+      option.label=`${s.name||code}${s.country?` (${s.country})`:''}`;
+      options.appendChild(option);
+      const button=document.createElement('button');
+      button.type='button';
+      button.className='site-choice';
+      button.dataset.siteCode=code;
+      button.textContent=`${code} — ${s.name||code}`;
+      button.onclick=()=>chooseSite(code);
+      choices.appendChild(button);
+    });
+    help.textContent = SITES.length
+      ? `Available for this country: ${SITES.map(s=>s.code).join(', ')}. Click a site above or type its code.`
+      : 'CC returned no sites for this country. Add/activate the site in CC before provisioning.';
+  }catch(e){
+    SITES=[];
+    help.textContent='Could not load the site list. You may type a canonical site code; CC will validate it before provisioning.';
+    showError(e.message);
+  }
 }
 
-function siteChanged(){ loadOtaReadiness(document.getElementById('site').value); }
+function currentSite(){
+  const input=document.getElementById('site');
+  const code=(input.value||'').trim().toUpperCase();
+  if(input.value!==code) input.value=code;
+  return code;
+}
+function markSiteChoice(code){
+  document.querySelectorAll('.site-choice').forEach(b=>b.classList.toggle('active', b.dataset.siteCode===code));
+}
+function chooseSite(code){
+  document.getElementById('site').value=code;
+  markSiteChoice(code);
+  loadOtaReadiness(code);
+}
+function siteInputChanged(){
+  const code=currentSite();
+  markSiteChoice(code);
+  window.clearTimeout(SITE_READINESS_TIMER);
+  SITE_READINESS_TIMER=window.setTimeout(()=>loadOtaReadiness(code), 350);
+}
+function siteChanged(){
+  window.clearTimeout(SITE_READINESS_TIMER);
+  const code=currentSite();
+  markSiteChoice(code);
+  loadOtaReadiness(code);
+}
 async function loadOtaReadiness(site=''){
   const el=document.getElementById('otaReadyText');
   try{
@@ -389,11 +450,13 @@ function updateSel(){ document.getElementById('selCount').textContent = selected
 
 async function confirmProvision(){
   clearError();
-  const site=document.getElementById('site').value;
+  const site=currentSite();
   const ssid=document.getElementById('ssid').value;
   const wpw=document.getElementById('wpw').value;
   const units=selectedUnits();
-  if(!site) return showError('Pick a destination site.');
+  if(!site) return showError('Select a destination site or enter its canonical CC code.');
+  if(SITES.length && !SITES.some(s=>String(s.code||'').toUpperCase()===site))
+    return showError(`Unknown site code ${site}. Select one of: ${SITES.map(s=>s.code).join(', ')}.`);
   if(!ssid) return showError('Enter the destination site’s exact Starlink Wi-Fi SSID.');
   if(!wpw) return showError('Enter the destination site’s Starlink Wi-Fi password.');
   if(!units.length) return showError('Select at least one virgin gateway.');

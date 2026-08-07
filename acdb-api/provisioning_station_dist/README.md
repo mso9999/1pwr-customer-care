@@ -72,6 +72,12 @@ catalog. The page checks CC’s approved OTA release
 before it permits a batch. Scan, verify serial/MAC matches, choose the canonical
 site and operational Wi-Fi, and confirm.
 
+The destination-site control shows the country roster as large buttons and
+also accepts a manually typed canonical code. For Benin, the configured codes
+are currently `GBO` and `SAM`. Manual entry does not bypass validation: CC
+checks that the code belongs to the selected country and has an eligible OTA
+release before provisioning is enabled.
+
 Do not erase, open, USB-flash, or repeat provisioning when the gateway’s state
 is uncertain. Preserve the serial, MAC, assigned Thing, OTA update ID, and
 screenshots, then escalate.

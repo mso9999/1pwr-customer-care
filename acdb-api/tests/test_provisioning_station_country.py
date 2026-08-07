@@ -39,3 +39,16 @@ def test_station_refuses_requests_until_country_is_selected():
     station.SESSION = station.Session("https://cc.1pwrafrica.com", None)
     with pytest.raises(RuntimeError, match="Select the deployment country"):
         station.cc_request("GET", "/provisioning/site-codes", auth=False)
+
+
+def test_station_normalizes_flat_and_wrapped_site_lists():
+    rows = [{"code": "GBO", "name": "Gbo"}, {"code": "SAM", "name": "Sam"}]
+
+    assert station.normalize_site_codes_response(rows) == rows
+    assert station.normalize_site_codes_response({"sites": rows}) == rows
+    assert station.normalize_site_codes_response({"data": rows}) == rows
+
+
+def test_station_rejects_invalid_site_list_shape():
+    with pytest.raises(RuntimeError, match="invalid site list"):
+        station.normalize_site_codes_response("SAM")
