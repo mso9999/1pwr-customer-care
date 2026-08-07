@@ -750,6 +750,7 @@ class ActivationStepUpdateRequest(BaseModel):
 
 
 STATION_DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "provisioning_station_dist")
+STATION_BUNDLE_VERSION = "2026.08.07.2"
 METER_KIT_FIRMWARE_COMMIT = "6ea321048c8fc23564e5d9de91fccc1d821162ae"
 METER_KIT_FILES = {
     "METER_ADDRESSING.md": "10c8eecc99eeee35c1636c7446f4a053aba9d0a6b3f3263c6f2ee079ea6b2735",
@@ -777,7 +778,14 @@ def download_station(_user: CurrentUser = Depends(require_role(*PROVISIONING_ROL
     return Response(
         content=buf.getvalue(),
         media_type="application/zip",
-        headers={"Content-Disposition": "attachment; filename=provisioning-station.zip"},
+        headers={
+            "Content-Disposition": (
+                f"attachment; filename=provisioning-station-{STATION_BUNDLE_VERSION}.zip"
+            ),
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "X-Provisioning-Station-Version": STATION_BUNDLE_VERSION,
+        },
     )
 
 

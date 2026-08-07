@@ -51,6 +51,7 @@ COUNTRY_API_PREFIX = {
     "BN": "/api/bn",
     "ZM": "/api/zm",
 }
+STATION_VERSION = "2026.08.07.2"
 
 # ---------------------------------------------------------------------------
 # In-memory session (single technician per running station)
@@ -316,6 +317,8 @@ class Handler(BaseHTTPRequestHandler):
             body = payload if isinstance(payload, bytes) else str(payload).encode()
         self.send_response(code)
         self.send_header("Content-Type", content_type)
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+        self.send_header("Pragma", "no-cache")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -328,7 +331,8 @@ class Handler(BaseHTTPRequestHandler):
 
     # ---- GET ----
     def do_GET(self):
-        if self.path in ("/", "/index.html"):
+        request_path = urllib.parse.urlsplit(self.path).path
+        if request_path in ("/", "/index.html"):
             try:
                 with open(os.path.join(STATIC_DIR, "index.html"), "rb") as f:
                     return self._send(200, f.read(), "text/html; charset=utf-8")
@@ -340,6 +344,7 @@ class Handler(BaseHTTPRequestHandler):
                 "user": SESSION.user,
                 "cc_base": SESSION.cc_base,
                 "country": SESSION.country,
+                "station_version": STATION_VERSION,
                 # Default to ALL local subnets (comma-separated) so a laptop
                 # hotspot subnet is scanned alongside the internet-facing one.
                 "subnet": SESSION.subnet or ", ".join(local_subnets()),
@@ -545,7 +550,8 @@ def main():
     print(f"   CC:      {SESSION.cc_base}")
     print(f"   Country: {SESSION.country or 'select in browser'}")
     print(f"   Subnet:  {sub}")
-    print(f"   Open:    http://localhost:{a.port}")
+    print(f"   Version: {STATION_VERSION}")
+    print(f"   Open:    http://localhost:{a.port}/?v={urllib.parse.quote(STATION_VERSION)}")
     print("=" * 64)
     ThreadingHTTPServer(("127.0.0.1", a.port), Handler).serve_forever()
 

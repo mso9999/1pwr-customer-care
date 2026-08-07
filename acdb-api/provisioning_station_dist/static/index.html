@@ -47,6 +47,7 @@
 <body>
 <header>
   <h1>1Meter Provisioning Station</h1>
+  <span id="versionPill" class="pill">station …</span>
   <span id="ccPill" class="pill">CC: …</span>
   <span id="authPill" class="pill">signed out</span>
   <span id="subnetPill" class="pill"></span>
@@ -198,6 +199,7 @@ function setTab(t){
 
 async function boot(){
   const s = await api('/api/session');
+  document.getElementById('versionPill').textContent = 'station ' + (s.station_version||'unknown');
   document.getElementById('ccPill').textContent = 'CC: ' + s.cc_base.replace(/^https?:\/\//,'');
   document.getElementById('subnetPill').textContent = s.subnet;
   document.getElementById('subnet').value = s.subnet;

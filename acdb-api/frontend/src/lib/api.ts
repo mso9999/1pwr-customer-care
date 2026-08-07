@@ -4062,15 +4062,17 @@ export async function reconcileProvisioning(): Promise<{
 /** Download the provisioning-station local app (zip) with the auth token. */
 export async function downloadProvisioningStation(): Promise<void> {
   const token = getToken();
-  const res = await fetch(`${getApiBase()}/provisioning/station/download`, {
+  const res = await fetch(`${getApiBase()}/provisioning/station/download?fresh=${Date.now()}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
+    cache: 'no-store',
   });
   if (!res.ok) throw new Error(`Download failed: HTTP ${res.status}`);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = 'provisioning-station.zip';
+  const version = res.headers.get('X-Provisioning-Station-Version') || 'latest';
+  a.download = `provisioning-station-${version}.zip`;
   a.click();
   URL.revokeObjectURL(url);
 }

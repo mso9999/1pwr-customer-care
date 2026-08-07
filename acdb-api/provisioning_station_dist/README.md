@@ -66,7 +66,10 @@ If `py` is unavailable:
 python provisioning_station.py --cc https://cc.1pwrafrica.com
 ```
 
-Then open `http://localhost:8787`, select the deployment country, and sign in.
+Then open the exact versioned URL printed after `Open:` in PowerShell, select
+the deployment country, and sign in. The page header must show station version
+`2026.08.07.2` or later; if it does not, close the old station, download again,
+and extract into a new folder.
 The country selection controls the database, canonical sites, currency, and OTA
 catalog. The page checks CC’s approved OTA release
 before it permits a batch. Scan, verify serial/MAC matches, choose the canonical
