@@ -43,7 +43,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from middleware import require_employee
+from middleware import effective_roles, raise_privilege_denied, require_employee
 from models import CCRole, CurrentUser
 
 from .adapters import REGISTRY
@@ -65,11 +65,8 @@ OM_TICKETS_TIMEOUT_SECONDS = float(os.environ.get("OM_TICKETS_TIMEOUT_SECONDS", 
 # ---------------------------------------------------------------------------
 
 def _require_write_role(user: CurrentUser) -> None:
-    if not set(user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role]).intersection({CCRole.superadmin.value, CCRole.onm_team.value}):
-        raise HTTPException(
-            status_code=403,
-            detail="Gensite writes require superadmin or onm_team role.",
-        )
+    if not set(effective_roles(user)).intersection({CCRole.superadmin.value, CCRole.onm_team.value}):
+        raise_privilege_denied(user, [CCRole.superadmin, CCRole.onm_team], "commission or change generation-site records")
 
 
 def _resolve_adapter(vendor: str):

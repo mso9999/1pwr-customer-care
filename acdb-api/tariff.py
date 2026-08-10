@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 
 from db_auth import get_auth_db
 from models import CCRole, CurrentUser
-from middleware import require_employee
+from middleware import effective_roles, raise_privilege_denied, require_employee
 from mutations import try_log_mutation
 
 logger = logging.getLogger("acdb-api.tariff")
@@ -33,11 +33,8 @@ _TARIFF_ROLES = {CCRole.superadmin.value, CCRole.onm_team.value, CCRole.finance_
 
 
 def _require_tariff_role(user: CurrentUser):
-    if not set(user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role]).intersection(_TARIFF_ROLES):
-        raise HTTPException(
-            status_code=403,
-            detail="Tariff management requires superadmin, onm_team, or finance_team role",
-        )
+    if not set(effective_roles(user)).intersection(_TARIFF_ROLES):
+        raise_privilege_denied(user, _TARIFF_ROLES, "manage customer tariffs")
 
 
 # ---------------------------------------------------------------------------

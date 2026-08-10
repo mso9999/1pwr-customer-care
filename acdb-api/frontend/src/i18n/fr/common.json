@@ -40,6 +40,18 @@
   "page": "Page",
   "rows": "lignes",
   "cols": "colonnes",
+  "privilegeDenied": {
+    "title": "Cette action n’est pas incluse dans vos droits actuels",
+    "summary": "Le Service Client a comparé tous vos rôles principaux et secondaires avec le rôle requis ici.",
+    "assigned": "Vos rôles CC effectifs",
+    "required": "Rôle requis pour cette action",
+    "whoCanChange": "Qui est responsable de la modification des droits",
+    "yourCountry": "votre pays",
+    "hrOwner": "L’équipe RH {{country}} de votre organisation gère les affectations principales/secondaires, le statut de responsable et le périmètre.",
+    "nexusOwner": "Un administrateur utilisateurs Nexus/IS&T gère l’accès explicite au Service Client ou son refus dans Nexus.",
+    "ccOwner": "Un super-administrateur du Service Client gère les rôles CC manuels et les actions locales protégées.",
+    "next": "Demandez au responsable approprié de corriger l’affectation. Déconnectez-vous ensuite puis reconnectez-vous afin que le Service Client reçoive les nouveaux droits."
+  },
   "nav": {
     "dashboard": "Tableau de bord",
     "operations": "Opérations",

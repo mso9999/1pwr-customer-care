@@ -6,7 +6,7 @@ import os
 import logging
 from datetime import datetime, timedelta
 from functools import wraps
-from typing import Optional
+from typing import Iterable, Optional
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -125,16 +125,82 @@ def require_employee(user: CurrentUser = Depends(get_current_user)) -> CurrentUs
     return user
 
 
-def require_role(*roles: CCRole):
+def effective_roles(user: CurrentUser) -> list[str]:
+    """Return all composed CC roles, preserving a stable display order."""
+    values = user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role]
+    return list(dict.fromkeys(str(value) for value in values if value))
+
+
+def privilege_denial_detail(
+    user: CurrentUser,
+    required_roles: Iterable[str | CCRole],
+    action: str = "perform this action",
+) -> dict:
+    """Machine-readable denial contract shared by every CC role gate."""
+    assigned = effective_roles(user) or [CCRole.generic.value]
+    required = list(dict.fromkeys(
+        role.value if isinstance(role, CCRole) else str(role)
+        for role in required_roles
+    ))
+    return {
+        "code": "privilege_denied",
+        "system": "cc",
+        "action": action,
+        "assigned_roles": assigned,
+        "required_roles": required,
+        "message": (
+            f"Your assigned CC role(s) are {', '.join(assigned)}. "
+            f"To {action}, you need one of: {', '.join(required)}."
+        ),
+        "role_crud_owners": [
+            {
+                "owner": "Your organization’s country HR team",
+                "manages": "Primary/secondary department assignments, Lead status, and assignment scope in HR.",
+            },
+            {
+                "owner": "Nexus/IS&T User Administrator",
+                "manages": "Explicit Customer Care access or denial in Nexus, within access policy.",
+            },
+            {
+                "owner": "Customer Care Superadmin",
+                "manages": "Manual CC roles and protected local CC actions.",
+            },
+        ],
+        "resolution": (
+            "Ask the appropriate owner to correct the assignment, then sign out and back in "
+            "so Customer Care receives a fresh privilege claim."
+        ),
+    }
+
+
+def raise_privilege_denied(
+    user: CurrentUser,
+    required_roles: Iterable[str | CCRole],
+    action: str = "perform this action",
+) -> None:
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=privilege_denial_detail(user, required_roles, action),
+    )
+
+
+def _normalize_required_roles(roles) -> list[str]:
+    normalized: list[str] = []
+    for role in roles:
+        if isinstance(role, (list, tuple, set)):
+            normalized.extend(_normalize_required_roles(role))
+        else:
+            normalized.append(role.value if isinstance(role, CCRole) else str(role))
+    return list(dict.fromkeys(normalized))
+
+
+def require_role(*roles: CCRole, action: str = "use this area"):
     """Dependency factory: require user to have one of the specified CC roles."""
     def dependency(user: CurrentUser = Depends(require_employee)) -> CurrentUser:
-        required = {r.value for r in roles}
-        effective = set(user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role])
+        required = set(_normalize_required_roles(roles))
+        effective = set(effective_roles(user))
         if not effective.intersection(required):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Requires one of: {[r.value for r in roles]}",
-            )
+            raise_privilege_denied(user, required, action)
         return user
     return dependency
 

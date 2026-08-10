@@ -53,7 +53,7 @@ from contract_gen import CONTRACTS_DIR
 from country_config import COUNTRY, get_tariff_rate_for_site
 from balance_engine import get_balance_kwh, record_payment_kwh
 from fee_debt import total_fee_debt_for_advance_block
-from middleware import require_employee
+from middleware import effective_roles, raise_privilege_denied, require_employee
 from models import CCRole, CurrentUser
 from mutations import try_log_mutation
 from sm_credit_retry import credit_sm_with_retry
@@ -100,11 +100,8 @@ _SITE_CODE_RE = re.compile(r"([A-Z]{3})$")
 
 
 def _require_admin(user: CurrentUser) -> None:
-    if not set(user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role]).intersection(_ADMIN_ROLES):
-        raise HTTPException(
-            status_code=403,
-            detail="Advance management requires superadmin, onm_team, or finance_team",
-        )
+    if not set(effective_roles(user)).intersection(_ADMIN_ROLES):
+        raise_privilege_denied(user, _ADMIN_ROLES, "manage customer connection or readyboard advances")
 
 
 def _site_for_account(account_number: str) -> str:

@@ -29,7 +29,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from models import CCRole, CurrentUser
-from middleware import require_employee
+from middleware import effective_roles, raise_privilege_denied, require_employee
 from db_auth import get_auth_db
 
 logger = logging.getLogger("acdb-api.sync")
@@ -1426,8 +1426,8 @@ def upsert_site_project(
     user: CurrentUser = Depends(require_employee),
 ):
     """Add or update a site-to-project mapping. Requires superadmin."""
-    if CCRole.superadmin.value not in (user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role]):
-        raise HTTPException(status_code=403, detail="Superadmin only")
+    if CCRole.superadmin.value not in effective_roles(user):
+        raise_privilege_denied(user, [CCRole.superadmin], "add or change a site-to-uGridPlan project mapping")
 
     now = datetime.utcnow().isoformat()
     with get_auth_db() as conn:

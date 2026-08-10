@@ -30,7 +30,7 @@ from pydantic import BaseModel, Field
 
 from country_config import COUNTRY
 from customer_api import get_connection
-from middleware import require_employee
+from middleware import effective_roles, raise_privilege_denied, require_employee
 from models import CCRole, CurrentUser
 from mutations import try_log_mutation
 
@@ -46,11 +46,8 @@ _FEE_ADMIN_ROLES = {
 
 
 def _require_fee_admin(user: CurrentUser) -> None:
-    if not set(user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role]).intersection(_FEE_ADMIN_ROLES):
-        raise HTTPException(
-            status_code=403,
-            detail="Country fee management requires superadmin, onm_team, or finance_team",
-        )
+    if not set(effective_roles(user)).intersection(_FEE_ADMIN_ROLES):
+        raise_privilege_denied(user, _FEE_ADMIN_ROLES, "manage country connection and readyboard fees")
 
 
 # ---------------------------------------------------------------------------

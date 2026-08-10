@@ -18,9 +18,10 @@ from models import (
     PaginatedResponse,
     RecordCreateRequest,
     RecordUpdateRequest,
+    TRANSACTION_TABLES,
     UserType,
 )
-from middleware import can_write_table, get_current_user, require_employee
+from middleware import can_write_table, effective_roles, get_current_user, raise_privilege_denied, require_employee
 from mutations import log_mutation
 from sm_credit_retry import credit_sm_with_retry
 from sparkmeter_customer import is_thundercloud_account, sync_thundercloud_customer_name
@@ -564,8 +565,8 @@ def purge_expired(
     user: CurrentUser = Depends(require_employee),
 ):
     """Permanently delete cold-storage records older than COLD_STORAGE_DAYS."""
-    if CCRole.superadmin.value not in (user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role]):
-        raise HTTPException(status_code=403, detail="Purge requires superadmin role")
+    if CCRole.superadmin.value not in effective_roles(user):
+        raise_privilege_denied(user, [CCRole.superadmin], "permanently purge expired customer records")
 
     if table_name.lower() not in SOFT_DELETE_TABLES:
         raise HTTPException(status_code=400, detail="Table does not support cold storage")
@@ -609,8 +610,8 @@ def restore_record(
     user: CurrentUser = Depends(require_employee),
 ):
     """Restore a soft-deleted record from cold storage."""
-    if not set(user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role]).intersection({CCRole.superadmin.value, CCRole.onm_team.value}):
-        raise HTTPException(status_code=403, detail="Restore requires superadmin or onm_team role")
+    if not set(effective_roles(user)).intersection({CCRole.superadmin.value, CCRole.onm_team.value}):
+        raise_privilege_denied(user, [CCRole.superadmin, CCRole.onm_team], "restore a deleted customer record")
 
     if table_name.lower() not in SOFT_DELETE_TABLES:
         raise HTTPException(status_code=400, detail="Table does not support cold storage")
@@ -931,7 +932,10 @@ def create_record(
 ):
     """Create a new record. Requires write permission for the table."""
     if not can_write_table(user, table_name):
-        raise HTTPException(status_code=403, detail="Write access denied for this table")
+        required = [CCRole.superadmin, CCRole.onm_team]
+        if table_name.lower() in TRANSACTION_TABLES:
+            required.append(CCRole.finance_team)
+        raise_privilege_denied(user, required, f"create records in the {table_name} table")
 
     if not req.data:
         raise HTTPException(status_code=400, detail="No data provided")
@@ -989,7 +993,10 @@ def update_record(
 ):
     """Update a record by primary key. Requires write permission."""
     if not can_write_table(user, table_name):
-        raise HTTPException(status_code=403, detail="Write access denied for this table")
+        required = [CCRole.superadmin, CCRole.onm_team]
+        if table_name.lower() in TRANSACTION_TABLES:
+            required.append(CCRole.finance_team)
+        raise_privilege_denied(user, required, f"update records in the {table_name} table")
 
     if not req.data:
         raise HTTPException(status_code=400, detail="No data provided")
@@ -1106,8 +1113,8 @@ def delete_record(
     For soft-delete tables (customers), records are moved to cold storage
     for 30 days before permanent purge.
     """
-    if not set(user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role]).intersection({CCRole.superadmin.value, CCRole.onm_team.value}):
-        raise HTTPException(status_code=403, detail="Delete requires superadmin or onm_team role")
+    if not set(effective_roles(user)).intersection({CCRole.superadmin.value, CCRole.onm_team.value}):
+        raise_privilege_denied(user, [CCRole.superadmin, CCRole.onm_team], f"delete a record from the {table_name} table")
 
     with _get_connection() as conn:
         pk = _get_primary_key(conn, table_name)

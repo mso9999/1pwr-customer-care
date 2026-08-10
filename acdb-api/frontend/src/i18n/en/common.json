@@ -40,6 +40,18 @@
   "page": "Page",
   "rows": "rows",
   "cols": "cols",
+  "privilegeDenied": {
+    "title": "This action is not included in your current access",
+    "summary": "Customer Care compared all of your primary and secondary role assignments with the role required here.",
+    "assigned": "Your effective CC role(s)",
+    "required": "Role needed for this action",
+    "whoCanChange": "Who is responsible for changing access",
+    "yourCountry": "your country",
+    "hrOwner": "The {{country}} HR team in your organization manages primary/secondary department assignments, Lead status, and scope.",
+    "nexusOwner": "A Nexus/IS&T User Administrator manages explicit Customer Care access or denial in Nexus.",
+    "ccOwner": "A Customer Care Superadmin manages manual CC roles and protected local actions.",
+    "next": "Ask the appropriate owner to correct the assignment. Then sign out and back in so Customer Care receives a fresh privilege claim."
+  },
   "nav": {
     "dashboard": "Dashboard",
     "operations": "Operations",

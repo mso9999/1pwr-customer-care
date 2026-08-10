@@ -43,6 +43,18 @@ function formatApiErrorDetail(detail: unknown): string {
       .join('; ');
   }
   if (typeof detail === 'object') {
+    const denial = detail as {
+      code?: string;
+      message?: string;
+      role_crud_owners?: Array<{ owner?: string; manages?: string }>;
+      resolution?: string;
+    };
+    if (denial.code === 'privilege_denied') {
+      const owners = (denial.role_crud_owners || [])
+        .map((item) => `${item.owner || 'Access owner'}: ${item.manages || ''}`.trim())
+        .join(' ');
+      return [denial.message, owners, denial.resolution].filter(Boolean).join(' ');
+    }
     try {
       return JSON.stringify(detail);
     } catch {

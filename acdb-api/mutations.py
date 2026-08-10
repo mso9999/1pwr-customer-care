@@ -17,7 +17,7 @@ import psycopg2.extras
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from db_auth import get_auth_db
-from middleware import require_employee
+from middleware import effective_roles, raise_privilege_denied, require_employee
 from models import CCRole, CurrentUser
 
 logger = logging.getLogger("acdb-api.mutations")
@@ -545,8 +545,8 @@ def revert_mutation(
     - update -> UPDATE back to old_values
     - delete -> INSERT old_values back
     """
-    if not set(user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role]).intersection({CCRole.superadmin.value, CCRole.onm_team.value}):
-        raise HTTPException(status_code=403, detail="Revert requires superadmin or onm_team role")
+    if not set(effective_roles(user)).intersection({CCRole.superadmin.value, CCRole.onm_team.value}):
+        raise_privilege_denied(user, [CCRole.superadmin, CCRole.onm_team], "revert an audited mutation")
 
     mutation = _fetch_mutation_record(mutation_id, include_payload=True)
     if not mutation:
