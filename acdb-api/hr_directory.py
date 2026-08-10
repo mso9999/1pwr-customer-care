@@ -23,12 +23,12 @@ What this module provides
 
 Caching
 -------
-The full directory is cached for ``HR_DIRECTORY_TTL`` seconds (default 1800 /
-30 min). HR changes slowly and roles are baked into the JWT at login, so a
-half-hour freshness window is ample; per-employee ``/show`` lookups fill the
-gap for someone not yet in a cached cycle. Firestore is no longer used for
-employees — it remains in ``pr_lookup`` only for the portfolio/organization
-list.
+The full directory is cached for ``HR_DIRECTORY_TTL`` seconds (default 300 /
+5 min). Membership changes affect authorization and roles are baked into the
+JWT at login, so the shorter window keeps primary/secondary assignment changes
+operationally responsive. Per-employee ``/show`` lookups fill the gap for
+someone not yet in a cached cycle. Firestore is no longer used for employees —
+it remains in ``pr_lookup`` only for the portfolio/organization list.
 
 Env vars (preferred names per the HR integration guide, with legacy fallbacks
 so the currently-deployed host keeps working without an env change):
@@ -62,7 +62,7 @@ HR_BASE_URL = (
 HR_API_KEY = os.environ.get("HR_API_KEY_CC_PORTAL") or os.environ.get("HR_PORTAL_API_KEY", "")
 
 HR_TIMEOUT = float(os.environ.get("HR_TIMEOUT", "6"))
-HR_DIRECTORY_TTL = float(os.environ.get("HR_DIRECTORY_TTL", "1800"))  # 30 min
+HR_DIRECTORY_TTL = float(os.environ.get("HR_DIRECTORY_TTL", "300"))  # 5 min
 
 _AUTH_WARNED = False
 
