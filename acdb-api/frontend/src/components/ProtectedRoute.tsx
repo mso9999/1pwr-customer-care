@@ -41,7 +41,8 @@ export default function ProtectedRoute({ children, requireEmployee, requireRole 
     return <Navigate to="/my/profile" replace />;
   }
 
-  if (requireRole && !requireRole.includes(user.role)) {
+  const effectiveRoles = user.roles || user.cc_roles || [user.role];
+  if (requireRole && !requireRole.some((role) => effectiveRoles.includes(role))) {
     return <div className="text-center py-16 text-red-600">Access denied. Required role: {requireRole.join(', ')}</div>;
   }
 

@@ -33,7 +33,7 @@ _TARIFF_ROLES = {CCRole.superadmin.value, CCRole.onm_team.value, CCRole.finance_
 
 
 def _require_tariff_role(user: CurrentUser):
-    if user.role not in _TARIFF_ROLES:
+    if not set(user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role]).intersection(_TARIFF_ROLES):
         raise HTTPException(
             status_code=403,
             detail="Tariff management requires superadmin, onm_team, or finance_team role",

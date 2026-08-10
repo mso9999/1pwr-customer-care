@@ -564,7 +564,7 @@ def purge_expired(
     user: CurrentUser = Depends(require_employee),
 ):
     """Permanently delete cold-storage records older than COLD_STORAGE_DAYS."""
-    if user.role != CCRole.superadmin.value:
+    if CCRole.superadmin.value not in (user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role]):
         raise HTTPException(status_code=403, detail="Purge requires superadmin role")
 
     if table_name.lower() not in SOFT_DELETE_TABLES:
@@ -609,7 +609,7 @@ def restore_record(
     user: CurrentUser = Depends(require_employee),
 ):
     """Restore a soft-deleted record from cold storage."""
-    if user.role not in (CCRole.superadmin.value, CCRole.onm_team.value):
+    if not set(user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role]).intersection({CCRole.superadmin.value, CCRole.onm_team.value}):
         raise HTTPException(status_code=403, detail="Restore requires superadmin or onm_team role")
 
     if table_name.lower() not in SOFT_DELETE_TABLES:
@@ -1106,7 +1106,7 @@ def delete_record(
     For soft-delete tables (customers), records are moved to cold storage
     for 30 days before permanent purge.
     """
-    if user.role not in (CCRole.superadmin.value, CCRole.onm_team.value):
+    if not set(user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role]).intersection({CCRole.superadmin.value, CCRole.onm_team.value}):
         raise HTTPException(status_code=403, detail="Delete requires superadmin or onm_team role")
 
     with _get_connection() as conn:

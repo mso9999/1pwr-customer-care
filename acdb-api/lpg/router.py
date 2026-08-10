@@ -55,7 +55,7 @@ router = APIRouter(prefix="/api/lpg", tags=["lpg"])
 # ---------------------------------------------------------------------------
 
 def _require_write_role(user: CurrentUser) -> None:
-    if user.role not in (CCRole.superadmin.value, CCRole.onm_team.value):
+    if not set(user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role]).intersection({CCRole.superadmin.value, CCRole.onm_team.value}):
         raise HTTPException(
             status_code=403,
             detail="LPG writes require superadmin or onm_team role.",

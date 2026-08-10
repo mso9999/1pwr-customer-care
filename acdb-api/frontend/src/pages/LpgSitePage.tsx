@@ -66,7 +66,7 @@ function fuelEconomy(run: { cylinders_consumed: number; runtime_seconds: number 
 export default function LpgSitePage() {
   const { code = '' } = useParams();
   const { user } = useAuth();
-  const canEdit = user?.role === 'superadmin' || user?.role === 'onm_team';
+  const canEdit = (user?.roles || user?.cc_roles || (user?.role ? [user.role] : [])).some((role) => ['superadmin', 'onm_team'].includes(role));
 
   const [summary, setSummary] = useState<LpgSiteSummary | null>(null);
   const [batches, setBatches] = useState<LpgBatch[]>([]);

@@ -1426,7 +1426,7 @@ def upsert_site_project(
     user: CurrentUser = Depends(require_employee),
 ):
     """Add or update a site-to-project mapping. Requires superadmin."""
-    if user.role != CCRole.superadmin.value:
+    if CCRole.superadmin.value not in (user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role]):
         raise HTTPException(status_code=403, detail="Superadmin only")
 
     now = datetime.utcnow().isoformat()

@@ -81,7 +81,7 @@ function DiffView({ oldVals, newVals }: { oldVals: Record<string, unknown> | nul
 export default function MutationsPage() {
   const { t } = useTranslation(['mutations', 'common']);
   const { user } = useAuth();
-  const canRevert = user?.role === 'superadmin' || user?.role === 'onm_team';
+  const canRevert = (user?.roles || user?.cc_roles || (user?.role ? [user.role] : [])).some((role) => ['superadmin', 'onm_team'].includes(role));
   const canRevertAction = (action: string) => ['create', 'update', 'delete'].includes(action);
 
   const [mutations, setMutations] = useState<Mutation[]>([]);

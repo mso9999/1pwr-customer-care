@@ -33,13 +33,21 @@ security = HTTPBearer(auto_error=False)
 # Token helpers
 # ---------------------------------------------------------------------------
 
-def create_token(user_type: str, user_id: str, role: str, name: str = "", email: str = "") -> tuple[str, int]:
+def create_token(
+    user_type: str,
+    user_id: str,
+    role: str,
+    name: str = "",
+    email: str = "",
+    roles: Optional[list[str]] = None,
+) -> tuple[str, int]:
     """Create a JWT. Returns (token_string, expires_in_seconds)."""
     expires = timedelta(hours=JWT_EXPIRY_HOURS)
     payload = {
         "sub": user_id,
         "user_type": user_type,
         "role": role,
+        "roles": roles or [role],
         "name": name,
         "email": email,
         "iat": datetime.utcnow(),
@@ -83,17 +91,27 @@ async def get_current_user(
 
     role_str = payload.get("role", "generic")
     permissions = {}
+    role_values = payload.get("roles")
+    if not isinstance(role_values, list):
+        role_values = [role_str]
+    role_values = [str(value) for value in role_values if value]
+    if role_str not in role_values:
+        role_values.append(role_str)
     if payload.get("user_type") == "employee":
-        try:
-            cc_role = CCRole(role_str)
-            permissions = ROLE_PERMISSIONS.get(cc_role, ROLE_PERMISSIONS[CCRole.generic])
-        except ValueError:
-            permissions = ROLE_PERMISSIONS[CCRole.generic]
+        permissions = dict(ROLE_PERMISSIONS[CCRole.generic])
+        for value in role_values:
+            try:
+                cc_role = CCRole(value)
+            except ValueError:
+                continue
+            for permission, allowed in ROLE_PERMISSIONS.get(cc_role, {}).items():
+                permissions[permission] = permissions.get(permission, False) or bool(allowed)
 
     return CurrentUser(
         user_type=UserType(payload.get("user_type", "customer")),
         user_id=payload.get("sub", ""),
         role=role_str,
+        roles=role_values,
         name=payload.get("name", ""),
         email=payload.get("email", ""),
         permissions=permissions,
@@ -110,7 +128,9 @@ def require_employee(user: CurrentUser = Depends(get_current_user)) -> CurrentUs
 def require_role(*roles: CCRole):
     """Dependency factory: require user to have one of the specified CC roles."""
     def dependency(user: CurrentUser = Depends(require_employee)) -> CurrentUser:
-        if user.role not in [r.value for r in roles]:
+        required = {r.value for r in roles}
+        effective = set(user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role])
+        if not effective.intersection(required):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Requires one of: {[r.value for r in roles]}",

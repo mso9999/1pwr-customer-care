@@ -100,7 +100,7 @@ _SITE_CODE_RE = re.compile(r"([A-Z]{3})$")
 
 
 def _require_admin(user: CurrentUser) -> None:
-    if user.role not in _ADMIN_ROLES:
+    if not set(user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role]).intersection(_ADMIN_ROLES):
         raise HTTPException(
             status_code=403,
             detail="Advance management requires superadmin, onm_team, or finance_team",

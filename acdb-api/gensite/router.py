@@ -65,7 +65,7 @@ OM_TICKETS_TIMEOUT_SECONDS = float(os.environ.get("OM_TICKETS_TIMEOUT_SECONDS", 
 # ---------------------------------------------------------------------------
 
 def _require_write_role(user: CurrentUser) -> None:
-    if user.role not in (CCRole.superadmin.value, CCRole.onm_team.value):
+    if not set(user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role]).intersection({CCRole.superadmin.value, CCRole.onm_team.value}):
         raise HTTPException(
             status_code=403,
             detail="Gensite writes require superadmin or onm_team role.",
@@ -961,4 +961,3 @@ def open_ugp_ticket_for_alarm(
         "site_code": alarm["site_code"],
         "om_response": om_payload,
     }
-

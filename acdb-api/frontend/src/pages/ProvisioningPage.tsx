@@ -489,8 +489,9 @@ export default function ProvisioningPage() {
     ['FAILED', 'REJECTED', 'CANCELED', 'REMOVED'].includes(x.status || '')).length || 0;
   const otaQueued = Math.max(0, otaExpected - otaSucceeded - otaInProgress - otaFailed);
   const otaPercent = otaExpected ? Math.round((otaSucceeded / otaExpected) * 100) : 0;
-  const canApproveRelease = ['superadmin', 'engineering'].includes(String(user?.role || ''));
-  const canConfigureSiteSystems = ['superadmin', 'engineering'].includes(String(user?.role || ''));
+  const effectiveRoles = user?.roles || user?.cc_roles || (user?.role ? [user.role] : []);
+  const canApproveRelease = effectiveRoles.some((role) => ['superadmin', 'engineering'].includes(role));
+  const canConfigureSiteSystems = effectiveRoles.some((role) => ['superadmin', 'engineering'].includes(role));
   const selectedSiteProgress = guideSite ? countryReadiness?.site_progress?.[guideSite] : undefined;
   const foundationKeys = new Set(['sites', 'tariff', 'metering', 'payment_ingest', 'meter_credit']);
   const foundationsReady = Boolean(countryReadiness?.gates

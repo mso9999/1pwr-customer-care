@@ -594,7 +594,7 @@ export default function CustomerDetailPage() {
               <button onClick={() => setEditing(false)} className="px-4 py-2 bg-gray-200 rounded-lg text-sm hover:bg-gray-300">{t('common:cancel')}</button>
             </>
           )}
-          {(isSuperadmin || user?.role === 'onm_team') && (
+          {(isSuperadmin || (user?.roles || user?.cc_roles || (user?.role ? [user.role] : [])).includes('onm_team')) && (
             <button onClick={handleDelete} className="px-4 py-2 bg-red-100 text-red-700 rounded-lg text-sm hover:bg-red-200">{t('common:delete')}</button>
           )}
         </div>

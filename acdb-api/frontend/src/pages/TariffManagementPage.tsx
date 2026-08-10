@@ -13,7 +13,7 @@ const FEE_ADMIN_ROLES = new Set(['superadmin', 'onm_team', 'finance_team']);
 function CountryFeesCard() {
   const { t } = useTranslation(['tariff']);
   const { user } = useAuth();
-  const canEdit = !!user?.role && FEE_ADMIN_ROLES.has(user.role as string);
+  const canEdit = (user?.roles || user?.cc_roles || (user?.role ? [user.role] : [])).some((role) => FEE_ADMIN_ROLES.has(role));
   const [fees, setFees] = useState<CountryFees | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ connection: 0, readyboard: 0 });
@@ -148,7 +148,7 @@ function CountryFeesCard() {
 function LowBalanceKwhCard() {
   const { t } = useTranslation(['tariff']);
   const { user } = useAuth();
-  const canEdit = !!user?.role && FEE_ADMIN_ROLES.has(user.role as string);
+  const canEdit = (user?.roles || user?.cc_roles || (user?.role ? [user.role] : [])).some((role) => FEE_ADMIN_ROLES.has(role));
   const [fees, setFees] = useState<CountryFees | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ warn: 10, clear: 20, maxPerDay: 2 });
@@ -325,7 +325,7 @@ function LowBalanceKwhCard() {
 function SmsGatewayBalanceRateCard() {
   const { t } = useTranslation(['tariff']);
   const { user } = useAuth();
-  const canEdit = !!user?.role && FEE_ADMIN_ROLES.has(user.role as string);
+  const canEdit = (user?.roles || user?.cc_roles || (user?.role ? [user.role] : [])).some((role) => FEE_ADMIN_ROLES.has(role));
   const [fees, setFees] = useState<CountryFees | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ perHour: 1, perDay: 3 });

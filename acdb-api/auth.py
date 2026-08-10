@@ -108,43 +108,62 @@ def _employee_token_response(
     email: str,
     hr_role: str = "",
     nexus_department: str | None = None,
+    nexus_memberships: list[dict] | None = None,
 ) -> TokenResponse:
     """
     Issue the CC employee JWT + user payload for an already-authenticated
     employee. Shared by employee-login (PIN) and the Nexus SSO receiver.
 
-    When ``nexus_department`` is provided (from Nexus SSO claims), it is used
-    as the authoritative department string instead of the HR directory lookup.
-    This makes Nexus the single source of truth for department→role mapping.
+    HR remains authoritative for the complete membership list. A Nexus
+    department claim is retained for display compatibility; authorization
+    composes every live HR membership plus any explicit manual CC assignment.
     """
     # Cache HR email in SQLite (diagnostic continuity; HR is keyed by employee_id)
     from pr_lookup import (
-        get_cc_role_for_email,
-        get_cc_role_for_employee_id,
         get_department_for_email,
         get_department_for_employee_id,
         set_employee_email,
     )
-    from hr_directory import _map_department_to_role
+    from hr_directory import (
+        get_cc_roles_for_email,
+        get_cc_roles_for_employee_id,
+        get_cc_roles_for_memberships,
+    )
 
     if email:
         set_employee_email(employee_id, email)
 
-    # Determine CC role: non-generic manual SQLite override > Nexus department > HR department auto-map > generic
-    # A manual 'generic' assignment is treated as "no manual role" so that department
-    # reassignment can take effect without needing to delete the row.
+    # Compose every role source. Department memberships are a union, so a
+    # secondary O&M assignment grants O&M privileges even when Finance is the
+    # primary department (and vice versa). Manual assignments add authority;
+    # an explicit Nexus app denial is enforced before this function is called.
     manual_role = get_employee_role(employee_id)
+    cc_roles: set[str] = set()
     if manual_role and manual_role != CCRole.generic.value:
-        cc_role = manual_role
-    elif nexus_department:
-        # Nexus SSO provided the department — use it as the single source of truth
-        cc_role = _map_department_to_role(nexus_department) or CCRole.generic.value
+        cc_roles.add(manual_role)
+    if nexus_memberships:
+        cc_roles.update(get_cc_roles_for_memberships(nexus_memberships))
     else:
-        # Fallback for direct (non-SSO) logins: HR directory lookup
-        hr_role_mapped = get_cc_role_for_email(email) if email else None
-        if hr_role_mapped is None:
-            hr_role_mapped = get_cc_role_for_employee_id(employee_id)
-        cc_role = hr_role_mapped or CCRole.generic.value
+        # Direct login and legacy Nexus tokens resolve the live HR membership
+        # list. Scalar primary department is used only for older HR records.
+        if email:
+            cc_roles.update(get_cc_roles_for_email(email))
+        if not cc_roles:
+            cc_roles.update(get_cc_roles_for_employee_id(employee_id))
+    if not cc_roles:
+        cc_roles.add(CCRole.generic.value)
+
+    # Preserve one legacy display role while carrying the complete role union
+    # in the token. Authorization gates use cc_roles, not this precedence.
+    precedence = [
+        CCRole.superadmin.value,
+        CCRole.onm_team.value,
+        CCRole.finance_team.value,
+        CCRole.engineering.value,
+        CCRole.generic.value,
+    ]
+    cc_role = next((role for role in precedence if role in cc_roles), CCRole.generic.value)
+    ordered_roles = [role for role in precedence if role in cc_roles]
 
     # Readable HR department affiliation (for display/self-diagnosis in CC).
     # When Nexus provided the department, use it; otherwise fall back to HR directory.
@@ -158,9 +177,17 @@ def _employee_token_response(
         role=cc_role,
         name=name,
         email=email,
+        roles=ordered_roles,
     )
 
-    permissions = ROLE_PERMISSIONS.get(CCRole(cc_role), ROLE_PERMISSIONS[CCRole.generic])
+    permissions = dict(ROLE_PERMISSIONS[CCRole.generic])
+    for value in ordered_roles:
+        try:
+            mapped_permissions = ROLE_PERMISSIONS.get(CCRole(value), {})
+        except ValueError:
+            continue
+        for permission, allowed in mapped_permissions.items():
+            permissions[permission] = permissions.get(permission, False) or bool(allowed)
 
     return TokenResponse(
         access_token=token,
@@ -171,6 +198,7 @@ def _employee_token_response(
             "name": name,
             "email": email,
             "cc_role": cc_role,
+            "cc_roles": ordered_roles,
             "hr_role": hr_role,
             "department": department,
             "permissions": permissions,
@@ -371,6 +399,9 @@ def nexus_sso_login(req: NexusSsoRequest):
 
     # Extract Nexus-provided department from SSO claims (authoritative)
     nexus_department = str(claims.get("department") or "").strip() or None
+    raw_memberships = claims.get("memberships")
+    nexus_memberships = [item for item in raw_memberships if isinstance(item, dict)] \
+        if isinstance(raw_memberships, list) else None
 
     return _employee_token_response(
         employee_id=str(emp["employee_id"]),
@@ -378,6 +409,7 @@ def nexus_sso_login(req: NexusSsoRequest):
         email=email,
         hr_role=str(emp.get("role") or ""),
         nexus_department=nexus_department,
+        nexus_memberships=nexus_memberships,
     )
 
 
@@ -649,6 +681,8 @@ def get_me(user: CurrentUser = Depends(get_current_user)):
         "user_type": user.user_type.value,
         "user_id": user.user_id,
         "role": user.role,
+        "roles": user.roles or [user.role],
+        "cc_roles": user.roles or [user.role],
         "name": user.name,
         "email": user.email,
         "permissions": user.permissions,

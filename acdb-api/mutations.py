@@ -545,7 +545,7 @@ def revert_mutation(
     - update -> UPDATE back to old_values
     - delete -> INSERT old_values back
     """
-    if user.role not in (CCRole.superadmin.value, CCRole.onm_team.value):
+    if not set(user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role]).intersection({CCRole.superadmin.value, CCRole.onm_team.value}):
         raise HTTPException(status_code=403, detail="Revert requires superadmin or onm_team role")
 
     mutation = _fetch_mutation_record(mutation_id, include_payload=True)

@@ -225,6 +225,40 @@ def get_cc_role_for_employee_id(employee_id: str) -> Optional[str]:
     return _map_department_to_role(get_department_for_employee_id(employee_id) or "")
 
 
+def _cc_roles_from_record(rec: Optional[dict]) -> list[str]:
+    """Map every HR department membership to CC roles.
+
+    Secondary assignments are first-class: they contribute exactly the same
+    mapped CC role as a primary assignment. The older scalar department is
+    retained only as a backward-compatible fallback for legacy HR records.
+    """
+    if not rec:
+        return []
+    departments: list[str] = []
+    memberships = rec.get("memberships")
+    if isinstance(memberships, list):
+        for membership in memberships:
+            if isinstance(membership, dict):
+                name = str(membership.get("department_name") or "").strip()
+                if name:
+                    departments.append(name)
+    if not departments and rec.get("department"):
+        departments.append(str(rec["department"]).strip())
+    return sorted({role for role in (_map_department_to_role(name) for name in departments) if role})
+
+
+def get_cc_roles_for_email(email: str) -> list[str]:
+    return _cc_roles_from_record(get_employee_by_email(email))
+
+
+def get_cc_roles_for_employee_id(employee_id: str) -> list[str]:
+    return _cc_roles_from_record(get_employee_by_id(employee_id))
+
+
+def get_cc_roles_for_memberships(memberships: list[dict]) -> list[str]:
+    return _cc_roles_from_record({"memberships": memberships})
+
+
 def get_all_pr_departments() -> list[dict]:
     """HR departments, shaped as the historical PRDepartment objects
     ({id,name,code,org,org_name,active}) so the admin department→role picker

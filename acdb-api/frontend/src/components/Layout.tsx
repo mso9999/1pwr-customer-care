@@ -247,7 +247,7 @@ export default function Layout() {
               <p className="text-sm font-medium text-gray-700 truncate">{user.name || user.user_id}</p>
               {isEmployee && (
                 <span className="inline-block px-1.5 py-0.5 bg-blue-100 text-blue-700 text-[10px] font-medium rounded-full">
-                  {user.role}
+                  {(user.roles || user.cc_roles || [user.role]).join(' + ')}
                 </span>
               )}
               {isEmployee && (

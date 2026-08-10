@@ -74,9 +74,10 @@ class CurrentUser(BaseModel):
     user_type: UserType
     user_id: str  # employee_id or customer_id
     role: str     # CCRole value or "customer"
+    roles: List[str] = Field(default_factory=list)
     name: str = ""
     email: str = ""
-    permissions: Dict[str, bool] = {}
+    permissions: Dict[str, bool] = Field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------

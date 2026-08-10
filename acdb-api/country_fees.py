@@ -46,7 +46,7 @@ _FEE_ADMIN_ROLES = {
 
 
 def _require_fee_admin(user: CurrentUser) -> None:
-    if user.role not in _FEE_ADMIN_ROLES:
+    if not set(user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role]).intersection(_FEE_ADMIN_ROLES):
         raise HTTPException(
             status_code=403,
             detail="Country fee management requires superadmin, onm_team, or finance_team",

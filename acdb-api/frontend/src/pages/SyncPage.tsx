@@ -10,7 +10,7 @@ import { useAuth } from '../contexts/AuthContext';
 export default function SyncPage() {
   const { t } = useTranslation(['sync', 'common']);
   const { user } = useAuth();
-  const isSuperadmin = user?.role === 'superadmin';
+  const isSuperadmin = (user?.roles || user?.cc_roles || (user?.role ? [user.role] : [])).includes('superadmin');
 
   const [sites, setSites] = useState<SiteProject[]>([]);
   const [status, setStatus] = useState<SyncStatus | null>(null);

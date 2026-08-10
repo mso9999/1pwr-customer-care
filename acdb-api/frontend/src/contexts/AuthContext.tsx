@@ -5,6 +5,8 @@ interface User {
   user_type: string;
   user_id: string;
   role: string;
+  roles?: string[];
+  cc_roles?: string[];
   name: string;
   email: string;
   department?: string;
@@ -66,7 +68,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const isEmployee = user?.user_type === 'employee';
   const isCustomer = user?.user_type === 'customer';
-  const isSuperadmin = user?.role === 'superadmin';
+  const effectiveRoles = user?.roles || user?.cc_roles || (user?.role ? [user.role] : []);
+  const isSuperadmin = effectiveRoles.includes('superadmin');
   const canWrite = Boolean(user?.permissions?.write_customers || user?.permissions?.write_transactions);
   const canWriteCustomers = Boolean(user?.permissions?.write_customers);
 

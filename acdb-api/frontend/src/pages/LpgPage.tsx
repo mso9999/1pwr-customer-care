@@ -31,7 +31,7 @@ export default function LpgPage() {
   const { country } = useCountry();
   const { user } = useAuth();
   const navigate = useNavigate();
-  const canEdit = user?.role === 'superadmin' || user?.role === 'onm_team';
+  const canEdit = (user?.roles || user?.cc_roles || (user?.role ? [user.role] : [])).some((role) => ['superadmin', 'onm_team'].includes(role));
   const [sites, setSites] = useState<LpgSiteSummary[]>([]);
   const [criticalCount, setCriticalCount] = useState(0);
   const [loading, setLoading] = useState(true);

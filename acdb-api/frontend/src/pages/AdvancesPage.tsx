@@ -424,7 +424,7 @@ function LedgerModal({ advance, onClose }: { advance: Advance; onClose: () => vo
 export default function AdvancesPage() {
   const { t } = useTranslation(['advances', 'common']);
   const { user } = useAuth();
-  const canAdmin = isAdvanceAdmin(user?.role as string | undefined);
+  const canAdmin = (user?.roles || user?.cc_roles || (user?.role ? [user.role] : [])).some((role) => isAdvanceAdmin(role));
 
   const [rows, setRows] = useState<Advance[]>([]);
   const [loading, setLoading] = useState(true);

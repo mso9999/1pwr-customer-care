@@ -415,7 +415,7 @@ def assign_meter(
     user: CurrentUser = Depends(require_employee),
 ):
     """Atomically assign a meter and account to an existing customer."""
-    if user.role not in (CCRole.superadmin.value, CCRole.onm_team.value):
+    if not set(user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role]).intersection({CCRole.superadmin.value, CCRole.onm_team.value}):
         raise HTTPException(status_code=403, detail="Requires superadmin or onm_team role")
 
     customer_identifier = str(req.customer_identifier or "").strip()
@@ -684,7 +684,7 @@ def update_meter_assignment(
     The account pointer, billing source, and any prior primary are updated in
     the same transaction so the UI cannot leave an account with two primaries.
     """
-    if user.role not in (CCRole.superadmin.value, CCRole.onm_team.value):
+    if not set(user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role]).intersection({CCRole.superadmin.value, CCRole.onm_team.value}):
         raise HTTPException(status_code=403, detail="Requires superadmin or onm_team role")
 
     meter_id = str(meter_id or "").strip()
@@ -806,7 +806,7 @@ def decommission_meter(
     user: CurrentUser = Depends(require_employee),
 ):
     """Mark a meter as faulty/test/decommissioned and optionally assign a replacement."""
-    if user.role not in (CCRole.superadmin.value, CCRole.onm_team.value):
+    if not set(user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role]).intersection({CCRole.superadmin.value, CCRole.onm_team.value}):
         raise HTTPException(status_code=403, detail="Requires superadmin or onm_team role")
 
     valid_reasons = ("faulty", "test", "decommissioned", "retired")
@@ -973,7 +973,7 @@ def batch_update_status(
 
     Body: [{ "meter_id": "SMRSD-...", "status": "faulty", "notes": "..." }, ...]
     """
-    if user.role not in (CCRole.superadmin.value, CCRole.onm_team.value):
+    if not set(user.roles if isinstance(user.roles, (list, tuple, set)) and user.roles else [user.role]).intersection({CCRole.superadmin.value, CCRole.onm_team.value}):
         raise HTTPException(status_code=403, detail="Requires superadmin or onm_team role")
 
     now = datetime.now(timezone.utc).isoformat()
