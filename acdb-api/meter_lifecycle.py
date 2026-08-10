@@ -18,13 +18,21 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from models import CCRole, CurrentUser
-from middleware import effective_roles, raise_privilege_denied, require_employee
+from middleware import require_action, require_employee
 from mutations import log_mutation
 from sparkmeter_customer import sync_sparkmeter_customer_and_meter
 
 logger = logging.getLogger("acdb-api.meter-lifecycle")
 
 router = APIRouter(prefix="/api/meters", tags=["meter-lifecycle"])
+
+CC_METER_OPERATE_GATE = require_action(
+    "operate_customer_care",
+    system="cc",
+    action="assign and maintain customer meter records",
+    required_level="C",
+    fallback_roles=(CCRole.superadmin, CCRole.onm_team),
+)
 
 
 def _get_connection():
@@ -412,12 +420,9 @@ def _parse_account_sequence(account_number: str) -> int:
 @router.post("/assign")
 def assign_meter(
     req: AssignMeterRequest,
-    user: CurrentUser = Depends(require_employee),
+    user: CurrentUser = Depends(CC_METER_OPERATE_GATE),
 ):
     """Atomically assign a meter and account to an existing customer."""
-    if not set(effective_roles(user)).intersection({CCRole.superadmin.value, CCRole.onm_team.value}):
-        raise_privilege_denied(user, [CCRole.superadmin, CCRole.onm_team], "assign a meter to a customer")
-
     customer_identifier = str(req.customer_identifier or "").strip()
     meter_id = str(req.meter_id or "").strip()
     thing_name = str(req.thing_name or "").strip()
@@ -677,16 +682,13 @@ def assign_meter(
 def update_meter_assignment(
     meter_id: str,
     req: MeterAssignmentUpdate,
-    user: CurrentUser = Depends(require_employee),
+    user: CurrentUser = Depends(CC_METER_OPERATE_GATE),
 ):
     """Correct an existing meter's platform or primary/secondary role.
 
     The account pointer, billing source, and any prior primary are updated in
     the same transaction so the UI cannot leave an account with two primaries.
     """
-    if not set(effective_roles(user)).intersection({CCRole.superadmin.value, CCRole.onm_team.value}):
-        raise_privilege_denied(user, [CCRole.superadmin, CCRole.onm_team], "change a meter platform or primary/secondary assignment")
-
     meter_id = str(meter_id or "").strip()
     platform = _normalise_platform(req.platform)
     target_role = _normalise_assignment_role(req.role)
@@ -803,12 +805,9 @@ def update_meter_assignment(
 def decommission_meter(
     meter_id: str,
     req: DecommissionRequest,
-    user: CurrentUser = Depends(require_employee),
+    user: CurrentUser = Depends(CC_METER_OPERATE_GATE),
 ):
     """Mark a meter as faulty/test/decommissioned and optionally assign a replacement."""
-    if not set(effective_roles(user)).intersection({CCRole.superadmin.value, CCRole.onm_team.value}):
-        raise_privilege_denied(user, [CCRole.superadmin, CCRole.onm_team], "decommission or replace a meter")
-
     valid_reasons = ("faulty", "test", "decommissioned", "retired")
     if req.reason.lower() not in valid_reasons:
         raise HTTPException(status_code=400, detail=f"reason must be one of: {', '.join(valid_reasons)}")
@@ -967,15 +966,12 @@ def account_meter_history(
 @router.post("/batch-status")
 def batch_update_status(
     updates: list[dict],
-    user: CurrentUser = Depends(require_employee),
+    user: CurrentUser = Depends(CC_METER_OPERATE_GATE),
 ):
     """Batch update meter statuses (for processing spreadsheet annotations).
 
     Body: [{ "meter_id": "SMRSD-...", "status": "faulty", "notes": "..." }, ...]
     """
-    if not set(effective_roles(user)).intersection({CCRole.superadmin.value, CCRole.onm_team.value}):
-        raise_privilege_denied(user, [CCRole.superadmin, CCRole.onm_team], "batch-update meter lifecycle status")
-
     now = datetime.now(timezone.utc).isoformat()
     results = {"updated": 0, "not_found": 0, "errors": []}
 

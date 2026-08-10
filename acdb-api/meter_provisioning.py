@@ -67,7 +67,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from middleware import require_role
+from middleware import require_action
 from models import CCRole, CurrentUser
 from mutations import try_log_mutation
 from country_config import ALL_SITE_ABBREV, ALL_SITE_DISTRICTS, get_country_for_site
@@ -124,6 +124,27 @@ _BENCH_PREFIXES = ("HQTEST", "TEST-", "TESTSITE")
 
 PROVISIONING_ROLES = (CCRole.superadmin, CCRole.onm_team, CCRole.engineering)
 RELEASE_APPROVAL_ROLES = (CCRole.superadmin, CCRole.engineering)
+CC_OPERATE_GATE = require_action(
+    "operate_customer_care",
+    system="cc",
+    action="provision and commission gateways",
+    required_level="C",
+    fallback_roles=PROVISIONING_ROLES,
+)
+CC_APPROVE_GATE = require_action(
+    "approve_financial_and_control",
+    system="cc",
+    action="approve and promote an OTA firmware release",
+    required_level="B",
+    fallback_roles=RELEASE_APPROVAL_ROLES,
+)
+CC_ADMIN_GATE = require_action(
+    "administer_cc",
+    system="cc",
+    action="rotate a protected gateway identity",
+    required_level="A",
+    fallback_roles=(CCRole.superadmin,),
+)
 ACTIVATION_STEP_DEFS = {
     "deployment_wifi_ready": {
         "label": "Deployment Wi-Fi prepared",
@@ -759,7 +780,7 @@ METER_KIT_FILES = {
 
 
 @router.get("/station/download")
-def download_station(_user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES))):
+def download_station(_user: CurrentUser = Depends(CC_OPERATE_GATE)):
     """Download the provisioning-station local app (zip) for the technician laptop.
 
     The station is a stdlib-only Python app the provisioner runs on the laptop;
@@ -791,7 +812,7 @@ def download_station(_user: CurrentUser = Depends(require_role(*PROVISIONING_ROL
 
 @router.get("/meter-kit/download")
 def download_meter_validation_kit(
-    _user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES)),
+    _user: CurrentUser = Depends(CC_OPERATE_GATE),
 ):
     """Download pinned meter-addressing code plus CC's batch-validation SOP."""
     buf = io.BytesIO()
@@ -831,7 +852,7 @@ def download_meter_validation_kit(
 
 
 @router.get("/site-codes", response_model=list[SiteCode])
-def list_site_codes(_user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES))):
+def list_site_codes(_user: CurrentUser = Depends(CC_OPERATE_GATE)):
     """Canonical site codes from CC's country config — the only valid prefixes."""
     from country_config import COUNTRY
     out = []
@@ -847,7 +868,7 @@ def list_site_codes(_user: CurrentUser = Depends(require_role(*PROVISIONING_ROLE
 
 @router.get("/readiness")
 def country_provisioning_readiness(
-    _user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES)),
+    _user: CurrentUser = Depends(CC_OPERATE_GATE),
 ):
     """Country activation gates, ownership, and concrete next actions."""
     from country_config import COUNTRY
@@ -1109,7 +1130,7 @@ def country_provisioning_readiness(
 @router.put("/activation-steps")
 def update_activation_step(
     body: ActivationStepUpdateRequest,
-    user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES)),
+    user: CurrentUser = Depends(CC_OPERATE_GATE),
 ):
     """Record or clear an operator-confirmed physical activation step."""
     site = body.site_code.strip().upper()
@@ -1416,7 +1437,7 @@ def _ota_release_checks(release: dict) -> dict:
 @router.get("/ota/readiness")
 def ota_readiness(
     site_code: Optional[str] = None,
-    _user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES)),
+    _user: CurrentUser = Depends(CC_OPERATE_GATE),
 ):
     """Fail-closed preflight for the factory-boot -> full-firmware OTA stage."""
     release = _ota_release(site_code)
@@ -1451,7 +1472,7 @@ def ota_readiness(
 @router.post("/ota/promote")
 def promote_factory_gateways(
     payload: OtaPromotionRequest,
-    user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES)),
+    user: CurrentUser = Depends(CC_OPERATE_GATE),
 ):
     """Create a signed AWS IoT OTA update for newly provisioned factory units.
 
@@ -1640,7 +1661,7 @@ def promote_factory_gateways(
 @router.post("/ota/release-approval")
 def approve_ota_release(
     payload: OtaReleaseApprovalRequest,
-    user: CurrentUser = Depends(require_role(*RELEASE_APPROVAL_ROLES)),
+    user: CurrentUser = Depends(CC_APPROVE_GATE),
 ):
     """Approve one immutable candidate for batch use after a successful canary.
 
@@ -1808,7 +1829,7 @@ def approve_ota_release(
 @router.get("/ota/{ota_update_id}")
 def ota_promotion_status(
     ota_update_id: str,
-    _user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES)),
+    _user: CurrentUser = Depends(CC_OPERATE_GATE),
 ):
     """Return OTA creation state and per-Thing AWS IoT Job execution state."""
     if not re.match(r"^[A-Za-z0-9_-]{1,64}$", ota_update_id):
@@ -1895,7 +1916,7 @@ def _issue_cert_and_payload(thing: str, attrs: dict, policy: str):
 @router.post("/things")
 def provision_thing(
     payload: ProvisionRequest,
-    user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES)),
+    user: CurrentUser = Depends(CC_OPERATE_GATE),
 ):
     """Provision a new unit: canonical Thing + cert + registry claim + bootstrap payload.
 
@@ -1971,7 +1992,7 @@ def provision_thing(
 @router.post("/gateways")
 def provision_gateway_batch(
     payload: GatewayBatchRequest,
-    user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES)),
+    user: CurrentUser = Depends(CC_OPERATE_GATE),
 ):
     """Batch-provision virgin gateways for a site (account-free, gateway-pool names).
 
@@ -2100,7 +2121,7 @@ def provision_gateway_batch(
 
 
 @router.post("/reconcile")
-def reconcile_from_telemetry(_user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES))):
+def reconcile_from_telemetry(_user: CurrentUser = Depends(CC_OPERATE_GATE)):
     """Bind provisioned gateways to the meter serials they've acquired in the field.
 
     Reads DynamoDB ``meter_last_seen`` (which carries both ``meterId`` and
@@ -2202,7 +2223,7 @@ def reconcile_from_telemetry(_user: CurrentUser = Depends(require_role(*PROVISIO
 @router.post("/rotate")
 def rotate_identity(
     payload: RotateRequest,
-    user: CurrentUser = Depends(require_role(CCRole.superadmin)),
+    user: CurrentUser = Depends(CC_ADMIN_GATE),
 ):
     """Rename an already-online unit by publishing ``cfg/identity`` to its CURRENT
     client id. Used to migrate ``TestSite*`` / ``OneMeterN`` units in place.
@@ -2280,7 +2301,7 @@ def rotate_identity(
 @router.post("/update-config")
 def update_device_config(
     payload: UpdateConfigRequest,
-    user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES)),
+    user: CurrentUser = Depends(CC_OPERATE_GATE),
 ):
     """Update WiFi/SoftAP configuration on an already-provisioned gateway.
 
@@ -2355,7 +2376,7 @@ def update_device_config(
 @router.get("/meters")
 def list_provisioned_meters(
     site: Optional[str] = None,
-    _user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES)),
+    _user: CurrentUser = Depends(CC_OPERATE_GATE),
 ):
     """CC's system-of-record view of provisioned meters + locational assignment.
 
@@ -2416,7 +2437,7 @@ def list_provisioned_meters(
 
 
 @router.get("/registry")
-def list_registry(_user: CurrentUser = Depends(require_role(*PROVISIONING_ROLES))):
+def list_registry(_user: CurrentUser = Depends(CC_OPERATE_GATE)):
     """List the provisioning registry (DynamoDB scan), newest first."""
     ddb = _client("dynamodb")
     items, start = [], None

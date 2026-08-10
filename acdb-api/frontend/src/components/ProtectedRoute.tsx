@@ -6,11 +6,13 @@ interface Props {
   children: React.ReactNode;
   requireEmployee?: boolean;
   requireRole?: string[];
+  requireAction?: string;
+  requiredLevel?: string;
 }
 
-export default function ProtectedRoute({ children, requireEmployee, requireRole }: Props) {
+export default function ProtectedRoute({ children, requireEmployee, requireRole, requireAction, requiredLevel }: Props) {
   const { t } = useTranslation(['common']);
-  const { user, loading } = useAuth();
+  const { user, loading, hasPrivilegeAction } = useAuth();
 
   if (loading) {
     return <div className="flex justify-center items-center h-64"><div className="text-gray-400">{t('common:loading')}</div></div>;
@@ -42,7 +44,9 @@ export default function ProtectedRoute({ children, requireEmployee, requireRole 
   }
 
   const effectiveRoles = user.roles || user.cc_roles || [user.role];
-  if (requireRole && !requireRole.some((role) => effectiveRoles.includes(role))) {
+  const actionDenied = Boolean(requireAction && !hasPrivilegeAction(requireAction));
+  const roleDenied = Boolean(requireRole && !requireRole.some((role) => effectiveRoles.includes(role)));
+  if (actionDenied || roleDenied) {
     const countryCode = localStorage.getItem('cc_country') || 'LS';
     const countryName = ({ BN: 'Benin', BJ: 'Benin', LS: 'Lesotho', ZM: 'Zambia' } as Record<string, string>)[countryCode]
       || t('common:privilegeDenied.yourCountry');
@@ -56,11 +60,11 @@ export default function ProtectedRoute({ children, requireEmployee, requireRole 
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-lg bg-gray-50 p-4">
               <p className="font-medium text-gray-900">{t('common:privilegeDenied.assigned')}</p>
-              <p className="mt-1 font-mono">{effectiveRoles.join(', ') || 'generic'}</p>
+              <p className="mt-1 font-mono">{user.privilege_version ? `Level ${user.privilege_level || 'NONE'}` : (effectiveRoles.join(', ') || 'generic')}</p>
             </div>
             <div className="rounded-lg bg-amber-50 p-4">
               <p className="font-medium text-gray-900">{t('common:privilegeDenied.required')}</p>
-              <p className="mt-1 font-mono">{requireRole.join(', ')}</p>
+              <p className="mt-1 font-mono">{requireAction ? `${requiredLevel ? `Level ${requiredLevel} · ` : ''}${requireAction}` : requireRole?.join(', ')}</p>
             </div>
           </div>
           <div>

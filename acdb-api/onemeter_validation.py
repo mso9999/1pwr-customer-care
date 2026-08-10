@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from country_config import COUNTRY
-from middleware import require_role
+from middleware import require_action
 from models import CCRole, CurrentUser
 from relay_control import queue_validation_relay
 
@@ -35,6 +35,13 @@ VALIDATION_THINGS = {
 }
 METER_LAST_SEEN_TABLE = os.environ.get("METER_LAST_SEEN_TABLE", "meter_last_seen")
 ROLES = (CCRole.superadmin, CCRole.onm_team, CCRole.engineering)
+CC_VALIDATION_GATE = require_action(
+    "operate_customer_care",
+    system="cc",
+    action="run the isolated meter and gateway validation workflow",
+    required_level="C",
+    fallback_roles=ROLES,
+)
 
 
 def _get_connection():
@@ -188,7 +195,7 @@ class ValidationPayment(BaseModel):
 @router.post("/sessions")
 def start_validation(
     body: StartValidation,
-    user: CurrentUser = Depends(require_role(*ROLES)),
+    user: CurrentUser = Depends(CC_VALIDATION_GATE),
 ):
     thing = body.thing_name.strip()
 
@@ -257,7 +264,7 @@ def start_validation(
 @router.get("/sessions/{session_id}")
 def validation_status(
     session_id: str,
-    _user: CurrentUser = Depends(require_role(*ROLES)),
+    _user: CurrentUser = Depends(CC_VALIDATION_GATE),
 ):
     with _get_connection() as conn:
         cur = conn.cursor()
@@ -274,7 +281,7 @@ def validation_status(
 @router.post("/sessions/{session_id}/observe")
 def observe_load(
     session_id: str,
-    user: CurrentUser = Depends(require_role(*ROLES)),
+    user: CurrentUser = Depends(CC_VALIDATION_GATE),
 ):
     with _get_connection() as conn:
         cur = conn.cursor()
@@ -330,7 +337,7 @@ def observe_load(
 def apply_test_payment(
     session_id: str,
     body: ValidationPayment,
-    user: CurrentUser = Depends(require_role(*ROLES)),
+    user: CurrentUser = Depends(CC_VALIDATION_GATE),
 ):
     with _get_connection() as conn:
         cur = conn.cursor()
@@ -372,7 +379,7 @@ def apply_test_payment(
 @router.post("/sessions/{session_id}/complete")
 def complete_validation(
     session_id: str,
-    user: CurrentUser = Depends(require_role(*ROLES)),
+    user: CurrentUser = Depends(CC_VALIDATION_GATE),
 ):
     with _get_connection() as conn:
         cur = conn.cursor()

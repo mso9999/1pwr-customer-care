@@ -121,7 +121,7 @@ function SiteAdditionGuide({
 }
 
 export default function ProvisioningPage() {
-  const { user } = useAuth();
+  const { hasPrivilegeAction } = useAuth();
   const [mode, setMode] = useState<Mode>('walkthrough');
   const [countryReadiness, setCountryReadiness] = useState<CountryProvisioningReadiness | null>(null);
   const [countryReadinessLoading, setCountryReadinessLoading] = useState(false);
@@ -489,9 +489,8 @@ export default function ProvisioningPage() {
     ['FAILED', 'REJECTED', 'CANCELED', 'REMOVED'].includes(x.status || '')).length || 0;
   const otaQueued = Math.max(0, otaExpected - otaSucceeded - otaInProgress - otaFailed);
   const otaPercent = otaExpected ? Math.round((otaSucceeded / otaExpected) * 100) : 0;
-  const effectiveRoles = user?.roles || user?.cc_roles || (user?.role ? [user.role] : []);
-  const canApproveRelease = effectiveRoles.some((role) => ['superadmin', 'engineering'].includes(role));
-  const canConfigureSiteSystems = effectiveRoles.some((role) => ['superadmin', 'engineering'].includes(role));
+  const canApproveRelease = hasPrivilegeAction('approve_financial_and_control');
+  const canConfigureSiteSystems = hasPrivilegeAction('administer_cc');
   const selectedSiteProgress = guideSite ? countryReadiness?.site_progress?.[guideSite] : undefined;
   const foundationKeys = new Set(['sites', 'tariff', 'metering', 'payment_ingest', 'meter_credit']);
   const foundationsReady = Boolean(countryReadiness?.gates

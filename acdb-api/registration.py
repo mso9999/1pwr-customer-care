@@ -22,14 +22,22 @@ from pydantic import BaseModel, Field
 
 from country_config import COUNTRY, KNOWN_SITES
 from country_fees import get_country_fees
-from middleware import require_employee, require_role
-from models import CurrentUser
+from middleware import require_action, require_employee
+from models import CCRole, CurrentUser
 from mutations import log_mutation, try_log_mutation
 from sparkmeter_customer import create_sparkmeter_customer
 
 logger = logging.getLogger("cc-api.registration")
 
 router = APIRouter(prefix="/api/customers", tags=["registration"])
+
+CC_CUSTOMER_OPERATE_GATE = require_action(
+    "operate_customer_care",
+    system="cc",
+    action="register and onboard customers",
+    required_level="C",
+    fallback_roles=(CCRole.superadmin, CCRole.onm_team),
+)
 
 
 def _get_connection():
@@ -211,7 +219,7 @@ def _validate_active_community(raw: str) -> str:
 @router.post("/register")
 def register_customer(
     req: CustomerCreateRequest,
-    user: CurrentUser = Depends(require_employee),
+    user: CurrentUser = Depends(CC_CUSTOMER_OPERATE_GATE),
 ):
     """Register a new customer.
 
@@ -470,7 +478,7 @@ def preview_next_account(
 async def bulk_import_customers(
     file: UploadFile = File(...),
     community: str = Query(..., min_length=2, max_length=10),
-    user: CurrentUser = Depends(require_role(["superadmin", "onm_team"])),
+    user: CurrentUser = Depends(CC_CUSTOMER_OPERATE_GATE),
 ):
     """Bulk import customers from an Excel file.
 

@@ -40,6 +40,9 @@ def create_token(
     name: str = "",
     email: str = "",
     roles: Optional[list[str]] = None,
+    privilege_system: str = "",
+    effective_privilege: Optional[dict] = None,
+    privilege_version: str = "",
 ) -> tuple[str, int]:
     """Create a JWT. Returns (token_string, expires_in_seconds)."""
     expires = timedelta(hours=JWT_EXPIRY_HOURS)
@@ -53,6 +56,12 @@ def create_token(
         "iat": datetime.utcnow(),
         "exp": datetime.utcnow() + expires,
     }
+    if privilege_system:
+        payload["privilege_system"] = privilege_system
+    if effective_privilege:
+        payload["effective_privilege"] = effective_privilege
+    if privilege_version:
+        payload["privilege_version"] = privilege_version
     token = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
     return token, int(expires.total_seconds())
 
@@ -107,6 +116,14 @@ async def get_current_user(
             for permission, allowed in ROLE_PERMISSIONS.get(cc_role, {}).items():
                 permissions[permission] = permissions.get(permission, False) or bool(allowed)
 
+    effective_privilege = payload.get("effective_privilege")
+    if not isinstance(effective_privilege, dict):
+        effective_privilege = {}
+    actions = effective_privilege.get("actions")
+    scope_countries = effective_privilege.get("scopeCountries")
+    scope_organizations = effective_privilege.get("scopeOrganizations")
+    role_crud_owners = effective_privilege.get("roleCrudOwners")
+
     return CurrentUser(
         user_type=UserType(payload.get("user_type", "customer")),
         user_id=payload.get("sub", ""),
@@ -115,6 +132,13 @@ async def get_current_user(
         name=payload.get("name", ""),
         email=payload.get("email", ""),
         permissions=permissions,
+        privilege_system=str(payload.get("privilege_system") or ""),
+        privilege_level=str(effective_privilege.get("level") or ""),
+        privilege_actions=[str(value) for value in actions if value] if isinstance(actions, list) else [],
+        privilege_version=str(payload.get("privilege_version") or ""),
+        scope_countries=[str(value) for value in scope_countries if value] if isinstance(scope_countries, list) else [],
+        scope_organizations=[str(value) for value in scope_organizations if value] if isinstance(scope_organizations, list) else [],
+        role_crud_owners=[str(value) for value in role_crud_owners if value] if isinstance(role_crud_owners, list) else [],
     )
 
 
@@ -202,6 +226,79 @@ def require_role(*roles: CCRole, action: str = "use this area"):
         if not effective.intersection(required):
             raise_privilege_denied(user, required, action)
         return user
+    return dependency
+
+
+def privilege_action_denial_detail(
+    user: CurrentUser,
+    action_key: str,
+    action: str,
+    required_level: str,
+    system: str,
+) -> dict:
+    """Explain a denial against the signed Nexus action grant."""
+    owner_labels = user.role_crud_owners or [
+        "Your organization’s country HR team",
+        "Nexus/IS&T User Administrator",
+        f"{system.upper()} Superadmin",
+    ]
+    return {
+        "code": "privilege_denied",
+        "system": system,
+        "action": action_key,
+        "action_label": action,
+        "assigned_level": user.privilege_level or "NONE",
+        "required_level": required_level,
+        "assigned_actions": user.privilege_actions,
+        "privilege_version": user.privilege_version,
+        "scope_countries": user.scope_countries,
+        "scope_organizations": user.scope_organizations,
+        "message": (
+            f"Your signed {system.upper()} privilege is Level {user.privilege_level or 'NONE'}. "
+            f"To {action}, Level {required_level} with action '{action_key}' is required."
+        ),
+        "role_crud_owners": [
+            {"owner": label, "manages": "Role or department assignments that contribute to this Nexus privilege."}
+            for label in owner_labels
+        ],
+        "resolution": (
+            "Ask the appropriate owner to correct the assignment, then sign out and back in "
+            "so this app receives a fresh signed Nexus privilege claim."
+        ),
+    }
+
+
+def require_action(
+    action_key: str,
+    *,
+    system: str,
+    action: str,
+    required_level: str,
+    fallback_roles: Iterable[str | CCRole],
+):
+    """Require a signed Nexus action, with role fallback for emergency login.
+
+    Nexus SSO sessions always carry ``privilege_version`` and are evaluated
+    strictly against their target-system action list. The local role fallback
+    exists only for the documented direct-login contingency path.
+    """
+    fallback = _normalize_required_roles(fallback_roles)
+
+    def dependency(user: CurrentUser = Depends(require_employee)) -> CurrentUser:
+        if user.privilege_version:
+            if user.privilege_system != system or action_key not in user.privilege_actions:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=privilege_action_denial_detail(
+                        user, action_key, action, required_level, system
+                    ),
+                )
+            return user
+
+        if not set(effective_roles(user)).intersection(fallback):
+            raise_privilege_denied(user, fallback, action)
+        return user
+
     return dependency
 
 

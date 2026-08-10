@@ -78,6 +78,13 @@ class CurrentUser(BaseModel):
     name: str = ""
     email: str = ""
     permissions: Dict[str, bool] = Field(default_factory=dict)
+    privilege_system: str = ""
+    privilege_level: str = ""
+    privilege_actions: List[str] = Field(default_factory=list)
+    privilege_version: str = ""
+    scope_countries: List[str] = Field(default_factory=list)
+    scope_organizations: List[str] = Field(default_factory=list)
+    role_crud_owners: List[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

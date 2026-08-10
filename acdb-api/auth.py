@@ -34,7 +34,7 @@ from models import (
     TokenResponse,
     UserType,
 )
-from middleware import create_token, get_current_user, require_employee
+from middleware import create_token, get_current_user, require_action, require_employee
 from middleware import security as _verify_security
 from db_auth import (
     customer_is_registered,
@@ -109,6 +109,9 @@ def _employee_token_response(
     hr_role: str = "",
     nexus_department: str | None = None,
     nexus_memberships: list[dict] | None = None,
+    privilege_system: str = "",
+    effective_privilege: dict | None = None,
+    privilege_version: str = "",
 ) -> TokenResponse:
     """
     Issue the CC employee JWT + user payload for an already-authenticated
@@ -178,6 +181,9 @@ def _employee_token_response(
         name=name,
         email=email,
         roles=ordered_roles,
+        privilege_system=privilege_system,
+        effective_privilege=effective_privilege,
+        privilege_version=privilege_version,
     )
 
     permissions = dict(ROLE_PERMISSIONS[CCRole.generic])
@@ -202,6 +208,13 @@ def _employee_token_response(
             "hr_role": hr_role,
             "department": department,
             "permissions": permissions,
+            "privilege_system": privilege_system,
+            "privilege_level": str((effective_privilege or {}).get("level") or ""),
+            "privilege_actions": list((effective_privilege or {}).get("actions") or []),
+            "privilege_version": privilege_version,
+            "scope_countries": list((effective_privilege or {}).get("scopeCountries") or []),
+            "scope_organizations": list((effective_privilege or {}).get("scopeOrganizations") or []),
+            "role_crud_owners": list((effective_privilege or {}).get("roleCrudOwners") or []),
         },
     )
 
@@ -402,6 +415,10 @@ def nexus_sso_login(req: NexusSsoRequest):
     raw_memberships = claims.get("memberships")
     nexus_memberships = [item for item in raw_memberships if isinstance(item, dict)] \
         if isinstance(raw_memberships, list) else None
+    privilege_system = str(claims.get("targetSystem") or "").strip().lower()
+    raw_privilege = claims.get("effectivePrivilege")
+    effective_privilege = raw_privilege if isinstance(raw_privilege, dict) else None
+    privilege_version = str(claims.get("privilegeVersion") or "").strip()
 
     return _employee_token_response(
         employee_id=str(emp["employee_id"]),
@@ -410,6 +427,9 @@ def nexus_sso_login(req: NexusSsoRequest):
         hr_role=str(emp.get("role") or ""),
         nexus_department=nexus_department,
         nexus_memberships=nexus_memberships,
+        privilege_system=privilege_system,
+        effective_privilege=effective_privilege,
+        privilege_version=privilege_version,
     )
 
 
@@ -671,6 +691,62 @@ async def verify_auth(request: Request, credentials=Depends(_verify_security)):
     user = await get_current_user(request, credentials)
     if user.user_type != UserType.employee:
         raise HTTPException(status_code=403, detail="Employees only.")
+
+    # O&M's reverse proxy supplies the original browser method/path on its
+    # internal auth subrequest. This is the server-side enforcement point for
+    # the signed per-app Nexus action claim; hiding a button in React is not a
+    # security boundary. Old proxy configs omit the headers and remain
+    # read-only until the config is upgraded.
+    original_method = request.headers.get("X-Original-Method", "").upper()
+    original_uri = request.headers.get("X-Original-URI", "")
+    if not original_method or not original_uri:
+        raise HTTPException(
+            status_code=403,
+            detail="O&M authorization proxy is missing the original method or URI; access is fail-closed.",
+        )
+    is_write = original_method not in {"GET", "HEAD", "OPTIONS"}
+    admin_read_write_prefixes = (
+        "/api/om/notifications/",
+        "/api/om/mutation-log",
+    )
+    admin_write_prefixes = (
+        "/api/om/categories",
+        "/api/om/import-historical",
+    )
+    if original_uri.startswith(admin_read_write_prefixes) or (
+        is_write and original_uri.startswith(admin_write_prefixes)
+    ):
+        gate = require_action(
+            "administer_om",
+            system="om",
+            action="administer O&M workflows and reference data",
+            required_level="A",
+            fallback_roles=(CCRole.superadmin,),
+        )
+    elif is_write:
+        gate = require_action(
+            "operate_tickets",
+            system="om",
+            action="create or update O&M records",
+            required_level="C",
+            fallback_roles=(CCRole.superadmin, CCRole.onm_team, "it_team"),
+        )
+    else:
+        gate = require_action(
+            "view_tickets",
+            system="om",
+            action="view O&M tickets and reports",
+            required_level="D",
+            fallback_roles=(
+                CCRole.superadmin,
+                CCRole.onm_team,
+                CCRole.finance_team,
+                CCRole.engineering,
+                CCRole.generic,
+                "it_team",
+            ),
+        )
+    gate(user)
     return Response(status_code=204)
 
 
@@ -686,6 +762,13 @@ def get_me(user: CurrentUser = Depends(get_current_user)):
         "name": user.name,
         "email": user.email,
         "permissions": user.permissions,
+        "privilege_system": user.privilege_system,
+        "privilege_level": user.privilege_level,
+        "privilege_actions": user.privilege_actions,
+        "privilege_version": user.privilege_version,
+        "scope_countries": user.scope_countries,
+        "scope_organizations": user.scope_organizations,
+        "role_crud_owners": user.role_crud_owners,
     }
 
     # Employees: re-derive HR department from the cached email/id so it survives

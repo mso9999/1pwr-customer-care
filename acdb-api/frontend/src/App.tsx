@@ -74,12 +74,12 @@ export default function App() {
             {/* Employee routes */}
             <Route path="dashboard" element={<ProtectedRoute requireEmployee><DashboardPage /></ProtectedRoute>} />
             <Route path="customers" element={<ProtectedRoute requireEmployee><CustomersPage /></ProtectedRoute>} />
-            <Route path="customers/new" element={<ProtectedRoute requireEmployee requireRole={['superadmin', 'onm_team']}><NewCustomerWizard /></ProtectedRoute>} />
+            <Route path="customers/new" element={<ProtectedRoute requireEmployee requireAction="operate_customer_care" requiredLevel="C"><NewCustomerWizard /></ProtectedRoute>} />
             <Route path="customers/:id" element={<ProtectedRoute requireEmployee><CustomerDetailPage /></ProtectedRoute>} />
             <Route path="meters" element={<ProtectedRoute requireEmployee><MetersPage /></ProtectedRoute>} />
             <Route path="accounts" element={<ProtectedRoute requireEmployee><AccountsPage /></ProtectedRoute>} />
             <Route path="transactions" element={<ProtectedRoute requireEmployee><TransactionsPage /></ProtectedRoute>} />
-            <Route path="assign-meter" element={<ProtectedRoute requireEmployee requireRole={['superadmin', 'onm_team']}><AssignMeterPage /></ProtectedRoute>} />
+            <Route path="assign-meter" element={<ProtectedRoute requireEmployee requireAction="operate_customer_care" requiredLevel="C"><AssignMeterPage /></ProtectedRoute>} />
             <Route path="customer-data" element={<ProtectedRoute requireEmployee><CustomerDataPage /></ProtectedRoute>} />
             <Route path="tables" element={<ProtectedRoute requireEmployee><TablesPage /></ProtectedRoute>} />
             <Route path="tables/:name" element={<ProtectedRoute requireEmployee><TableBrowserPage /></ProtectedRoute>} />
@@ -91,10 +91,10 @@ export default function App() {
             <Route path="investor-analytics" element={<ProtectedRoute requireEmployee><InvestorAnalyticsPage /></ProtectedRoute>} />
             <Route path="customer-cohort" element={<ProtectedRoute requireEmployee><CustomerCohortPage /></ProtectedRoute>} />
             <Route path="sync" element={<ProtectedRoute requireEmployee><SyncPage /></ProtectedRoute>} />
-            <Route path="commission" element={<ProtectedRoute requireEmployee requireRole={['superadmin', 'onm_team']}><CommissionCustomerPage /></ProtectedRoute>} />
+            <Route path="commission" element={<ProtectedRoute requireEmployee requireAction="operate_customer_care" requiredLevel="C"><CommissionCustomerPage /></ProtectedRoute>} />
             <Route path="tariffs" element={<ProtectedRoute requireEmployee><TariffManagementPage /></ProtectedRoute>} />
             <Route path="check-meters" element={<ProtectedRoute requireEmployee><CheckMeterPage /></ProtectedRoute>} />
-            <Route path="provisioning" element={<ProtectedRoute requireEmployee requireRole={['superadmin', 'onm_team', 'engineering']}><ProvisioningPage /></ProtectedRoute>} />
+            <Route path="provisioning" element={<ProtectedRoute requireEmployee requireAction="operate_customer_care" requiredLevel="C"><ProvisioningPage /></ProtectedRoute>} />
             <Route path="meter-connectivity" element={<ProtectedRoute requireEmployee><MeterConnectivityPage /></ProtectedRoute>} />
             <Route path="billing-priority" element={<ProtectedRoute requireEmployee><BillingPriorityPage /></ProtectedRoute>} />
             <Route path="financing" element={<ProtectedRoute requireEmployee><FinancingPage /></ProtectedRoute>} />
@@ -107,7 +107,7 @@ export default function App() {
             <Route path="fee-trace-review" element={<ProtectedRoute requireEmployee><FeeTraceReviewPage /></ProtectedRoute>} />
             <Route path="tickets" element={<ProtectedRoute requireEmployee><TicketsPage /></ProtectedRoute>} />
             <Route path="gensite" element={<ProtectedRoute requireEmployee><GenSiteListPage /></ProtectedRoute>} />
-            <Route path="gensite/commission" element={<ProtectedRoute requireEmployee requireRole={['superadmin', 'onm_team']}><CommissionSitePage /></ProtectedRoute>} />
+            <Route path="gensite/commission" element={<ProtectedRoute requireEmployee requireAction="operate_customer_care" requiredLevel="C"><CommissionSitePage /></ProtectedRoute>} />
             <Route path="gensite/:code" element={<ProtectedRoute requireEmployee><GenSitePage /></ProtectedRoute>} />
             <Route path="lpg" element={<ProtectedRoute requireEmployee><LpgPage /></ProtectedRoute>} />
             <Route path="lpg/:code" element={<ProtectedRoute requireEmployee><LpgSitePage /></ProtectedRoute>} />
@@ -117,10 +117,10 @@ export default function App() {
             <Route path="my/dashboard" element={<CustomerDashboardPage />} />
             <Route path="my/profile" element={<MyProfilePage />} />
             {/* Admin routes */}
-            <Route path="admin/roles" element={<ProtectedRoute requireEmployee requireRole={['superadmin']}><AdminRolesPage /></ProtectedRoute>} />
-            <Route path="admin/programs" element={<ProtectedRoute requireEmployee requireRole={['superadmin']}><ProgramsPage /></ProtectedRoute>} />
-            <Route path="admin/coverage" element={<ProtectedRoute requireEmployee requireRole={['superadmin']}><CoverageAuditPage /></ProtectedRoute>} />
-            <Route path="admin/sms-log" element={<ProtectedRoute requireEmployee requireRole={['superadmin']}><SMSLogPage /></ProtectedRoute>} />
+            <Route path="admin/roles" element={<ProtectedRoute requireEmployee requireAction="administer_cc" requiredLevel="A"><AdminRolesPage /></ProtectedRoute>} />
+            <Route path="admin/programs" element={<ProtectedRoute requireEmployee requireAction="administer_cc" requiredLevel="A"><ProgramsPage /></ProtectedRoute>} />
+            <Route path="admin/coverage" element={<ProtectedRoute requireEmployee requireAction="administer_cc" requiredLevel="A"><CoverageAuditPage /></ProtectedRoute>} />
+            <Route path="admin/sms-log" element={<ProtectedRoute requireEmployee requireAction="administer_cc" requiredLevel="A"><SMSLogPage /></ProtectedRoute>} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

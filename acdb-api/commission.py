@@ -28,11 +28,20 @@ from contract_gen import (
     list_customer_contracts,
     send_contract_sms,
 )
-from middleware import require_employee, CurrentUser
+from middleware import require_action, require_employee, CurrentUser
+from models import CCRole
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["commission"])
+
+CC_COMMISSION_GATE = require_action(
+    "operate_customer_care",
+    system="cc",
+    action="commission or decommission customers and site connections",
+    required_level="C",
+    fallback_roles=(CCRole.superadmin, CCRole.onm_team),
+)
 
 
 def _commissioning_done_date(connection_date_str: str) -> str:
@@ -218,7 +227,7 @@ async def get_commission_data(identifier: str, user: CurrentUser = Depends(requi
 # ---------------------------------------------------------------------------
 
 @router.post("/api/commission/execute")
-async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends(require_employee)):
+async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends(CC_COMMISSION_GATE)):
     """Execute customer commissioning:
     1. Resolve customer (read-only)
     2. Generate bilingual contract PDFs (if this fails, no DB changes — avoids orphan state)
@@ -483,7 +492,7 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
 # ---------------------------------------------------------------------------
 
 @router.post("/api/commission/decommission/{customer_id}")
-async def decommission_customer(customer_id: int, user: CurrentUser = Depends(require_employee)):
+async def decommission_customer(customer_id: int, user: CurrentUser = Depends(CC_COMMISSION_GATE)):
     """Decommission a customer (non-destructive).
 
     Sets date_service_terminated on customers table.  All meter, account,
@@ -683,7 +692,7 @@ COMMISSIONING_STEPS = {
 @router.post("/api/commission/bulk-status")
 def bulk_update_commissioning_status(
     req: BulkStatusRequest,
-    user: CurrentUser = Depends(require_employee),
+    user: CurrentUser = Depends(CC_COMMISSION_GATE),
 ):
     """Bulk update commissioning step flags for multiple customers.
 
@@ -821,7 +830,7 @@ class EnergizeUpstreamRequest(BaseModel):
 @router.post("/api/commission/energize-upstream")
 async def energize_upstream(
     req: EnergizeUpstreamRequest,
-    user: CurrentUser = Depends(require_employee),
+    user: CurrentUser = Depends(CC_COMMISSION_GATE),
 ):
     """Energize upstream conductors that were flagged during commissioning.
 

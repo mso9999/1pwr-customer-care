@@ -49,13 +49,21 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from customer_api import get_connection
-from middleware import require_employee, require_role
+from middleware import require_action, require_employee
 from models import CCRole, CurrentUser
 from mutations import try_log_mutation
 
 logger = logging.getLogger("cc-api.relay-control")
 
 router = APIRouter(prefix="/api/meters", tags=["relay-control"])
+
+CC_RELAY_GATE = require_action(
+    "approve_financial_and_control",
+    system="cc",
+    action="issue a manual meter relay command",
+    required_level="B",
+    fallback_roles=(CCRole.superadmin, CCRole.onm_team),
+)
 
 VALID_ACTIONS = ("open", "close")
 DEFAULT_TTL_SECONDS = 300
@@ -285,7 +293,7 @@ def _device_online(cur, meter_id: Optional[str]) -> bool:
 def request_relay(
     thing_name: str,
     payload: RelayRequest,
-    user: CurrentUser = Depends(require_role(CCRole.superadmin, CCRole.onm_team)),
+    user: CurrentUser = Depends(CC_RELAY_GATE),
 ):
     """Manually issue a relay command to a 1Meter.
 

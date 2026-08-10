@@ -7,6 +7,13 @@ interface User {
   role: string;
   roles?: string[];
   cc_roles?: string[];
+  privilege_system?: string;
+  privilege_level?: string;
+  privilege_actions?: string[];
+  privilege_version?: string;
+  scope_countries?: string[];
+  scope_organizations?: string[];
+  role_crud_owners?: string[];
   name: string;
   email: string;
   department?: string;
@@ -25,6 +32,7 @@ interface AuthContextType {
   isSuperadmin: boolean;
   canWrite: boolean;
   canWriteCustomers: boolean;
+  hasPrivilegeAction: (action: string) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -69,12 +77,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isEmployee = user?.user_type === 'employee';
   const isCustomer = user?.user_type === 'customer';
   const effectiveRoles = user?.roles || user?.cc_roles || (user?.role ? [user.role] : []);
-  const isSuperadmin = effectiveRoles.includes('superadmin');
-  const canWrite = Boolean(user?.permissions?.write_customers || user?.permissions?.write_transactions);
-  const canWriteCustomers = Boolean(user?.permissions?.write_customers);
+  const hasSignedCcPrivilege = Boolean(user?.privilege_version && user?.privilege_system === 'cc');
+  const hasPrivilegeAction = (action: string) => hasSignedCcPrivilege
+    ? Boolean(user?.privilege_actions?.includes(action))
+    : action === 'view_customer_operations'
+      ? isEmployee
+      : action === 'operate_customer_care'
+        ? effectiveRoles.some((role) => ['superadmin', 'onm_team', 'engineering'].includes(role))
+        : action === 'approve_financial_and_control'
+          ? effectiveRoles.some((role) => ['superadmin', 'onm_team', 'finance_team', 'engineering'].includes(role))
+          : action === 'administer_cc'
+            ? effectiveRoles.includes('superadmin')
+            : false;
+  const isSuperadmin = hasPrivilegeAction('administer_cc');
+  const canWrite = hasSignedCcPrivilege
+    ? hasPrivilegeAction('operate_customer_care') || hasPrivilegeAction('approve_financial_and_control')
+    : Boolean(user?.permissions?.write_customers || user?.permissions?.write_transactions);
+  const canWriteCustomers = hasSignedCcPrivilege
+    ? hasPrivilegeAction('operate_customer_care')
+    : Boolean(user?.permissions?.write_customers);
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, loading, isEmployee, isCustomer, isSuperadmin, canWrite, canWriteCustomers }}>
+    <AuthContext.Provider value={{ user, token, login, logout, loading, isEmployee, isCustomer, isSuperadmin, canWrite, canWriteCustomers, hasPrivilegeAction }}>
       {children}
     </AuthContext.Provider>
   );

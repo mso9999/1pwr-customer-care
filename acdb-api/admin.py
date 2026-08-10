@@ -11,7 +11,7 @@ from models import (
     CCRole, CurrentUser, RoleAssignment, RoleAssignmentResponse,
     DepartmentMapping, DepartmentMappingResponse,
 )
-from middleware import require_role
+from middleware import require_action
 from db_auth import (
     delete_department_mapping,
     delete_employee_role,
@@ -28,6 +28,14 @@ logger = logging.getLogger("acdb-api.admin")
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
+CC_ADMIN_GATE = require_action(
+    "administer_cc",
+    system="cc",
+    action="manage Customer Care roles and configuration",
+    required_level="A",
+    fallback_roles=(CCRole.superadmin,),
+)
+
 
 def _enrich_with_hr(role_row: dict) -> RoleAssignmentResponse:
     """Add name/email from HR portal to a role assignment."""
@@ -43,7 +51,7 @@ def _enrich_with_hr(role_row: dict) -> RoleAssignmentResponse:
 
 
 @router.get("/roles", response_model=List[RoleAssignmentResponse])
-def list_roles(user: CurrentUser = Depends(require_role(CCRole.superadmin))):
+def list_roles(user: CurrentUser = Depends(CC_ADMIN_GATE)):
     """List all employee CC role assignments, enriched with HR portal names."""
     roles = list_employee_roles()
     return [_enrich_with_hr(r) for r in roles]
@@ -52,7 +60,7 @@ def list_roles(user: CurrentUser = Depends(require_role(CCRole.superadmin))):
 @router.post("/roles", response_model=RoleAssignmentResponse, status_code=201)
 def assign_role(
     req: RoleAssignment,
-    user: CurrentUser = Depends(require_role(CCRole.superadmin)),
+    user: CurrentUser = Depends(CC_ADMIN_GATE),
 ):
     """Assign a CC role to an employee. Enriches with HR portal data if available."""
     existing_role = get_employee_role(req.employee_id)
@@ -93,7 +101,7 @@ def assign_role(
 def update_role(
     employee_id: str,
     req: RoleAssignment,
-    user: CurrentUser = Depends(require_role(CCRole.superadmin)),
+    user: CurrentUser = Depends(CC_ADMIN_GATE),
 ):
     """Update an employee's CC role."""
     existing = get_employee_role(employee_id)
@@ -130,7 +138,7 @@ def update_role(
 @router.delete("/roles/{employee_id}")
 def remove_role(
     employee_id: str,
-    user: CurrentUser = Depends(require_role(CCRole.superadmin)),
+    user: CurrentUser = Depends(CC_ADMIN_GATE),
 ):
     """Remove an employee's CC role assignment (reverts to generic)."""
     existing = get_employee_role(employee_id)
@@ -164,7 +172,7 @@ class EmployeeEmailMapping(BaseModel):
 
 
 @router.get("/employee-emails")
-def list_employee_emails(user: CurrentUser = Depends(require_role(CCRole.superadmin))):
+def list_employee_emails(user: CurrentUser = Depends(CC_ADMIN_GATE)):
     """List all employee_id → email mappings stored locally."""
     from pr_lookup import get_employee_email
     import sqlite3, os
@@ -181,7 +189,7 @@ def list_employee_emails(user: CurrentUser = Depends(require_role(CCRole.superad
 @router.post("/employee-emails", status_code=201)
 def set_employee_email_mapping(
     req: EmployeeEmailMapping,
-    user: CurrentUser = Depends(require_role(CCRole.superadmin)),
+    user: CurrentUser = Depends(CC_ADMIN_GATE),
 ):
     """Store or update an employee_id → email mapping for PR department lookup."""
     from pr_lookup import set_employee_email
@@ -193,7 +201,7 @@ def set_employee_email_mapping(
 @router.post("/employee-emails/bulk", status_code=201)
 def bulk_set_employee_emails(
     mappings: List[EmployeeEmailMapping],
-    user: CurrentUser = Depends(require_role(CCRole.superadmin)),
+    user: CurrentUser = Depends(CC_ADMIN_GATE),
 ):
     """Bulk store employee_id → email mappings."""
     from pr_lookup import set_employee_email
@@ -211,7 +219,7 @@ def bulk_set_employee_emails(
 
 @router.get("/department-mappings", response_model=List[DepartmentMappingResponse])
 def get_department_mappings(
-    user: CurrentUser = Depends(require_role(CCRole.superadmin)),
+    user: CurrentUser = Depends(CC_ADMIN_GATE),
 ):
     """List all department→role auto-mappings."""
     return [DepartmentMappingResponse(**r) for r in list_department_mappings()]
@@ -220,7 +228,7 @@ def get_department_mappings(
 @router.post("/department-mappings", response_model=DepartmentMappingResponse, status_code=201)
 def add_department_mapping(
     req: DepartmentMapping,
-    user: CurrentUser = Depends(require_role(CCRole.superadmin)),
+    user: CurrentUser = Depends(CC_ADMIN_GATE),
 ):
     """Create or update a department→role mapping."""
     set_department_mapping(
@@ -249,7 +257,7 @@ def add_department_mapping(
 @router.delete("/department-mappings/{department_key}")
 def remove_department_mapping(
     department_key: str,
-    user: CurrentUser = Depends(require_role(CCRole.superadmin)),
+    user: CurrentUser = Depends(CC_ADMIN_GATE),
 ):
     """Delete a department→role mapping."""
     deleted = delete_department_mapping(department_key)
@@ -270,7 +278,7 @@ def remove_department_mapping(
 
 @router.get("/pr-departments")
 def list_pr_departments(
-    user: CurrentUser = Depends(require_role(CCRole.superadmin)),
+    user: CurrentUser = Depends(CC_ADMIN_GATE),
 ):
     """Return all departments from the PR Firestore for the admin UI."""
     from pr_lookup import get_all_pr_departments
@@ -289,7 +297,7 @@ class _BroadcastPinRequest(BaseModel):
 
 @router.get("/auth/pin-preview")
 def auth_pin_preview(
-    user: CurrentUser = Depends(require_role(CCRole.superadmin)),
+    user: CurrentUser = Depends(CC_ADMIN_GATE),
 ):
     """Preview the message that the monthly PIN broadcast would send.
 
@@ -316,7 +324,7 @@ def auth_pin_preview(
 @router.post("/auth/broadcast-pin")
 def auth_broadcast_pin(
     req: _BroadcastPinRequest,
-    user: CurrentUser = Depends(require_role(CCRole.superadmin)),
+    user: CurrentUser = Depends(CC_ADMIN_GATE),
 ):
     """Manually trigger the monthly PIN WhatsApp broadcast.
 
