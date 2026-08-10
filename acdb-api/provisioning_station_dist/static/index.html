@@ -23,6 +23,7 @@
   .site-choices { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
   .site-choice { background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; border-radius:8px; padding:8px 12px; cursor:pointer; }
   .site-choice:hover, .site-choice.active { background:#2563eb; color:#fff; border-color:#2563eb; }
+  input.field-missing { border-color:#dc2626; background:#fef2f2; }
   button.primary { background:var(--b); color:#fff; border:none; border-radius:8px; padding:9px 16px; font-size:14px; cursor:pointer; }
   button.primary:disabled { opacity:.5; cursor:default; }
   button.ghost { background:#f3f4f6; border:none; border-radius:8px; padding:7px 12px; cursor:pointer; font-size:13px; }
@@ -80,6 +81,10 @@
       <h3 style="margin-top:0">Full-firmware OTA readiness</h3>
       <div id="otaReadyText" class="muted">Checking CC’s approved firmware release…</div>
       <p class="muted" style="margin-bottom:0">Keep the selected site's actual Starlink router powered, online, and within range. After bootstrap the gateway leaves the provisioning LAN and must join Starlink to receive its OTA Job.</p>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+        <button class="ghost" onclick="retryCcChecks()">Retry CC checks</button>
+        <button class="ghost" onclick="logout()">Change user / sign in again</button>
+      </div>
     </div>
 
     <div class="tabs">
@@ -108,7 +113,7 @@
         <table id="gwTable" class="hide" style="margin-top:10px">
           <thead><tr>
             <th><input type="checkbox" id="selAll" onclick="toggleAll(this)"></th>
-            <th>IP</th><th>PCB MAC</th><th>Status</th><th>Current name</th><th>Serial (from CSV or type)</th>
+            <th>IP</th><th>PCB MAC</th><th>Status</th><th>Current name</th><th>Printed factory serial (required)</th>
           </tr></thead>
           <tbody id="gwBody"></tbody>
         </table>
@@ -132,15 +137,16 @@
             <div id="siteChoices" class="site-choices"></div>
             <div id="siteHelp" class="muted" style="margin-top:6px">Loading country sites from CC…</div>
           </div>
-          <div><label>Deployment Starlink Wi-Fi SSID</label><input id="ssid" placeholder="exact Starlink network name" /></div>
-          <div><label>Deployment Starlink Wi-Fi password</label><input id="wpw" type="password" autocomplete="new-password" /></div>
+          <div><label>Deployment Starlink Wi-Fi SSID</label><input id="ssid" placeholder="exact Starlink network name" oninput="updateProvisionState()" /></div>
+          <div><label>Deployment Starlink Wi-Fi password</label><input id="wpw" type="password" autocomplete="new-password" oninput="updateProvisionState()" /></div>
         </div>
         <p class="muted" style="margin:12px 0 0">
           <span id="selCount">0</span> gateway(s) selected. Names <b>&lt;SITE&gt;-GW-####</b> are
           allocated by CC. No customer account is set now — that happens later in commissioning.
         </p>
         <div style="margin-top:12px">
-          <button class="primary" id="provBtn" onclick="confirmProvision()">Confirm &amp; provision selected</button>
+          <button class="primary" id="provBtn" onclick="confirmProvision()" disabled>Confirm &amp; provision selected</button>
+          <div id="provisionActionHelp" class="muted" style="margin-top:8px">Waiting for CC’s OTA readiness check…</div>
         </div>
       </div>
 
@@ -180,10 +186,23 @@
 let SITES = [], SCAN = [], RESULTS = [];
 let SITE_READINESS_TIMER = null;
 let OTA_READY = false, OTA_CANDIDATE_READY = false, OTA_CANARY_MODE = false, OTA_UPDATE_ID = '';
+let OTA_CHECKING = true, OTA_BLOCK_REASON = 'Waiting for CC’s OTA readiness check…';
+let CURRENT_USER = null;
 let MAC_TO_SERIAL = {};  // normalized mac -> serial, from the factory CSV
 
 function showError(m){ const e=document.getElementById('error'); e.textContent=m; e.classList.remove('hide'); }
 function clearError(){ document.getElementById('error').classList.add('hide'); }
+function ccRole(user=CURRENT_USER){ return (user && (user.cc_role||user.role)) || 'unknown'; }
+function friendlyCcError(message){
+  const raw=String(message||'Unknown CC error');
+  if(raw.includes('403') || raw.includes('Requires one of')){
+    return `CC access denied for role “${ccRole()}”. Gateway provisioning requires O&M, Engineering, or Superadmin access. Ask a CC administrator to assign the correct role, then click “Change user / sign in again”.`;
+  }
+  if(raw.includes('401') || raw.toLowerCase().includes('not authenticated') || raw.toLowerCase().includes('invalid token')){
+    return 'The CC sign-in has expired or is invalid. Click “Change user / sign in again”, then sign in and retry.';
+  }
+  return raw;
+}
 async function api(path, method='GET', body){
   const r = await fetch(path, {method, headers:{'Content-Type':'application/json'}, body: body?JSON.stringify(body):undefined});
   const j = await r.json().catch(()=>({}));
@@ -207,12 +226,30 @@ async function boot(){
   if(s.logged_in){ onLoggedIn(s.user); }
 }
 function onLoggedIn(user){
-  document.getElementById('authPill').textContent = (user && (user.name||user.employee_id)) || 'signed in';
+  CURRENT_USER=user||null;
+  const identity=(user && (user.name||user.employee_id)) || 'signed in';
+  document.getElementById('authPill').textContent = `${identity} · ${ccRole(user)}`;
   document.getElementById('authPill').className = 'pill ok';
   document.getElementById('loginCard').classList.add('hide');
   document.getElementById('app').classList.remove('hide');
   loadSites();
   loadOtaReadiness();
+}
+async function logout(){
+  try{ await api('/api/logout','POST',{}); }catch(_e){}
+  CURRENT_USER=null; SITES=[]; SCAN=[]; OTA_READY=false; OTA_CANARY_MODE=false;
+  OTA_CHECKING=true; OTA_BLOCK_REASON='Sign in to CC to run the readiness checks.';
+  document.getElementById('authPill').textContent='signed out';
+  document.getElementById('authPill').className='pill';
+  document.getElementById('app').classList.add('hide');
+  document.getElementById('loginCard').classList.remove('hide');
+  document.getElementById('empPw').value='';
+  clearError();
+}
+function retryCcChecks(){
+  clearError();
+  loadSites();
+  loadOtaReadiness(currentSite());
 }
 async function login(){
   clearError();
@@ -250,10 +287,13 @@ async function loadSites(){
     help.textContent = SITES.length
       ? `Available for this country: ${SITES.map(s=>s.code).join(', ')}. Click a site above or type its code.`
       : 'CC returned no sites for this country. Add/activate the site in CC before provisioning.';
+    updateProvisionState();
   }catch(e){
     SITES=[];
-    help.textContent='Could not load the site list. You may type a canonical site code; CC will validate it before provisioning.';
-    showError(e.message);
+    const message=friendlyCcError(e.message);
+    help.innerHTML=`<span class="state s-failed">CC site check failed</span> ${message}`;
+    showError(message);
+    updateProvisionState();
   }
 }
 
@@ -270,12 +310,14 @@ function chooseSite(code){
   document.getElementById('site').value=code;
   markSiteChoice(code);
   loadOtaReadiness(code);
+  updateProvisionState();
 }
 function siteInputChanged(){
   const code=currentSite();
   markSiteChoice(code);
   window.clearTimeout(SITE_READINESS_TIMER);
   SITE_READINESS_TIMER=window.setTimeout(()=>loadOtaReadiness(code), 350);
+  updateProvisionState();
 }
 function siteChanged(){
   window.clearTimeout(SITE_READINESS_TIMER);
@@ -285,6 +327,10 @@ function siteChanged(){
 }
 async function loadOtaReadiness(site=''){
   const el=document.getElementById('otaReadyText');
+  OTA_CHECKING=true;
+  OTA_BLOCK_REASON='Waiting for CC’s OTA readiness check…';
+  el.innerHTML='<span class="state s-working">checking</span> Checking CC’s approved firmware release…';
+  updateProvisionState();
   try{
     const r=await api('/api/ota-readiness'+(site?'?site_code='+encodeURIComponent(site):''));
     OTA_READY=!!r.ready;
@@ -292,24 +338,32 @@ async function loadOtaReadiness(site=''){
     const rel=r.release||{};
     OTA_CANARY_MODE=!OTA_READY && OTA_CANDIDATE_READY && !!rel.canary_only;
     if(OTA_READY){
+      OTA_BLOCK_REASON='';
       el.innerHTML=`<span class="state s-done">ready</span> Site <b>${rel.site_code||site}</b> is approved for signed full firmware <b>${rel.target_firmware_version||''}</b>. Deployment Starlink credentials will be stored as runtime configuration; CC does not retain the password.`;
     }else if(OTA_CANARY_MODE){
+      OTA_BLOCK_REASON='';
       el.innerHTML=`<span class="state s-working">candidate ready</span> Site <b>${rel.site_code||site}</b> has signed candidate <b>${rel.target_firmware_version||''}</b>. Select exactly one gateway. CC will mark it as the authorized test unit and run the first OTA canary; batch provisioning remains locked until the canary is approved.`;
     }else if(r.site_required){
+      OTA_BLOCK_REASON='Choose the destination site so CC can verify its approved firmware release.';
       el.innerHTML='<span class="state s-queued">select site</span> Choose the destination site to verify its approved firmware release.';
     }else{
       const missing=(r.missing||[]).join(', ');
       const failed=Object.entries(r.checks||{}).filter(([,v])=>!v.ok).map(([k])=>k).join(', ');
       el.innerHTML=`<span class="state s-failed">not ready</span> Stop: CC cannot yet promote factory-boot gateways. ${missing?`Missing configuration: ${missing}. `:''}${failed?`Failed checks: ${failed}.`:''} Contact Engineering; do not treat identity delivery as completed provisioning.`;
+      OTA_BLOCK_REASON=`CC full-firmware OTA is not ready.${missing?` Missing: ${missing}.`:''}${failed?` Failed checks: ${failed}.`:''}`;
     }
-    document.getElementById('provBtn').disabled=!(OTA_READY||OTA_CANARY_MODE);
+    OTA_CHECKING=false;
     document.getElementById('provBtn').textContent=OTA_CANARY_MODE?'Confirm & provision first canary':'Confirm & provision selected';
+    updateProvisionState();
   }catch(e){
     OTA_READY=false;
     OTA_CANDIDATE_READY=false;
     OTA_CANARY_MODE=false;
-    el.innerHTML=`<span class="state s-failed">check failed</span> ${e.message}`;
-    document.getElementById('provBtn').disabled=true;
+    OTA_CHECKING=false;
+    OTA_BLOCK_REASON=friendlyCcError(e.message);
+    el.innerHTML=`<span class="state s-failed">CC check failed</span> ${OTA_BLOCK_REASON}`;
+    showError(OTA_BLOCK_REASON);
+    updateProvisionState();
   }
 }
 
@@ -433,7 +487,7 @@ function renderScan(){
       <td class="mono">${g.pcb_mac||'<span class="muted">unknown</span>'}</td>
       <td>${badge}</td>
       <td class="mono">${g.thing_name||'—'}</td>
-      <td><input data-label="${i}" value="${autoSerial}" placeholder="serial" style="padding:4px 6px;font-size:12px">${matched}</td>
+      <td><input data-label="${i}" value="${autoSerial}" placeholder="enter printed serial" oninput="updateProvisionState()" style="padding:6px 8px;font-size:13px">${matched}</td>
     </tr>`;
   }).join('');
   document.getElementById('assignCard').classList.remove('hide');
@@ -448,7 +502,43 @@ function selectedUnits(){
     return {ip:g.ip, pcb_mac:g.pcb_mac, box_label:label||null};
   }).filter(u=>u.pcb_mac);
 }
-function updateSel(){ document.getElementById('selCount').textContent = selectedUnits().length; }
+function selectedSerialGaps(){
+  return [...document.querySelectorAll('.gwsel:checked')].filter(cb=>{
+    const input=document.querySelector(`[data-label="${cb.dataset.i}"]`);
+    return !input || !input.value.trim();
+  });
+}
+function updateProvisionState(){
+  const units=selectedUnits();
+  const gaps=selectedSerialGaps();
+  document.querySelectorAll('[data-label]').forEach(input=>{
+    const cb=document.querySelector(`.gwsel[data-i="${input.dataset.label}"]`);
+    input.classList.toggle('field-missing', !!(cb&&cb.checked&&!input.value.trim()));
+  });
+  const site=currentSite();
+  const ssid=(document.getElementById('ssid').value||'').trim();
+  const password=document.getElementById('wpw').value||'';
+  let reason='';
+  if(OTA_CHECKING) reason='Waiting for CC’s OTA readiness check…';
+  else if(!(OTA_READY||OTA_CANARY_MODE)) reason=OTA_BLOCK_REASON||'CC full-firmware OTA is not ready.';
+  else if(!units.length) reason='Select at least one virgin gateway.';
+  else if(gaps.length) reason='Enter the printed factory serial for every selected gateway. The grey text is only a placeholder.';
+  else if(!site) reason='Choose the destination site or type its canonical CC code.';
+  else if(SITES.length && !SITES.some(s=>String(s.code||'').toUpperCase()===site)) reason=`Choose a valid site: ${SITES.map(s=>s.code).join(', ')}.`;
+  else if(!ssid) reason='Enter the destination site’s exact Starlink Wi-Fi network name.';
+  else if(!password) reason='Enter the destination site’s Starlink Wi-Fi password.';
+  else if(OTA_CANARY_MODE && units.length!==1) reason='The first OTA canary requires exactly one selected gateway.';
+  const btn=document.getElementById('provBtn');
+  btn.disabled=!!reason;
+  const help=document.getElementById('provisionActionHelp');
+  help.innerHTML=reason
+    ? `<span class="state s-failed">action required</span> ${reason}`
+    : '<span class="state s-done">ready</span> All required inputs and CC checks are complete.';
+}
+function updateSel(){
+  document.getElementById('selCount').textContent = selectedUnits().length;
+  updateProvisionState();
+}
 
 async function confirmProvision(){
   clearError();
@@ -462,6 +552,7 @@ async function confirmProvision(){
   if(!ssid) return showError('Enter the destination site’s exact Starlink Wi-Fi SSID.');
   if(!wpw) return showError('Enter the destination site’s Starlink Wi-Fi password.');
   if(!units.length) return showError('Select at least one virgin gateway.');
+  if(units.some(u=>!u.box_label)) return showError('Enter the printed factory serial for every selected gateway. The grey text is only a placeholder.');
   if(!(OTA_READY||OTA_CANARY_MODE)) return showError('CC full-firmware OTA is not ready. Stop and follow the readiness action shown above.');
   if(OTA_CANARY_MODE && units.length!==1) return showError('This candidate requires exactly one first-canary gateway. Select one unit only.');
   const names = units.length;
@@ -477,7 +568,7 @@ async function confirmProvision(){
   let alloc;
   try{
     alloc = await api('/api/allocate','POST',{site_code:site, wifi_ssid:ssid, wifi_password:wpw, units, canary:OTA_CANARY_MODE});
-  }catch(e){ showError(e.message); prov.disabled=false; return; }
+  }catch(e){ showError(e.message); updateProvisionState(); return; }
 
   RESULTS = [];
   const gws = alloc.gateways||[];
@@ -503,7 +594,7 @@ async function confirmProvision(){
   const successful=RESULTS.filter(r=>r.status.startsWith('done'));
   if(!successful.length){
     setProg(gws.length, gws.length, 'Identity delivery failed; no OTA was scheduled.');
-    prov.disabled=false;
+    updateProvisionState();
     return;
   }
 
@@ -530,7 +621,13 @@ async function confirmProvision(){
   // A first-canary is intentionally one-shot in this station session. Reuse
   // the recorded Thing if troubleshooting is required; never allocate another
   // identity merely because an OTA or bootstrap needs investigation.
-  prov.disabled=OTA_CANARY_MODE ? true : !OTA_READY;
+  if(OTA_CANARY_MODE){
+    OTA_READY=false;
+    OTA_CANDIDATE_READY=false;
+    OTA_CANARY_MODE=false;
+    OTA_BLOCK_REASON='This first-canary station session is complete. Do not allocate a second identity.';
+  }
+  updateProvisionState();
 }
 function setProg(done,total,msg){
   const pct = total? Math.round(done/total*100):0;

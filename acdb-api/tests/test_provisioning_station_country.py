@@ -52,3 +52,15 @@ def test_station_normalizes_flat_and_wrapped_site_lists():
 def test_station_rejects_invalid_site_list_shape():
     with pytest.raises(RuntimeError, match="invalid site list"):
         station.normalize_site_codes_response("SAM")
+
+
+def test_station_requires_printed_serial_for_every_selected_gateway():
+    with pytest.raises(RuntimeError, match="printed factory serial"):
+        station.validate_station_units([
+            {"pcb_mac": "44:bd:8d:1d:d9:20", "box_label": ""},
+        ])
+
+    units = station.validate_station_units([
+        {"pcb_mac": "44:bd:8d:1d:d9:20", "box_label": " sn:000539 "},
+    ])
+    assert units[0]["box_label"] == "sn:000539"

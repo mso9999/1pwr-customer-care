@@ -68,12 +68,20 @@ python provisioning_station.py --cc https://cc.1pwrafrica.com
 
 Then open the exact versioned URL printed after `Open:` in PowerShell, select
 the deployment country, and sign in. The page header must show station version
-`2026.08.07.2` or later; if it does not, close the old station, download again,
+`2026.08.09.1` or later; if it does not, close the old station, download again,
 and extract into a new folder.
 The country selection controls the database, canonical sites, currency, and OTA
 catalog. The page checks CC’s approved OTA release
 before it permits a batch. Scan, verify serial/MAC matches, choose the canonical
 site and operational Wi-Fi, and confirm.
+
+The printed factory serial is required for every selected gateway. Grey text in
+the serial box is only a placeholder; type the serial printed on the unit (or
+import the verified serial-to-MAC CSV). The action message beside the disabled
+button lists the next missing input or CC gate. If CC reports access denied, a
+CC administrator must assign the operator the O&M, Engineering, or Superadmin
+role; then use **Change user / sign in again** so the new role is included in a
+fresh session.
 
 The destination-site control shows the country roster as large buttons and
 also accepts a manually typed canonical code. For Benin, the configured codes

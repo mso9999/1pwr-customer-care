@@ -385,6 +385,14 @@ and record its factory serial. Do not open or erase it.
 7. Click **Confirm & provision selected**.
 8. Read the confirmation dialog and confirm.
 
+The printed factory serial is mandatory for each selected row. The faint
+**enter printed serial** text is an instruction, not a completed value. If the
+button remains disabled, read the **action required** line immediately below
+it. It identifies the missing input, rejected CC role, or OTA-readiness gate.
+Use **Retry CC checks** after a network interruption. If an administrator has
+changed your CC role, use **Change user / sign in again** to obtain a fresh
+session before retrying.
+
 The station now performs two distinct operations:
 
 ### Stage 1 — identity/network bootstrap

@@ -750,7 +750,7 @@ class ActivationStepUpdateRequest(BaseModel):
 
 
 STATION_DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "provisioning_station_dist")
-STATION_BUNDLE_VERSION = "2026.08.07.2"
+STATION_BUNDLE_VERSION = "2026.08.09.1"
 METER_KIT_FIRMWARE_COMMIT = "6ea321048c8fc23564e5d9de91fccc1d821162ae"
 METER_KIT_FILES = {
     "METER_ADDRESSING.md": "10c8eecc99eeee35c1636c7446f4a053aba9d0a6b3f3263c6f2ee079ea6b2735",

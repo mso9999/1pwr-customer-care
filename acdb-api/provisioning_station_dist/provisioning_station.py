@@ -51,7 +51,7 @@ COUNTRY_API_PREFIX = {
     "BN": "/api/bn",
     "ZM": "/api/zm",
 }
-STATION_VERSION = "2026.08.07.2"
+STATION_VERSION = "2026.08.09.1"
 
 # ---------------------------------------------------------------------------
 # In-memory session (single technician per running station)
@@ -110,6 +110,30 @@ def normalize_site_codes_response(payload) -> list[dict]:
     if not isinstance(payload, list):
         raise RuntimeError("CC returned an invalid site list. Re-download the station or contact Engineering.")
     return [row for row in payload if isinstance(row, dict) and row.get("code")]
+
+
+def validate_station_units(units) -> list[dict]:
+    """Require a physical factory serial for station-led provisioning."""
+    if not isinstance(units, list) or not units:
+        raise RuntimeError("Select at least one virgin gateway.")
+    missing = []
+    for unit in units:
+        if not isinstance(unit, dict):
+            raise RuntimeError("The selected gateway list is invalid. Re-scan and try again.")
+        serial = str(unit.get("box_label") or "").strip()
+        if not serial:
+            missing.append(str(unit.get("pcb_mac") or unit.get("ip") or "unknown gateway"))
+        elif len(serial) > 64:
+            raise RuntimeError(
+                f"Factory serial for {unit.get('pcb_mac') or 'gateway'} is longer than 64 characters."
+            )
+        unit["box_label"] = serial
+    if missing:
+        raise RuntimeError(
+            "Enter the printed factory serial for every selected gateway. Missing: "
+            + ", ".join(missing)
+        )
+    return units
 
 
 # ---------------------------------------------------------------------------
@@ -407,6 +431,13 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._send(401, {"error": str(e)})
 
+        if self.path == "/api/logout":
+            with SESSION.lock:
+                SESSION.token = None
+                SESSION.user = None
+                SESSION.pending.clear()
+            return self._send(200, {"ok": True})
+
         if self.path == "/api/scan":
             raw = (body.get("subnet") or SESSION.subnet or ", ".join(local_subnets()))
             subnets = [s.strip() for s in str(raw).split(",") if s.strip()]
@@ -458,9 +489,10 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_allocate(self, body: dict):
         if not SESSION.token:
             return self._send(401, {"error": "not logged in to CC"})
-        units = body.get("units") or []
-        if not units:
-            return self._send(400, {"error": "no units selected"})
+        try:
+            units = validate_station_units(body.get("units") or [])
+        except Exception as e:
+            return self._send(400, {"error": str(e)})
         ip_by_mac = {}
         cc_units = []
         for u in units:

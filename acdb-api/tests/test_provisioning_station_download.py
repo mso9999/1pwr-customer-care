@@ -18,3 +18,6 @@ def test_station_download_is_versioned_uncached_and_contains_new_site_picker():
         assert "select below or enter canonical CC code" in page
         assert 'id="siteChoices"' in page
         assert 'id="versionPill"' in page
+        assert "Printed factory serial (required)" in page
+        assert 'id="provisionActionHelp"' in page
+        assert "Change user / sign in again" in page

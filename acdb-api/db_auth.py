@@ -162,6 +162,24 @@ def init_auth_db():
                 )
                 logger.info("Seeded engineering role for employee %s (%s)", emp_id, who)
 
+        # Country field operators responsible for gateway/meter provisioning.
+        # Direct grants keep commissioning available when an otherwise valid HR
+        # record has not yet been assigned an organization/department.  Keep
+        # this list narrow and use the canonical HR employee ID.
+        _PROVISIONING_OPERATOR_PINS = [
+            ("1PWR0501", "Comfort Possy Berry Quenum", "onm_team"),
+        ]
+        for emp_id, who, cc_role in _PROVISIONING_OPERATOR_PINS:
+            if not conn.execute(
+                "SELECT 1 FROM cc_employee_roles WHERE employee_id = ?", (emp_id,)
+            ).fetchone():
+                conn.execute(
+                    """INSERT INTO cc_employee_roles (employee_id, cc_role, assigned_by, assigned_at)
+                       VALUES (?, ?, 'system:provisioning-operator', datetime('now'))""",
+                    (emp_id, cc_role),
+                )
+                logger.info("Seeded %s role for provisioning operator %s (%s)", cc_role, emp_id, who)
+
         # Correct an earlier mis-identification: Bokang is 1PWR156, not 1PWR138F.
         # Remove the stale system-seeded 1PWR138F grant if present (only if it was
         # auto-seeded; never touch a human-assigned role).
