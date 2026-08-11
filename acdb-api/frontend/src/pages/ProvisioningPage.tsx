@@ -7,6 +7,7 @@ import {
   getProvisioningSiteCodes,
   getProvisioningRegistry,
   getProvisionedMeters,
+  getFleetLive,
   reconcileProvisioning,
   downloadProvisioningStation,
   downloadMeterValidationKit,
@@ -25,12 +26,13 @@ import {
   type ProvisioningSiteCode,
   type ProvisioningRegistryRow,
   type ProvisionedMeter,
+  type FleetLiveResult,
   type MeterValidationStatus,
   type CountryProvisioningReadiness,
 } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
-type Mode = 'walkthrough' | 'readiness' | 'guide' | 'canary' | 'batch-test' | 'config' | 'meters' | 'registry';
+type Mode = 'walkthrough' | 'readiness' | 'guide' | 'canary' | 'batch-test' | 'config' | 'meters' | 'fleet-live' | 'registry';
 type ValidationNetworkMode = 'site' | 'mirror';
 type GuideCheckKey =
   | 'sealed'
@@ -190,6 +192,9 @@ export default function ProvisioningPage() {
   const [meters, setMeters] = useState<ProvisionedMeter[]>([]);
   const [metersLoading, setMetersLoading] = useState(false);
 
+  const [fleetLive, setFleetLive] = useState<FleetLiveResult | null>(null);
+  const [fleetLiveLoading, setFleetLiveLoading] = useState(false);
+
   const loadCountryReadiness = () => {
     setCountryReadinessLoading(true);
     getCountryProvisioningReadiness()
@@ -252,11 +257,20 @@ export default function ProvisioningPage() {
     }
   };
 
+  const loadFleetLive = () => {
+    setFleetLiveLoading(true);
+    getFleetLive()
+      .then(setFleetLive)
+      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setFleetLiveLoading(false));
+  };
+
   useEffect(() => {
     if (mode === 'walkthrough' || mode === 'readiness') loadCountryReadiness();
     if (mode === 'registry') loadRegistry();
     if (mode === 'meters') loadMeters();
     if (mode === 'config') loadConfigRegistry();
+    if (mode === 'fleet-live') loadFleetLive();
   }, [mode]);
 
   useEffect(() => {
@@ -656,6 +670,7 @@ export default function ProvisioningPage() {
           ['batch-test', 'Batch validation'],
           ['config', 'Update Configuration'],
           ['meters', 'Provisioned meters'],
+          ['fleet-live', 'Fleet live'],
           ['registry', 'Registry'],
         ] as [Mode, string][]).map(([m, label]) => (
           <button
@@ -1781,6 +1796,59 @@ export default function ProvisioningPage() {
                 ))}
                 {!meters.length && !metersLoading && (
                   <tr><td colSpan={11} className="px-4 py-8 text-center text-gray-400">No provisioned meters yet.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : mode === 'fleet-live' ? (
+        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
+            <div>
+              <span className="text-sm font-medium text-gray-700">Fleet live status</span>
+              {fleetLive && (
+                <span className="ml-3 text-xs text-gray-500">
+                  {fleetLive.operational} operational · {fleetLive.connected} connected · {fleetLive.total_things} total
+                </span>
+              )}
+            </div>
+            <button onClick={loadFleetLive} className="text-xs text-blue-600 hover:underline">
+              {fleetLiveLoading ? 'Loading…' : 'Refresh'}
+            </button>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
+                <tr>
+                  <th className="text-left px-4 py-2">Thing</th>
+                  <th className="text-left px-4 py-2">Meter serial</th>
+                  <th className="text-left px-4 py-2">Status</th>
+                  <th className="text-left px-4 py-2">Latest sample</th>
+                  <th className="text-left px-4 py-2">Power</th>
+                  <th className="text-left px-4 py-2">FW</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {(fleetLive?.units || []).map((u, i) => (
+                  <tr key={i} className="hover:bg-gray-50">
+                    <td className="px-4 py-2 font-mono text-gray-900">{u.thing_name}</td>
+                    <td className="px-4 py-2 font-mono">{u.meter_id || '—'}</td>
+                    <td className="px-4 py-2">
+                      <span className={`px-2 py-0.5 rounded-full text-xs ${
+                        u.connected ? 'bg-green-100 text-green-700'
+                          : u.operational ? 'bg-blue-100 text-blue-700'
+                          : 'bg-gray-100 text-gray-600'
+                      }`}>
+                        {u.connected ? 'connected' : u.operational ? 'operational' : 'offline'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2 text-xs text-gray-500">{u.latest_sample || u.last_seen || u.last_accepted || '—'}</td>
+                    <td className="px-4 py-2 text-xs">{u.power || '—'}</td>
+                    <td className="px-4 py-2 text-xs text-gray-500">{u.fw || '—'}</td>
+                  </tr>
+                ))}
+                {(!fleetLive?.units || !fleetLive.units.length) && !fleetLiveLoading && (
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No fleet data yet.</td></tr>
                 )}
               </tbody>
             </table>

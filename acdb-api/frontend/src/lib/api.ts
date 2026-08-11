@@ -4071,6 +4071,30 @@ export async function reconcileProvisioning(): Promise<{
   return request('/provisioning/reconcile', { method: 'POST' });
 }
 
+export interface FleetLiveUnit {
+  thing_name: string;
+  connected: boolean;
+  connect_ts?: number;
+  meter_id?: string;
+  last_accepted?: string;
+  last_seen?: string;
+  latest_sample?: string;
+  power?: string;
+  fw?: string;
+  operational: boolean;
+}
+
+export interface FleetLiveResult {
+  total_things: number;
+  operational: number;
+  connected: number;
+  units: FleetLiveUnit[];
+}
+
+export async function getFleetLive(): Promise<FleetLiveResult> {
+  return request<FleetLiveResult>('/provisioning/fleet-live');
+}
+
 /** Download the provisioning-station local app (zip) with the auth token. */
 export async function downloadProvisioningStation(): Promise<void> {
   const token = getToken();

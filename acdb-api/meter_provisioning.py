@@ -2436,6 +2436,125 @@ def list_provisioned_meters(
     return {"count": len(rows), "meters": rows}
 
 
+@router.get("/fleet-live")
+def fleet_live(_user: CurrentUser = Depends(CC_OPERATE_GATE)):
+    """Live fleet status: which units are connected and/or providing telemetry.
+
+    Joins three sources:
+    - AWS IoT fleet index (`connectivity.connected`) — MQTT session up.
+    - `meter_last_seen` (`lastAcceptedTime` = meter's sample time, `last_seen` =
+      ingestion time) — last accepted reading.
+    - `1meter_data` (latest `sample_time`) — actual telemetry recency.
+
+    A unit is "operational" if it's connected OR has recent telemetry.
+    """
+    ddb = _client("dynamodb")
+    iot = _client("iot")
+
+    # 1. Fleet index connectivity (OneMeter* + MAK-GW*)
+    connected = {}
+    for pattern in ("thingName:OneMeter*", "thingName:MAK-GW*"):
+        try:
+            resp = iot.search_index(queryString=pattern, maxResults=200)
+            for t in resp.get("things", []):
+                name = t.get("thingName")
+                conn = t.get("connectivity", {})
+                connected[name] = {
+                    "connected": conn.get("connected", False),
+                    "connect_ts": conn.get("timestamp"),
+                    "disconnect_reason": conn.get("disconnectReason"),
+                }
+        except Exception as exc:
+            logger.warning("fleet index query failed for %s: %s", pattern, exc)
+
+    # 2. meter_last_seen (last accepted reading + ingestion time)
+    last_seen = {}
+    start = None
+    try:
+        while True:
+            kw = {"TableName": "meter_last_seen",
+                  "ProjectionExpression": "meterId, thingName, lastAcceptedTime, last_seen, EnergyActive, Relay"}
+            if start:
+                kw["ExclusiveStartKey"] = start
+            resp = ddb.scan(**kw)
+            for it in resp.get("Items", []):
+                def g(k):
+                    v = it.get(k, {})
+                    return list(v.values())[0] if v else None
+                tn = g("thingName") or ""
+                last_seen[tn] = {
+                    "meter_id": g("meterId"),
+                    "last_accepted": g("lastAcceptedTime"),
+                    "last_seen": g("last_seen"),
+                    "energy": g("EnergyActive"),
+                    "relay": g("Relay"),
+                }
+            start = resp.get("LastEvaluatedKey")
+            if not start:
+                break
+    except Exception as exc:
+        logger.warning("meter_last_seen scan failed: %s", exc)
+
+    # 3. Latest telemetry per meter from 1meter_data (sample_time)
+    telemetry = {}
+    try:
+        for tn, info in last_seen.items():
+            mid = info.get("meter_id")
+            if not mid:
+                continue
+            r = ddb.query(
+                TableName="1meter_data",
+                KeyConditionExpression="device_id = :m",
+                ExpressionAttributeValues={":m": {"S": mid}},
+                ScanIndexForward=False,
+                Limit=1,
+            )
+            items = r.get("Items", [])
+            if items:
+                it = items[0]
+                telemetry[tn] = {
+                    "latest_sample": list(it.get("sample_time", {}).values())[0] if it.get("sample_time") else None,
+                    "power": list(it.get("Power", {}).values())[0] if it.get("Power") else None,
+                    "fw": list(it.get("FirmwareVersion", {}).values())[0] if it.get("FirmwareVersion") else None,
+                }
+    except Exception as exc:
+        logger.warning("1meter_data query failed: %s", exc)
+
+    # 4. Build unified rows
+    rows = []
+    for tn in sorted(set(connected.keys()) | set(last_seen.keys())):
+        conn = connected.get(tn, {})
+        ls = last_seen.get(tn, {})
+        tele = telemetry.get(tn, {})
+        is_operational = conn.get("connected") or bool(tele.get("latest_sample"))
+        rows.append({
+            "thing_name": tn,
+            "connected": conn.get("connected"),
+            "connect_ts": conn.get("connect_ts"),
+            "meter_id": ls.get("meter_id"),
+            "last_accepted": ls.get("last_accepted"),
+            "last_seen": ls.get("last_seen"),
+            "latest_sample": tele.get("latest_sample"),
+            "power": tele.get("power"),
+            "fw": tele.get("fw"),
+            "operational": is_operational,
+        })
+
+    # Sort: connected first, then by latest_sample desc
+    def sort_key(r):
+        return (not r["connected"], r.get("latest_sample") or "", r["thing_name"])
+    rows.sort(key=sort_key)
+
+    operational = sum(1 for r in rows if r["operational"])
+    connected_count = sum(1 for r in rows if r["connected"])
+    return {
+        "total_things": len(rows),
+        "operational": operational,
+        "connected": connected_count,
+        "units": rows,
+    }
+
+
 @router.get("/registry")
 def list_registry(_user: CurrentUser = Depends(CC_OPERATE_GATE)):
     """List the provisioning registry (DynamoDB scan), newest first."""
