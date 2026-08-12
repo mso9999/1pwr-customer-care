@@ -581,6 +581,11 @@ export default function CustomerDetailPage() {
                 <>
                   <button onClick={() => navigate(`/assign-meter?customer=${accountNumber || urlParam}`)} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-sm hover:bg-emerald-700">{t('customerDetail:assignMeter')}</button>
                   <button onClick={() => navigate(`/commission?customer=${accountNumber || urlParam}`)} className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm hover:bg-amber-700">{t('customerDetail:commission')}</button>
+                  {isCommissioned && (
+                    <button onClick={() => navigate(`/commission?edit=1&account=${accountNumber || urlParam}`)} className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm hover:bg-purple-700" title="Update the uGridPLAN connection (PTB/pole) for this unit">
+                      Edit PTB
+                    </button>
+                  )}
                 </>
                 )
               )}
