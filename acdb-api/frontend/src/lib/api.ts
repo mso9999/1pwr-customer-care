@@ -1174,6 +1174,26 @@ export async function splitConnection(data: SplitConnectionRequest) {
   });
 }
 
+export interface UpdateSurveyIdRequest {
+  account_number: string;
+  survey_id: string;
+}
+
+export interface UpdateSurveyIdResult {
+  status: string;
+  account_number: string;
+  survey_id: string;
+  previous_survey_id?: string;
+  ugp_sync?: Record<string, unknown>;
+}
+
+export async function updateSurveyId(data: UpdateSurveyIdRequest): Promise<UpdateSurveyIdResult> {
+  return request<UpdateSurveyIdResult>('/commission/update-survey-id', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
 // Stats
 export interface SiteStat {
   site: string;

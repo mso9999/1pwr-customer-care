@@ -831,6 +831,85 @@ class EnergizeUpstreamRequest(BaseModel):
     lines: List[Dict[str, Any]]
 
 
+class UpdateSurveyIdRequest(BaseModel):
+    account_number: str = Field(..., min_length=1)
+    survey_id: str = Field(..., min_length=1, description="UGP connection (PTB/pole) to bind")
+
+
+@router.post("/api/commission/update-survey-id")
+def update_survey_id(req: UpdateSurveyIdRequest, user: CurrentUser = Depends(CC_COMMISSION_GATE)):
+    """Update the uGridPLAN connection (survey_id / PTB/pole) for an already-commissioned account.
+
+    Used to backfill PTB association for units commissioned before it was required.
+    Does NOT regenerate contracts or change commissioning status — only updates the
+    survey_id binding on the account row and re-syncs to uGridPLAN.
+    """
+    account_number = req.account_number.strip().upper()
+    survey_id = req.survey_id.strip()
+
+    with _get_connection() as conn:
+        cur = conn.cursor()
+        # Verify the account exists and is commissioned
+        cur.execute(
+            "SELECT customer_id, survey_id FROM accounts WHERE account_number = %s",
+            (account_number,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"Account {account_number} not found")
+
+        customer_id, existing_survey = row
+        # Check the customer is commissioned
+        cur.execute(
+            "SELECT customer_commissioned FROM customers WHERE id = %s",
+            (customer_id,),
+        )
+        cust = cur.fetchone()
+        if not cust or not cust[0]:
+            raise HTTPException(status_code=400, detail=f"Account {account_number} is not commissioned yet")
+
+        # Update the survey_id binding
+        cur.execute(
+            "UPDATE accounts SET survey_id = %s, updated_at = NOW() WHERE account_number = %s",
+            (survey_id, account_number),
+        )
+        conn.commit()
+
+    # Re-sync to uGridPLAN (non-blocking)
+    ugp_result = None
+    try:
+        from sync_ugridplan import sync_commission_to_ugp
+        # Get site_code from account_number suffix
+        m = re.search(r"([A-Za-z]{2,4})$", account_number)
+        site_code = m.group(1).upper() if m else ""
+        # Get meter serial
+        with _get_connection() as conn2:
+            cur2 = conn2.cursor()
+            cur2.execute(
+                "SELECT meter_id FROM meters WHERE account_number = %s ORDER BY updated_at DESC NULLS LAST LIMIT 1",
+                (account_number,),
+            )
+            mrow = cur2.fetchone()
+            meter_serial = str(mrow[0] or "") if mrow else ""
+        ugp_result = sync_commission_to_ugp(
+            site_code=site_code,
+            survey_id=survey_id,
+            connection_date="",  # not changing the date
+            account_number=account_number,
+            meter_serial=meter_serial,
+        )
+    except Exception as exc:
+        logger.warning("UGP re-sync failed for %s: %s", account_number, exc)
+
+    return {
+        "status": "ok",
+        "account_number": account_number,
+        "survey_id": survey_id,
+        "previous_survey_id": existing_survey,
+        "ugp_sync": ugp_result,
+    }
+
+
 @router.post("/api/commission/energize-upstream")
 async def energize_upstream(
     req: EnergizeUpstreamRequest,

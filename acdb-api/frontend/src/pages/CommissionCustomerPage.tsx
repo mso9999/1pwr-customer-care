@@ -9,12 +9,14 @@ import {
   energizeUpstream,
   listUGPConnections,
   splitConnection,
+  updateSurveyId,
   getProvisionedMeters,
   type CommissionData,
   type CommissionResult,
   type UpstreamWarning,
   type UGPConnection,
   type ProvisionedMeter,
+  type UpdateSurveyIdResult,
 } from '../lib/api';
 import SignatureCapture from '../components/SignatureCapture';
 
@@ -367,6 +369,7 @@ export default function CommissionCustomerPage() {
   const [searchParams] = useSearchParams();
   const prefilledCustomerId = searchParams.get('customer') || '';
   const prefilledAccount = searchParams.get('account') || '';
+  const editMode = searchParams.get('edit') === '1' || searchParams.get('edit') === 'true';
 
   const [step, setStep] = useState(0);
 
@@ -397,6 +400,7 @@ export default function CommissionCustomerPage() {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [result, setResult] = useState<CommissionResult | null>(null);
+  const [editResult, setEditResult] = useState<UpdateSurveyIdResult | null>(null);
 
   const [energizing, setEnergizing] = useState(false);
   const [energizeResult, setEnergizeResult] = useState<{ updated: number; failed: number } | null>(null);
@@ -470,6 +474,23 @@ export default function CommissionCustomerPage() {
   const goBack = () => {
     setError('');
     setStep(s => Math.max(s - 1, 0));
+  };
+
+  const handleEditSubmit = async () => {
+    setSaving(true);
+    setError('');
+    setEditResult(null);
+    try {
+      const res = await updateSurveyId({
+        account_number: accountNumber.trim().toUpperCase(),
+        survey_id: surveyId,
+      });
+      setEditResult(res);
+    } catch (e: any) {
+      setError(e.message || 'Update failed');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleSubmit = async () => {
@@ -892,18 +913,80 @@ export default function CommissionCustomerPage() {
         </div>
       </div>
 
-      <ProgressBar current={step} />
-
-      <div className="bg-white rounded-2xl shadow-sm border p-5 sm:p-6 min-h-[320px]">
-        <div className="mb-5">
-          <h2 className="text-lg font-semibold text-gray-800">{stepTitles[step]}</h2>
-          <p className="text-sm text-gray-400 mt-0.5">{stepDescs[step]}</p>
+      {editMode ? (
+        /* Edit mode: update PTB/pole (survey_id) for an already-commissioned account */
+        <div className="bg-white rounded-2xl shadow-sm border p-5 sm:p-6">
+          <div className="mb-5">
+            <h2 className="text-lg font-semibold text-gray-800">Edit PTB/pole association</h2>
+            <p className="text-sm text-gray-400 mt-0.5">Update the uGridPLAN connection for an already-commissioned unit. Does not regenerate contracts.</p>
+          </div>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Account number</label>
+              <input
+                value={accountNumber}
+                onChange={e => setAccountNumber(e.target.value.toUpperCase())}
+                placeholder="e.g. 0001MAK"
+                className="w-full px-4 py-3 border border-gray-300 rounded-xl text-base focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">{t('commission:fields.ugpConnection')}</label>
+              {surveyId ? (
+                <div className="flex items-center gap-2 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
+                  <svg className="w-5 h-5 text-blue-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                  </svg>
+                  <span className="flex-1 text-sm font-medium text-blue-800">{surveyId}</span>
+                  <button type="button" onClick={() => setSurveyId('')} className="text-xs text-blue-600 hover:text-blue-800 underline">
+                    {t('commission:fields.remove')}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setShowUGPPicker(true)}
+                  disabled={!accountNumber.trim()}
+                  className="w-full py-3 bg-gray-100 border-2 border-dashed border-gray-300 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-200 active:bg-gray-300 disabled:opacity-40 transition flex items-center justify-center gap-2"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                  </svg>
+                  {t('commission:fields.linkUgp')}
+                </button>
+              )}
+            </div>
+            {error && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">{error}</div>
+            )}
+            {editResult && (
+              <div className="p-3 bg-green-50 border border-green-200 rounded-xl text-green-700 text-sm">
+                Updated: {editResult.account_number} → {editResult.survey_id}
+              </div>
+            )}
+            <button
+              onClick={handleEditSubmit}
+              disabled={saving || !accountNumber.trim() || !surveyId}
+              className="w-full py-4 bg-blue-600 text-white rounded-xl font-semibold text-base hover:bg-blue-700 active:bg-blue-800 disabled:opacity-50 transition"
+            >
+              {saving ? 'Updating…' : 'Update PTB/pole association'}
+            </button>
+          </div>
         </div>
+      ) : (
+        <>
+          <ProgressBar current={step} />
 
-        {step === 0 && renderStep0()}
-        {step === 1 && renderStep1()}
-        {step === 2 && renderStep2()}
-        {step === 3 && renderStep3()}
+          <div className="bg-white rounded-2xl shadow-sm border p-5 sm:p-6 min-h-[320px]">
+            <div className="mb-5">
+              <h2 className="text-lg font-semibold text-gray-800">{stepTitles[step]}</h2>
+              <p className="text-sm text-gray-400 mt-0.5">{stepDescs[step]}</p>
+            </div>
+
+            {step === 0 && renderStep0()}
+            {step === 1 && renderStep1()}
+            {step === 2 && renderStep2()}
+            {step === 3 && renderStep3()}
 
         {error && (
           <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">{error}</div>
@@ -936,6 +1019,8 @@ export default function CommissionCustomerPage() {
             </button>
           )}
         </div>
+      )}
+        </>
       )}
     </div>
   );
