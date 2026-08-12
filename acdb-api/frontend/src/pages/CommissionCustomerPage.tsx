@@ -111,7 +111,7 @@ interface UGPPickerProps {
   onClose: () => void;
 }
 
-function UGPConnectionPicker({ site, accountNumber, onSelect, onClose }: UGPPickerProps) {
+export function UGPConnectionPicker({ site, accountNumber, onSelect, onClose }: UGPPickerProps) {
   const [connections, setConnections] = useState<UGPConnection[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
