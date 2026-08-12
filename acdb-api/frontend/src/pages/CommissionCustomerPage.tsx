@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
 import {
   getCommissionData,
   executeCommission,
@@ -114,6 +116,7 @@ function UGPConnectionPicker({ site, accountNumber, onSelect, onClose }: UGPPick
   const [search, setSearch] = useState('');
   const [splitting, setSplitting] = useState(false);
   const [splitTarget, setSplitTarget] = useState<UGPConnection | null>(null);
+  const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
 
   useEffect(() => {
     if (!site) return;
@@ -187,6 +190,46 @@ function UGPConnectionPicker({ site, accountNumber, onSelect, onClose }: UGPPick
     </button>
   );
 
+  // Map view: show connections with GPS as markers
+  const withGps = filtered.filter(c => c.gps_lat != null && c.gps_lon != null);
+  const mapCenter: [number, number] = withGps.length > 0
+    ? [withGps[0].gps_lat!, withGps[0].gps_lon!]
+    : [-29.179, 27.592]; // Ha Makebe default
+
+  const renderMap = () => (
+    <div className="h-[400px] w-full">
+      <MapContainer center={mapCenter} zoom={15} style={{ height: '100%', width: '100%' }}>
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        {withGps.map(c => (
+          <Marker
+            key={c.survey_id}
+            position={[c.gps_lat!, c.gps_lon!]}
+            eventHandlers={{
+              click: () => handleRowClick(c),
+            }}
+          >
+            <Popup>
+              <div className="text-sm">
+                <div className="font-semibold">{c.survey_id}</div>
+                <div className="text-xs text-gray-600">{c.customer_type}</div>
+                {c.bound_account && <div className="text-xs text-amber-600">Bound: {c.bound_account}</div>}
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleRowClick(c); }}
+                  className="mt-2 px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700"
+                >
+                  Select this connection
+                </button>
+              </div>
+            </Popup>
+          </Marker>
+        ))}
+      </MapContainer>
+    </div>
+  );
+
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40" onClick={onClose}>
       <div className="bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[85vh] flex flex-col" onClick={e => e.stopPropagation()}>
@@ -205,12 +248,33 @@ function UGPConnectionPicker({ site, accountNumber, onSelect, onClose }: UGPPick
             </button>
           </div>
           {connections.length > 0 && (
-            <input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Filter by Survey ID, type..."
-              className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none"
-            />
+            <>
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Filter by Survey ID, type..."
+                className="w-full px-3 py-2 border border-gray-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none"
+              />
+              <div className="flex gap-2 mt-3">
+                <button
+                  onClick={() => setViewMode('list')}
+                  className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition ${
+                    viewMode === 'list' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  }`}
+                >
+                  List
+                </button>
+                <button
+                  onClick={() => setViewMode('map')}
+                  disabled={withGps.length === 0}
+                  className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition ${
+                    viewMode === 'map' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                  } disabled:opacity-40`}
+                >
+                  Map ({withGps.length})
+                </button>
+              </div>
+            </>
           )}
         </div>
         <div className="flex-1 overflow-y-auto">
@@ -227,6 +291,8 @@ function UGPConnectionPicker({ site, accountNumber, onSelect, onClose }: UGPPick
             <div className="text-center py-12 text-gray-400 text-sm">
               {search ? 'No matching connections' : 'No connections found'}
             </div>
+          ) : viewMode === 'map' ? (
+            renderMap()
           ) : (
             <div>
               {available.length > 0 && (
