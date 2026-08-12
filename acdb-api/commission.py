@@ -83,7 +83,11 @@ class CommissionRequest(BaseModel):
     last_name: Optional[str] = None
     gps_lat: Optional[str] = None
     gps_lng: Optional[str] = None
-    survey_id: Optional[str] = None         # UGP connection binding (from picker)
+    survey_id: str = Field(
+        ...,
+        min_length=1,
+        description="UGP connection binding (PTB/pole) — REQUIRED. The unit must be associated with a physical uGridPLAN connection element so we know where it's installed.",
+    )
     gateway_thing_name: Optional[str] = Field(
         default=None,
         description="Permanent gateway Thing name (e.g. MAK-GW-0001) to associate with this customer. Does NOT rename the Thing.",

@@ -63,5 +63,8 @@
     "accountRequired": "Le numéro de compte est requis",
     "signatureRequired": "La signature est requise"
   },
-  "commissionFailed": "Échec de la mise en service"
+  "commissionFailed": "Échec de la mise en service",
+  "errors": {
+    "ugpRequired": "Veuillez sélectionner la connexion uGridPLAN (PTB/pôle) pour cette unité. C'est obligatoire pour savoir où elle est installée."
+  }
 }

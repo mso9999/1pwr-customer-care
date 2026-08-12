@@ -415,6 +415,13 @@ export default function CommissionCustomerPage() {
       const site =
         (customerData?.customer.concession || '').trim().toUpperCase() || fromAcct;
 
+      // PTB/pole association is required — we must know where the unit is installed.
+      if (!surveyId) {
+        setError(t('commission:errors.ugpRequired') || 'Please select the uGridPLAN connection (PTB/pole) for this unit. This is required so we know where it is installed.');
+        setSaving(false);
+        return;
+      }
+
       const res = await executeCommission({
         customer_id: customerData?.customer.customer_id_legacy ? parseInt(String(customerData.customer.customer_id_legacy), 10) : undefined,
         account_number: acct,
@@ -429,7 +436,7 @@ export default function CommissionCustomerPage() {
         last_name: customerData?.customer.last_name || '',
         gps_lat: gpsLat || undefined,
         gps_lng: gpsLng || undefined,
-        survey_id: surveyId || undefined,
+        survey_id: surveyId,
         gateway_thing_name: gatewayThingName || undefined,
         customer_signature: signatureB64,
       });
@@ -851,7 +858,8 @@ export default function CommissionCustomerPage() {
               {t('commission:next')}
             </button>
           ) : (
-            <button onClick={handleSubmit} disabled={saving}
+            <button onClick={handleSubmit} disabled={saving || !surveyId}
+              title={!surveyId ? (t('commission:errors.ugpRequired') || 'Select the uGridPLAN connection (PTB/pole) first') : undefined}
               className="flex-1 py-4 bg-green-600 text-white rounded-xl font-semibold text-base hover:bg-green-700 active:bg-green-800 disabled:opacity-50 transition">
               {saving ? (
                 <span className="flex items-center justify-center gap-2">

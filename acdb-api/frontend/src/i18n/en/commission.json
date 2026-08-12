@@ -63,5 +63,8 @@
     "accountRequired": "Account number is required",
     "signatureRequired": "Signature is required"
   },
-  "commissionFailed": "Commissioning failed"
+  "commissionFailed": "Commissioning failed",
+  "errors": {
+    "ugpRequired": "Please select the uGridPLAN connection (PTB/pole) for this unit. This is required so we know where it is installed."
+  }
 }
