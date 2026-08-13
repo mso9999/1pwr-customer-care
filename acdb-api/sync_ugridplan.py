@@ -1777,6 +1777,37 @@ def _pole_id_of(c: Dict[str, Any]) -> str:
     return str(c.get("ID") or c.get("id") or c.get("Pole_ID") or c.get("pole_id") or "").strip()
 
 
+def _gateway_for_meter_serial(meter_serial: str) -> str:
+    """Resolve the gateway Thing that reads a meter serial.
+
+    The gateway↔meter link is data-driven: DynamoDB meter_last_seen binds the
+    reporting Thing (thingName) to the meter serial (meterId). Falls back to the
+    CC meter_provisioning record. Returns "" if unknown.
+    """
+    ms = (meter_serial or "").strip()
+    if not ms:
+        return ""
+    # Normalize to the zero-padded form DynamoDB uses (meterId is zero-padded).
+    candidates = {ms, ms.zfill(12), ms.lstrip("0") or ms}
+    try:
+        ddb = _get_ddb()
+        for cand in candidates:
+            resp = ddb.get_item(TableName="meter_last_seen", Key={"meterId": {"S": cand}})
+            item = resp.get("Item")
+            if item:
+                tn = item.get("thingName", {}).get("S", "")
+                if tn:
+                    return tn
+    except Exception as e:
+        logger.warning("gateway lookup (meter_last_seen) failed for %s: %s", ms, e)
+    return ""
+
+
+def _get_ddb():
+    import boto3
+    return boto3.client("dynamodb", region_name=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
+
+
 @router.get("/poles")
 def list_poles(
     site: str = Query(..., description="Site code (e.g. MAK)"),
@@ -1857,9 +1888,10 @@ def list_poles(
 
 class AssignPtbRequest(BaseModel):
     site: str = Field(..., description="Site code (e.g. MAK)")
-    account_number: str = Field(..., min_length=1)
-    pole_id: str = Field(..., min_length=1, description="Pole the unit is mounted on")
-    meter_serial: str = Field(default="", description="Meter serial to assign to a PTB channel")
+    account_number: str = Field(..., min_length=1, description="Customer account this meter serves")
+    pole_id: str = Field(..., min_length=1, description="Pole the PTB (and gateway) is mounted on")
+    meter_serial: str = Field(..., min_length=1, description="Customer meter serial")
+    gateway_thing_name: Optional[str] = Field(default=None, description="Gateway (e.g. MAK-GW-0007) that reads this meter; auto-derived from telemetry/provisioning if omitted")
     survey_id: Optional[str] = Field(default=None, description="Customer connection to bind (optional; else nearest to pole)")
     ptb_serial: Optional[str] = Field(default=None, description="PTB box serial (optional, on create)")
 
@@ -1869,12 +1901,18 @@ def assign_ptb(
     req: AssignPtbRequest,
     user: CurrentUser = Depends(require_employee),
 ):
-    """Link a unit to a physical pole: find-or-create the PTB on that pole, assign
-    the meter serial to a PTB channel, mark it Installed, and bind the customer
-    connection (Survey_ID) to the account (setting the connection's Pole_ID).
+    """Commission one customer meter onto the physical network model:
 
-    This is the corrected physical model: a meter lives in a PTB on a pole, not
-    hanging on the pole directly. Idempotent per pole (reuses an existing PTB).
+        Pole → PTB (1/pole) → Gateway (1/PTB) → Meter (N/gateway) → Customer (1/meter)
+
+    Makes all three associations:
+      1. gateway ↔ PTB (and PTB ↔ pole): find-or-create the PTB on the pole, set
+         its serial_number to the gateway Thing, mark Installed.
+      2. meter ↔ gateway: add the meter serial to the PTB's channel_serials.
+      3. meter ↔ customer: bind the customer connection (Survey_ID) to the account
+         and set the connection's Meter_Serial + Pole_ID.
+
+    Idempotent per pole (reuses an existing PTB).
     """
     _allowed = {CCRole.superadmin.value, CCRole.onm_team.value, "engineering"}
     if not set(effective_roles(user)) & _allowed:
@@ -1884,6 +1922,11 @@ def assign_ptb(
     account_number = req.account_number.strip().upper()
     pole_id = req.pole_id.strip()
     meter_serial = (req.meter_serial or "").strip()
+    gateway_thing = (req.gateway_thing_name or "").strip()
+
+    # Resolve the gateway that serves this meter (PTB contains the gateway).
+    if not gateway_thing and meter_serial:
+        gateway_thing = _gateway_for_meter_serial(meter_serial)
 
     with get_auth_db() as conn:
         row = conn.execute(
@@ -1900,14 +1943,15 @@ def assign_ptb(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"uGridPLAN unreachable: {e}")
 
-    # 1. Find or create the PTB on this pole.
+    # 1. Find or create the PTB on this pole. The PTB contains the gateway.
+    #    PTB.serial_number holds the gateway Thing (1 gateway per PTB/pole).
     ptb = client.get_ptb_for_pole(session_id, pole_id)
     ptb_created = False
     if ptb is None:
         try:
             client.create_ptb(
                 session_id, pole_id,
-                serial_number=req.ptb_serial or "",
+                serial_number=gateway_thing or (req.ptb_serial or ""),
                 channel_serials=[meter_serial] if meter_serial else [],
                 notes=f"created from CC commissioning by {user.user_id}",
             )
@@ -1921,9 +1965,9 @@ def assign_ptb(
 
     ptb_id = str(ptb.get("ptbId") or ptb.get("ptb_id") or "")
 
-    # 2. Assign the meter serial into a PTB channel + mark Installed (if provided).
+    # 2. Associate gateway ↔ PTB (serial_number) and meter ↔ gateway (channel).
     ptb_updated = False
-    if meter_serial and ptb_id:
+    if ptb_id:
         existing_serials = ptb.get("channelSerials") or ptb.get("channel_serials") or []
         if isinstance(existing_serials, str):
             try:
@@ -1932,8 +1976,12 @@ def assign_ptb(
             except Exception:
                 existing_serials = []
         serials = [str(s) for s in existing_serials]
-        if meter_serial not in serials:
-            # Put it in the first empty channel, else append.
+        updates: Dict[str, Any] = {}
+        # gateway ↔ PTB
+        if gateway_thing:
+            updates["serial_number"] = gateway_thing
+        # meter ↔ gateway (channel)
+        if meter_serial and meter_serial not in serials:
             placed = False
             for i, s in enumerate(serials):
                 if not s:
@@ -1942,12 +1990,12 @@ def assign_ptb(
                     break
             if not placed:
                 serials.append(meter_serial)
+            updates["channel_serials"] = serials
+            updates["num_channels"] = max(len(serials), int(ptb.get("numChannels") or ptb.get("num_channels") or 0))
+        if updates:
+            updates["status"] = "I"  # Installed
             try:
-                client.update_ptb(session_id, ptb_id, {
-                    "channel_serials": serials,
-                    "num_channels": max(len(serials), int(ptb.get("numChannels") or ptb.get("num_channels") or 0)),
-                    "status": "I",  # Installed
-                })
+                client.update_ptb(session_id, ptb_id, updates)
                 ptb_updated = True
             except Exception as e:
                 logger.warning("PTB channel update failed for %s: %s", ptb_id, e)
@@ -1991,8 +2039,20 @@ def assign_ptb(
         except Exception as e:
             logger.warning("nearest-connection lookup failed for pole %s: %s", pole_id, e)
 
+    # 3. meter ↔ customer: update the uGP connection (Survey_ID) with the meter
+    #    serial + pole, and bind it to the account.
     account_updated = False
+    connection_updated = False
     if survey_id:
+        try:
+            conn_updates: Dict[str, Any] = {"Pole_ID": pole_id}
+            if meter_serial:
+                conn_updates["Meter_Serial"] = meter_serial
+            if account_number:
+                conn_updates["Customer_Code"] = account_number
+            connection_updated = bool(client.update_connection(session_id, survey_id, conn_updates))
+        except Exception as e:
+            logger.warning("connection update failed for %s: %s", survey_id, e)
         try:
             with get_pg_connection() as pg:
                 cur = pg.cursor()
@@ -2013,8 +2073,10 @@ def assign_ptb(
         "ptb_id": ptb_id,
         "ptb_created": ptb_created,
         "ptb_updated": ptb_updated,
+        "gateway_thing_name": gateway_thing,
         "meter_serial": meter_serial,
         "survey_id": survey_id,
+        "connection_updated": connection_updated,
         "account_updated": account_updated,
     }
 

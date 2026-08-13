@@ -1202,6 +1202,7 @@ export interface AssignPtbRequest {
   account_number: string;
   pole_id: string;
   meter_serial?: string;
+  gateway_thing_name?: string;  // auto-derived from telemetry if omitted
   survey_id?: string;
   ptb_serial?: string;
 }
@@ -1213,8 +1214,10 @@ export interface AssignPtbResult {
   ptb_id: string;
   ptb_created: boolean;
   ptb_updated: boolean;
+  gateway_thing_name?: string;
   meter_serial: string;
   survey_id?: string | null;
+  connection_updated: boolean;
   account_updated: boolean;
 }
 
