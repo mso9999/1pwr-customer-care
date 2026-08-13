@@ -10,6 +10,7 @@ import {
   updateMeterAssignment,
   updateSurveyId,
   assignPtb,
+  getProvisionedMeters,
   type PaginatedResponse,
   type MeterAssignment,
 } from '../lib/api';
@@ -57,6 +58,8 @@ export default function MetersPage() {
   const [editSurveyId, setEditSurveyId] = useState('');
   const [editPoleId, setEditPoleId] = useState('');
   const [editPoleHasPtb, setEditPoleHasPtb] = useState(false);
+  const [editGateway, setEditGateway] = useState('');
+  const [siteGateways, setSiteGateways] = useState<string[]>([]);
   const [showUGPPicker, setShowUGPPicker] = useState(false);
   const [showPolePicker, setShowPolePicker] = useState(false);
 
@@ -245,7 +248,24 @@ export default function MetersPage() {
     setEditSurveyId(String(row['survey_id'] || ''));
     setEditPoleId('');
     setEditPoleHasPtb(false);
+    setEditGateway('');
     setModal('edit');
+
+    // Load this site's provisioned gateways (MAK-GW-*) for the gateway override dropdown.
+    const site = String(row['account_number'] || '').match(/[A-Za-z]{2,4}$/)?.[0]?.toUpperCase() || '';
+    if (site) {
+      getProvisionedMeters(site)
+        .then((r) => {
+          const gws = (r.meters || [])
+            .map((m) => String(m.thing_name || ''))
+            .filter((n) => n.includes('-GW-'))
+            .sort();
+          setSiteGateways(gws);
+        })
+        .catch(() => setSiteGateways([]));
+    } else {
+      setSiteGateways([]);
+    }
   };
 
   const handleEdit = async () => {
@@ -266,6 +286,7 @@ export default function MetersPage() {
           account_number: editAccount,
           pole_id: editPoleId,
           meter_serial: editMeterId,
+          gateway_thing_name: editGateway || undefined,
           survey_id: editSurveyId || undefined,
         });
       } else if (editSurveyId && editAccount) {
@@ -573,6 +594,16 @@ export default function MetersPage() {
                       Pick pole on map (PTB created if missing)
                     </button>
                   )}
+                </div>
+              )}
+              {editAccount && editPoleId && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Gateway (reads this meter)</label>
+                  <select value={editGateway} onChange={e => setEditGateway(e.target.value)} className="w-full px-3 py-2.5 border rounded-lg text-sm bg-white">
+                    <option value="">Auto-derive from telemetry</option>
+                    {siteGateways.map(g => <option key={g} value={g}>{g}</option>)}
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">Only needed if the unit hasn't reported telemetry yet.</p>
                 </div>
               )}
             </div>
