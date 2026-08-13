@@ -180,6 +180,17 @@ def init_auth_db():
                 )
                 logger.info("Seeded %s role for provisioning operator %s (%s)", cc_role, emp_id, who)
 
+        # Comfort (1PWR0501) is the Benin IT lead — upgrade to superadmin so she
+        # has privileged access (incl. managing access for the Benin team). This
+        # upgrades the earlier onm_team provisioning-operator grant.
+        conn.execute(
+            """INSERT INTO cc_employee_roles (employee_id, cc_role, assigned_by, assigned_at)
+               VALUES ('1PWR0501', 'superadmin', 'system:benin-it-lead', datetime('now'))
+               ON CONFLICT(employee_id) DO UPDATE SET cc_role = 'superadmin',
+                   assigned_by = 'system:benin-it-lead', assigned_at = datetime('now')"""
+        )
+        logger.info("Ensured superadmin role for Benin IT lead 1PWR0501 (Comfort)")
+
         # Correct an earlier mis-identification: Bokang is 1PWR156, not 1PWR138F.
         # Remove the stale system-seeded 1PWR138F grant if present (only if it was
         # auto-seeded; never touch a human-assigned role).
