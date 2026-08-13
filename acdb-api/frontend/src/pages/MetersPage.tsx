@@ -11,6 +11,7 @@ import {
   updateSurveyId,
   assignPtb,
   getProvisionedMeters,
+  downloadMeterValidationKit,
   type PaginatedResponse,
   type MeterAssignment,
 } from '../lib/api';
@@ -360,12 +361,22 @@ export default function MetersPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl sm:text-2xl font-bold text-gray-800">{t('meters:title')}</h1>
-        {canWriteCustomers && (
-          <Link to="/assign-meter" className="px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 active:bg-blue-800 transition flex items-center gap-1.5">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-            {t('meters:assignMeter')}
-          </Link>
-        )}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={async () => { try { await downloadMeterValidationKit(); } catch { /* surfaced via console */ } }}
+            className="px-4 py-2.5 bg-gray-100 text-gray-700 border border-gray-300 rounded-xl text-sm font-medium hover:bg-gray-200 transition flex items-center gap-1.5"
+            title="Download the meter Modbus-addressing SOP + tool (field kit)"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+            Addressing kit
+          </button>
+          {canWriteCustomers && (
+            <Link to="/assign-meter" className="px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 active:bg-blue-800 transition flex items-center gap-1.5">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+              {t('meters:assignMeter')}
+            </Link>
+          )}
+        </div>
       </div>
 
       <div className="space-y-2 sm:space-y-0 sm:flex sm:gap-3 sm:flex-wrap sm:items-center">

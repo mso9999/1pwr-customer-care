@@ -67,7 +67,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from middleware import require_action
+from middleware import require_action, require_employee
 from models import CCRole, CurrentUser
 from mutations import try_log_mutation
 from country_config import ALL_SITE_ABBREV, ALL_SITE_DISTRICTS, get_country_for_site
@@ -812,9 +812,15 @@ def download_station(_user: CurrentUser = Depends(CC_OPERATE_GATE)):
 
 @router.get("/meter-kit/download")
 def download_meter_validation_kit(
-    _user: CurrentUser = Depends(CC_OPERATE_GATE),
+    _user: CurrentUser = Depends(require_employee),
 ):
-    """Download pinned meter-addressing code plus CC's batch-validation SOP."""
+    """Download pinned meter-addressing code plus CC's batch-validation SOP.
+
+    Any logged-in employee may download: this is a read-only field SOP + the
+    Modbus addressing tool, not an operational control, so it uses the broad
+    employee gate rather than the privileged provisioning action (so field staff
+    like the Benin team can fetch it without a privileged role).
+    """
     buf = io.BytesIO()
     try:
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
