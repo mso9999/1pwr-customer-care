@@ -9,12 +9,14 @@ import {
   setMeterSafetyOverride,
   updateMeterAssignment,
   updateSurveyId,
+  assignPtb,
   type PaginatedResponse,
   type MeterAssignment,
 } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import CountryPill from '../components/CountryPill';
 import { UGPConnectionPicker } from './CommissionCustomerPage';
+import UGPPolePicker from '../components/UGPPolePicker';
 
 type ModalKind = 'delete' | 'decommission' | 'history' | 'override' | 'edit' | null;
 interface Site { concession: string; country?: string | null }
@@ -53,7 +55,10 @@ export default function MetersPage() {
   const [editNote, setEditNote] = useState('');
   const [editError, setEditError] = useState('');
   const [editSurveyId, setEditSurveyId] = useState('');
+  const [editPoleId, setEditPoleId] = useState('');
+  const [editPoleHasPtb, setEditPoleHasPtb] = useState(false);
   const [showUGPPicker, setShowUGPPicker] = useState(false);
+  const [showPolePicker, setShowPolePicker] = useState(false);
 
   // Safety override modal state
   const [overrideMeterId, setOverrideMeterId] = useState('');
@@ -238,6 +243,8 @@ export default function MetersPage() {
     setEditNote('');
     setEditError('');
     setEditSurveyId(String(row['survey_id'] || ''));
+    setEditPoleId('');
+    setEditPoleHasPtb(false);
     setModal('edit');
   };
 
@@ -251,13 +258,25 @@ export default function MetersPage() {
         role: editRole,
         note: editNote.trim() || undefined,
       });
-      // If survey_id changed, update it too (PTB/pole backfill)
-      const currentSurveyId = String(data?.rows?.find(r => String(r['meter_id']) === editMeterId)?.['survey_id'] || '');
-      if (editSurveyId !== currentSurveyId && editAccount) {
-        await updateSurveyId({
+      // If a pole was picked, link the unit: find-or-create PTB on the pole,
+      // assign the meter serial to a channel, and bind the account's connection.
+      if (editPoleId && editAccount) {
+        await assignPtb({
+          site: editAccount.match(/[A-Za-z]{2,4}$/)?.[0]?.toUpperCase() || '',
           account_number: editAccount,
-          survey_id: editSurveyId,
+          pole_id: editPoleId,
+          meter_serial: editMeterId,
+          survey_id: editSurveyId || undefined,
         });
+      } else if (editSurveyId && editAccount) {
+        // Fallback: only a connection was set (no pole) — update survey_id binding.
+        const currentSurveyId = String(data?.rows?.find(r => String(r['meter_id']) === editMeterId)?.['survey_id'] || '');
+        if (editSurveyId !== currentSurveyId) {
+          await updateSurveyId({
+            account_number: editAccount,
+            survey_id: editSurveyId,
+          });
+        }
       }
       setModal(null);
       fetchData();
@@ -531,25 +550,27 @@ export default function MetersPage() {
               </div>
               {editAccount && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">PTB/pole (uGridPLAN connection)</label>
-                  {editSurveyId ? (
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Pole / PTB (uGridPLAN)</label>
+                  {editPoleId ? (
                     <div className="flex items-center gap-2 px-3 py-2.5 bg-blue-50 border border-blue-200 rounded-lg">
                       <svg className="w-4 h-4 text-blue-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
                       </svg>
-                      <span className="flex-1 text-sm font-medium text-blue-800">{editSurveyId}</span>
-                      <button type="button" onClick={() => setEditSurveyId('')} className="text-xs text-blue-600 hover:text-blue-800 underline">Remove</button>
+                      <span className="flex-1 text-sm font-medium text-blue-800">
+                        {editPoleId} {editPoleHasPtb ? '· has PTB' : '· PTB will be created'}
+                      </span>
+                      <button type="button" onClick={() => { setEditPoleId(''); setEditPoleHasPtb(false); }} className="text-xs text-blue-600 hover:text-blue-800 underline">Remove</button>
                     </div>
                   ) : (
                     <button
                       type="button"
-                      onClick={() => setShowUGPPicker(true)}
+                      onClick={() => setShowPolePicker(true)}
                       className="w-full py-2.5 bg-gray-100 border-2 border-dashed border-gray-300 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-200 transition flex items-center justify-center gap-2"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
                       </svg>
-                      Link UGP connection
+                      Pick pole on map (PTB created if missing)
                     </button>
                   )}
                 </div>
@@ -569,6 +590,18 @@ export default function MetersPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {showPolePicker && editAccount && (
+        <UGPPolePicker
+          site={editAccount.match(/[A-Za-z]{2,4}$/)?.[0]?.toUpperCase() || ''}
+          onSelect={(pole) => {
+            setEditPoleId(pole.pole_id);
+            setEditPoleHasPtb(pole.has_ptb);
+            setShowPolePicker(false);
+          }}
+          onClose={() => setShowPolePicker(false)}
+        />
       )}
 
       {showUGPPicker && editAccount && (

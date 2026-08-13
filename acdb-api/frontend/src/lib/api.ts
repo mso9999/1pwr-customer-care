@@ -1179,6 +1179,52 @@ export interface UpdateSurveyIdRequest {
   survey_id: string;
 }
 
+// --- PTB / pole linking ---
+export interface UGPPole {
+  pole_id: string;
+  gps_lat: number | null;
+  gps_lon: number | null;
+  subnetwork: string;
+  has_ptb: boolean;
+  ptb_id: string | null;
+  ptb_status: string | null;
+  drop_count: number;
+}
+
+export async function listUGPPoles(site: string) {
+  return request<{ site: string; count: number; poles: UGPPole[] }>(
+    `/sync/poles?site=${encodeURIComponent(site)}`
+  );
+}
+
+export interface AssignPtbRequest {
+  site: string;
+  account_number: string;
+  pole_id: string;
+  meter_serial?: string;
+  survey_id?: string;
+  ptb_serial?: string;
+}
+
+export interface AssignPtbResult {
+  status: string;
+  account_number: string;
+  pole_id: string;
+  ptb_id: string;
+  ptb_created: boolean;
+  ptb_updated: boolean;
+  meter_serial: string;
+  survey_id?: string | null;
+  account_updated: boolean;
+}
+
+export async function assignPtb(data: AssignPtbRequest): Promise<AssignPtbResult> {
+  return request<AssignPtbResult>('/sync/assign-ptb', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
 export interface UpdateSurveyIdResult {
   status: string;
   account_number: string;

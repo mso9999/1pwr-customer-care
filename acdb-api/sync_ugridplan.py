@@ -26,7 +26,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from models import CCRole, CurrentUser
 from middleware import effective_roles, raise_privilege_denied, require_employee
@@ -577,6 +577,75 @@ class UGPClient:
                 survey_id, resp.text[:300],
             )
             return {"status": "error", "error": resp.text[:300]}
+        return resp.json()
+
+    # ------------------------------------------------------------------
+    # PTB (Pole Top Box) — the box mounted on a pole holding the meters.
+    # Uses the adapter's dedicated /v5/ptb/* endpoints (create/update/list),
+    # NOT the generic /project/create-element (which has no ptb branch).
+    # ------------------------------------------------------------------
+
+    def get_ptbs(self, project_id: str) -> List[Dict[str, Any]]:
+        """List PTB elements for a project (adapter GET /v5/ptb)."""
+        self._ensure_auth()
+        resp = self.session.get(
+            f"{self.base}/v5/ptb", params={"projectId": project_id}, timeout=30
+        )
+        if resp.status_code == 401:
+            self.authenticate()
+            resp = self.session.get(
+                f"{self.base}/v5/ptb", params={"projectId": project_id}, timeout=30
+            )
+        if resp.status_code != 200:
+            raise RuntimeError(f"Failed to fetch PTBs ({resp.status_code}): {resp.text[:200]}")
+        data = resp.json()
+        return data.get("ptbs", data.get("items", []))
+
+    def get_ptb_for_pole(self, project_id: str, pole_id: str) -> Optional[Dict[str, Any]]:
+        """Return the PTB mounted on a given pole, or None."""
+        for ptb in self.get_ptbs(project_id):
+            pid = str(ptb.get("poleId") or ptb.get("pole_id") or "")
+            if pid == str(pole_id):
+                return ptb
+        return None
+
+    def create_ptb(self, project_id: str, pole_id: str, *, serial_number: str = "",
+                   num_channels: int = 0, channel_serials: Optional[List[str]] = None,
+                   manufacturer: str = "", model: str = "", notes: str = "") -> Dict[str, Any]:
+        """Create a PTB on a pole (adapter POST /v5/ptb/create).
+
+        The adapter auto-derives GPS from the pole, auto-counts channels from
+        connected drops, and refuses a duplicate PTB on the same pole.
+        """
+        self._ensure_auth()
+        payload: Dict[str, Any] = {
+            "project_id": project_id,
+            "pole_id": pole_id,
+            "serial_number": serial_number,
+            "manufacturer": manufacturer,
+            "model": model,
+            "num_channels": num_channels,
+            "channel_serials": channel_serials or [],
+            "notes": notes,
+        }
+        resp = self.session.post(f"{self.base}/v5/ptb/create", json=payload, timeout=60)
+        if resp.status_code == 401:
+            self.authenticate()
+            resp = self.session.post(f"{self.base}/v5/ptb/create", json=payload, timeout=60)
+        if resp.status_code != 200:
+            raise RuntimeError(f"PTB create failed on pole {pole_id} ({resp.status_code}): {resp.text[:300]}")
+        return resp.json()
+
+    def update_ptb(self, project_id: str, ptb_id: str, updates: Dict[str, Any]) -> Dict[str, Any]:
+        """Update a PTB's fields (adapter PUT /v5/ptb/update)."""
+        self._ensure_auth()
+        payload = {"project_id": project_id, "ptb_id": ptb_id, "updates": updates}
+        resp = self.session.put(f"{self.base}/v5/ptb/update", json=payload, timeout=60)
+        if resp.status_code == 401:
+            self.authenticate()
+            resp = self.session.put(f"{self.base}/v5/ptb/update", json=payload, timeout=60)
+        if resp.status_code != 200:
+            raise RuntimeError(f"PTB update failed for {ptb_id} ({resp.status_code}): {resp.text[:300]}")
         return resp.json()
 
 
@@ -1696,6 +1765,257 @@ def list_connections(
         "ugp_registry_key": loaded_registry_key,
         "count": len(connections),
         "connections": connections,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Poles + PTB (Pole Top Box) — physical install location of a meter/gateway
+# ---------------------------------------------------------------------------
+
+
+def _pole_id_of(c: Dict[str, Any]) -> str:
+    return str(c.get("ID") or c.get("id") or c.get("Pole_ID") or c.get("pole_id") or "").strip()
+
+
+@router.get("/poles")
+def list_poles(
+    site: str = Query(..., description="Site code (e.g. MAK)"),
+    user: CurrentUser = Depends(require_employee),
+):
+    """List pole elements for a site with GPS, PTB status, and drop count.
+
+    Used by the commissioning/meter PTB picker (map view) so the operator picks
+    the physical pole a unit is mounted on; the assign step then finds-or-creates
+    the PTB on that pole.
+    """
+    with get_auth_db() as conn:
+        row = conn.execute(
+            "SELECT project_id FROM cc_site_projects WHERE site_code = ?",
+            (site.upper(),),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"No uGridPLAN project configured for site '{site}'.")
+
+    project_name = row["project_id"]
+    try:
+        client = _get_ugp_client()
+        session_id = _load_project_for_site(client, project_name)
+        raw_poles = client.session.get(
+            f"{client.base}/project/table-data",
+            params={"projectId": session_id, "elementType": "pole", "page": 1, "pageSize": 2000},
+            timeout=60,
+        )
+        if raw_poles.status_code != 200:
+            raise RuntimeError(f"pole fetch HTTP {raw_poles.status_code}")
+        poles = raw_poles.json().get("rows", [])
+        ptbs = client.get_ptbs(session_id)
+        lines = client.get_lines(session_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"uGridPLAN fetch failed: {e}")
+
+    # pole_id -> ptb
+    ptb_by_pole = {}
+    for p in ptbs:
+        pid = str(p.get("poleId") or p.get("pole_id") or "")
+        if pid:
+            ptb_by_pole[pid] = p
+
+    # pole_id -> connected drop count (lines whose Node 1 is the pole)
+    drops: Dict[str, int] = {}
+    for ln in lines:
+        n1 = str(ln.get("Node 1") or ln.get("node1") or "").strip()
+        if n1:
+            drops[n1] = drops.get(n1, 0) + 1
+
+    out = []
+    for c in poles:
+        pid = _pole_id_of(c)
+        if not pid:
+            continue
+        gx = c.get("GPS_X") or c.get("gps_x") or c.get("longitude")
+        gy = c.get("GPS_Y") or c.get("gps_y") or c.get("latitude")
+        try:
+            gx = float(gx) if gx not in (None, "") else None
+            gy = float(gy) if gy not in (None, "") else None
+        except (ValueError, TypeError):
+            gx = gy = None
+        ptb = ptb_by_pole.get(pid)
+        out.append({
+            "pole_id": pid,
+            "gps_lat": gy,
+            "gps_lon": gx,
+            "subnetwork": str(c.get("SubNetwork") or "").strip(),
+            "has_ptb": ptb is not None,
+            "ptb_id": (ptb.get("ptbId") or ptb.get("ptb_id")) if ptb else None,
+            "ptb_status": (ptb.get("status")) if ptb else None,
+            "drop_count": drops.get(pid, 0),
+        })
+    return {"site": site.upper(), "count": len(out), "poles": out}
+
+
+class AssignPtbRequest(BaseModel):
+    site: str = Field(..., description="Site code (e.g. MAK)")
+    account_number: str = Field(..., min_length=1)
+    pole_id: str = Field(..., min_length=1, description="Pole the unit is mounted on")
+    meter_serial: str = Field(default="", description="Meter serial to assign to a PTB channel")
+    survey_id: Optional[str] = Field(default=None, description="Customer connection to bind (optional; else nearest to pole)")
+    ptb_serial: Optional[str] = Field(default=None, description="PTB box serial (optional, on create)")
+
+
+@router.post("/assign-ptb")
+def assign_ptb(
+    req: AssignPtbRequest,
+    user: CurrentUser = Depends(require_employee),
+):
+    """Link a unit to a physical pole: find-or-create the PTB on that pole, assign
+    the meter serial to a PTB channel, mark it Installed, and bind the customer
+    connection (Survey_ID) to the account (setting the connection's Pole_ID).
+
+    This is the corrected physical model: a meter lives in a PTB on a pole, not
+    hanging on the pole directly. Idempotent per pole (reuses an existing PTB).
+    """
+    _allowed = {CCRole.superadmin.value, CCRole.onm_team.value, "engineering"}
+    if not set(effective_roles(user)) & _allowed:
+        raise_privilege_denied(user, [CCRole.onm_team], "link a unit to a pole/PTB")
+
+    site_code = req.site.strip().upper()
+    account_number = req.account_number.strip().upper()
+    pole_id = req.pole_id.strip()
+    meter_serial = (req.meter_serial or "").strip()
+
+    with get_auth_db() as conn:
+        row = conn.execute(
+            "SELECT project_id FROM cc_site_projects WHERE site_code = ?",
+            (site_code,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"No uGridPLAN project configured for site '{site_code}'.")
+    project_name = row["project_id"]
+
+    try:
+        client = _get_ugp_client()
+        session_id = _load_project_for_site(client, project_name)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"uGridPLAN unreachable: {e}")
+
+    # 1. Find or create the PTB on this pole.
+    ptb = client.get_ptb_for_pole(session_id, pole_id)
+    ptb_created = False
+    if ptb is None:
+        try:
+            client.create_ptb(
+                session_id, pole_id,
+                serial_number=req.ptb_serial or "",
+                channel_serials=[meter_serial] if meter_serial else [],
+                notes=f"created from CC commissioning by {user.user_id}",
+            )
+            ptb_created = True
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"PTB create failed on pole {pole_id}: {e}")
+        # Re-read to get the new PTB's id
+        ptb = client.get_ptb_for_pole(session_id, pole_id)
+        if ptb is None:
+            raise HTTPException(status_code=502, detail="PTB created but not readable back from uGridPLAN")
+
+    ptb_id = str(ptb.get("ptbId") or ptb.get("ptb_id") or "")
+
+    # 2. Assign the meter serial into a PTB channel + mark Installed (if provided).
+    ptb_updated = False
+    if meter_serial and ptb_id:
+        existing_serials = ptb.get("channelSerials") or ptb.get("channel_serials") or []
+        if isinstance(existing_serials, str):
+            try:
+                import json as _json
+                existing_serials = _json.loads(existing_serials)
+            except Exception:
+                existing_serials = []
+        serials = [str(s) for s in existing_serials]
+        if meter_serial not in serials:
+            # Put it in the first empty channel, else append.
+            placed = False
+            for i, s in enumerate(serials):
+                if not s:
+                    serials[i] = meter_serial
+                    placed = True
+                    break
+            if not placed:
+                serials.append(meter_serial)
+            try:
+                client.update_ptb(session_id, ptb_id, {
+                    "channel_serials": serials,
+                    "num_channels": max(len(serials), int(ptb.get("numChannels") or ptb.get("num_channels") or 0)),
+                    "status": "I",  # Installed
+                })
+                ptb_updated = True
+            except Exception as e:
+                logger.warning("PTB channel update failed for %s: %s", ptb_id, e)
+
+    # 3. Bind the customer connection to the account + set its Pole_ID.
+    #    Prefer an explicit survey_id; else nearest connection to the pole's GPS.
+    from customer_api import get_connection as get_pg_connection
+    survey_id = (req.survey_id or "").strip() or None
+    if not survey_id:
+        # find pole GPS, then nearest connection
+        try:
+            poles_resp = client.session.get(
+                f"{client.base}/project/table-data",
+                params={"projectId": session_id, "elementType": "pole", "page": 1, "pageSize": 2000},
+                timeout=60,
+            )
+            pole_gps = None
+            for c in poles_resp.json().get("rows", []):
+                if _pole_id_of(c) == pole_id:
+                    pole_gps = (c.get("GPS_Y") or c.get("gps_y"), c.get("GPS_X") or c.get("gps_x"))
+                    break
+            if pole_gps and pole_gps[0] and pole_gps[1]:
+                conns = client.get_connections(session_id)
+                best = None
+                best_d = None
+                import math
+                def _dist(c):
+                    try:
+                        cy = float(c.get("GPS_Y") or c.get("gps_y"))
+                        cx = float(c.get("GPS_X") or c.get("gps_x"))
+                    except (TypeError, ValueError):
+                        return None
+                    return math.hypot(cy - float(pole_gps[0]), cx - float(pole_gps[1]))
+                for c in conns:
+                    dd = _dist(c)
+                    if dd is not None and (best_d is None or dd < best_d):
+                        best_d = dd
+                        best = c
+                if best is not None:
+                    survey_id = str(best.get("Survey_ID") or best.get("survey_id") or "").strip() or None
+        except Exception as e:
+            logger.warning("nearest-connection lookup failed for pole %s: %s", pole_id, e)
+
+    account_updated = False
+    if survey_id:
+        try:
+            with get_pg_connection() as pg:
+                cur = pg.cursor()
+                cur.execute(
+                    "UPDATE accounts SET survey_id = %s, updated_at = NOW() "
+                    "WHERE account_number = %s",
+                    (survey_id, account_number),
+                )
+                account_updated = cur.rowcount > 0
+                pg.commit()
+        except Exception as e:
+            logger.warning("account survey_id bind failed for %s: %s", account_number, e)
+
+    return {
+        "status": "ok",
+        "account_number": account_number,
+        "pole_id": pole_id,
+        "ptb_id": ptb_id,
+        "ptb_created": ptb_created,
+        "ptb_updated": ptb_updated,
+        "meter_serial": meter_serial,
+        "survey_id": survey_id,
+        "account_updated": account_updated,
     }
 
 
