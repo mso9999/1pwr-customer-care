@@ -585,6 +585,35 @@ class UGPClient:
     # NOT the generic /project/create-element (which has no ptb branch).
     # ------------------------------------------------------------------
 
+    def get_poles(self, project_id: str, page_size: int = 1000) -> List[Dict[str, Any]]:
+        """Fetch all pole elements for a project (paginated; adapter caps pageSize at 1000)."""
+        self._ensure_auth()
+        all_rows: List[Dict[str, Any]] = []
+        page = 1
+        while True:
+            resp = self.session.get(
+                f"{self.base}/project/table-data",
+                params={"projectId": project_id, "elementType": "pole", "page": page, "pageSize": page_size},
+                timeout=60,
+            )
+            if resp.status_code == 401:
+                self.authenticate()
+                resp = self.session.get(
+                    f"{self.base}/project/table-data",
+                    params={"projectId": project_id, "elementType": "pole", "page": page, "pageSize": page_size},
+                    timeout=60,
+                )
+            if resp.status_code != 200:
+                raise RuntimeError(f"Failed to fetch poles ({resp.status_code}): {resp.text[:200]}")
+            data = resp.json()
+            rows = data.get("rows", [])
+            all_rows.extend(rows)
+            total = data.get("total", len(rows))
+            if len(all_rows) >= total or not rows:
+                break
+            page += 1
+        return all_rows
+
     def get_ptbs(self, project_id: str) -> List[Dict[str, Any]]:
         """List PTB elements for a project (adapter GET /v5/ptb)."""
         self._ensure_auth()
@@ -1831,14 +1860,7 @@ def list_poles(
     try:
         client = _get_ugp_client()
         session_id = _load_project_for_site(client, project_name)
-        raw_poles = client.session.get(
-            f"{client.base}/project/table-data",
-            params={"projectId": session_id, "elementType": "pole", "page": 1, "pageSize": 2000},
-            timeout=60,
-        )
-        if raw_poles.status_code != 200:
-            raise RuntimeError(f"pole fetch HTTP {raw_poles.status_code}")
-        poles = raw_poles.json().get("rows", [])
+        poles = client.get_poles(session_id)
         ptbs = client.get_ptbs(session_id)
         lines = client.get_lines(session_id)
     except HTTPException:
@@ -1945,6 +1967,18 @@ def assign_ptb(
 
     # 1. Find or create the PTB on this pole. The PTB contains the gateway.
     #    PTB.serial_number holds the gateway Thing (1 gateway per PTB/pole).
+    #    First verify the pole exists in the model so a bad/unknown pole gives a
+    #    clear 400 instead of an opaque downstream 500.
+    pole_exists = any(_pole_id_of(c) == pole_id for c in client.get_poles(session_id))
+    if not pole_exists:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Pole '{pole_id}' is not in the uGridPLAN {site_code} model. "
+                f"Pick an existing pole from the map, or add the pole to uGridPLAN first."
+            ),
+        )
+
     ptb = client.get_ptb_for_pole(session_id, pole_id)
     ptb_created = False
     if ptb is None:
@@ -2007,13 +2041,8 @@ def assign_ptb(
     if not survey_id:
         # find pole GPS, then nearest connection
         try:
-            poles_resp = client.session.get(
-                f"{client.base}/project/table-data",
-                params={"projectId": session_id, "elementType": "pole", "page": 1, "pageSize": 2000},
-                timeout=60,
-            )
             pole_gps = None
-            for c in poles_resp.json().get("rows", []):
+            for c in client.get_poles(session_id):
                 if _pole_id_of(c) == pole_id:
                     pole_gps = (c.get("GPS_Y") or c.get("gps_y"), c.get("GPS_X") or c.get("gps_x"))
                     break
