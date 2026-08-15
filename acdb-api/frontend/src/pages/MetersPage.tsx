@@ -246,6 +246,10 @@ export default function MetersPage() {
     setEditRole(String(row['role'] || '').toLowerCase() === 'primary' ? 'primary' : 'secondary');
     setEditNote('');
     setEditError('');
+    // survey_id is the uGP *connection* (customer/billing link). The pole (PTB
+    // location) is a SEPARATE physical pick via the map. Do NOT prefill the pole
+    // from survey_id — a connection id is not a pole, and pre-filling it makes
+    // assign-ptb fail with "pole not in the uGP model". Pole starts empty.
     setEditSurveyId(String(row['survey_id'] || ''));
     setEditPoleId('');
     setEditPoleHasPtb(false);
@@ -580,9 +584,21 @@ export default function MetersPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">{t('meters:changeNote')}</label>
                 <textarea value={editNote} onChange={e => setEditNote(e.target.value)} rows={2} maxLength={500} placeholder={t('meters:changeNotePlaceholder')} className="w-full px-3 py-2 border rounded-lg text-sm resize-none" />
               </div>
+              {editAccount && editSurveyId && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Customer connection (uGridPLAN)</label>
+                  <div className="flex items-center gap-2 px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-lg">
+                    <svg className="w-4 h-4 text-gray-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                    </svg>
+                    <span className="flex-1 text-sm font-medium text-gray-700">{editSurveyId}</span>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">The billing link (which customer). Not the physical location — that's the pole below.</p>
+                </div>
+              )}
               {editAccount && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Pole / PTB (uGridPLAN)</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Pole / PTB (physical location)</label>
                   {editPoleId ? (
                     <div className="flex items-center gap-2 px-3 py-2.5 bg-blue-50 border border-blue-200 rounded-lg">
                       <svg className="w-4 h-4 text-blue-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
