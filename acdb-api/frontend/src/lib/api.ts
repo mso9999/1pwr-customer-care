@@ -1200,7 +1200,7 @@ export async function listUGPPoles(site: string) {
 export interface AssignPtbRequest {
   site: string;
   account_number: string;
-  pole_id: string;
+  pole_id?: string;  // optional: derived from the connection's service drop if omitted
   meter_serial?: string;
   gateway_thing_name?: string;  // auto-derived from telemetry if omitted
   survey_id?: string;
@@ -1226,6 +1226,13 @@ export async function assignPtb(data: AssignPtbRequest): Promise<AssignPtbResult
     method: 'POST',
     body: JSON.stringify(data),
   });
+}
+
+/** Derive the physical pole a customer connection drops from (node1 of the drop line). */
+export async function getPoleForConnection(site: string, surveyId: string): Promise<{ pole_id: string | null }> {
+  return request<{ pole_id: string | null }>(
+    `/sync/pole-for-connection?site=${encodeURIComponent(site)}&survey_id=${encodeURIComponent(surveyId)}`
+  );
 }
 
 export interface UpdateSurveyIdResult {

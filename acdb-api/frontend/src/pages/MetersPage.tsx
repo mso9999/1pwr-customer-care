@@ -8,8 +8,8 @@ import {
   getMeterHistory,
   setMeterSafetyOverride,
   updateMeterAssignment,
-  updateSurveyId,
   assignPtb,
+  getPoleForConnection,
   getProvisionedMeters,
   downloadMeterValidationKit,
   type PaginatedResponse,
@@ -246,18 +246,28 @@ export default function MetersPage() {
     setEditRole(String(row['role'] || '').toLowerCase() === 'primary' ? 'primary' : 'secondary');
     setEditNote('');
     setEditError('');
-    // survey_id is the uGP *connection* (customer/billing link). The pole (PTB
-    // location) is a SEPARATE physical pick via the map. Do NOT prefill the pole
-    // from survey_id — a connection id is not a pole, and pre-filling it makes
-    // assign-ptb fail with "pole not in the uGP model". Pole starts empty.
-    setEditSurveyId(String(row['survey_id'] || ''));
+    // survey_id is the uGP *connection* (customer/billing link). The physical
+    // pole is derived from that connection's service drop (never a free pick,
+    // and never the connection id itself). Derived below via getPoleForConnection.
+    const surveyId = String(row['survey_id'] || '');
+    setEditSurveyId(surveyId);
     setEditPoleId('');
     setEditPoleHasPtb(false);
     setEditGateway('');
     setModal('edit');
 
-    // Load this site's provisioned gateways (MAK-GW-*) for the gateway override dropdown.
     const site = String(row['account_number'] || '').match(/[A-Za-z]{2,4}$/)?.[0]?.toUpperCase() || '';
+
+    // Derive the physical pole from the customer connection's service drop
+    // (node1=pole, node2=connection). A customer has exactly one pole, so the
+    // unit's pole must come from its connection — never a free pick.
+    if (site && surveyId) {
+      getPoleForConnection(site, surveyId)
+        .then((r) => { if (r.pole_id) setEditPoleId(r.pole_id); })
+        .catch(() => { /* leave empty; operator can pick on the map */ });
+    }
+
+    // Load this site's provisioned gateways (MAK-GW-*) for the gateway override dropdown.
     if (site) {
       getProvisionedMeters(site)
         .then((r) => {
@@ -283,26 +293,18 @@ export default function MetersPage() {
         role: editRole,
         note: editNote.trim() || undefined,
       });
-      // If a pole was picked, link the unit: find-or-create PTB on the pole,
-      // assign the meter serial to a channel, and bind the account's connection.
-      if (editPoleId && editAccount) {
+      // Link the unit to its physical pole/PTB whenever there's a pole OR a
+      // connection. The backend derives the pole from the connection's service
+      // drop when pole_id is omitted, so the pole always matches the customer.
+      if ((editPoleId || editSurveyId) && editAccount) {
         await assignPtb({
           site: editAccount.match(/[A-Za-z]{2,4}$/)?.[0]?.toUpperCase() || '',
           account_number: editAccount,
-          pole_id: editPoleId,
+          pole_id: editPoleId || undefined,
           meter_serial: editMeterId,
           gateway_thing_name: editGateway || undefined,
           survey_id: editSurveyId || undefined,
         });
-      } else if (editSurveyId && editAccount) {
-        // Fallback: only a connection was set (no pole) — update survey_id binding.
-        const currentSurveyId = String(data?.rows?.find(r => String(r['meter_id']) === editMeterId)?.['survey_id'] || '');
-        if (editSurveyId !== currentSurveyId) {
-          await updateSurveyId({
-            account_number: editAccount,
-            survey_id: editSurveyId,
-          });
-        }
       }
       setModal(null);
       fetchData();
@@ -606,6 +608,7 @@ export default function MetersPage() {
                       </svg>
                       <span className="flex-1 text-sm font-medium text-blue-800">
                         {editPoleId} {editPoleHasPtb ? '· has PTB' : '· PTB will be created'}
+                        {editSurveyId ? ' · from connection' : ''}
                       </span>
                       <button type="button" onClick={() => { setEditPoleId(''); setEditPoleHasPtb(false); }} className="text-xs text-blue-600 hover:text-blue-800 underline">Remove</button>
                     </div>

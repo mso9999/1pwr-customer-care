@@ -1806,6 +1806,37 @@ def _pole_id_of(c: Dict[str, Any]) -> str:
     return str(c.get("ID") or c.get("id") or c.get("Pole_ID") or c.get("pole_id") or "").strip()
 
 
+def _conn_id_of(c: Dict[str, Any]) -> str:
+    return str(c.get("Survey_ID") or c.get("survey_id") or c.get("Name", "") or "").strip()
+
+
+def _pole_for_connection(lines: List[Dict[str, Any]], survey_id: str) -> Optional[str]:
+    """Derive the pole a customer connection is physically dropped from.
+
+    In uGridPLAN a connection is reached by a service drop / AIRDAC line where
+    Node 1 = pole and Node 2 = connection (Survey_ID). A customer has exactly one
+    such pole, so the PTB for a meter must go on the pole its connection drops
+    from — never a free/arbitrary pole pick. Prefer the drop-type line (Airdac /
+    LV / Drop) over an MV backbone when several lines touch the connection.
+    """
+    sid = (survey_id or "").strip()
+    if not sid:
+        return None
+    DROP = ("airdac", "drop", "lv", "service")
+    best: Optional[str] = None
+    for ln in lines:
+        n1 = str(ln.get("Node 1") or ln.get("node1") or "").strip()
+        n2 = str(ln.get("Node 2") or ln.get("node2") or "").strip()
+        if n2 != sid or not n1:
+            continue
+        ltype = str(ln.get("Type") or ln.get("type") or "").lower()
+        if any(t in ltype for t in DROP):
+            return n1  # drop line — definitive
+        if best is None:
+            best = n1  # backbone as fallback
+    return best
+
+
 def _gateway_for_meter_serial(meter_serial: str) -> str:
     """Resolve the gateway Thing that reads a meter serial.
 
@@ -1908,13 +1939,44 @@ def list_poles(
     return {"site": site.upper(), "count": len(out), "poles": out}
 
 
+@router.get("/pole-for-connection")
+def pole_for_connection(
+    site: str = Query(...),
+    survey_id: str = Query(...),
+    user: CurrentUser = Depends(require_employee),
+):
+    """Derive the pole a customer connection is physically dropped from.
+
+    The pole is read from the connection's service drop line (node1=pole,
+    node2=connection). Used by the meter edit modal to show the unit's physical
+    pole — derived from its connection, so it always matches the customer.
+    """
+    site_code = site.strip().upper()
+    sid_in = survey_id.strip()
+    with get_auth_db() as conn:
+        row = conn.execute(
+            "SELECT project_id FROM cc_site_projects WHERE site_code = ?",
+            (site_code,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"No uGridPLAN project for site '{site_code}'.")
+    try:
+        client = _get_ugp_client()
+        session_id = _load_project_for_site(client, row["project_id"])
+        lines = client.get_lines(session_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"uGridPLAN fetch failed: {e}")
+    pole = _pole_for_connection(lines, sid_in)
+    return {"site": site_code, "survey_id": sid_in, "pole_id": pole}
+
+
 class AssignPtbRequest(BaseModel):
     site: str = Field(..., description="Site code (e.g. MAK)")
     account_number: str = Field(..., min_length=1, description="Customer account this meter serves")
-    pole_id: str = Field(..., min_length=1, description="Pole the PTB (and gateway) is mounted on")
+    pole_id: Optional[str] = Field(default=None, description="Pole the PTB is mounted on. If omitted, derived from the connection's service drop (node1=pole, node2=connection) so it always matches the customer.")
     meter_serial: str = Field(..., min_length=1, description="Customer meter serial")
     gateway_thing_name: Optional[str] = Field(default=None, description="Gateway (e.g. MAK-GW-0007) that reads this meter; auto-derived from telemetry/provisioning if omitted")
-    survey_id: Optional[str] = Field(default=None, description="Customer connection to bind (optional; else nearest to pole)")
+    survey_id: Optional[str] = Field(default=None, description="Customer connection; also used to derive the pole when pole_id is omitted")
     ptb_serial: Optional[str] = Field(default=None, description="PTB box serial (optional, on create)")
 
 
@@ -1942,9 +2004,9 @@ def assign_ptb(
 
     site_code = req.site.strip().upper()
     account_number = req.account_number.strip().upper()
-    pole_id = req.pole_id.strip()
     meter_serial = (req.meter_serial or "").strip()
     gateway_thing = (req.gateway_thing_name or "").strip()
+    survey_id_in = (req.survey_id or "").strip() or None
 
     # Resolve the gateway that serves this meter (PTB contains the gateway).
     if not gateway_thing and meter_serial:
@@ -1964,6 +2026,19 @@ def assign_ptb(
         session_id = _load_project_for_site(client, project_name)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"uGridPLAN unreachable: {e}")
+
+    # Resolve the pole. A customer has exactly one pole (via its connection's
+    # service drop). If the operator didn't pick one, derive it from the
+    # connection so the pole ALWAYS matches the customer — never a free pick.
+    pole_id = (req.pole_id or "").strip()
+    if not pole_id and survey_id_in:
+        pole_id = _pole_for_connection(client.get_lines(session_id), survey_id_in) or ""
+    if not pole_id:
+        raise HTTPException(
+            status_code=400,
+            detail="No pole given and none could be derived from the connection's service drop. "
+                   "Pick the pole on the map.",
+        )
 
     # 1. Find or create the PTB on this pole. The PTB contains the gateway.
     #    PTB.serial_number holds the gateway Thing (1 gateway per PTB/pole).
@@ -2037,7 +2112,9 @@ def assign_ptb(
     # 3. Bind the customer connection to the account + set its Pole_ID.
     #    Prefer an explicit survey_id; else nearest connection to the pole's GPS.
     from customer_api import get_connection as get_pg_connection
-    survey_id = (req.survey_id or "").strip() or None
+    # The connection is the one we derived the pole from (or was given). Only
+    # fall back to nearest-to-pole when no connection was provided at all.
+    survey_id = survey_id_in
     if not survey_id:
         # find pole GPS, then nearest connection
         try:
