@@ -18,6 +18,7 @@ import {
 } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import CountryPill from '../components/CountryPill';
+import FleetMap from '../components/FleetMap';
 import { UGPConnectionPicker } from './CommissionCustomerPage';
 import UGPPolePicker from '../components/UGPPolePicker';
 
@@ -63,6 +64,7 @@ export default function MetersPage() {
   const [editGateway, setEditGateway] = useState('');
   const [siteGateways, setSiteGateways] = useState<string[]>([]);
   const [ptbResult, setPtbResult] = useState<AssignPtbResult | null>(null);
+  const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
   const [showUGPPicker, setShowUGPPicker] = useState(false);
   const [showPolePicker, setShowPolePicker] = useState(false);
 
@@ -382,6 +384,14 @@ export default function MetersPage() {
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
             Addressing kit
+          </button>
+          <button
+            onClick={() => setViewMode(viewMode === 'list' ? 'map' : 'list')}
+            className="px-4 py-2.5 bg-gray-100 text-gray-700 border border-gray-300 rounded-xl text-sm font-medium hover:bg-gray-200 transition flex items-center gap-1.5"
+            title="Map of installed meters vs online/reporting"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" /></svg>
+            {viewMode === 'list' ? 'Map' : 'List'}
           </button>
           {canWriteCustomers && (
             <Link to="/assign-meter" className="px-4 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-medium hover:bg-blue-700 active:bg-blue-800 transition flex items-center gap-1.5">
@@ -862,7 +872,9 @@ export default function MetersPage() {
         </div>
       )}
 
-      {loading || busy ? (
+      {viewMode === 'map' ? (
+        <FleetMap site={filterSite || undefined} />
+      ) : loading || busy ? (
         <div className="text-center py-8 text-gray-400">{busy ? t('meters:processing') : t('meters:loading')}</div>
       ) : !data || data.rows.length === 0 ? (
         <div className="text-center py-8 text-gray-400">{t('meters:noMeters')}</div>

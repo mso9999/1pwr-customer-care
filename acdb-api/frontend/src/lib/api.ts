@@ -1255,6 +1255,34 @@ export async function getPoleForConnection(site: string, surveyId: string): Prom
   );
 }
 
+// --- Fleet map ---
+export interface FleetMapMeter {
+  meter_id: string;
+  account_number?: string;
+  village?: string;
+  lat: number;
+  lng: number;
+  status?: string;
+  platform?: string;
+  thing_name?: string;
+  last_seen?: string;
+  online: boolean;
+}
+
+export interface FleetMapResult {
+  site?: string;
+  total: number;
+  online: number;
+  offline: number;
+  no_gps: number;
+  meters: FleetMapMeter[];
+}
+
+export async function getFleetMap(site?: string): Promise<FleetMapResult> {
+  const qs = site ? `?site=${encodeURIComponent(site)}` : '';
+  return request<FleetMapResult>(`/provisioning/fleet-map${qs}`);
+}
+
 export interface UpdateSurveyIdResult {
   status: string;
   account_number: string;

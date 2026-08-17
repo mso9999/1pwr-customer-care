@@ -2442,6 +2442,120 @@ def list_provisioned_meters(
     return {"count": len(rows), "meters": rows}
 
 
+@router.get("/fleet-map")
+def fleet_map(
+    site: Optional[str] = None,
+    _user: CurrentUser = Depends(require_employee),
+):
+    """Fleet map data: meters with GPS + online/reporting status.
+
+    Joins 1PDB `meters` (location, account, status) with DynamoDB
+    `meter_last_seen` (telemetry recency + Thing). Status per meter:
+      - online:    reported telemetry within the last 24h
+      - offline:   installed (account + GPS) but no recent telemetry
+      - no-gps:    no real coordinates (shown in count only, not on the map)
+    Employee-readable (map is a read-only view).
+    """
+    from datetime import datetime, timezone, timedelta
+    from customer_api import get_connection
+
+    site_code = site.strip().upper() if site else None
+
+    # 1PDB meters with location
+    with get_connection() as conn:
+        cur = conn.cursor()
+        sql = """
+            SELECT meter_id, account_number, community, village_name,
+                   latitude, longitude, status, platform
+            FROM meters
+            WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+        """
+        params: list = []
+        if site_code:
+            sql += " AND community = %s"
+            params.append(site_code)
+        cur.execute(sql, params)
+        cols = [d[0] for d in cur.description]
+        meters = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+    # DynamoDB meter_last_seen: meterId -> thingName + last_seen
+    seen = {}
+    try:
+        ddb = _client("dynamodb")
+        start = None
+        while True:
+            kw = {"TableName": "meter_last_seen",
+                  "ProjectionExpression": "meterId, thingName, last_seen"}
+            if start:
+                kw["ExclusiveStartKey"] = start
+            resp = ddb.scan(**kw)
+            for it in resp.get("Items", []):
+                def g(k):
+                    v = it.get(k, {})
+                    return list(v.values())[0] if v else None
+                mid = g("meterId")
+                if mid:
+                    seen[mid] = {"thing_name": g("thingName"), "last_seen": g("last_seen")}
+            start = resp.get("LastEvaluatedKey")
+            if not start:
+                break
+    except Exception as exc:
+        logger.warning("fleet-map meter_last_seen scan failed: %s", exc)
+
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=24)
+
+    def parse_seen(ts):
+        if not ts:
+            return None
+        for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y%m%d%H%M"):
+            try:
+                dt = datetime.strptime(str(ts), fmt)
+                return dt.replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
+        return None
+
+    out = []
+    no_gps = 0
+    for m in meters:
+        mid = str(m.get("meter_id") or "")
+        # skip the shared default/center coordinate (not a real install location)
+        try:
+            lat = float(m["latitude"]); lng = float(m["longitude"])
+        except (TypeError, ValueError):
+            no_gps += 1
+            continue
+        sn = mid.lstrip("0") or mid
+        srec = seen.get(mid) or seen.get(sn) or seen.get(mid.zfill(12))
+        last_seen = srec.get("last_seen") if srec else None
+        thing = srec.get("thing_name") if srec else None
+        seen_dt = parse_seen(last_seen)
+        online = bool(seen_dt and seen_dt >= cutoff)
+        out.append({
+            "meter_id": mid,
+            "account_number": m.get("account_number"),
+            "village": m.get("village_name"),
+            "lat": lat,
+            "lng": lng,
+            "status": m.get("status"),
+            "platform": m.get("platform"),
+            "thing_name": thing,
+            "last_seen": last_seen,
+            "online": online,
+        })
+
+    online_n = sum(1 for r in out if r["online"])
+    return {
+        "site": site_code,
+        "total": len(out),
+        "online": online_n,
+        "offline": len(out) - online_n,
+        "no_gps": no_gps,
+        "meters": out,
+    }
+
+
 @router.get("/fleet-live")
 def fleet_live(_user: CurrentUser = Depends(CC_OPERATE_GATE)):
     """Live fleet status: which units are connected and/or providing telemetry.
