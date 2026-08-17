@@ -1939,6 +1939,131 @@ def list_poles(
     return {"site": site.upper(), "count": len(out), "poles": out}
 
 
+@router.get("/ptb-backfill")
+def ptb_backfill_report(
+    site: str = Query(..., description="Site code (e.g. MAK)"),
+    format: str = Query("json", description="json | csv"),
+    user: CurrentUser = Depends(require_employee),
+):
+    """PTB-link deficit report: for each provisioned unit, which links in the
+    chain are missing.
+
+        Pole → PTB (1/pole) → Gateway (1/PTB) → Meter (N/gateway) → Customer (1/meter)
+
+    Per unit we check: gateway↔meter (meter_serial), meter↔customer
+    (account_number), customer↔connection (account.survey_id), connection↔pole
+    (connection Pole_ID or derivable from its service drop), pole↔PTB (PTB exists
+    on the pole). One-time backfill worklist — not a permanent flag.
+    """
+    import csv as _csv
+    import io as _io
+    from customer_api import get_connection as get_pg_connection
+
+    site_code = site.strip().upper()
+
+    # 1PDB: provisioned units for the site
+    with get_pg_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT mp.thing_name, mp.meter_serial, mp.account_number, mp.pcb_mac,
+                   mp.box_label, mp.status, mp.first_seen_online,
+                   a.survey_id
+            FROM meter_provisioning mp
+            LEFT JOIN accounts a ON a.account_number = mp.account_number
+            WHERE mp.site = %s AND COALESCE(mp.is_test, false) = false
+            ORDER BY mp.thing_name
+            """,
+            (site_code,),
+        )
+        cols = [d[0] for d in cur.description]
+        units = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+    # uGP: connections (survey_id -> Pole_ID), lines (connection -> pole), ptbs (pole -> ptb)
+    with get_auth_db() as conn:
+        row = conn.execute(
+            "SELECT project_id FROM cc_site_projects WHERE site_code = ?",
+            (site_code,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"No uGridPLAN project for site '{site_code}'.")
+    try:
+        client = _get_ugp_client()
+        session_id = _load_project_for_site(client, row["project_id"])
+        conns = client.get_connections(session_id)
+        lines = client.get_lines(session_id)
+        ptbs = client.get_ptbs(session_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"uGridPLAN fetch failed: {e}")
+
+    conn_pole = {}   # survey_id -> Pole_ID (explicit) 
+    for c in conns:
+        sid = _conn_id_of(c)
+        if sid:
+            conn_pole[sid] = str(c.get("Pole_ID") or c.get("pole_id") or "").strip() or None
+    ptb_poles = set()
+    for p in ptbs:
+        pid = str(p.get("poleId") or p.get("pole_id") or "")
+        if pid:
+            ptb_poles.add(pid)
+
+    rows = []
+    for u in units:
+        thing = u.get("thing_name")
+        meter_serial = (u.get("meter_serial") or "").strip()
+        account = (u.get("account_number") or "").strip()
+        survey_id = (u.get("survey_id") or "").strip()
+        # connection -> pole: explicit Pole_ID, else derive from the drop line
+        pole_id = None
+        if survey_id:
+            pole_id = conn_pole.get(survey_id) or _pole_for_connection(lines, survey_id)
+        has_ptb = bool(pole_id and pole_id in ptb_poles)
+
+        missing = []
+        if not meter_serial:
+            missing.append("meter")            # gateway↔meter
+        if not account:
+            missing.append("customer")         # meter↔customer
+        if account and not survey_id:
+            missing.append("connection")       # customer↔connection
+        if survey_id and not pole_id:
+            missing.append("pole")             # connection↔pole
+        if pole_id and not has_ptb:
+            missing.append("ptb")              # pole↔PTB
+
+        rows.append({
+            "thing_name": thing,
+            "meter_serial": meter_serial or "",
+            "account_number": account or "",
+            "survey_id": survey_id or "",
+            "pole_id": pole_id or "",
+            "ptb": "yes" if has_ptb else "",
+            "box_label": (u.get("box_label") or ""),
+            "online": "yes" if u.get("first_seen_online") else "",
+            "missing": ",".join(missing) if missing else "none",
+        })
+
+    complete = sum(1 for r in rows if r["missing"] == "none")
+    if format.lower() == "csv":
+        buf = _io.StringIO()
+        w = _csv.DictWriter(buf, fieldnames=["thing_name","meter_serial","account_number","survey_id","pole_id","ptb","box_label","online","missing"])
+        w.writeheader()
+        w.writerows(rows)
+        from fastapi.responses import Response
+        return Response(
+            content=buf.getvalue(),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=ptb-backfill-{site_code}.csv"},
+        )
+    return {
+        "site": site_code,
+        "total_units": len(rows),
+        "fully_linked": complete,
+        "needing_backfill": len(rows) - complete,
+        "units": rows,
+    }
+
+
 @router.get("/pole-for-connection")
 def pole_for_connection(
     site: str = Query(...),
