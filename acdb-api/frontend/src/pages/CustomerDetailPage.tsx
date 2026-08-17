@@ -10,6 +10,7 @@ import {
   type InferredCohortStatus, type CohortStatus,
   uploadPaymentProof, listPaymentProofs, paymentProofDownloadUrl,
   type InferredPaymentStatus, type PaymentProof,
+  fetchRegistrationSignatureUrl,
 } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useCountry } from '../contexts/CountryContext';
@@ -376,6 +377,18 @@ export default function CustomerDetailPage() {
     listPaymentProofs(cid).then(({ proofs: p }) => setProofs(p)).catch(() => {});
   }, [pgId]);
 
+  // Registration signature image (object URL), when one was captured at registration
+  const [signatureUrl, setSignatureUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!pgId || isNaN(Number(pgId))) return;
+    if (!record || !record['registration_signature_path']) { setSignatureUrl(null); return; }
+    let revoked: string | null = null;
+    fetchRegistrationSignatureUrl(pgId)
+      .then(url => { revoked = url; setSignatureUrl(url); })
+      .catch(() => setSignatureUrl(null));
+    return () => { if (revoked) URL.revokeObjectURL(revoked); };
+  }, [pgId, record]);
+
   const refreshPaymentStatus = () => {
     if (!pgId || isNaN(Number(pgId))) return;
     const cid = Number(pgId);
@@ -509,7 +522,8 @@ export default function CustomerDetailPage() {
   if (error && !record) return <div className="text-center py-8 text-red-500">{error}</div>;
   if (!record) return <div className="text-center py-8 text-gray-400">{t('common:loading')}</div>;
 
-  const fields = Object.keys(record);
+  // Signature metadata columns render as a dedicated card below, not as raw text rows.
+  const fields = Object.keys(record).filter(f => !f.startsWith('registration_signature_'));
   const displayTitle = accountNumber || urlParam || '';
   const siteCode = String(
     record['community']
@@ -658,6 +672,32 @@ export default function CustomerDetailPage() {
           ))}
         </div>
       </div>
+
+      {/* Registration signature (captured at registration, MGF018 parity) */}
+      {!!record['registration_signature_path'] && (
+        <div className="bg-white rounded-lg shadow p-4 sm:p-5">
+          <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">
+            {t('customerDetail:registrationSignature')}
+          </h2>
+          {signatureUrl ? (
+            <img
+              src={signatureUrl}
+              alt={t('customerDetail:registrationSignature')}
+              className="max-w-full sm:max-w-md rounded-lg border border-gray-200 bg-white"
+            />
+          ) : (
+            <p className="text-sm text-gray-400">{t('common:loading')}...</p>
+          )}
+          {!!record['registration_signature_captured_at'] && (
+            <p className="text-xs text-gray-400 mt-2">
+              {t('customerDetail:signatureCapturedAt', {
+                date: String(record['registration_signature_captured_at']).slice(0, 10),
+                by: String(record['registration_signature_captured_by'] || '—'),
+              })}
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Payment Status section */}
       {pgId && (

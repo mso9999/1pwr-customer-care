@@ -8,6 +8,8 @@
     "locationDesc": "Site, district et adresse",
     "service": "Détails du service",
     "serviceDesc": "Type de client et date de raccordement",
+    "signature": "Signature",
+    "signatureDesc": "Signature facultative du client, comme sur le registre papier",
     "review": "Vérification et soumission",
     "reviewDesc": "Confirmez que toutes les informations sont correctes"
   },
@@ -36,7 +38,12 @@
     "captureLocation": "Capturer la position actuelle",
     "gpsNotSupported": "Géolocalisation non prise en charge",
     "customerType": "Type de client",
+    "numberOfRooms": "Nombre de pièces",
     "dateConnected": "Date de raccordement",
+    "customerSignature": "Signature du client (facultative)",
+    "signatureHelper": "Le client signe avec le doigt ou un stylet, ou téléversez un JPEG de la signature du registre.",
+    "signatureCapturedAlt": "Signature du client capturée",
+    "replaceSignature": "Remplacer la signature",
     "select": "Sélectionner…"
   },
   "ugp": {

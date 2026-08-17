@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { listSites, listUGPConnections, registerCustomerRecord, type CustomerRegistrationResult, type UGPConnection } from '../lib/api';
 import { useCountry } from '../contexts/CountryContext';
+import SignatureCapture from '../components/SignatureCapture';
 
 // ---------------------------------------------------------------------------
 // Wizard step definitions
@@ -11,7 +12,7 @@ import { useCountry } from '../contexts/CountryContext';
 interface FieldDef {
   key: string;
   label: string;
-  type?: 'text' | 'tel' | 'date' | 'select' | 'gps' | 'ugp_picker' | 'checkbox';
+  type?: 'text' | 'tel' | 'date' | 'number' | 'select' | 'gps' | 'ugp_picker' | 'checkbox' | 'signature';
   placeholder?: string;
   required?: boolean;
   options?: string[];
@@ -52,12 +53,20 @@ const steps: { title: string; description: string; fields: FieldDef[] }[] = [
     description: 'Connection and metering information',
     fields: [
       { key: 'customer_type', label: 'Customer Type', type: 'select', options: CUSTOMER_TYPES, required: true },
+      { key: 'number_of_rooms', label: 'Number of Rooms', type: 'number', placeholder: 'e.g. 3', half: true },
       { key: 'date_service_connected', label: 'Date Connected', type: 'date' },
       {
         key: 'acquires_1pwr_readyboard',
         label: 'Customer will receive a 1PWR readyboard (readyboard fee applies)',
         type: 'checkbox',
       },
+    ],
+  },
+  {
+    title: 'Signature',
+    description: 'Optional customer signature, as on the paper ledger',
+    fields: [
+      { key: 'registration_signature', label: 'Customer Signature (optional)', type: 'signature' },
     ],
   },
 ];
@@ -380,6 +389,7 @@ export default function NewCustomerWizard() {
   const [sites, setSites] = useState<string[]>([]);
   const [showUGPPicker, setShowUGPPicker] = useState(false);
   const [ugpLinked, setUgpLinked] = useState('');
+  const [signatureB64, setSignatureB64] = useState('');
   const [createdCustomer, setCreatedCustomer] = useState<CustomerRegistrationResult | null>(null);
 
   const fieldLabelKey: Record<string, string> = {
@@ -397,7 +407,9 @@ export default function NewCustomerWizard() {
     street_address: 'newCustomer:fields.village',
     GPS: 'newCustomer:fields.gpsCoordinates',
     customer_type: 'newCustomer:fields.customerType',
+    number_of_rooms: 'newCustomer:fields.numberOfRooms',
     date_service_connected: 'newCustomer:fields.dateConnected',
+    registration_signature: 'newCustomer:fields.customerSignature',
   };
 
   const fieldPlaceholderKey: Record<string, string> = {
@@ -407,8 +419,8 @@ export default function NewCustomerWizard() {
     account_number: 'newCustomer:fields.existingAccountPlaceholder',
   };
 
-  const stepTitleKeys = ['newCustomer:steps.personal', 'newCustomer:steps.location', 'newCustomer:steps.service'];
-  const stepDescKeys = ['newCustomer:steps.personalDesc', 'newCustomer:steps.locationDesc', 'newCustomer:steps.serviceDesc'];
+  const stepTitleKeys = ['newCustomer:steps.personal', 'newCustomer:steps.location', 'newCustomer:steps.service', 'newCustomer:steps.signature'];
+  const stepDescKeys = ['newCustomer:steps.personalDesc', 'newCustomer:steps.locationDesc', 'newCustomer:steps.serviceDesc', 'newCustomer:steps.signatureDesc'];
 
   useEffect(() => {
     listSites()
@@ -427,6 +439,7 @@ export default function NewCustomerWizard() {
     setError('');
     setShowUGPPicker(false);
     setUgpLinked('');
+    setSignatureB64('');
     setCreatedCustomer(null);
   };
 
@@ -470,6 +483,8 @@ export default function NewCustomerWizard() {
     setSaving(true);
     setError('');
     try {
+      const roomsRaw = form['number_of_rooms']?.trim() || '';
+      const roomsParsed = roomsRaw ? parseInt(roomsRaw, 10) : NaN;
       const result = await registerCustomerRecord({
         first_name: form['first_name']?.trim() || '',
         middle_name: form['middle_name']?.trim() || undefined,
@@ -488,6 +503,8 @@ export default function NewCustomerWizard() {
         gps_lon: form['gps_lon']?.trim() || undefined,
         date_service_connected: form['date_service_connected']?.trim() || undefined,
         acquires_1pwr_readyboard: form['acquires_1pwr_readyboard'] === '1',
+        number_of_rooms: Number.isFinite(roomsParsed) ? roomsParsed : undefined,
+        registration_signature_b64: signatureB64 || undefined,
       });
       setCreatedCustomer(result);
     } catch (e: any) {
@@ -573,6 +590,37 @@ export default function NewCustomerWizard() {
       );
     }
 
+    if (f.type === 'signature') {
+      return (
+        <div key={f.key} className="col-span-2">
+          <label className="block text-sm font-medium text-gray-700 mb-2">{label}</label>
+          {signatureB64 ? (
+            <div className="space-y-3">
+              <div className="border border-gray-200 rounded-xl p-2 bg-white">
+                <img
+                  src={`data:image/jpeg;base64,${signatureB64}`}
+                  alt={t('newCustomer:fields.signatureCapturedAlt')}
+                  className="w-full rounded-lg"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => setSignatureB64('')}
+                className="w-full py-3 bg-gray-100 text-gray-600 rounded-xl font-medium text-sm hover:bg-gray-200 active:bg-gray-300 transition"
+              >
+                {t('newCustomer:fields.replaceSignature')}
+              </button>
+            </div>
+          ) : (
+            <SignatureCapture
+              onCapture={setSignatureB64}
+              helperText={t('newCustomer:fields.signatureHelper')}
+            />
+          )}
+        </div>
+      );
+    }
+
     if (f.type === 'select') {
       const opts = f.key === 'community' ? sites : (f.options || []);
       return (
@@ -599,6 +647,7 @@ export default function NewCustomerWizard() {
         </label>
         <input
           type={f.type || 'text'}
+          {...(f.type === 'number' ? { min: 0, step: 1, inputMode: 'numeric' as const } : {})}
           value={form[f.key] || ''}
           onChange={e => set(f.key, e.target.value)}
           placeholder={placeholder}
@@ -616,6 +665,7 @@ export default function NewCustomerWizard() {
     const filledFields = steps.flatMap(s => s.fields).filter(f => {
       if (f.type === 'ugp_picker') return false;
       if (f.type === 'gps') return form['gps_lat'] || form['gps_lon'];
+      if (f.type === 'signature') return !!signatureB64;
       return form[f.key]?.trim();
     });
     return (
@@ -637,9 +687,17 @@ export default function NewCustomerWizard() {
             return (
               <div key={f.key} className="flex justify-between items-start px-4 py-3">
                 <span className="text-sm text-gray-500 shrink-0 mr-4">{label}</span>
-                <span className="text-sm font-medium text-gray-800 text-right">
-                  {f.type === 'gps' ? `${form['gps_lat'] || '--'}, ${form['gps_lon'] || '--'}` : form[f.key]}
-                </span>
+                {f.type === 'signature' ? (
+                  <img
+                    src={`data:image/jpeg;base64,${signatureB64}`}
+                    alt={t('newCustomer:fields.signatureCapturedAlt')}
+                    className="h-12 rounded border border-gray-200"
+                  />
+                ) : (
+                  <span className="text-sm font-medium text-gray-800 text-right">
+                    {f.type === 'gps' ? `${form['gps_lat'] || '--'}, ${form['gps_lon'] || '--'}` : form[f.key]}
+                  </span>
+                )}
               </div>
             );
           })}

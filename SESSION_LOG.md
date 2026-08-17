@@ -7945,3 +7945,42 @@ Root cause: **Dual registration without synchronization**
 - `systemctl list-timers` confirms `cc-sm-credit-mirror.timer` and `cc-ls-balance-audit.timer` scheduled ✓
 - Disk: 61% used, 47 GB free ✓
 - IDE lints on touched files reported no new diagnostics.
+
+## Session 2026-08-17 [202608171252] (MGF018 Paper Ledger vs CC Registration — Duplication Analysis)
+
+### What Was Done
+- Compared the **MGF018 Customer Registration Ledger** (paper form, current version V04 per footer on field photos) against CC's registration capture (`registration.py` + `NewCustomerWizard.tsx`).
+- The controlled docx files under `1PWR PM TEAM/Customer Onboarding Project/Document Controlled Customer Onboarding Docs/` are all **0-byte Dropbox online-only placeholders** (not hydrated locally). Reconstructed the form's columns from actual committee ledger photos in `1PWR/1PWR OM TEAM/LEDGERS/LEDGS/` (clearest: `ledgers/KET1.jpg`, `ledgers/WhatsApp Image 2025-10-21...jpg` showing footer "Form: MGF018V04").
+- **Ledger columns (V04)**: Date | Names | Gender | Plot number | ID Number | Contact(s) | Number of rooms | Readyboard (Y/N) | Signature.
+- **Mapping**: Names→first/middle/last_name ✅, Gender→gender ✅, Plot number→plot_number ✅, ID→national_id ✅, Contacts→phone/cell_phone_1(+2) ✅, Readyboard→acquires_1pwr_readyboard ✅, Date→auto `created_at` (⚠️ transcription date, not village signing date).
+- **Unique to paper, NOT in CC**: (1) **Number of rooms** — zero matches anywhere in repo schema/code; (2) **customer Signature at registration** — CC signature capture exists only at commissioning/contract (`contract_gen.py`, commission flow), not in `NewCustomerWizard`.
+
+### Key Decisions / Findings
+- Verdict delivered: mostly duplication → CC-primary is safe IF ops decides (a) whether number-of-rooms matters (add column+wizard field, or drop from form V05) and (b) whether the registration-time signature has standalone legal/audit value given the later contract signature + MGF003 consent form.
+- CC also captures MORE than paper: GPS, district, street address, customer_type, email, date_service_connected.
+
+### What Next Session Should Know
+- If asked to close the gaps: add `number_of_rooms` (small migration + wizard field) and/or signature pad to `NewCustomerWizard.tsx`; `MGF018` docx files need Dropbox hydration ("Make available offline") to read the controlled master.
+
+### Protocol Feedback
+- Orientation docs sufficient. Dropbox Smart Sync placeholders (0-byte files) are a recurring obstacle when reading PM-team controlled documents — worth noting that field photos under `1PWR OM TEAM/LEDGERS` are the de-facto readable source for the paper form.
+
+## Session 2026-08-17 [202608171252b] (MGF018 Parity: number_of_rooms + Registration Signature)
+
+### What Was Done
+- Implemented both MGF018 paper-ledger gaps identified earlier today, both OPTIONAL at registration:
+  - **`number_of_rooms`**: `customers` column (migration `063_registration_rooms_signature.sql`), accepted in `POST /api/customers/register` and Excel bulk import (`number_of_rooms` column), new optional field in the New Customer wizard (Service Details step). Shows automatically on the generic customer detail grid.
+  - **Registration signature (draw-with-finger)**: new 4th wizard step reusing the existing `SignatureCapture` component (canvas draw + JPEG upload fallback). Backend decodes/validates (JPEG magic, ≤5 MiB), stores file at `acdb-api/contracts/<SITE>/registration/registration_signature_<ACCT>_<ts>.jpg` with sha256 + captured_by/at metadata columns on `customers` (mirrors advances contract conventions). Authenticated image endpoint `GET /api/customers/{id}/registration-signature` (path-traversal guarded); customer detail page renders a "Registration Signature" card (signature meta columns filtered out of the generic field grid).
+- i18n en/fr for `newCustomer` + `customerDetail`; What's New folio entry `registration-rooms-signature` (2026-08-17).
+
+### Key Decisions
+- Signature stored as host-side file (not DB blob) per advances/contract convention; DB holds path/filename/sha256/captured_by/at.
+- Invalid signature payload fails the whole registration (400) — fail-fast, no silent drop.
+- Bulk import accepts `number_of_rooms` so historical ledger transcription can carry it; signatures remain single-registration only.
+
+### Verification
+- `python3 -m py_compile registration.py` OK; `npx tsc -b --noEmit` clean; edited i18n JSON files parse.
+
+### What Next Session Should Know
+- NOT yet committed/deployed. Deploy = push to `main` (applies migration 063 via CI). After deploy, verify `GET /api/customers/{id}/registration-signature` on a test registration.
+- `contracts/<SITE>/registration/` is created on-demand on the host; same persistence story as generated contracts.

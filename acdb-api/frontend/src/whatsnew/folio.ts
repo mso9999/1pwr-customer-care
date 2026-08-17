@@ -37,6 +37,22 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW_FOLIO: WhatsNewEntry[] = [
   {
+    id: 'registration-rooms-signature',
+    date: '2026-08-17',
+    title: 'Registration now matches the paper ledger — rooms + signature',
+    blurb: 'The New Customer wizard captures everything the MGF018 paper ledger did: number of rooms and an optional draw-with-finger customer signature.',
+    pages: [
+      {
+        heading: 'Paper-ledger parity at registration',
+        body:
+          'Registering a customer in CC now captures the two items that previously existed only on the MGF018 paper ledger:\n\n' +
+          '- **Number of rooms** (optional) — a new field in the Service Details step\n' +
+          '- **Customer signature** (optional) — a new Signature step where the customer draws with their finger on the phone, or you can upload a photo of the ledger signature\n\n' +
+          'Both are stored on the customer record; the signature image appears on the customer detail page.',
+      },
+    ],
+  },
+  {
     id: 'investor-analytics',
     date: '2026-07-16',
     title: 'Investor Analytics — portfolio-grade KPIs now available',

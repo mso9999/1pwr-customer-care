@@ -1122,6 +1122,10 @@ export interface CustomerRegistrationRequest {
   date_service_connected?: string;
   meter_id?: string;
   acquires_1pwr_readyboard?: boolean;
+  /** MGF018 paper-ledger parity: room count (optional). */
+  number_of_rooms?: number;
+  /** MGF018 paper-ledger parity: base64 JPEG from the draw-with-finger pad (optional). */
+  registration_signature_b64?: string;
 }
 
 export interface CustomerRegistrationResult {
@@ -1138,6 +1142,22 @@ export async function registerCustomerRecord(data: CustomerRegistrationRequest):
     method: 'POST',
     body: JSON.stringify(data),
   });
+}
+
+/**
+ * Fetch a customer's registration-signature JPEG with auth and return a
+ * revocable object URL for inline display. Returns null when none is on file.
+ */
+export async function fetchRegistrationSignatureUrl(customerId: number | string): Promise<string | null> {
+  const token = getToken();
+  const res = await fetch(
+    `${getApiBase()}/customers/${encodeURIComponent(String(customerId))}/registration-signature`,
+    { headers: token ? { Authorization: `Bearer ${token}` } : undefined },
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
 }
 
 export interface UGPConnection {

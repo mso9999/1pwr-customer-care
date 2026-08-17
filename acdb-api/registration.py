@@ -11,15 +11,21 @@ Endpoints:
   GET  /api/customers/next-account     — Preview next account number for a site
 """
 
+import base64
+import binascii
+import hashlib
 import io
 import logging
+import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from contract_gen import CONTRACTS_DIR
 from country_config import COUNTRY, KNOWN_SITES
 from country_fees import get_country_fees
 from middleware import require_action, require_employee
@@ -111,6 +117,10 @@ class CustomerCreateRequest(BaseModel):
     date_service_connected: Optional[str] = None
     meter_id: Optional[str] = None
     acquires_1pwr_readyboard: bool = False
+    # MGF018 paper-ledger parity fields (both optional):
+    number_of_rooms: Optional[int] = Field(default=None, ge=0, le=200)
+    # Base64 JPEG from the draw-with-finger SignatureCapture pad (or normalized upload)
+    registration_signature_b64: Optional[str] = None
     # Optional EXISTING account number (legacy ACCDB accounts that were never imported
     # but already carry payments). When provided, CC uses it instead of auto-generating;
     # creating the account adopts any transactions already keyed to that number.
@@ -182,6 +192,52 @@ def _normalize_gender_for_storage(raw: Optional[str]) -> Optional[str]:
         raise HTTPException(status_code=400, detail="gender must be Male or Female when provided")
 
     return normalized
+
+
+_SIGNATURE_MAX_BYTES = 5 * 1024 * 1024  # drawn/uploaded JPEGs normalize to ~1200x480
+
+
+def _registration_signature_dir(site_code: str) -> str:
+    path = os.path.join(CONTRACTS_DIR, site_code.upper(), "registration")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _save_registration_signature(
+    b64: str, account_number: str, community: str, captured_by: str,
+) -> Dict[str, Any]:
+    """Decode + persist a registration signature JPEG; returns metadata columns.
+
+    Mirrors the advances contract convention: file on disk under
+    ``contracts/<SITE>/registration/`` with a sha256 for tamper-evidence.
+    """
+    try:
+        body = base64.b64decode(b64, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=400, detail="registration_signature_b64 is not valid base64")
+    if not body:
+        raise HTTPException(status_code=400, detail="registration signature is empty")
+    if len(body) > _SIGNATURE_MAX_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"registration signature too large ({len(body)} bytes; max {_SIGNATURE_MAX_BYTES})",
+        )
+    if not body.startswith(b"\xff\xd8"):
+        raise HTTPException(status_code=400, detail="registration signature must be a JPEG image")
+
+    sha256 = hashlib.sha256(body).hexdigest()
+    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    fname = f"registration_signature_{account_number}_{ts}.jpg"
+    fpath = os.path.join(_registration_signature_dir(community), fname)
+    with open(fpath, "wb") as f:
+        f.write(body)
+
+    return {
+        "registration_signature_path": fpath,
+        "registration_signature_filename": fname,
+        "registration_signature_sha256": sha256,
+        "registration_signature_captured_by": captured_by,
+    }
 
 
 def _validate_active_community(raw: str) -> str:
@@ -275,10 +331,10 @@ def register_customer(
                     first_name, middle_name, gender, last_name, community, phone, cell_phone_1,
                     cell_phone_2, email, national_id, plot_number,
                     street_address, city, district, country, customer_type,
-                    gps_lat, gps_lon, date_service_connected, is_active,
+                    gps_lat, gps_lon, date_service_connected, number_of_rooms, is_active,
                     created_by, updated_by
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     TRUE, %s, %s
                 ) RETURNING id, customer_id_legacy
             """, (
@@ -287,7 +343,7 @@ def register_customer(
                 req.email, req.national_id, req.plot_number,
                 req.street_address, req.city, req.district,
                 COUNTRY.name, resolved_customer_type, req.gps_lat, req.gps_lon,
-                req.date_service_connected,
+                req.date_service_connected, req.number_of_rooms,
                 user.user_id, user.user_id,
             ))
 
@@ -324,6 +380,32 @@ def register_customer(
                 ) VALUES (%s, %s, %s, %s, %s, %s)
             """, (account_number, customer_pg_id, req.meter_id, community, seq, user.user_id))
 
+            # Optional registration signature (MGF018 parity) — file on disk,
+            # metadata on the customer row.
+            signature_meta: Optional[Dict[str, Any]] = None
+            if req.registration_signature_b64:
+                signature_meta = _save_registration_signature(
+                    req.registration_signature_b64, account_number, community, user.user_id,
+                )
+                cursor.execute(
+                    """
+                    UPDATE customers
+                       SET registration_signature_path        = %s,
+                           registration_signature_filename    = %s,
+                           registration_signature_sha256      = %s,
+                           registration_signature_captured_by = %s,
+                           registration_signature_captured_at = NOW()
+                     WHERE id = %s
+                    """,
+                    (
+                        signature_meta["registration_signature_path"],
+                        signature_meta["registration_signature_filename"],
+                        signature_meta["registration_signature_sha256"],
+                        user.user_id,
+                        customer_pg_id,
+                    ),
+                )
+
             customer_values = {
                 "id": customer_pg_id,
                 "customer_id_legacy": customer_legacy_id,
@@ -346,10 +428,18 @@ def register_customer(
                 "gps_lat": req.gps_lat,
                 "gps_lon": req.gps_lon,
                 "date_service_connected": req.date_service_connected,
+                "number_of_rooms": req.number_of_rooms,
                 "is_active": True,
                 "created_by": user.user_id,
                 "updated_by": user.user_id,
             }
+            if signature_meta:
+                customer_values["registration_signature_filename"] = signature_meta[
+                    "registration_signature_filename"
+                ]
+                customer_values["registration_signature_sha256"] = signature_meta[
+                    "registration_signature_sha256"
+                ]
             account_values = {
                 "account_number": account_number,
                 "customer_id": customer_pg_id,
@@ -474,6 +564,37 @@ def preview_next_account(
         return {"community": community_code, "next_account_number": account_number}
 
 
+@router.get("/{customer_id}/registration-signature")
+def get_registration_signature(
+    customer_id: int,
+    user: CurrentUser = Depends(require_employee),
+):
+    """Authenticated download of the customer's registration-signature JPEG."""
+    with _get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT registration_signature_path, registration_signature_filename
+              FROM customers
+             WHERE id = %s
+            """,
+            (customer_id,),
+        )
+        row = cursor.fetchone()
+
+    if not row or not row[0]:
+        raise HTTPException(status_code=404, detail="No registration signature on file")
+
+    path, filename = row
+    real_path = os.path.realpath(path)
+    if not real_path.startswith(os.path.realpath(CONTRACTS_DIR) + os.sep):
+        raise HTTPException(status_code=400, detail="Invalid signature path")
+    if not os.path.isfile(real_path):
+        raise HTTPException(status_code=404, detail="Signature file missing on server")
+
+    return FileResponse(real_path, media_type="image/jpeg", filename=filename or "signature.jpg")
+
+
 @router.post("/bulk-import", response_model=BulkImportResult)
 async def bulk_import_customers(
     file: UploadFile = File(...),
@@ -484,7 +605,8 @@ async def bulk_import_customers(
 
     Expected columns: first_name, last_name, phone, customer_type,
                       gender,
-                      plot_number, national_id, gps_lat, gps_lon
+                      plot_number, national_id, gps_lat, gps_lon,
+                      number_of_rooms
     """
     if not file.filename.endswith((".xlsx", ".xls")):
         raise HTTPException(status_code=400, detail="File must be .xlsx or .xls")
@@ -538,13 +660,19 @@ async def bulk_import_customers(
                     str(row_dict.get("gender", "") or "").strip() or None
                 )
 
+                rooms_raw = row_dict.get("number_of_rooms")
+                try:
+                    rooms_val = int(float(rooms_raw)) if rooms_raw not in (None, "") else None
+                except (TypeError, ValueError):
+                    rooms_val = None
+
                 cursor.execute("""
                     INSERT INTO customers (
                         first_name, gender, last_name, community, country, phone,
                         national_id, plot_number, customer_type,
-                        gps_lat, gps_lon, is_active,
+                        gps_lat, gps_lon, number_of_rooms, is_active,
                         created_by
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, %s)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, %s)
                     RETURNING id, customer_id_legacy
                 """, (
                     # Preserve explicit HH1/HH2/HH3/etc. when present, but do not
@@ -559,6 +687,7 @@ async def bulk_import_customers(
                     ),
                     float(row_dict["gps_lat"]) if row_dict.get("gps_lat") else None,
                     float(row_dict["gps_lon"]) if row_dict.get("gps_lon") else None,
+                    rooms_val,
                     user.user_id,
                 ))
                 customer_pg_row = cursor.fetchone()

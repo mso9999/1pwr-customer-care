@@ -8,6 +8,8 @@
     "locationDesc": "Site, district, and address details",
     "service": "Service Details",
     "serviceDesc": "Customer type and connection date",
+    "signature": "Signature",
+    "signatureDesc": "Optional customer signature, as on the paper ledger",
     "review": "Review & Submit",
     "reviewDesc": "Confirm all details are correct"
   },
@@ -36,7 +38,12 @@
     "captureLocation": "Capture Current Location",
     "gpsNotSupported": "Geolocation not supported",
     "customerType": "Customer Type",
+    "numberOfRooms": "Number of Rooms",
     "dateConnected": "Date Connected",
+    "customerSignature": "Customer Signature (optional)",
+    "signatureHelper": "Customer signs with their finger or stylus, or upload a JPEG of the ledger signature.",
+    "signatureCapturedAlt": "Captured customer signature",
+    "replaceSignature": "Replace Signature",
     "select": "Select…"
   },
   "ugp": {

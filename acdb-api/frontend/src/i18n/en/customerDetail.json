@@ -9,6 +9,8 @@
   "commission": "Commission",
   "accountNumbers": "Account Numbers",
   "contracts": "Contracts",
+  "registrationSignature": "Registration Signature",
+  "signatureCapturedAt": "Captured {{date}} by {{by}}",
   "english": "English",
   "sesotho": "Sesotho",
   "notSet": "Not set",

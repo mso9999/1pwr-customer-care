@@ -9,6 +9,8 @@
   "commission": "Mise en service",
   "accountNumbers": "Numéros de compte",
   "contracts": "Contrats",
+  "registrationSignature": "Signature d'enregistrement",
+  "signatureCapturedAt": "Capturée le {{date}} par {{by}}",
   "english": "Anglais",
   "sesotho": "Sesotho",
   "notSet": "Non défini",
