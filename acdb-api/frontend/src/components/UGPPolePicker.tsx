@@ -1,8 +1,24 @@
 import { useEffect, useMemo, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { listUGPPoles, type UGPPole } from '../lib/api';
+
+// Fit the map to show ALL poles (every village) on load, instead of centering on
+// the first pole's village. Without this the map opens zoomed into one village and
+// the operator thinks the other villages' poles are missing.
+function FitBounds({ points }: { points: [number, number][] }) {
+  const map = useMap();
+  useEffect(() => {
+    if (points.length === 0) return;
+    if (points.length === 1) {
+      map.setView(points[0], 16);
+      return;
+    }
+    map.fitBounds(L.latLngBounds(points), { padding: [40, 40] });
+  }, [map, points]);
+  return null;
+}
 
 // Fix Leaflet default marker icons (Vite bundling drops the image assets).
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
@@ -89,6 +105,7 @@ export default function UGPPolePicker({ site, onSelect, onClose }: Props) {
             <div className="text-center py-16 text-gray-400 text-sm">No poles with GPS found{search ? ' for this filter' : ''}.</div>
           ) : (
             <MapContainer center={center} zoom={15} style={{ height: '100%', minHeight: 320, width: '100%' }}>
+              <FitBounds points={filtered.map((p) => [p.gps_lat!, p.gps_lon!] as [number, number])} />
               <TileLayer
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
