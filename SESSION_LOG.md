@@ -7984,3 +7984,29 @@ Root cause: **Dual registration without synchronization**
 ### What Next Session Should Know
 - NOT yet committed/deployed. Deploy = push to `main` (applies migration 063 via CI). After deploy, verify `GET /api/customers/{id}/registration-signature` on a test registration.
 - `contracts/<SITE>/registration/` is created on-demand on the host; same persistence story as generated contracts.
+
+## Session 2026-08-17 [202608171252c] (Committee Registrar Logins + Tablet-Primary Onboarding Docs)
+
+### Context Correction
+- User corrected the morning's MGF018 analysis: **MGF018V04 (Apr 23, 2025) does NOT contain "Number of rooms"** — the field photos in `1PWR OM TEAM/LEDGERS` are older form stock (likely V03-era) still in committee circulation. The `number_of_rooms` feature shipped anyway (user had explicitly requested it); it is optional. Field-stock drift flagged to ops.
+
+### What Was Done
+- **Field registrar (committee) auth**: new `UserType.registrar` + `CCRole.field_registrar` (no generic CRUD perms). Credentials in SQLite `cc_field_registrars` (bcrypt, per-country auth DB, auto-created by `init_auth_db()` at API startup). `POST /api/auth/registrar-login` issues JWTs; no HR record, no monthly PIN.
+- **Registration gate**: `require_registration_capable` in `registration.py` admits employees (existing action gate) OR active registrars (re-validated against SQLite per request → deactivation is immediate). Registrars are confined to their bound `site_code` and must use auto-generated account numbers.
+- **Admin UI**: "Field Registrars" section on `/admin/roles` (create / list / deactivate / reset password, optional site binding), superadmin-gated (`/api/admin/registrars`).
+- **Frontend**: Committee tab on LoginPage → lands in New Customer wizard; `ProtectedRoute allowRegistrar` on `/customers/new` only; minimal registrar nav in Layout; wizard hides UGP picker + legacy account field for registrars, pre-fills/locks site when bound, hides employee-only success actions.
+- **Tests**: `tests/test_field_registrars.py` (5 tests, store CRUD + gate admit/deny). Full suite: 247 passed.
+- **Docs (Dropbox, DRAFT for document control)**: `MGD061V03 Customer Onboarding SOP_Aug 17, 2026_DRAFT.docx` (tablet-primary onboarding; paper ledger = backup) and `Committee Tablet Registration Field Guide_Aug 2026_DRAFT.docx` (step-by-step committee training aid; Sesotho translation flagged as pre-rollout task), in `1PWR PM TEAM/.../MGD061 Customer Onboarding SOP/` with .md sources.
+- What's New folio entry `committee-registrar-logins`.
+
+### Key Decisions
+- Committee logins follow the customer-login precedent (non-HR identity, bcrypt in SQLite, scoped JWT) — fail-closed everywhere except the registration endpoint.
+- Per-request active-check on registrars (not just at login) so revocation is instant.
+- Bulk import stays employee-only; committees use the single-registration wizard.
+
+### Verification
+- `npx tsc -b --noEmit` clean; backend `py_compile` OK; 247/247 pytest pass; i18n JSON valid.
+
+### What Next Session Should Know
+- Deploy = push to `main`. After deploy: create a test registrar on `/admin/roles`, log in via Committee tab, register a test customer, verify site binding + audit attribution (`created_by` = registrar username).
+- The SOP/field-guide are DRAFTs pending PM document control; Sesotho translation of the field guide is an open task before village rollout.

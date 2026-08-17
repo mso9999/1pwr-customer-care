@@ -8,9 +8,11 @@ interface Props {
   requireRole?: string[];
   requireAction?: string;
   requiredLevel?: string;
+  /** Admit field registrars (committee logins) past employee/action gates. */
+  allowRegistrar?: boolean;
 }
 
-export default function ProtectedRoute({ children, requireEmployee, requireRole, requireAction, requiredLevel }: Props) {
+export default function ProtectedRoute({ children, requireEmployee, requireRole, requireAction, requiredLevel, allowRegistrar }: Props) {
   const { t } = useTranslation(['common']);
   const { user, loading, hasPrivilegeAction } = useAuth();
 
@@ -39,13 +41,15 @@ export default function ProtectedRoute({ children, requireEmployee, requireRole,
     return null;
   }
 
-  if (requireEmployee && user.user_type !== 'employee') {
+  const isRegistrar = user.user_type === 'registrar';
+
+  if (requireEmployee && user.user_type !== 'employee' && !(allowRegistrar && isRegistrar)) {
     return <Navigate to="/my/profile" replace />;
   }
 
   const effectiveRoles = user.roles || user.cc_roles || [user.role];
-  const actionDenied = Boolean(requireAction && !hasPrivilegeAction(requireAction));
-  const roleDenied = Boolean(requireRole && !requireRole.some((role) => effectiveRoles.includes(role)));
+  const actionDenied = Boolean(requireAction && !hasPrivilegeAction(requireAction) && !(allowRegistrar && isRegistrar));
+  const roleDenied = Boolean(requireRole && !requireRole.some((role) => effectiveRoles.includes(role)) && !(allowRegistrar && isRegistrar));
   if (actionDenied || roleDenied) {
     const countryCode = localStorage.getItem('cc_country') || 'LS';
     const countryName = ({ BN: 'Benin', BJ: 'Benin', LS: 'Lesotho', ZM: 'Zambia' } as Record<string, string>)[countryCode]

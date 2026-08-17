@@ -6,6 +6,8 @@ import {
   listPRDepartments, type DepartmentMapping, type PRDepartment,
   previewMonthlyPin, broadcastMonthlyPin,
   type PinPreview, type PinBroadcastResult,
+  listRegistrars, createRegistrar, updateRegistrar, listSites,
+  type FieldRegistrar,
 } from '../lib/api';
 
 const ROLES = ['superadmin', 'onm_team', 'finance_team', 'engineering', 'generic'];
@@ -213,7 +215,12 @@ export default function AdminRolesPage() {
       )}
 
       {/* ================================================================ */}
-      {/* SECTION 2: Department → Role Auto-Mapping                        */}
+      {/* SECTION 2: Field Registrars (committee logins)                    */}
+      {/* ================================================================ */}
+      <RegistrarSection />
+
+      {/* ================================================================ */}
+      {/* SECTION 3: Department → Role Auto-Mapping                        */}
       {/* ================================================================ */}
 
       <div className="border-t pt-6">
@@ -319,9 +326,201 @@ export default function AdminRolesPage() {
       </div>
 
       {/* ================================================================ */}
-      {/* SECTION 3: Monthly Staff PIN Broadcast                            */}
+      {/* SECTION 4: Monthly Staff PIN Broadcast                            */}
       {/* ================================================================ */}
       <PinBroadcastSection />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Field registrars (committee logins) — registration-only accounts
+// ---------------------------------------------------------------------------
+function RegistrarSection() {
+  const { t } = useTranslation(['admin']);
+  const [registrars, setRegistrars] = useState<FieldRegistrar[]>([]);
+  const [sites, setSites] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState('');
+  const [notice, setNotice] = useState('');
+  const [username, setUsername] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [password, setPassword] = useState('');
+  const [siteCode, setSiteCode] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const refresh = () => {
+    setLoading(true);
+    listRegistrars()
+      .then(setRegistrars)
+      .catch(e => setErr(e instanceof Error ? e.message : String(e)))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    refresh();
+    listSites()
+      .then(d => setSites((d.sites || []).map(s => s.concession).filter(Boolean)))
+      .catch(() => {});
+  }, []);
+
+  const handleCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setErr('');
+    setNotice('');
+    try {
+      await createRegistrar({
+        username: username.trim(),
+        password,
+        display_name: displayName.trim(),
+        site_code: siteCode || undefined,
+      });
+      setUsername('');
+      setDisplayName('');
+      setPassword('');
+      setSiteCode('');
+      setNotice(t('admin:registrarCreated'));
+      refresh();
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : String(e2));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleToggleActive = async (r: FieldRegistrar) => {
+    if (r.active && !confirm(t('admin:registrarDeactivateConfirm', { name: r.username }))) return;
+    setErr('');
+    try {
+      await updateRegistrar(r.username, { active: !r.active });
+      refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const handleResetPassword = async (r: FieldRegistrar) => {
+    const next = window.prompt(t('admin:registrarResetPrompt', { name: r.username }));
+    if (!next) return;
+    setErr('');
+    try {
+      await updateRegistrar(r.username, { password: next });
+      setNotice(t('admin:registrarCreated'));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  return (
+    <div className="border-t pt-6">
+      <h2 className="text-lg font-bold text-gray-800 mb-1">{t('admin:registrarTitle')}</h2>
+      <p className="text-sm text-gray-500 mb-4">{t('admin:registrarDesc')}</p>
+
+      {err && <p className="text-red-600 text-sm bg-red-50 p-3 rounded mb-3">{err}</p>}
+      {notice && <p className="text-green-700 text-sm bg-green-50 p-3 rounded mb-3">{notice}</p>}
+
+      <div className="bg-white rounded-lg shadow p-4 sm:p-5 mb-4">
+        <h3 className="text-sm font-medium text-gray-600 mb-3">{t('admin:registrarAdd')}</h3>
+        <form onSubmit={handleCreate} className="space-y-3 sm:space-y-0 sm:flex sm:gap-3 sm:flex-wrap sm:items-end">
+          <div className="sm:flex-1 sm:min-w-[160px]">
+            <label className="block text-xs text-gray-500 mb-1">{t('admin:registrarUsername')}</label>
+            <input
+              value={username}
+              onChange={e => setUsername(e.target.value)}
+              placeholder={t('admin:registrarUsernamePlaceholder')}
+              className="w-full px-3 py-2 border rounded-lg text-sm"
+              required
+            />
+          </div>
+          <div className="sm:flex-1 sm:min-w-[160px]">
+            <label className="block text-xs text-gray-500 mb-1">{t('admin:registrarDisplayName')}</label>
+            <input
+              value={displayName}
+              onChange={e => setDisplayName(e.target.value)}
+              placeholder={t('admin:registrarDisplayNamePlaceholder')}
+              className="w-full px-3 py-2 border rounded-lg text-sm"
+              required
+            />
+          </div>
+          <div className="sm:flex-1 sm:min-w-[140px]">
+            <label className="block text-xs text-gray-500 mb-1">{t('admin:registrarPassword')}</label>
+            <input
+              type="text"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              placeholder={t('admin:registrarPasswordPlaceholder')}
+              className="w-full px-3 py-2 border rounded-lg text-sm"
+              required
+              minLength={6}
+            />
+          </div>
+          <div className="sm:flex-none sm:min-w-[140px]">
+            <label className="block text-xs text-gray-500 mb-1">{t('admin:registrarSite')}</label>
+            <select
+              value={siteCode}
+              onChange={e => setSiteCode(e.target.value)}
+              className="w-full px-3 py-2 border rounded-lg text-sm bg-white"
+            >
+              <option value="">{t('admin:registrarSiteAny')}</option>
+              {sites.map(s => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <button type="submit" disabled={busy} className="w-full sm:w-auto px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 disabled:opacity-50">
+            {busy ? t('admin:adding') : t('admin:registrarAdd')}
+          </button>
+        </form>
+      </div>
+
+      {loading ? (
+        <div className="text-center py-6 text-gray-400">{t('admin:loading')}</div>
+      ) : registrars.length === 0 ? (
+        <div className="text-center py-6 text-gray-400">{t('admin:registrarEmpty')}</div>
+      ) : (
+        <div className="bg-white rounded-lg shadow overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                <th className="px-4 py-3 text-left font-medium text-gray-600">{t('admin:registrarColUsername')}</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-600">{t('admin:registrarColName')}</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-600">{t('admin:registrarColSite')}</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-600">{t('admin:registrarColStatus')}</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-600">{t('admin:registrarColCreatedBy')}</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-600">{t('admin:colActions')}</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {registrars.map(r => (
+                <tr key={r.username} className={`hover:bg-gray-50 ${r.active ? '' : 'opacity-60'}`}>
+                  <td className="px-4 py-2 font-mono text-xs font-medium">{r.username}</td>
+                  <td className="px-4 py-2">{r.display_name || <span className="text-gray-300">--</span>}</td>
+                  <td className="px-4 py-2">
+                    {r.site_code ? (
+                      <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs font-mono">{r.site_code}</span>
+                    ) : (
+                      <span className="text-gray-400 text-xs">{t('admin:registrarSiteAny')}</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2">
+                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${r.active ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-600'}`}>
+                      {r.active ? t('admin:registrarActive') : t('admin:registrarInactive')}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2 text-gray-500 text-xs">{r.created_by || '--'}</td>
+                  <td className="px-4 py-2 whitespace-nowrap">
+                    <button onClick={() => handleResetPassword(r)} className="text-blue-600 hover:text-blue-800 text-xs mr-3">
+                      {t('admin:registrarResetPassword')}
+                    </button>
+                    <button onClick={() => handleToggleActive(r)} className="text-red-600 hover:text-red-800 text-xs">
+                      {r.active ? t('admin:registrarDeactivate') : t('admin:registrarReactivate')}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }

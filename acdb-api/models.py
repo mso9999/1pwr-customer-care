@@ -16,6 +16,10 @@ from pydantic import BaseModel, Field
 class UserType(str, Enum):
     customer = "customer"
     employee = "employee"
+    # Committee / field registrar: non-employee identity that may ONLY register
+    # new customers (MGF018 tablet-primary flow). Credentials live in the local
+    # auth SQLite store (cc_field_registrars), not HR.
+    registrar = "registrar"
 
 
 class CCRole(str, Enum):
@@ -24,18 +28,23 @@ class CCRole(str, Enum):
     finance_team = "finance_team"
     engineering = "engineering"
     generic = "generic"
+    # Not grantable to employees via role admin; carried by registrar JWTs.
+    field_registrar = "field_registrar"
 
 
 # Permission matrix: role -> (can_write_customers, can_write_transactions, can_manage_roles)
 # `engineering` (R&D) is least-privilege like `generic` for customer/finance data;
 # its purpose is 1Meter provisioning access, which is gated separately in
 # meter_provisioning.py (PROVISIONING_ROLES).
+# `field_registrar` gets NO generic CRUD writes — registration is allowed via a
+# dedicated gate in registration.py, not the generic table-write permissions.
 ROLE_PERMISSIONS = {
-    CCRole.superadmin:   {"write_customers": True,  "write_transactions": True,  "manage_roles": True},
-    CCRole.onm_team:     {"write_customers": True,  "write_transactions": True,  "manage_roles": False},
-    CCRole.finance_team: {"write_customers": False, "write_transactions": True,  "manage_roles": False},
-    CCRole.engineering:  {"write_customers": False, "write_transactions": False, "manage_roles": False},
-    CCRole.generic:      {"write_customers": False, "write_transactions": False, "manage_roles": False},
+    CCRole.superadmin:      {"write_customers": True,  "write_transactions": True,  "manage_roles": True},
+    CCRole.onm_team:        {"write_customers": True,  "write_transactions": True,  "manage_roles": False},
+    CCRole.finance_team:    {"write_customers": False, "write_transactions": True,  "manage_roles": False},
+    CCRole.engineering:     {"write_customers": False, "write_transactions": False, "manage_roles": False},
+    CCRole.generic:         {"write_customers": False, "write_transactions": False, "manage_roles": False},
+    CCRole.field_registrar: {"write_customers": False, "write_transactions": False, "manage_roles": False},
 }
 
 # Tables considered "transaction" tables (finance can write these)
@@ -60,6 +69,38 @@ class CustomerRegisterRequest(BaseModel):
 class CustomerChangePasswordRequest(BaseModel):
     old_password: str = Field(..., min_length=1)
     new_password: str = Field(..., min_length=6)
+
+
+class RegistrarLoginRequest(BaseModel):
+    username: str = Field(..., min_length=1, description="Registrar username (issued by CC admin)")
+    password: str = Field(..., min_length=1, description="Registrar password")
+
+
+class RegistrarCreateRequest(BaseModel):
+    username: str = Field(..., min_length=3, description="Unique login name, e.g. 'mak-committee-1'")
+    password: str = Field(..., min_length=6, description="Initial password (min 6 chars)")
+    display_name: str = Field(..., min_length=1, description="Person or committee name shown in audit logs")
+    site_code: Optional[str] = Field(
+        default=None,
+        description="Optional site binding (e.g. MAK). When set, this registrar may only register customers in that site.",
+    )
+
+
+class RegistrarUpdateRequest(BaseModel):
+    display_name: Optional[str] = None
+    site_code: Optional[str] = None
+    active: Optional[bool] = None
+    password: Optional[str] = Field(default=None, min_length=6, description="Reset password")
+
+
+class RegistrarResponse(BaseModel):
+    username: str
+    display_name: str
+    site_code: Optional[str]
+    active: bool
+    created_by: str
+    created_at: str
+    updated_at: str
 
 
 class TokenResponse(BaseModel):

@@ -130,6 +130,17 @@ def init_auth_db():
                 seen_at     TEXT NOT NULL,
                 updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
             );
+
+            CREATE TABLE IF NOT EXISTS cc_field_registrars (
+                username      TEXT PRIMARY KEY,
+                password_hash TEXT NOT NULL,
+                display_name  TEXT NOT NULL DEFAULT '',
+                site_code     TEXT,
+                active        INTEGER NOT NULL DEFAULT 1,
+                created_by    TEXT NOT NULL DEFAULT '',
+                created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+            );
         """)
 
         # Seed default superadmin if not already present
@@ -302,6 +313,97 @@ def customer_is_registered(customer_id: str) -> bool:
             (customer_id,),
         ).fetchone()
         return row is not None
+
+
+# ---------------------------------------------------------------------------
+# Field registrar (committee) credentials — non-employee, registration-only
+# ---------------------------------------------------------------------------
+
+def _registrar_row_to_dict(row: sqlite3.Row | None) -> dict | None:
+    if row is None:
+        return None
+    d = dict(row)
+    d["active"] = bool(d.get("active"))
+    d.pop("password_hash", None)
+    return d
+
+
+def get_registrar(username: str, *, include_hash: bool = False) -> dict | None:
+    """Return a registrar record by username (case-insensitive), or None."""
+    with get_auth_db() as conn:
+        row = conn.execute(
+            "SELECT * FROM cc_field_registrars WHERE username = ? COLLATE NOCASE",
+            (username.strip(),),
+        ).fetchone()
+    if row is None:
+        return None
+    if include_hash:
+        d = dict(row)
+        d["active"] = bool(d.get("active"))
+        return d
+    return _registrar_row_to_dict(row)
+
+
+def list_registrars() -> list[dict]:
+    with get_auth_db() as conn:
+        rows = conn.execute(
+            "SELECT * FROM cc_field_registrars ORDER BY username"
+        ).fetchall()
+        return [_registrar_row_to_dict(r) for r in rows]
+
+
+def create_registrar(
+    username: str,
+    password_hash: str,
+    display_name: str,
+    site_code: str | None,
+    created_by: str,
+) -> None:
+    now = datetime.utcnow().isoformat()
+    with get_auth_db() as conn:
+        conn.execute(
+            """INSERT INTO cc_field_registrars
+               (username, password_hash, display_name, site_code, active, created_by, created_at, updated_at)
+               VALUES (?, ?, ?, ?, 1, ?, ?, ?)""",
+            (username.strip(), password_hash, display_name.strip(),
+             (site_code or "").strip().upper() or None, created_by, now, now),
+        )
+
+
+def update_registrar(
+    username: str,
+    *,
+    display_name: str | None = None,
+    site_code: str | None = None,
+    active: bool | None = None,
+    password_hash: str | None = None,
+) -> bool:
+    """Update provided fields only. Returns False when the username is unknown."""
+    sets: list[str] = []
+    params: list = []
+    if display_name is not None:
+        sets.append("display_name = ?")
+        params.append(display_name.strip())
+    if site_code is not None:
+        sets.append("site_code = ?")
+        params.append(site_code.strip().upper() or None)
+    if active is not None:
+        sets.append("active = ?")
+        params.append(1 if active else 0)
+    if password_hash is not None:
+        sets.append("password_hash = ?")
+        params.append(password_hash)
+    if not sets:
+        return True
+    sets.append("updated_at = ?")
+    params.append(datetime.utcnow().isoformat())
+    params.append(username.strip())
+    with get_auth_db() as conn:
+        cursor = conn.execute(
+            f"UPDATE cc_field_registrars SET {', '.join(sets)} WHERE username = ? COLLATE NOCASE",
+            params,
+        )
+        return cursor.rowcount > 0
 
 
 # ---------------------------------------------------------------------------

@@ -10,16 +10,21 @@ from fastapi import APIRouter, Depends, HTTPException
 from models import (
     CCRole, CurrentUser, RoleAssignment, RoleAssignmentResponse,
     DepartmentMapping, DepartmentMappingResponse,
+    RegistrarCreateRequest, RegistrarResponse, RegistrarUpdateRequest,
 )
 from middleware import require_action
 from db_auth import (
+    create_registrar,
     delete_department_mapping,
     delete_employee_role,
     get_employee_role,
+    get_registrar,
     list_department_mappings,
     list_employee_roles,
+    list_registrars,
     set_department_mapping,
     set_employee_role,
+    update_registrar,
 )
 from auth import lookup_employee
 from mutations import try_log_mutation
@@ -157,6 +162,110 @@ def remove_role(
     )
     logger.info("Role removed for %s by %s", employee_id, user.user_id)
     return {"message": f"Role removed for {employee_id}. They will default to 'generic'."}
+
+
+# ---------------------------------------------------------------------------
+# Field registrars (committee logins) — registration-only, non-employee
+# ---------------------------------------------------------------------------
+
+@router.get("/registrars", response_model=List[RegistrarResponse])
+def list_field_registrars(user: CurrentUser = Depends(CC_ADMIN_GATE)):
+    """List all field registrar (committee) accounts. Password hashes are never returned."""
+    return list_registrars()
+
+
+@router.post("/registrars", response_model=RegistrarResponse, status_code=201)
+def create_field_registrar(
+    req: RegistrarCreateRequest,
+    user: CurrentUser = Depends(CC_ADMIN_GATE),
+):
+    """Create a committee registrar account (username + password, optional site binding)."""
+    import re as _re
+
+    username = req.username.strip().lower()
+    if not _re.match(r"^[a-z0-9][a-z0-9._-]{2,}$", username):
+        raise HTTPException(
+            status_code=400,
+            detail="Username must be 3+ chars: lowercase letters, digits, dot, dash, underscore.",
+        )
+    if get_registrar(username):
+        raise HTTPException(status_code=409, detail=f"Registrar '{username}' already exists")
+
+    if req.site_code:
+        from country_config import KNOWN_SITES
+        site = req.site_code.strip().upper()
+        if KNOWN_SITES and site not in KNOWN_SITES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Site '{site}' is not configured for this country. Choose one of: {', '.join(sorted(KNOWN_SITES))}.",
+            )
+    else:
+        site = None
+
+    import bcrypt as _bcrypt
+    hashed = _bcrypt.hashpw(req.password.encode(), _bcrypt.gensalt()).decode()
+    create_registrar(username, hashed, req.display_name, site, user.user_id)
+
+    try_log_mutation(
+        user, "create", "cc_field_registrars", username,
+        new_values={
+            "username": username,
+            "display_name": req.display_name,
+            "site_code": site,
+            "created_by": user.user_id,
+        },
+        metadata={"origin": "admin_registrar_management"},
+    )
+    logger.info("Registrar %s created by %s (site=%s)", username, user.user_id, site)
+    return get_registrar(username)
+
+
+@router.put("/registrars/{username}", response_model=RegistrarResponse)
+def update_field_registrar(
+    username: str,
+    req: RegistrarUpdateRequest,
+    user: CurrentUser = Depends(CC_ADMIN_GATE),
+):
+    """Update a registrar: display name, site binding, active flag, or password reset."""
+    existing = get_registrar(username)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"No registrar '{username}'")
+
+    if req.site_code is not None and req.site_code.strip():
+        from country_config import KNOWN_SITES
+        site = req.site_code.strip().upper()
+        if KNOWN_SITES and site not in KNOWN_SITES:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Site '{site}' is not configured for this country. Choose one of: {', '.join(sorted(KNOWN_SITES))}.",
+            )
+
+    password_hash = None
+    if req.password:
+        import bcrypt as _bcrypt
+        password_hash = _bcrypt.hashpw(req.password.encode(), _bcrypt.gensalt()).decode()
+
+    update_registrar(
+        username,
+        display_name=req.display_name,
+        site_code=req.site_code,
+        active=req.active,
+        password_hash=password_hash,
+    )
+
+    changes = req.model_dump(exclude_none=True)
+    try_log_mutation(
+        user, "update", "cc_field_registrars", username,
+        old_values={
+            "display_name": existing.get("display_name"),
+            "site_code": existing.get("site_code"),
+            "active": existing.get("active"),
+        },
+        new_values={**changes, "password": bool(req.password)},
+        metadata={"origin": "admin_registrar_management"},
+    )
+    logger.info("Registrar %s updated by %s: %s", username, user.user_id, sorted(changes.keys()))
+    return get_registrar(username)
 
 
 # ---------------------------------------------------------------------------

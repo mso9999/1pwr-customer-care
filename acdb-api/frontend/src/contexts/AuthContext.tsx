@@ -29,6 +29,7 @@ interface AuthContextType {
   loading: boolean;
   isEmployee: boolean;
   isCustomer: boolean;
+  isRegistrar: boolean;
   isSuperadmin: boolean;
   canWrite: boolean;
   canWriteCustomers: boolean;
@@ -76,6 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const isEmployee = user?.user_type === 'employee';
   const isCustomer = user?.user_type === 'customer';
+  const isRegistrar = user?.user_type === 'registrar';
   const effectiveRoles = user?.roles || user?.cc_roles || (user?.role ? [user.role] : []);
   const hasSignedCcPrivilege = Boolean(user?.privilege_version && user?.privilege_system === 'cc');
   const hasPrivilegeAction = (action: string) => hasSignedCcPrivilege
@@ -98,7 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     : Boolean(user?.permissions?.write_customers);
 
   return (
-    <AuthContext.Provider value={{ user, token, login, logout, loading, isEmployee, isCustomer, isSuperadmin, canWrite, canWriteCustomers, hasPrivilegeAction }}>
+    <AuthContext.Provider value={{ user, token, login, logout, loading, isEmployee, isCustomer, isRegistrar, isSuperadmin, canWrite, canWriteCustomers, hasPrivilegeAction }}>
       {children}
     </AuthContext.Provider>
   );

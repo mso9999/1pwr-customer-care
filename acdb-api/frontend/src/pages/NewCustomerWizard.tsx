@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { listSites, listUGPConnections, registerCustomerRecord, type CustomerRegistrationResult, type UGPConnection } from '../lib/api';
 import { useCountry } from '../contexts/CountryContext';
+import { useAuth } from '../contexts/AuthContext';
 import SignatureCapture from '../components/SignatureCapture';
 
 // ---------------------------------------------------------------------------
@@ -381,6 +382,8 @@ function ProgressBar({ current, total }: { current: number; total: number }) {
 export default function NewCustomerWizard() {
   const { t } = useTranslation(['newCustomer', 'common']);
   const { config } = useCountry();
+  const { user, isRegistrar } = useAuth();
+  const registrarSite = isRegistrar ? String((user as any)?.site_code || '').trim().toUpperCase() : '';
   const navigate = useNavigate();
   const [step, setStep] = useState(0);
   const [form, setForm] = useState<Record<string, string>>({});
@@ -430,6 +433,12 @@ export default function NewCustomerWizard() {
       })
       .catch(() => {});
   }, []);
+
+  // Bound registrars register only into their own site — pre-fill and lock it.
+  useEffect(() => {
+    if (registrarSite) set('community', registrarSite);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [registrarSite]);
 
   const set = (key: string, value: string) => setForm(prev => ({ ...prev, [key]: value }));
   const resetWizard = () => {
@@ -623,6 +632,7 @@ export default function NewCustomerWizard() {
 
     if (f.type === 'select') {
       const opts = f.key === 'community' ? sites : (f.options || []);
+      const locked = f.key === 'community' && !!registrarSite;
       return (
         <div key={f.key} className={f.half ? '' : 'col-span-2 sm:col-span-1'}>
           <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -631,7 +641,8 @@ export default function NewCustomerWizard() {
           <select
             value={form[f.key] || ''}
             onChange={e => set(f.key, e.target.value)}
-            className="w-full px-4 py-3.5 border border-gray-300 rounded-xl text-base bg-white focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none appearance-none"
+            disabled={locked}
+            className={`w-full px-4 py-3.5 border border-gray-300 rounded-xl text-base focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none appearance-none ${locked ? 'bg-gray-100 text-gray-600' : 'bg-white'}`}
           >
             <option value="">{t('newCustomer:fields.select')}</option>
             {opts.map(o => <option key={o} value={o}>{f.key === 'gender' ? (o === 'Male' ? t('newCustomer:fields.male') : t('newCustomer:fields.female')) : o}</option>)}
@@ -661,8 +672,13 @@ export default function NewCustomerWizard() {
   // Review step
   // ---------------------------------------------------------------------------
 
+  // Registrars don't use the uGridPlan picker (employee-gated API) and may not
+  // enter legacy account numbers — the backend rejects both for registrar JWTs.
+  const visibleFields = (fields: FieldDef[]) =>
+    fields.filter(f => !(isRegistrar && (f.type === 'ugp_picker' || f.key === 'account_number')));
+
   const renderReview = () => {
-    const filledFields = steps.flatMap(s => s.fields).filter(f => {
+    const filledFields = visibleFields(steps.flatMap(s => s.fields)).filter(f => {
       if (f.type === 'ugp_picker') return false;
       if (f.type === 'gps') return form['gps_lat'] || form['gps_lon'];
       if (f.type === 'signature') return !!signatureB64;
@@ -760,7 +776,7 @@ export default function NewCustomerWizard() {
 
             {isReview ? renderReview() : (
               <div className="grid grid-cols-2 gap-4">
-                {currentStep!.fields.map(renderField)}
+                {visibleFields(currentStep!.fields).map(renderField)}
               </div>
             )}
 
@@ -852,12 +868,14 @@ export default function NewCustomerWizard() {
           </div>
 
           <div className="flex flex-col sm:flex-row gap-3 mt-6">
-            <button
-              onClick={() => navigate(`/customers/${createdCustomer.customer_id_legacy}`)}
-              className="flex-1 py-4 bg-blue-600 text-white rounded-xl font-semibold text-base hover:bg-blue-700 active:bg-blue-800 transition"
-            >
-              {t('newCustomer:success.openRecord')}
-            </button>
+            {!isRegistrar && (
+              <button
+                onClick={() => navigate(`/customers/${createdCustomer.customer_id_legacy}`)}
+                className="flex-1 py-4 bg-blue-600 text-white rounded-xl font-semibold text-base hover:bg-blue-700 active:bg-blue-800 transition"
+              >
+                {t('newCustomer:success.openRecord')}
+              </button>
+            )}
             <button
               onClick={resetWizard}
               className="flex-1 py-4 bg-gray-100 text-gray-700 rounded-xl font-medium text-base hover:bg-gray-200 active:bg-gray-300 transition"
@@ -865,12 +883,14 @@ export default function NewCustomerWizard() {
               {t('newCustomer:success.createAnother')}
             </button>
           </div>
-          <button
-            onClick={() => navigate('/customers', { replace: true })}
-            className="w-full mt-3 py-3 text-sm text-gray-500 hover:text-gray-700"
-          >
-            {t('newCustomer:success.backToCustomers')}
-          </button>
+          {!isRegistrar && (
+            <button
+              onClick={() => navigate('/customers', { replace: true })}
+              className="w-full mt-3 py-3 text-sm text-gray-500 hover:text-gray-700"
+            >
+              {t('newCustomer:success.backToCustomers')}
+            </button>
+          )}
         </>
       )}
 

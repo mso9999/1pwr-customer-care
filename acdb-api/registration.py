@@ -28,8 +28,9 @@ from pydantic import BaseModel, Field
 from contract_gen import CONTRACTS_DIR
 from country_config import COUNTRY, KNOWN_SITES
 from country_fees import get_country_fees
-from middleware import require_action, require_employee
-from models import CCRole, CurrentUser
+from db_auth import get_registrar
+from middleware import get_current_user, require_action, require_employee
+from models import CCRole, CurrentUser, UserType
 from mutations import log_mutation, try_log_mutation
 from sparkmeter_customer import create_sparkmeter_customer
 
@@ -44,6 +45,35 @@ CC_CUSTOMER_OPERATE_GATE = require_action(
     required_level="C",
     fallback_roles=(CCRole.superadmin, CCRole.onm_team),
 )
+
+
+def require_registration_capable(
+    user: CurrentUser = Depends(get_current_user),
+) -> CurrentUser:
+    """Admit employees passing the operate_customer_care action gate, OR an
+    active field registrar (committee login). Registrars are re-validated
+    against the auth store on every call so deactivation takes effect
+    immediately, even before the JWT expires."""
+    if user.user_type == UserType.registrar:
+        record = get_registrar(user.user_id)
+        if not record or not record["active"]:
+            raise HTTPException(
+                status_code=403,
+                detail="This registrar account is no longer active.",
+            )
+        return user
+    if user.user_type != UserType.employee:
+        raise HTTPException(status_code=403, detail="Employee access required")
+    return CC_CUSTOMER_OPERATE_GATE(user)
+
+
+def _registrar_site_binding(user: CurrentUser) -> Optional[str]:
+    """Return the registrar's bound site code, or None for employees/unbound."""
+    if user.user_type != UserType.registrar:
+        return None
+    record = get_registrar(user.user_id) or {}
+    site = str(record.get("site_code") or "").strip().upper()
+    return site or None
 
 
 def _get_connection():
@@ -275,18 +305,36 @@ def _validate_active_community(raw: str) -> str:
 @router.post("/register")
 def register_customer(
     req: CustomerCreateRequest,
-    user: CurrentUser = Depends(CC_CUSTOMER_OPERATE_GATE),
+    user: CurrentUser = Depends(require_registration_capable),
 ):
     """Register a new customer.
 
     Account number is auto-generated unless ``account_number`` is supplied (legacy
     ACCDB accounts known to the field team — see O&M request 2026-06-10). Manual
     numbers are validated for format, site match, and uniqueness.
+
+    Field registrars (committee logins) may only use auto-generated numbers, and
+    are confined to their bound site when one is set on their account.
     """
     with _get_connection() as conn:
         cursor = conn.cursor()
         try:
             community = _validate_active_community(req.community)
+
+            bound_site = _registrar_site_binding(user)
+            if bound_site and community != bound_site:
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        f"This registrar account is restricted to site {bound_site}; "
+                        f"cannot register customers in {community}."
+                    ),
+                )
+            if user.user_type == UserType.registrar and (req.account_number or "").strip():
+                raise HTTPException(
+                    status_code=403,
+                    detail="Registrar accounts must use auto-generated account numbers.",
+                )
 
             manual_account = (req.account_number or "").strip().upper()
             if manual_account:

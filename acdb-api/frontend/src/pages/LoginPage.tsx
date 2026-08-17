@@ -2,9 +2,9 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
-import { employeeLogin, customerLogin, customerRegister } from '../lib/api';
+import { employeeLogin, customerLogin, customerRegister, registrarLogin } from '../lib/api';
 
-type Mode = 'employee' | 'customer' | 'register';
+type Mode = 'employee' | 'customer' | 'register' | 'registrar';
 
 export default function LoginPage() {
   const { t } = useTranslation('login');
@@ -33,6 +33,10 @@ export default function LoginPage() {
         const res = await employeeLogin(id, password);
         login(res.access_token, res.user as any);
         navigate('/dashboard');
+      } else if (mode === 'registrar') {
+        const res = await registrarLogin(id.trim(), password);
+        login(res.access_token, res.user as any);
+        navigate('/customers/new');
       } else {
         const res = await customerLogin(id, password);
         login(res.access_token, res.user as any);
@@ -68,6 +72,12 @@ export default function LoginPage() {
             >
               {t('customer')}
             </button>
+            <button
+              className={`flex-1 py-2 text-sm font-medium rounded-md transition ${mode === 'registrar' ? 'bg-white shadow text-blue-700' : 'text-gray-500'}`}
+              onClick={() => { setMode('registrar'); setError(''); setSuccess(''); }}
+            >
+              {t('committee')}
+            </button>
           </div>
 
           {mode === 'employee' && (
@@ -92,13 +102,13 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                {mode === 'employee' ? t('employeeId') : t('accountNumber')}
+                {mode === 'employee' ? t('employeeId') : mode === 'registrar' ? t('registrarUsername') : t('accountNumber')}
               </label>
               <input
                 type="text"
                 value={id}
                 onChange={(e) => setId(e.target.value)}
-                placeholder={mode === 'employee' ? t('enterEmployeeId') : t('accountNumberExample')}
+                placeholder={mode === 'employee' ? t('enterEmployeeId') : mode === 'registrar' ? t('enterRegistrarUsername') : t('accountNumberExample')}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                 required
               />

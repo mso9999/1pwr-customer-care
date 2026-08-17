@@ -30,6 +30,7 @@ from models import (
     CustomerLoginRequest,
     CustomerRegisterRequest,
     EmployeeLoginRequest,
+    RegistrarLoginRequest,
     ROLE_PERMISSIONS,
     TokenResponse,
     UserType,
@@ -40,6 +41,7 @@ from db_auth import (
     customer_is_registered,
     get_customer_password_hash,
     get_employee_role,
+    get_registrar,
     get_whats_new_seen,
     mark_whats_new_seen,
     set_customer_password,
@@ -633,6 +635,59 @@ def customer_login(req: CustomerLoginRequest):
             "customer_id": acct,
             "name": name,
             "role": "customer",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# Field registrar (committee) login — registration-only, no HR record, no PIN
+# ---------------------------------------------------------------------------
+
+@router.post("/registrar-login", response_model=TokenResponse)
+def registrar_login(req: RegistrarLoginRequest):
+    """Committee / field-registrar login with admin-issued username + password.
+
+    Registrars are not employees and never see the monthly staff PIN. The
+    resulting JWT carries user_type=registrar and role=field_registrar, which
+    every employee-gated endpoint rejects; only the customer-registration
+    gate (registration.py) admits it.
+    """
+    record = get_registrar(req.username, include_hash=True)
+    if not record or not _bcrypt.checkpw(
+        req.password.encode(), record["password_hash"].encode()
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+        )
+    if not record["active"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This registrar account has been deactivated. Contact 1PWR Customer Care.",
+        )
+
+    username = str(record["username"])
+    token, expires_in = create_token(
+        user_type=UserType.registrar.value,
+        user_id=username,
+        role=CCRole.field_registrar.value,
+        name=str(record.get("display_name") or username),
+        email="",
+    )
+    logger.info("Registrar login: %s (%s)", username, record.get("display_name") or "")
+
+    return TokenResponse(
+        access_token=token,
+        expires_in=expires_in,
+        user={
+            "user_type": "registrar",
+            "user_id": username,
+            "name": str(record.get("display_name") or username),
+            "role": CCRole.field_registrar.value,
+            "roles": [CCRole.field_registrar.value],
+            "cc_roles": [CCRole.field_registrar.value],
+            "site_code": record.get("site_code"),
+            "permissions": {},
         },
     )
 

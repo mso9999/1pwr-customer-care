@@ -58,6 +58,7 @@ function HomeRedirect() {
   if (loading) return null;
   if (!user) return <Navigate to="/login" replace />;
   if (user.user_type === 'customer') return <Navigate to="/my/dashboard" replace />;
+  if (user.user_type === 'registrar') return <Navigate to="/customers/new" replace />;
   return <Navigate to="/dashboard" replace />;
 }
 
@@ -74,7 +75,7 @@ export default function App() {
             {/* Employee routes */}
             <Route path="dashboard" element={<ProtectedRoute requireEmployee><DashboardPage /></ProtectedRoute>} />
             <Route path="customers" element={<ProtectedRoute requireEmployee><CustomersPage /></ProtectedRoute>} />
-            <Route path="customers/new" element={<ProtectedRoute requireEmployee requireAction="operate_customer_care" requiredLevel="C"><NewCustomerWizard /></ProtectedRoute>} />
+            <Route path="customers/new" element={<ProtectedRoute requireEmployee requireAction="operate_customer_care" requiredLevel="C" allowRegistrar><NewCustomerWizard /></ProtectedRoute>} />
             <Route path="customers/:id" element={<ProtectedRoute requireEmployee><CustomerDetailPage /></ProtectedRoute>} />
             <Route path="meters" element={<ProtectedRoute requireEmployee><MetersPage /></ProtectedRoute>} />
             <Route path="accounts" element={<ProtectedRoute requireEmployee><AccountsPage /></ProtectedRoute>} />

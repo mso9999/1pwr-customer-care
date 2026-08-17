@@ -93,6 +93,11 @@ const CUSTOMER_NAV: NavItemDef[] = [
   { to: '/my/profile', labelKey: 'nav.myAccount', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
 ];
 
+// Committee / field registrars get a single-purpose menu: register customers.
+const REGISTRAR_NAV: NavItemDef[] = [
+  { to: '/customers/new', labelKey: 'nav.newCustomer', icon: 'M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z' },
+];
+
 function NavIcon({ d }: { d: string }) {
   return (
     <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
@@ -102,7 +107,7 @@ function NavIcon({ d }: { d: string }) {
 }
 
 export default function Layout() {
-  const { user, logout, isEmployee, isCustomer, isSuperadmin } = useAuth();
+  const { user, logout, isEmployee, isCustomer, isRegistrar, isSuperadmin } = useAuth();
   const { country, setCountry, countries, portfolios, portfolio, setPortfolio } = useCountry();
   const { t, i18n } = useTranslation('common');
   const currentCountry = countries.find((c) => c.code === country);
@@ -232,6 +237,11 @@ export default function Layout() {
         {isCustomer && (
           <div className="space-y-0.5">
             {CUSTOMER_NAV.map(renderLink)}
+          </div>
+        )}
+        {isRegistrar && (
+          <div className="space-y-0.5">
+            {REGISTRAR_NAV.map(renderLink)}
           </div>
         )}
       </nav>

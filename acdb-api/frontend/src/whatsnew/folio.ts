@@ -37,6 +37,24 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW_FOLIO: WhatsNewEntry[] = [
   {
+    id: 'committee-registrar-logins',
+    date: '2026-08-17',
+    title: 'Committee logins — register customers on tablets in the field',
+    blurb: 'Village committee members can now sign in to CC with their own username and password and register customers directly — paper ledger becomes the backup.',
+    pages: [
+      {
+        heading: 'Registration moves to the field',
+        body:
+          'Committee members no longer need a 1PWR employee account or the monthly staff PIN. Admins issue each committee registrar a username and password (Admin → Roles → Field Registrars), optionally bound to a single site.\n\n' +
+          '- Committee login lives on the sign-in page under the new **Committee** tab\n' +
+          '- Registrars land directly in the New Customer wizard and can only register customers — no other CC access\n' +
+          '- Registrations are attributed to the registrar in the audit log\n' +
+          '- Accounts can be deactivated instantly from the admin page\n\n' +
+          'Paper ledgers remain the backup when there is no connectivity; transcribe them into CC the same week.',
+      },
+    ],
+  },
+  {
     id: 'registration-rooms-signature',
     date: '2026-08-17',
     title: 'Registration now matches the paper ledger — rooms + signature',

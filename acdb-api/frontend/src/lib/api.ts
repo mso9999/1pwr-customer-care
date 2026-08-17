@@ -1144,6 +1144,64 @@ export async function registerCustomerRecord(data: CustomerRegistrationRequest):
   });
 }
 
+// ── Field registrars (committee logins) ─────────────────────────
+
+export interface RegistrarLoginResult {
+  access_token: string;
+  expires_in: number;
+  user: {
+    user_type: string;
+    user_id: string;
+    name: string;
+    role: string;
+    roles: string[];
+    site_code: string | null;
+    permissions: Record<string, boolean>;
+  };
+}
+
+export async function registrarLogin(username: string, password: string): Promise<RegistrarLoginResult> {
+  return request('/auth/registrar-login', {
+    method: 'POST',
+    body: JSON.stringify({ username, password }),
+  });
+}
+
+export interface FieldRegistrar {
+  username: string;
+  display_name: string;
+  site_code: string | null;
+  active: boolean;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function listRegistrars(): Promise<FieldRegistrar[]> {
+  return request('/admin/registrars');
+}
+
+export async function createRegistrar(data: {
+  username: string;
+  password: string;
+  display_name: string;
+  site_code?: string;
+}): Promise<FieldRegistrar> {
+  return request('/admin/registrars', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function updateRegistrar(username: string, data: {
+  display_name?: string;
+  site_code?: string;
+  active?: boolean;
+  password?: string;
+}): Promise<FieldRegistrar> {
+  return request(`/admin/registrars/${encodeURIComponent(username)}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  });
+}
+
 /**
  * Fetch a customer's registration-signature JPEG with auth and return a
  * revocable object URL for inline display. Returns null when none is on file.
