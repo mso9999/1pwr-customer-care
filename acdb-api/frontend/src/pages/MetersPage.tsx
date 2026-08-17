@@ -12,6 +12,7 @@ import {
   getPoleForConnection,
   getProvisionedMeters,
   downloadMeterValidationKit,
+  type AssignPtbResult,
   type PaginatedResponse,
   type MeterAssignment,
 } from '../lib/api';
@@ -61,6 +62,7 @@ export default function MetersPage() {
   const [editPoleHasPtb, setEditPoleHasPtb] = useState(false);
   const [editGateway, setEditGateway] = useState('');
   const [siteGateways, setSiteGateways] = useState<string[]>([]);
+  const [ptbResult, setPtbResult] = useState<AssignPtbResult | null>(null);
   const [showUGPPicker, setShowUGPPicker] = useState(false);
   const [showPolePicker, setShowPolePicker] = useState(false);
 
@@ -286,6 +288,7 @@ export default function MetersPage() {
   const handleEdit = async () => {
     setBusy(true);
     setEditError('');
+    setPtbResult(null);
     try {
       // Update meter assignment (platform/role/note)
       await updateMeterAssignment(editMeterId, {
@@ -297,7 +300,7 @@ export default function MetersPage() {
       // connection. The backend derives the pole from the connection's service
       // drop when pole_id is omitted, so the pole always matches the customer.
       if ((editPoleId || editSurveyId) && editAccount) {
-        await assignPtb({
+        const res = await assignPtb({
           site: editAccount.match(/[A-Za-z]{2,4}$/)?.[0]?.toUpperCase() || '',
           account_number: editAccount,
           pole_id: editPoleId || undefined,
@@ -305,6 +308,10 @@ export default function MetersPage() {
           gateway_thing_name: editGateway || undefined,
           survey_id: editSurveyId || undefined,
         });
+        // Show the result instead of closing, so the operator sees the link landed.
+        setPtbResult(res);
+        fetchData();
+        return; // keep modal open to show the success panel
       }
       setModal(null);
       fetchData();
@@ -564,6 +571,27 @@ export default function MetersPage() {
               </button>
             </div>
 
+            {ptbResult ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
+                  <svg className="w-5 h-5 text-green-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span className="text-sm font-semibold text-green-800">Linked to pole / PTB</span>
+                </div>
+                <dl className="text-sm space-y-1.5">
+                  <div className="flex justify-between"><dt className="text-gray-500">Pole</dt><dd className="font-mono font-medium">{ptbResult.pole_id}</dd></div>
+                  <div className="flex justify-between"><dt className="text-gray-500">PTB</dt><dd className="font-mono font-medium">{ptbResult.ptb_id}{ptbResult.ptb_created ? ' (created)' : ' (existing)'}</dd></div>
+                  {ptbResult.gateway_thing_name && <div className="flex justify-between"><dt className="text-gray-500">Gateway</dt><dd className="font-mono font-medium">{ptbResult.gateway_thing_name}</dd></div>}
+                  <div className="flex justify-between"><dt className="text-gray-500">Meter serial</dt><dd className="font-mono font-medium">{ptbResult.meter_serial}</dd></div>
+                  {ptbResult.survey_id && <div className="flex justify-between"><dt className="text-gray-500">Connection</dt><dd className="font-mono font-medium">{ptbResult.survey_id}</dd></div>}
+                  <div className="flex justify-between"><dt className="text-gray-500">Account</dt><dd className="font-mono font-medium">{ptbResult.account_number}</dd></div>
+                </dl>
+                <p className="text-xs text-gray-500">The connection now carries the pole + meter serial in uGridPLAN, and the account is linked.</p>
+                <button onClick={() => { setPtbResult(null); setModal(null); }} className="w-full py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700">Done</button>
+              </div>
+            ) : (
+            <>
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">{t('meters:colPlatform')}</label>
@@ -649,6 +677,8 @@ export default function MetersPage() {
                 {busy ? t('meters:processing') : t('meters:saveAssignment')}
               </button>
             </div>
+            </>
+            )}
           </div>
         </div>
       )}
