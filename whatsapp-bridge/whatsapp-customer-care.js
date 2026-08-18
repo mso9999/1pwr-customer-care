@@ -1135,6 +1135,28 @@ function startInboundHttpServer() {
     }
 
     var server = http.createServer(function(req, res) {
+        // GET /groups — list WhatsApp groups the linked phone participates in.
+        // Used to discover group JIDs (e.g. for /broadcast targets).
+        if (req.method === "GET" && (req.url === "/groups" || req.url === "/groups/")) {
+            var getHdr = req.headers["x-bridge-secret"] || "";
+            if (getHdr !== secret) {
+                sendText(res, 401, "unauthorized");
+                return;
+            }
+            if (!isReady || !sock) {
+                sendJson(res, 503, { ok: false, reason: "wa_not_ready" });
+                return;
+            }
+            sock.groupFetchAllParticipating().then(function(groups) {
+                var list = Object.keys(groups).map(function(jid) {
+                    return { jid: jid, subject: groups[jid].subject || "" };
+                });
+                sendJson(res, 200, { ok: true, count: list.length, groups: list });
+            }).catch(function(e) {
+                sendJson(res, 500, { ok: false, reason: e && e.message ? e.message : String(e) });
+            });
+            return;
+        }
         if (req.method !== "POST") {
             res.writeHead(404);
             res.end();
