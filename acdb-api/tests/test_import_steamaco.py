@@ -34,7 +34,7 @@ def test_authenticate_with_username_password():
             client.authenticate()
         assert client.token == "abc123"
         args, kwargs = client._http.post.call_args
-        assert args[0].endswith("/api-token-auth/")
+        assert args[0].endswith("/get-token/")
         assert kwargs["json"] == {"username": "u", "password": "p"}
 
 

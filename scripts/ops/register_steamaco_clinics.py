@@ -42,19 +42,28 @@ logging.basicConfig(
 )
 log = logging.getLogger("register-steamaco-clinics")
 
-# (serial, site, display name, district)
-# Names are the Steamaco-platform customer labels from the weekly exports.
-# 0179221230065 had no customer label in the exports — NKU attribution is by
-# elimination (the NKU weekly file); CONFIRM before applying.
+# (serial, site, display name, customer_type)
+# Serial/name pairings confirmed against the live Steamaco Nimbus API
+# (2026-08-19, /meters/ + /customers/ on the 1pwr_onm account).
 CLINICS = [
-    ("0179221230032", "MAN", "Manamaneng Health Centre"),
-    ("0179221230040", "MET", "Methalananeng Health Centre"),
-    ("0179221230057", "KET", "Ketane Health Centre"),
-    ("0179221230065", "NKU", "Ha Nkau Health Centre"),   # confirm name/serial pairing
-    ("0179221230107", "BOB", "Bobete Health Centre"),
-    ("0179221230123", "LEB", "Lebakeng Health Centre"),
-    ("0179221230131", "TLH", "Tlhanyaku Health Centre"),
+    ("0179221230032", "MAN", "Manamaneng Health Centre", "HC"),
+    ("0179221230040", "MET", "Methalananeng Health Centre", "HC"),
+    ("0179221230057", "KET", "Ketane Health Centre", "HC"),
+    ("0179221230065", "NKU", "Ha Nkau Health Centre", "HC"),
+    ("0179221230107", "BOB", "Bobete Health Centre", "HC"),
+    ("0179221230123", "LEB", "Lebakeng Health Centre", "HC"),
+    ("0179221230131", "TLH", "Tlhanyaku Health Centre", "HC"),
+    # Institutional non-clinic accounts on the same Steamaco fleet:
+    ("0179221210059", "KET", "Ketane Police Station", "GOV"),
+    ("0179221210034", "LEB", "Lebakeng Council", "GOV"),
 ]
+
+# Known Steamaco meters deliberately NOT registered here (ops decision needed):
+#   0179221210042  Monnamoholo Badele (TLH/Thoteng, user_type=BUS)
+#   0179221230016  Rethabile Lempe (site unknown, BUS)
+#   0179221210026  Lesotho Sky Bikes (address "HQ")
+#   0179221210018  ONM TEST · 0179221230099 Ntate Khoali TEST  (test meters)
+#   0179221230024 / 0179221230073 / 0179221230081 / 0179221230115 (unassigned spares)
 
 CREATED_BY = "steamaco-registry"
 
@@ -69,7 +78,7 @@ def main() -> int:
 
     with get_connection() as conn:
         cur = conn.cursor()
-        for serial, site, name in CLINICS:
+        for serial, site, name, cust_type in CLINICS:
             cur.execute("SELECT 1 FROM meters WHERE meter_id = %s", (serial,))
             if cur.fetchone():
                 log.info("SKIP %s — meter %s already registered", site, serial)
@@ -81,7 +90,7 @@ def main() -> int:
             if not args.apply:
                 # next_account_number() is a pure MAX()-based read — no
                 # sequence is consumed by previewing it here.
-                log.info("DRY  %s -> %s  %s  (serial %s)", site, account, name, serial)
+                log.info("DRY  %s -> %s  %s [%s]  (serial %s)", site, account, name, cust_type, serial)
                 continue
 
             first, _, last = name.partition(" ")
@@ -90,10 +99,10 @@ def main() -> int:
                 INSERT INTO customers (
                     first_name, last_name, community, country, customer_type,
                     is_active, created_by, updated_by
-                ) VALUES (%s, %s, %s, 'Lesotho', 'HC', TRUE, %s, %s)
+                ) VALUES (%s, %s, %s, 'Lesotho', %s, TRUE, %s, %s)
                 RETURNING id
                 """,
-                (first, last or name, site, CREATED_BY, CREATED_BY),
+                (first, last or name, site, cust_type, CREATED_BY, CREATED_BY),
             )
             customer_id = cur.fetchone()[0]
 

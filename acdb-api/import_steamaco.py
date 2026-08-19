@@ -7,8 +7,8 @@ These meters report hourly to Steamaco's cloud; this job pulls the readings
 into 1PDB ``hourly_consumption`` with ``source='steamaco'`` so CC analytics,
 coverage audit, and monthly PIH consumption invoicing all read from 1PDB.
 
-API (per the documented Nimbus AMI / DRF-style API):
-  POST {base}/api-token-auth/  {username, password}  -> {"token": "..."}
+API (per the documented Nimbus AMI / DRF-style API; verified live 2026-08-19):
+  POST {base}/get-token/       {username, password}  -> {"token": "..."}
   GET  {base}/meters/?page_size=100                  -> paginated meter list
   GET  {base}/meters/{id}/utilities/1/readings/?start_time=..&end_time=..
        -> {"results": [{"timestamp", "reading", "usage_amount"}, ...]}
@@ -23,7 +23,7 @@ Env:
   STEAMACO_API_BASE       default https://api.steama.co
   STEAMACO_USERNAME / STEAMACO_PASSWORD   portal credentials (ui.steama.co)
   STEAMACO_TOKEN          optional pre-existing token (skips token POST)
-  STEAMACO_TOKEN_PATH     default /api-token-auth/
+  STEAMACO_TOKEN_PATH     default /get-token/
   STEAMACO_LOOKBACK_DAYS  first-run lookback when no watermark (default 7)
 
 Usage:
@@ -52,7 +52,7 @@ DATABASE_URL = os.environ.get(
     "postgresql://cc_api@localhost:5432/onepower_cc",
 )
 API_BASE = os.environ.get("STEAMACO_API_BASE", "https://api.steama.co").rstrip("/")
-TOKEN_PATH = os.environ.get("STEAMACO_TOKEN_PATH", "/api-token-auth/")
+TOKEN_PATH = os.environ.get("STEAMACO_TOKEN_PATH", "/get-token/")
 SOURCE = "steamaco"
 UTILITY_ID = 1  # electricity
 PAGE_SIZE = 100
@@ -228,6 +228,11 @@ def main() -> int:
         if args.dry_run:
             log.info("  %s (%s): %d hourly rows since %s [dry-run]",
                      serial, m["account_number"], len(deduped), start.date())
+            continue
+
+        if not deduped:
+            log.warning("  %s (%s): 0 readings since %s — meter may be offline",
+                        serial, m["account_number"], start.date())
             continue
 
         if deduped:
