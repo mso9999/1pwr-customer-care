@@ -719,3 +719,22 @@ Write SESSION_LOG.md entry with:
 - Key decisions
 - What next session should know
 - Protocol feedback (what was missing from docs?)
+
+## Canonical site lifecycle (PR → uGP → CC)
+
+Sites are **born in PR** (pre-survey spend), get exactly one **canonical
+uGP design** after survey (PR `linkUgpProject` enforces uniqueness), and
+arrive here via PR's `fanoutSiteChanges` → `POST /api/site-sync/ingest`
+(machine `X-API-Key`, env `CC_SITE_SYNC_API_KEY`; idempotent via
+`site_sync_events`).
+
+- Ingest stages new sites **inactive** (`country_sites`, `source='pr'`);
+  local activation happens at commissioning from the Site Registry UI
+  (`manage_site_registry` action, level C — Engineering/IS&T).
+- Activating a site with no canonical uGP design link returns 409 with
+  remediation detail; overriding requires `confirm_missing_ugp_link=true`
+  and is audited (`activated_without_ugp_link`).
+- PR-sourced rows are identity-read-only locally (name/district edit in
+  PR; syncs down). Local creation is a superadmin-only emergency path.
+- Code-defined (`country_config.py`) sites always win on identity; DB rows
+  only overlay the uGP association badge.
