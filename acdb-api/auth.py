@@ -802,7 +802,14 @@ async def verify_auth(request: Request, credentials=Depends(_verify_security)):
             ),
         )
     gate(user)
-    return Response(status_code=204)
+    # Surface the caller's signed O&M actions so nginx can forward them to the
+    # uGP adapter, which enforces action-level gates (e.g. approve_maintenance
+    # for ticket verify/close) that this URI-only subrequest cannot see.
+    if user.privilege_version:
+        headers = {"X-OM-Privilege-Actions": ",".join(user.privilege_actions or [])}
+    else:
+        headers = {"X-OM-Privilege-Fallback": "1"}
+    return Response(status_code=204, headers=headers)
 
 
 @router.get("/me")
