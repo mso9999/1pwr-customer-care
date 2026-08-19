@@ -29,7 +29,7 @@
       "title": "Cycle de vie nouveau client (parcours type)",
       "description": "De l’inscription au comptage ; adaptez aux procédures locales.",
       "steps": [
-        "Enregistrer le client (identité, téléphone, site/concession, type).",
+        "Enregistrer le client D'ABORD — avant tout paiement ou installation. L'enregistrement délivre le numéro de compte (ex. 0042MAK) dont le client a besoin comme référence pour payer le frais de raccordement ; rien d'autre ne peut commencer avant.",
         "Lorsque le client paie le frais de raccordement ou le tableau complet par mobile money, le portail reconnaît automatiquement le montant exact et le place en file de vérification — aucun rapprochement manuel requis. S'il ne peut pas payer la totalité, accordez plutôt une avance (voir le parcours Avances).",
         "Lancer l’assistant de mise en service pour vérifier les informations, signatures et documents.",
         "Attribuer ou confirmer le compteur et le numéro de série dans le registre.",

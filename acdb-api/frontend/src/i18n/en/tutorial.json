@@ -29,7 +29,7 @@
       "title": "New customer lifecycle (happy path)",
       "description": "End-to-end flow from registration through metering; align with your local SOPs.",
       "steps": [
-        "Register the customer (identity, phone, site/concession, customer type).",
+        "Register the customer FIRST — before any payment or installation. Registration issues the account number (e.g. 0042MAK) that the customer needs as the payment reference for the connection fee, so nothing else can start until this is done.",
         "When the customer pays the connection fee or full readyboard fee by mobile money, the portal recognises the exact amount automatically and queues it for finance verification — no manual matching required. If the customer can't pay it in full, grant an advance instead (see the Advances walkthrough).",
         "Run the commissioning wizard to verify details, signatures, and paperwork.",
         "Assign or confirm the meter and serial in the meter registry.",

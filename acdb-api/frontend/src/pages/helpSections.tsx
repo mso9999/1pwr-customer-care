@@ -341,12 +341,18 @@ function CustomerMgmtContent() {
         <P>La liste des clients permet une recherche textuelle par nom, numéro de compte et ID. Cliquez sur une ligne pour ouvrir la fiche détaillée du client.</P>
 
         <SubHead>Créer un nouveau client (<PageLink to="/customers/new">/customers/new</PageLink>)</SubHead>
-        <P>Rôles : <Bold>superadmin</Bold> ou <Bold>onm_team</Bold>.</P>
+        <P>Rôles : <Bold>superadmin</Bold> ou <Bold>onm_team</Bold>, ou un compte <Bold>inscripteur</Bold> de comité.</P>
         <Ol>
           <li>Cliquer sur <Bold>+ Nouveau client</Bold> ou naviguer vers <Code>/customers/new</Code>.</li>
           <li>Remplir : prénom, nom, ID national, téléphone, site/concession, type de client.</li>
           <li>Cliquer sur <Bold>Enregistrer</Bold>. Un numéro de compte est attribué automatiquement.</li>
         </Ol>
+        <Tip>
+          L&apos;enregistrement passe toujours <Bold>en premier</Bold> — avant le paiement du frais de
+          raccordement et avant toute installation de compteur. Le numéro de compte délivré à
+          l&apos;enregistrement est la référence de paiement du client : impossible de payer le frais
+          de raccordement sans être enregistré.
+        </Tip>
         <P>Si un site valide n&apos;apparaît pas dans la liste, voir la section <Bold>Sites et concessions</Bold> dans ce guide.</P>
         <Tip>
           Lors de la création d'un client, le compte est <Bold>automatiquement synchronisé avec SparkMeter</Bold> (Koios). Il n'est plus nécessaire de créer le client manuellement dans Koios.
@@ -384,12 +390,17 @@ function CustomerMgmtContent() {
       <P>The customer list supports text search across names, account numbers, and IDs. Click any customer row to open their detail page.</P>
 
       <SubHead>Register New Customer (<PageLink to="/customers/new">/customers/new</PageLink>)</SubHead>
-      <P>Requires role: <Bold>superadmin</Bold> or <Bold>onm_team</Bold>.</P>
+      <P>Requires role: <Bold>superadmin</Bold> or <Bold>onm_team</Bold>, or a committee <Bold>registrar</Bold> login.</P>
       <Ol>
         <li>Click <Bold>+ New Customer</Bold> or navigate to <Code>/customers/new</Code>.</li>
         <li>Fill in: first name, last name, national ID, phone number, site/concession, customer type.</li>
         <li>Click <Bold>Save</Bold>. An account number is assigned automatically.</li>
       </Ol>
+      <Tip>
+        Registration always comes <Bold>first</Bold> — before the connection fee is paid and before any
+        meter is installed. The account number issued at registration is the customer&apos;s payment
+        reference, so a customer cannot pay the connection fee until they are registered.
+      </Tip>
       <P>If a valid site does not appear in the dropdown, see <Bold>Sites & concessions</Bold> in this guide.</P>
       <Tip>
         When a customer is created, the account is <Bold>automatically synced to SparkMeter</Bold> (Koios). There is no need to manually create the customer in Koios.
