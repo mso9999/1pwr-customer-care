@@ -8072,6 +8072,11 @@ KET `meters` table: 172 of 173 rows have `ACCT-`placeholder meter_ids (no physic
 - **Rethabile Lempe** (0179221230016) → NOT registered: zero all-time readings in Nimbus — never wired/dark unit, not a customer.
 - Importer verified incremental on re-run (watermarks working; +2 rows each for live clinics).
 
+### Document control (2026-08-19 23:10 UTC, corrected 23:20)
+- ~~MGD068~~ → **MGD110V01** for the field guide. RCA of my error: I checked only the legacy Dropbox registry copies (max MGD067) — but (a) I missed the Sept-2024 copy, and (b) per user, **controlled documents are canonical in the online registry behind Nexus** (Firestore `controlledDocuments`, project pr-system-4ea55, DR app at doc.1pwrafrica.com). Canonical check showed MGD068 = "Commissioning and Operations SOP", series max = MGD109. Lesson: ALWAYS verify control numbers against the canonical Firestore registry (service account via `PR 25 NOV/firebase-service-account.json`), never the Dropbox xlsx copies.
+- **MGD110 reserved in the canonical registry** (title "Committee Tablet Registration Field Guide", status in_review) — version upload goes through the DR app UI.
+- MGD061V03 references + in-app Help updated to MGD110 (e1bbd65); docx files regenerated/renamed in Dropbox.
+
 ### CI incident (2026-08-19 18:35 UTC) — concurrent deploy collision
 - Two push-triggered deploy runs (mine 26d9ab2 + parallel session's 1b9d6b5) ran simultaneously against EOL and clobbered each other's `/tmp/cc-backend` staging dir → rsync `mkdir "/tmp/cc-backend/scripts/ops" failed: ENOENT` on attempt 1 of my run. Retry succeeded; the failed-then-succeeded run deployed the superset. Root fix: added a `concurrency` group (`deploy-cc-production`, cancel-in-progress: false) to `.github/workflows/deploy.yml` to serialize deploys.
 - BN (`onepower_bj`) has migration 066 recorded via CI; LS was applied+recorded manually.

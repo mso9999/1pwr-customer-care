@@ -658,6 +658,13 @@ historical only and should not be treated as evidence of an Access / ODBC stack.
 
 ---
 
+## Related System: Controlled Document Registry (canonical)
+
+- **Canonical store**: Firestore `controlledDocuments` collection, Firebase project `pr-system-4ea55`, surfaced via the **1PWR DR app** (doc.1pwrafrica.com) and Nexus.
+- **The Dropbox xlsx "Document Version Control Registry" copies are LEGACY/archival** — they disagree with each other and are NOT authoritative. Never assign MGD/MGF control numbers from them.
+- To verify/assign a control number: query `controlledDocuments` (service account at `PR 25 NOV/firebase-service-account.json`, DR repo at `AI Projects/1PWR DR`). Assign max+1 (gaps may be retired numbers).
+- New series get `status: "in_review"`; version files are uploaded via the DR app UI.
+
 ## Related System: uGridPlan
 
 | Item | Value |
