@@ -1328,6 +1328,20 @@ function AdminContent() {
           <li>Activer ou désactiver des comptes utilisateurs.</li>
         </Ul>
 
+        <SubHead>Comptes inscripteurs de comité (Field Registrars)</SubHead>
+        <P>
+          Les membres des comités villageois qui enregistrent les clients sur tablette utilisent des
+          comptes <Bold>inscripteur</Bold> — sans PIN mensuel du personnel, limités à la création de clients.
+          Gestion dans <PageLink to="/admin/roles">/admin/roles</PageLink>, section <Bold>Field Registrars</Bold> :
+        </P>
+        <Ol>
+          <li><Bold>Créer</Bold> : nom d'utilisateur (ex. <Code>mak-committee-1</Code>), nom affiché, mot de passe initial, et site lié facultatif (recommandé — limite le compte à son village).</li>
+          <li><Bold>Remettre</Bold> les identifiants au membre du comité et les consigner dans le registre des documents.</li>
+          <li><Bold>Réinitialiser le mot de passe</Bold> sur demande après vérification d'identité.</li>
+          <li><Bold>Désactiver</Bold> immédiatement si le membre quitte le comité ou si la tablette est perdue — l'effet est immédiat.</li>
+        </Ol>
+        <P>Connexion côté comité : onglet <Bold>Comité</Bold> sur la page de connexion. Chaque enregistrement est attribué au compte dans le journal d'audit.</P>
+
         <SubHead>Journal d'audit des modifications (<PageLink to="/mutations">/mutations</PageLink>)</SubHead>
         <P>Chaque modification de données (création, mise à jour, suppression) est enregistrée avec l'horodatage, l'utilisateur, la table/l'enregistrement concerné et les anciennes/nouvelles valeurs. Les modifications peuvent être examinées et annulées si nécessaire.</P>
 
@@ -1349,6 +1363,25 @@ function AdminContent() {
         <li>Assign or change roles (superadmin, onm_team, finance_team, generic).</li>
         <li>Activate or deactivate user accounts.</li>
       </Ul>
+
+      <SubHead>Field Registrar (Committee) Accounts</SubHead>
+      <P>
+        Village committee members who register customers on tablets sign in with
+        <Bold> registrar</Bold> accounts — no monthly staff PIN, and restricted to creating new
+        customers only. Managed under <PageLink to="/admin/roles">/admin/roles</PageLink> →
+        <Bold> Field Registrars</Bold> section:
+      </P>
+      <Ol>
+        <li><Bold>Create</Bold>: username (e.g. <Code>mak-committee-1</Code>), display name, initial password, and an optional site binding (recommended — confines the account to its own village).</li>
+        <li><Bold>Issue</Bold> the credentials to the committee member and record them per document control.</li>
+        <li><Bold>Reset password</Bold> on request after verifying the member's identity.</li>
+        <li><Bold>Deactivate</Bold> immediately when a member leaves the committee or a tablet is lost — takes effect at once.</li>
+      </Ol>
+      <P>
+        Committee members sign in via the <Bold>Committee</Bold> tab on the login page. Every registration
+        is attributed to the registrar account in the audit log. Full field procedure: MGD061 (Customer
+        Onboarding SOP) and MGD068 (Committee Tablet Registration Field Guide).
+      </P>
 
       <SubHead>Mutation Audit Trail (<PageLink to="/mutations">/mutations</PageLink>)</SubHead>
       <P>Every data change (create, update, delete) is logged with timestamp, user, table/record affected, and old/new values. Changes can be reviewed and reverted if needed.</P>
