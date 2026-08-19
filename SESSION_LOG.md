@@ -8054,3 +8054,18 @@ KET `meters` table: 172 of 173 rows have `ACCT-`placeholder meter_ids (no physic
 - NOT yet live: needs (a) deploy, (b) Steamaco creds into `/etc/default/cc-steamaco-import` on the host (STEAMACO_USERNAME/PASSWORD or TOKEN), (c) `register_steamaco_clinics.py --apply` after ops confirms the NKU serial pairing, (d) enable the timer.
 - No What's New folio entry yet on purpose — add one when the clinics actually appear in CC (user-visible), not for the infra alone.
 - First importer run after registration: use STEAMACO_LOOKBACK_DAYS to backfill (e.g. 90) if history depth is wanted for PIH reconciliation.
+
+### LIVE-ification (2026-08-19 evening) — DONE
+- Creds retrieved from Bitwarden (onm-team@1pwrafrica.com vault, entry "STEAMACO"; user re-authed after expired session). Written to `/etc/default/cc-steamaco-import` on EOL (root:cc_api 640).
+- **Live API validation**: token endpoint is `/get-token/` (NOT DRF-default `/api-token-auth/` — repo default fixed in 26d9ab2). Fleet = 18 meters, 13 customer-linked.
+- **NKU pairing CONFIRMED** via API: 0179221230065 = "NKU HC".
+- **Registry applied on prod** (9 accounts): 0001MAN, 0001MET, 0173KET (Ketane HC), 0001NKU, 0001BOB, 0001LEB (Lebakeng HC), 0102TLH, 0174KET (Ketane Police, GOV), 0002LEB (Lebakeng Council, GOV). All postpaid + steamaco priority.
+- **Migration 066** created + applied manually on LS (recorded in cc_schema_migrations): meter_platform enum += 'steamaco' (hit InvalidTextRepresentation on first apply attempt) + billing_meter_priority CHECK widened (hit check violation first). CI will apply to BN/ZM on next deploy.
+- **First import ran clean**: 7,260 hourly rows (90-day backfill) for the 4 LIVE clinic meters (MAN, MET, KET, NKU).
+- **FIELD-OPS FINDING — dark meters** (0 readings in 400d, all-time zero via API): Bobete HC (0179221230107), Lebakeng HC (0179221230123), Tlhanyaku HC (0179221230131), Ketane Police (0179221210059), LEB Council (0179221210034). Meters registered in Nimbus but silent — likely DCU/power/GSM down at those sites; need field visits. They'll auto-import when they come back (timer 4x daily, per-meter watermark).
+- Timer `cc-steamaco-import.timer` enabled on EOL (next 00:00 UTC).
+- Unregistered Steamaco meters pending ops decision: Monnamoholo Badele (TLH, BUS), Rethabile Lempe (site unknown, BUS), Lesotho Sky Bikes ("HQ"), 2 test, 4 spares.
+
+### CI incident (2026-08-19 18:35 UTC) — concurrent deploy collision
+- Two push-triggered deploy runs (mine 26d9ab2 + parallel session's 1b9d6b5) ran simultaneously against EOL and clobbered each other's `/tmp/cc-backend` staging dir → rsync `mkdir "/tmp/cc-backend/scripts/ops" failed: ENOENT` on attempt 1 of my run. Retry succeeded; the failed-then-succeeded run deployed the superset. Root fix: added a `concurrency` group (`deploy-cc-production`, cancel-in-progress: false) to `.github/workflows/deploy.yml` to serialize deploys.
+- BN (`onepower_bj`) has migration 066 recorded via CI; LS was applied+recorded manually.

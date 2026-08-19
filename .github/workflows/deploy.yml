@@ -6,6 +6,14 @@ on:
       - main
   workflow_dispatch:
 
+# Serialize deploys: two runs deploying concurrently clobber each other's
+# /tmp/cc-backend staging dir on the host (observed 2026-08-19: rsync
+# "mkdir /tmp/cc-backend/scripts/ops failed" when two push-triggered runs
+# overlapped). Queue later runs instead of cancelling them.
+concurrency:
+  group: deploy-cc-production
+  cancel-in-progress: false
+
 jobs:
   # ── Job 1: Build frontend on GitHub-hosted runner, deploy to Linux EC2 ──
   deploy-frontend:
