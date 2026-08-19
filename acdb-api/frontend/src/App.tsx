@@ -51,6 +51,7 @@ import AnalyticsPage from './pages/AnalyticsPage';
 import InvestorAnalyticsPage from './pages/InvestorAnalyticsPage';
 import CustomerCohortPage from './pages/CustomerCohortPage';
 import ProvisioningPage from './pages/ProvisioningPage';
+import SiteRegistryPage from './pages/SiteRegistryPage';
 import MeterConnectivityPage from './pages/MeterConnectivityPage';
 
 function HomeRedirect() {
@@ -96,6 +97,7 @@ export default function App() {
             <Route path="tariffs" element={<ProtectedRoute requireEmployee><TariffManagementPage /></ProtectedRoute>} />
             <Route path="check-meters" element={<ProtectedRoute requireEmployee><CheckMeterPage /></ProtectedRoute>} />
             <Route path="provisioning" element={<ProtectedRoute requireEmployee requireAction="operate_customer_care" requiredLevel="C"><ProvisioningPage /></ProtectedRoute>} />
+            <Route path="admin/sites" element={<ProtectedRoute requireEmployee requireAction="manage_site_registry" requiredLevel="C"><SiteRegistryPage /></ProtectedRoute>} />
             <Route path="meter-connectivity" element={<ProtectedRoute requireEmployee><MeterConnectivityPage /></ProtectedRoute>} />
             <Route path="billing-priority" element={<ProtectedRoute requireEmployee><BillingPriorityPage /></ProtectedRoute>} />
             <Route path="financing" element={<ProtectedRoute requireEmployee><FinancingPage /></ProtectedRoute>} />

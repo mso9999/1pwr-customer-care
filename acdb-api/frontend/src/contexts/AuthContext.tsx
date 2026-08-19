@@ -88,8 +88,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         ? effectiveRoles.some((role) => ['superadmin', 'onm_team', 'engineering'].includes(role))
         : action === 'approve_financial_and_control'
           ? effectiveRoles.some((role) => ['superadmin', 'onm_team', 'finance_team', 'engineering'].includes(role))
-          : action === 'administer_cc'
-            ? effectiveRoles.includes('superadmin')
+        : action === 'administer_cc'
+          ? effectiveRoles.includes('superadmin')
+          : action === 'manage_site_registry'
+            ? effectiveRoles.some((role) => ['superadmin', 'engineering'].includes(role))
             : false;
   const isSuperadmin = hasPrivilegeAction('administer_cc');
   const canWrite = hasSignedCcPrivilege

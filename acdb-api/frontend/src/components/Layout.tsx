@@ -12,6 +12,8 @@ interface NavItemDef {
   icon: string;
   accent?: boolean;
   superadminOnly?: boolean;
+  /** Nexus cc action required to see this item (claim-first, role fallback). */
+  action?: string;
 }
 
 interface NavSectionDef {
@@ -84,6 +86,7 @@ const EMPLOYEE_NAV: NavSectionDef[] = [
       { to: '/admin/programs', labelKey: 'nav.programs', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z', superadminOnly: true },
       { to: '/admin/coverage', labelKey: 'nav.coverage', icon: 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z', superadminOnly: true },
       { to: '/admin/sms-log', labelKey: 'nav.smsLog', icon: 'M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z', superadminOnly: true },
+      { to: '/admin/sites', labelKey: 'nav.siteRegistry', icon: 'M17.657 16.657L13.414 20.9a2 2 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z M15 11a3 3 0 11-6 0 3 3 0 016 0z', action: 'manage_site_registry' },
     ],
   },
 ];
@@ -107,7 +110,7 @@ function NavIcon({ d }: { d: string }) {
 }
 
 export default function Layout() {
-  const { user, logout, isEmployee, isCustomer, isRegistrar, isSuperadmin } = useAuth();
+  const { user, logout, isEmployee, isCustomer, isRegistrar, isSuperadmin, hasPrivilegeAction } = useAuth();
   const { country, setCountry, countries, portfolios, portfolio, setPortfolio } = useCountry();
   const { t, i18n } = useTranslation('common');
   const currentCountry = countries.find((c) => c.code === country);
@@ -127,6 +130,7 @@ export default function Layout() {
 
   const renderLink = (item: NavItemDef) => {
     if (item.superadminOnly && !isSuperadmin) return null;
+    if (item.action && !hasPrivilegeAction(item.action)) return null;
     const isExternal = !!item.href;
     const active = item.to ? isActive(item.to) : false;
     const cls = item.accent

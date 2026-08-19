@@ -26,7 +26,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from contract_gen import CONTRACTS_DIR
-from country_config import COUNTRY, KNOWN_SITES
+from country_config import COUNTRY, KNOWN_SITES, live_known_sites
 from country_fees import get_country_fees
 from db_auth import get_registrar
 from middleware import get_current_user, require_action, require_employee
@@ -278,7 +278,8 @@ def _validate_active_community(raw: str) -> str:
     from another country—from becoming part of account numbers and the ledger.
     """
     community = str(raw or "").strip().upper()
-    if not KNOWN_SITES:
+    known = live_known_sites(COUNTRY.code)
+    if not known:
         raise HTTPException(
             status_code=409,
             detail=(
@@ -287,12 +288,12 @@ def _validate_active_community(raw: str) -> str:
                 "roster before creating customers."
             ),
         )
-    if community not in KNOWN_SITES:
+    if community not in known:
         raise HTTPException(
             status_code=400,
             detail=(
                 f"Site '{community}' is not configured for {COUNTRY.name}. "
-                f"Choose one of: {', '.join(sorted(KNOWN_SITES))}."
+                f"Choose one of: {', '.join(sorted(known))}."
             ),
         )
     return community

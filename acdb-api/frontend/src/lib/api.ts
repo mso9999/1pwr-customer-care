@@ -361,6 +361,8 @@ export async function listRows(
     search?: string;
     filter_col?: string;
     filter_val?: string;
+    filters?: Record<string, string>;
+    linked?: string;
     filter_country?: string;
   } = {},
 ): Promise<PaginatedResponse> {
@@ -372,6 +374,8 @@ export async function listRows(
   if (params.search) qs.set('search', params.search);
   if (params.filter_col) qs.set('filter_col', params.filter_col);
   if (params.filter_val) qs.set('filter_val', params.filter_val);
+  if (params.filters && Object.keys(params.filters).length) qs.set('filters', JSON.stringify(params.filters));
+  if (params.linked) qs.set('linked', params.linked);
   if (params.filter_country) qs.set('filter_country', params.filter_country);
   return request(`/tables/${encodeURIComponent(table)}?${qs}`);
 }
@@ -1323,6 +1327,7 @@ export interface FleetMapMeter {
   status?: string;
   platform?: string;
   thing_name?: string;
+  linked?: boolean;
   last_seen?: string;
   online: boolean;
 }
@@ -1339,6 +1344,27 @@ export interface FleetMapResult {
 export async function getFleetMap(site?: string): Promise<FleetMapResult> {
   const qs = site ? `?site=${encodeURIComponent(site)}` : '';
   return request<FleetMapResult>(`/provisioning/fleet-map${qs}`);
+}
+
+export interface CustomerLinkage {
+  account_number: string;
+  linked: boolean;
+  meter_serial?: string | null;
+  thing_name?: string | null;
+  reporting_thing?: string | null;
+  pcb_mac?: string | null;
+  box_label?: string | null;
+  site?: string | null;
+  status?: string | null;
+  fw_version?: string | null;
+  commissioned_at?: string | null;
+  last_seen?: string | null;
+  online?: boolean;
+  pole_id?: string | null;
+}
+
+export async function getCustomerLinkage(account: string): Promise<CustomerLinkage> {
+  return request<CustomerLinkage>(`/provisioning/customer-linkage/${encodeURIComponent(account)}`);
 }
 
 export interface UpdateSurveyIdResult {
@@ -3187,6 +3213,50 @@ export interface CountryFees {
 
 export async function getCountryFees(): Promise<CountryFees> {
   return request('/admin/country-fees');
+}
+
+// ---------------------------------------------------------------------------
+// Canonical site registry (admin; Nexus manage_site_registry action)
+// ---------------------------------------------------------------------------
+
+export interface CountrySite {
+  country_code: string;
+  code: string;
+  name: string;
+  district: string | null;
+  active: boolean;
+  /** 'config' = code-defined in country_config.py (read-only in the UI). */
+  source: string;
+  created_by: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  retired_by: string | null;
+  retired_at: string | null;
+}
+
+export async function getCountrySites(): Promise<{ country_code: string; sites: CountrySite[] }> {
+  return request('/admin/country-sites');
+}
+
+export async function createCountrySite(payload: {
+  code: string;
+  name: string;
+  district?: string;
+}): Promise<{ ok: boolean; code: string }> {
+  return request('/admin/country-sites', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function updateCountrySite(
+  code: string,
+  payload: { name?: string; district?: string; active?: boolean }
+): Promise<{ ok: boolean } & CountrySite> {
+  return request(`/admin/country-sites/${encodeURIComponent(code)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function updateCountryFees(

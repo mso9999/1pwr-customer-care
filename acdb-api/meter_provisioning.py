@@ -178,12 +178,14 @@ def _active_site_map() -> dict[str, str]:
 
     Tests and legacy one-process tools without COUNTRY_CODE retain the global
     map, while deployed /api, /api/bn and /api/zm services fail closed to their
-    own country roster.
+    own country roster.  Both paths include the UI-managed ``country_sites``
+    overlay so sites created from the admin UI are usable without a redeploy.
     """
     if not os.environ.get("COUNTRY_CODE"):
-        return ALL_SITE_ABBREV
-    from country_config import COUNTRY
-    return COUNTRY.site_abbrev
+        from country_config import live_all_site_abbrev
+        return live_all_site_abbrev()
+    from country_config import COUNTRY, live_site_abbrev
+    return live_site_abbrev(COUNTRY.code)
 
 
 def _norm_mac(mac: str) -> str:

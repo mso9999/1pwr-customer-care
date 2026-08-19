@@ -57,11 +57,13 @@ function SiteAdditionGuide({
   countryName,
   open,
   showAdminLinks,
+  canManageSites,
 }: {
   countryCode?: string;
   countryName?: string;
   open?: boolean;
   showAdminLinks?: boolean;
+  canManageSites?: boolean;
 }) {
   return (
     <details open={open} className="rounded-xl border border-amber-300 bg-amber-50 p-4">
@@ -84,9 +86,23 @@ function SiteAdditionGuide({
             uGridPLAN project ID if used, payment scope, and the signed OTA release assignment.
           </li>
           <li>
-            <b>Engineering adds and deploys the canonical country configuration.</b> This is the
-            step that makes the site appear in CC. The uGridPLAN Sync and generation-site pages do
-            not create the canonical code.
+            <b>Engineering / IS&amp;T registers the canonical site code.</b> This is the step that
+            makes the site appear in CC.{' '}
+            {canManageSites ? (
+              <>
+                You hold the <code>manage_site_registry</code> action —{' '}
+                <Link to="/admin/sites" className="font-semibold text-blue-700 underline">
+                  open the Site Registry and add the site now
+                </Link>
+                ; it takes effect immediately, no deploy needed.
+              </>
+            ) : (
+              <>
+                A user with the <code>manage_site_registry</code> action (Engineering / IS&amp;T,
+                level C or above) adds it from the Site Registry admin page. The uGridPLAN Sync and
+                generation-site pages do not create the canonical code.
+              </>
+            )}
           </li>
           <li>
             After deployment, return here, select the country again, click <b>Refresh evidence</b>,
@@ -505,6 +521,7 @@ export default function ProvisioningPage() {
   const otaPercent = otaExpected ? Math.round((otaSucceeded / otaExpected) * 100) : 0;
   const canApproveRelease = hasPrivilegeAction('approve_financial_and_control');
   const canConfigureSiteSystems = hasPrivilegeAction('administer_cc');
+  const canManageSiteRegistry = hasPrivilegeAction('manage_site_registry');
   const selectedSiteProgress = guideSite ? countryReadiness?.site_progress?.[guideSite] : undefined;
   const foundationKeys = new Set(['sites', 'tariff', 'metering', 'payment_ingest', 'meter_credit']);
   const foundationsReady = Boolean(countryReadiness?.gates
@@ -754,6 +771,7 @@ export default function ProvisioningPage() {
               countryName={countryReadiness?.country_name}
               open={!guideSites.length}
               showAdminLinks={canConfigureSiteSystems}
+              canManageSites={canManageSiteRegistry}
             />
           )}
 
@@ -983,6 +1001,7 @@ export default function ProvisioningPage() {
                 countryName={countryReadiness.country_name}
                 open={!Object.keys(countryReadiness.sites).length}
                 showAdminLinks={canConfigureSiteSystems}
+                canManageSites={canManageSiteRegistry}
               />
             </>
           )}

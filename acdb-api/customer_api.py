@@ -324,6 +324,7 @@ from programs import router as programs_router
 from coverage_audit import router as coverage_audit_router
 from advances import router as advances_router
 from country_fees import router as country_fees_router
+from site_registry import router as site_registry_router
 from sms_log import router as sms_log_router
 from analytics import router as analytics_router
 from customer_cohort import router as customer_cohort_router
@@ -383,6 +384,7 @@ app.include_router(programs_router)
 app.include_router(coverage_audit_router)
 app.include_router(advances_router)
 app.include_router(country_fees_router)
+app.include_router(site_registry_router)
 app.include_router(sms_log_router)
 app.include_router(analytics_router)
 app.include_router(customer_cohort_router)
@@ -411,7 +413,8 @@ warm_stats_cache()
 @app.get("/api/config")
 def country_config_endpoint():
     """Return country-specific metadata for the frontend."""
-    from country_config import COUNTRY
+    from country_config import COUNTRY, live_site_abbrev
+    live_sites = live_site_abbrev(COUNTRY.code)
     effective_tariff = COUNTRY.default_tariff_rate
     try:
         with get_connection() as conn:
@@ -438,9 +441,9 @@ def country_config_endpoint():
         "currency": COUNTRY.currency,
         "currency_symbol": COUNTRY.currency_symbol,
         "dial_code": COUNTRY.dial_code,
-        "sites": COUNTRY.site_abbrev,
+        "sites": live_sites,
         "readiness": {
-            "customer_onboarding_enabled": bool(COUNTRY.site_abbrev),
+            "customer_onboarding_enabled": bool(live_sites),
             "tariff_configured": effective_tariff > 0,
             "metering_platform_configured": bool(
                 COUNTRY.koios_org_id and COUNTRY.koios_sites
@@ -716,7 +719,7 @@ def list_sites():
 
     Each entry carries a ``country`` field so UIs can group/badge by country.
     """
-    from country_config import COUNTRY, KNOWN_SITES
+    from country_config import COUNTRY, live_known_sites
 
     sql = """
         SELECT community, COUNT(*) AS customer_count
@@ -740,7 +743,8 @@ def list_sites():
 
             # Each API process owns one country database. Never leak another
             # country's static site list into this lane's onboarding UI.
-            all_codes = set(KNOWN_SITES) | set(counts.keys())
+            # live_known_sites includes UI-managed country_sites rows.
+            all_codes = live_known_sites(COUNTRY.code) | set(counts.keys())
             sites = [
                 {
                     "concession": code,

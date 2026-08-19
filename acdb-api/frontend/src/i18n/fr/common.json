@@ -59,6 +59,7 @@
     "financial": "Finances",
     "checkMeters": "Compteurs de contrôle",
     "provisioning": "Provisionnement",
+    "siteRegistry": "Registre des sites",
     "billingPriority": "Primauté de facturation",
     "maintenanceLog": "Journal de maintenance",
     "omTicketing": "Ticketing O&M",

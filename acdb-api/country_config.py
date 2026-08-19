@@ -13,6 +13,7 @@ Supported countries:
 """
 
 import os
+import time
 from dataclasses import dataclass, field
 from typing import Dict, Optional, Set
 
@@ -217,6 +218,99 @@ def get_country_for_site(site_code: str) -> Optional[str]:
     if not site_code:
         return None
     return _SITE_TO_COUNTRY.get(site_code.strip().upper())
+
+
+# ---------------------------------------------------------------------------
+# Live site registry overlay (DB-backed, UI-managed)
+# ---------------------------------------------------------------------------
+# Canonical sites were historically code-only (``site_abbrev`` above): adding
+# a deployment site required a code change plus a redeploy of the country
+# lane.  The ``country_sites`` table (migration 064) lets privileged
+# Engineering / IS&T staff create and retire sites from the CC admin UI
+# (Nexus ``manage_site_registry`` action) with no deploy.  These helpers
+# overlay active DB rows on the static config behind a short TTL cache.  Any
+# database error fails back to the last good cache (or the static config), so
+# a DB hiccup can never hide code-defined sites.
+
+_LIVE_SITE_TTL_SECONDS = 60.0
+_LIVE_SITE_CACHE_AT: float = 0.0
+_LIVE_SITE_CACHE: Dict[str, Dict[str, Dict[str, Optional[str]]]] = {}
+
+
+def _db_site_rows() -> Dict[str, Dict[str, Dict[str, Optional[str]]]]:
+    """All active UI-managed sites: {country: {code: {"name", "district"}}}."""
+    global _LIVE_SITE_CACHE_AT, _LIVE_SITE_CACHE
+    if time.monotonic() - _LIVE_SITE_CACHE_AT < _LIVE_SITE_TTL_SECONDS:
+        return _LIVE_SITE_CACHE
+    try:
+        from customer_api import get_connection  # lazy: customer_api imports us
+
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT country_code, code, name, district "
+                "FROM country_sites WHERE active = TRUE"
+            )
+            rows = cur.fetchall()
+    except Exception:
+        # Pre-migration table or DB unreachable: keep serving the last good
+        # cache (empty on first call => static config only). Stamp the cache
+        # time so a down DB is retried at most once per TTL, not per request.
+        _LIVE_SITE_CACHE_AT = time.monotonic()
+        return _LIVE_SITE_CACHE
+    grouped: Dict[str, Dict[str, Dict[str, Optional[str]]]] = {}
+    for country, code, name, district in rows:
+        cc = str(country or "").strip().upper()
+        sc = str(code or "").strip().upper()
+        if not cc or not sc:
+            continue
+        grouped.setdefault(cc, {})[sc] = {
+            "name": str(name or sc),
+            "district": str(district) if district else None,
+        }
+    _LIVE_SITE_CACHE = grouped
+    _LIVE_SITE_CACHE_AT = time.monotonic()
+    return grouped
+
+
+def reset_live_site_cache() -> None:
+    """Drop the overlay cache (used by tests and right after registry writes)."""
+    global _LIVE_SITE_CACHE_AT, _LIVE_SITE_CACHE
+    _LIVE_SITE_CACHE_AT = 0.0
+    _LIVE_SITE_CACHE = {}
+
+
+def live_site_abbrev(country_code: Optional[str] = None) -> Dict[str, str]:
+    """``site_abbrev`` for *country_code* (default: active) with DB overlay."""
+    cfg = get_country(country_code)
+    merged = dict(cfg.site_abbrev)
+    for code, row in _db_site_rows().get(cfg.code, {}).items():
+        merged[code] = str(row.get("name") or code)
+    return merged
+
+
+def live_site_districts(country_code: Optional[str] = None) -> Dict[str, str]:
+    """``site_districts`` for *country_code* (default: active) with DB overlay."""
+    cfg = get_country(country_code)
+    merged = dict(cfg.site_districts)
+    for code, row in _db_site_rows().get(cfg.code, {}).items():
+        if row.get("district"):
+            merged[code] = str(row["district"])
+    return merged
+
+
+def live_known_sites(country_code: Optional[str] = None) -> Set[str]:
+    """Active-country canonical site codes, static config ∪ DB overlay."""
+    return set(live_site_abbrev(country_code).keys())
+
+
+def live_all_site_abbrev() -> Dict[str, str]:
+    """Registry-wide ``ALL_SITE_ABBREV`` with the DB overlay applied."""
+    merged = dict(ALL_SITE_ABBREV)
+    for sites in _db_site_rows().values():
+        for code, row in sites.items():
+            merged[code] = str(row.get("name") or code)
+    return merged
 
 
 def get_tariff_rate_for_site(site_code: str) -> float:

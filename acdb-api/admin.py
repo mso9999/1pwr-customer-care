@@ -192,12 +192,13 @@ def create_field_registrar(
         raise HTTPException(status_code=409, detail=f"Registrar '{username}' already exists")
 
     if req.site_code:
-        from country_config import KNOWN_SITES
+        from country_config import live_known_sites
+        known = live_known_sites()
         site = req.site_code.strip().upper()
-        if KNOWN_SITES and site not in KNOWN_SITES:
+        if known and site not in known:
             raise HTTPException(
                 status_code=400,
-                detail=f"Site '{site}' is not configured for this country. Choose one of: {', '.join(sorted(KNOWN_SITES))}.",
+                detail=f"Site '{site}' is not configured for this country. Choose one of: {', '.join(sorted(known))}.",
             )
     else:
         site = None
@@ -232,12 +233,13 @@ def update_field_registrar(
         raise HTTPException(status_code=404, detail=f"No registrar '{username}'")
 
     if req.site_code is not None and req.site_code.strip():
-        from country_config import KNOWN_SITES
+        from country_config import live_known_sites
+        known = live_known_sites()
         site = req.site_code.strip().upper()
-        if KNOWN_SITES and site not in KNOWN_SITES:
+        if known and site not in known:
             raise HTTPException(
                 status_code=400,
-                detail=f"Site '{site}' is not configured for this country. Choose one of: {', '.join(sorted(KNOWN_SITES))}.",
+                detail=f"Site '{site}' is not configured for this country. Choose one of: {', '.join(sorted(known))}.",
             )
 
     password_hash = None

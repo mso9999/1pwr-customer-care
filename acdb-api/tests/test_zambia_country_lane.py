@@ -27,7 +27,7 @@ def test_zambia_identity_and_commercial_defaults_fail_closed():
 def test_zambia_registration_waits_for_approved_site_roster():
     with (
         patch.object(registration, "COUNTRY", country_config.ZAMBIA),
-        patch.object(registration, "KNOWN_SITES", set()),
+        patch.object(registration, "live_known_sites", return_value=set()),
         pytest.raises(HTTPException) as exc,
     ):
         registration._validate_active_community("ABC")
@@ -42,7 +42,7 @@ def test_zambia_rejects_foreign_or_unknown_site():
             "COUNTRY",
             SimpleNamespace(code="ZM", name="Zambia"),
         ),
-        patch.object(registration, "KNOWN_SITES", {"LUS"}),
+        patch.object(registration, "live_known_sites", return_value={"LUS"}),
         pytest.raises(HTTPException) as exc,
     ):
         registration._validate_active_community("GBO")
