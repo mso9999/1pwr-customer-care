@@ -3254,7 +3254,7 @@ export async function createCountrySite(payload: {
 
 export async function updateCountrySite(
   code: string,
-  payload: { name?: string; district?: string; active?: boolean }
+  payload: { name?: string; district?: string; active?: boolean; confirm_missing_ugp_link?: boolean }
 ): Promise<{ ok: boolean } & CountrySite> {
   return request(`/admin/country-sites/${encodeURIComponent(code)}`, {
     method: 'PATCH',
