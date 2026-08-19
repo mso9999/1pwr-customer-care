@@ -1380,7 +1380,7 @@ function AdminContent() {
       <P>
         Committee members sign in via the <Bold>Committee</Bold> tab on the login page. Every registration
         is attributed to the registrar account in the audit log. Full field procedure: MGD061 (Customer
-        Onboarding SOP) and MGD068 (Committee Tablet Registration Field Guide).
+        Onboarding SOP) and MGD110 (Committee Tablet Registration Field Guide).
       </P>
 
       <SubHead>Mutation Audit Trail (<PageLink to="/mutations">/mutations</PageLink>)</SubHead>
