@@ -116,12 +116,32 @@ class TestSiteSyncIngest(unittest.TestCase):
 
         assert out == {"ok": True, "applied": True, "action": "staged"}
         insert = next(w for w in writes if w[0].startswith("insert into country_sites"))
-        # active/source/created_by are inline literals (FALSE, 'pr', 'pr-site-sync')
+        # active/source are inline literals (FALSE, 'pr'); created_by is a bound
+        # parameter carrying the PR creator (falls back to 'pr-site-sync').
         assert "false" in insert[0] and "'pr'" in insert[0]
         params = insert[1]
         assert params[:4] == ("ZM", "CHI", "Chinsali", "Muchinga")
-        assert "CHI_minigrid" in params[4]  # ugp_project_ids json
-        assert params[5] == "CHI_minigrid"
+        assert params[4] == "pr-site-sync"  # no createdBy in payload
+        assert "CHI_minigrid" in params[5]  # ugp_project_ids json
+        assert params[6] == "CHI_minigrid"
+
+    def test_created_by_recorded_from_payload(self):
+        writes = []
+
+        def rows(sql, params):
+            writes.append((sql, params))
+            return []
+
+        with (
+            patch.object(country_config, "COUNTRY", country_config.ZAMBIA),
+            patch("customer_api.get_connection", return_value=_fake_conn(rows)),
+        ):
+            out = site_sync_ingest.ingest_site_event(
+                _event(createdBy="eduardo@1pwrafrica.com"), x_api_key=self._key)
+
+        assert out["action"] == "staged"
+        insert = next(w for w in writes if w[0].startswith("insert into country_sites"))
+        assert insert[1][4] == "eduardo@1pwrafrica.com"
 
     def test_update_preserves_local_activation(self):
         writes = []

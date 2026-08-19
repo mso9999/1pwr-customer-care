@@ -59,6 +59,8 @@ class SitePayloadIn(BaseModel):
     district: Optional[str] = None
     ugpProjects: list[UgpProjectLinkIn] = Field(default_factory=list)
     canonicalUgpProjectId: Optional[str] = None
+    createdBy: Optional[str] = None
+    createdAt: Optional[str] = None
 
 
 class SiteEventIn(BaseModel):
@@ -158,9 +160,10 @@ def ingest_site_event(event: SiteEventIn, x_api_key: Optional[str] = Header(None
             cur.execute(
                 "INSERT INTO country_sites (country_code, code, name, district, active, source, "
                 "created_by, ugp_project_ids, canonical_ugp_project_id) "
-                "VALUES (%s, %s, %s, %s, FALSE, 'pr', 'pr-site-sync', %s, %s) "
+                "VALUES (%s, %s, %s, %s, FALSE, 'pr', %s, %s, %s) "
                 "ON CONFLICT (country_code, code) DO NOTHING",
-                (COUNTRY.code, code, name, district, json.dumps(ugp_ids), canonical_ugp),
+                (COUNTRY.code, code, name, district,
+                 site.createdBy or 'pr-site-sync', json.dumps(ugp_ids), canonical_ugp),
             )
             action = "staged"
         conn.commit()
