@@ -8077,6 +8077,13 @@ KET `meters` table: 172 of 173 rows have `ACCT-`placeholder meter_ids (no physic
 - **MGD110 reserved in the canonical registry** (title "Committee Tablet Registration Field Guide", status in_review) — version upload goes through the DR app UI.
 - MGD061V03 references + in-app Help updated to MGD110 (e1bbd65); docx files regenerated/renamed in Dropbox.
 
+### Regularized as accepted (2026-08-19 23:25 UTC)
+- Both docs **published** in the canonical registry (doc.1pwrafrica.com), replicating the DR app's `uploadNewVersion(publishDirect=true)` write pattern via service account:
+  - **MGD061**: V03 docx uploaded to Storage (`controlled/MGD061/V03_*/…docx`), version approved+current (supersedes V02), series status=published. Note: series' Laravel-synced body_markdown still shows V02 text (syncedFrom=hr_portal) — the controlled FILE is V03; the HR-portal text body refreshes on the next Laravel re-publish.
+  - **MGD110**: V01 docx uploaded, approved+current, series status=published.
+- Audit entries written to `documentAuditLog` (event=version_published, uploadedBy="mso (agent-assisted)").
+- DRAFT banners removed from both .md sources; docx files renamed without DRAFT. Dropbox copies are now convenience copies — canonical is the DR registry.
+
 ### CI incident (2026-08-19 18:35 UTC) — concurrent deploy collision
 - Two push-triggered deploy runs (mine 26d9ab2 + parallel session's 1b9d6b5) ran simultaneously against EOL and clobbered each other's `/tmp/cc-backend` staging dir → rsync `mkdir "/tmp/cc-backend/scripts/ops" failed: ENOENT` on attempt 1 of my run. Retry succeeded; the failed-then-succeeded run deployed the superset. Root fix: added a `concurrency` group (`deploy-cc-production`, cancel-in-progress: false) to `.github/workflows/deploy.yml` to serialize deploys.
 - BN (`onepower_bj`) has migration 066 recorded via CI; LS was applied+recorded manually.
