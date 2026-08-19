@@ -10,6 +10,7 @@ os.environ.setdefault("CC_JWT_SECRET", "unit-test-secret")
 import country_config
 import customer_api  # noqa: F401  (assemble app so router imports resolve)
 import site_registry
+from models import CCRole
 
 
 def _fake_conn(rows_by_query):
@@ -75,8 +76,16 @@ class TestSiteRegistryApi(unittest.TestCase):
     def tearDown(self):
         country_config.reset_live_site_cache()
 
-    def _user(self):
-        return SimpleNamespace(email="eng@1pwrafrica.com", user_id="1PWR999")
+    def _user(self, role=CCRole.superadmin):
+        return SimpleNamespace(email="eng@1pwrafrica.com", user_id="1PWR999", role=role)
+
+    def test_create_requires_superadmin(self):
+        with self.assertRaises(Exception) as ctx:
+            site_registry.create_country_site(
+                site_registry.SiteCreate(code="CHI", name="Chinsali"),
+                self._user(role=CCRole.engineering),
+            )
+        assert getattr(ctx.exception, "status_code", None) == 403
 
     def test_create_rejects_malformed_code(self):
         with self.assertRaises(Exception) as ctx:
@@ -135,8 +144,8 @@ class TestSiteRegistryApi(unittest.TestCase):
         def rows(sql, params):
             if "from country_sites where country_code" in sql:
                 return [
-                    ("LS", "MAK", "Shadow Mak", None, True, "x", None, None, None, None, "ui"),
-                    ("LS", "NEW", "New Site", "Maseru", True, "x", None, None, None, None, "ui"),
+                    ("LS", "MAK", "Shadow Mak", None, True, "x", None, None, None, None, "ui", ["MAK_minigrid"], "MAK_minigrid"),
+                    ("LS", "NEW", "New Site", "Maseru", True, "x", None, None, None, None, "ui", [], None),
                 ]
             return []
 
@@ -148,8 +157,100 @@ class TestSiteRegistryApi(unittest.TestCase):
         by_code = {s["code"]: s for s in out["sites"]}
         assert by_code["MAK"]["source"] == "config"
         assert by_code["MAK"]["name"] != "Shadow Mak"
+        # uGP association overlays onto config-defined rows
+        assert by_code["MAK"]["canonical_ugp_project_id"] == "MAK_minigrid"
         assert by_code["NEW"]["source"] == "ui"
         assert by_code["NEW"]["district"] == "Maseru"
+
+    def _update_row(self, **over):
+        row = {
+            "country_code": "ZM", "code": "CHI", "name": "Chinsali", "district": "Muchinga",
+            "active": False, "created_by": "pr-site-sync", "created_at": None, "updated_at": None,
+            "retired_by": None, "retired_at": None, "source": "pr",
+            "ugp_project_ids": [], "canonical_ugp_project_id": None,
+        }
+        row.update(over)
+        return tuple(row[k] for k in (
+            "country_code", "code", "name", "district", "active", "created_by",
+            "created_at", "updated_at", "retired_by", "retired_at", "source",
+            "ugp_project_ids", "canonical_ugp_project_id",
+        ))
+
+    def test_update_blocks_identity_edit_on_pr_row(self):
+        row = self._update_row()
+
+        def rows(sql, params):
+            if "from country_sites where country_code" in sql:
+                return [row]
+            return []
+
+        with (
+            patch.object(country_config, "COUNTRY", country_config.ZAMBIA),
+            patch("customer_api.get_connection", return_value=_fake_conn(rows)),
+            self.assertRaises(Exception) as ctx,
+        ):
+            site_registry.update_country_site("CHI", site_registry.SiteUpdate(name="Renamed"), self._user())
+        assert getattr(ctx.exception, "status_code", None) == 409
+
+    def test_activation_without_ugp_link_requires_confirmation(self):
+        row = self._update_row()
+
+        def rows(sql, params):
+            if "from country_sites where country_code" in sql:
+                return [row]
+            return []
+
+        with (
+            patch.object(country_config, "COUNTRY", country_config.ZAMBIA),
+            patch("customer_api.get_connection", return_value=_fake_conn(rows)),
+            self.assertRaises(Exception) as ctx,
+        ):
+            site_registry.update_country_site("CHI", site_registry.SiteUpdate(active=True), self._user())
+        assert getattr(ctx.exception, "status_code", None) == 409
+        assert "uGP" in getattr(ctx.exception, "detail", "")
+
+    def test_activation_with_confirmation_audited(self):
+        row = self._update_row()
+        audited = {}
+
+        def rows(sql, params):
+            if "from country_sites where country_code" in sql:
+                return [row]
+            return []
+
+        def fake_audit(user, action, table, key, **kwargs):
+            audited.update(kwargs.get("metadata") or {})
+
+        with (
+            patch.object(country_config, "COUNTRY", country_config.ZAMBIA),
+            patch("customer_api.get_connection", return_value=_fake_conn(rows)),
+            patch("site_registry.try_log_mutation", side_effect=fake_audit),
+        ):
+            out = site_registry.update_country_site(
+                "CHI",
+                site_registry.SiteUpdate(active=True, confirm_missing_ugp_link=True),
+                self._user(),
+            )
+        assert out["ok"] is True
+        assert out["active"] is True
+        assert audited.get("activated_without_ugp_link") is True
+
+    def test_activation_with_ugp_link_needs_no_confirmation(self):
+        row = self._update_row(canonical_ugp_project_id="CHI_minigrid", ugp_project_ids=["CHI_minigrid"])
+
+        def rows(sql, params):
+            if "from country_sites where country_code" in sql:
+                return [row]
+            return []
+
+        with (
+            patch.object(country_config, "COUNTRY", country_config.ZAMBIA),
+            patch("customer_api.get_connection", return_value=_fake_conn(rows)),
+            patch("site_registry.try_log_mutation", return_value=None),
+        ):
+            out = site_registry.update_country_site("CHI", site_registry.SiteUpdate(active=True), self._user())
+        assert out["ok"] is True
+        assert out["active"] is True
 
 
 if __name__ == "__main__":

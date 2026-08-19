@@ -57,6 +57,9 @@ class SiteUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=2, max_length=120)
     district: Optional[str] = Field(None, max_length=120)
     active: Optional[bool] = None
+    # Required True when activating a site that has no canonical uGP design
+    # linked — the explicit "someone missed a step" acknowledgement.
+    confirm_missing_ugp_link: Optional[bool] = None
 
 
 def _lane_country() -> str:
@@ -72,6 +75,7 @@ def _config_codes() -> dict[str, str]:
 
 
 def _row_to_dict(row, *, source: str) -> dict:
+    ugp_ids = row[11] if len(row) > 11 else None
     return {
         "country_code": row[0],
         "code": row[1],
@@ -84,6 +88,8 @@ def _row_to_dict(row, *, source: str) -> dict:
         "updated_at": row[7].isoformat() if row[7] else None,
         "retired_by": row[8],
         "retired_at": row[9].isoformat() if row[9] else None,
+        "ugp_project_ids": list(ugp_ids) if ugp_ids else [],
+        "canonical_ugp_project_id": row[12] if len(row) > 12 else None,
     }
 
 
@@ -106,6 +112,8 @@ def list_country_sites(user: CurrentUser = Depends(CC_SITE_REGISTRY_GATE)):
             "updated_at": None,
             "retired_by": None,
             "retired_at": None,
+            "ugp_project_ids": [],
+            "canonical_ugp_project_id": None,
         }
 
     from customer_api import get_connection
@@ -114,14 +122,18 @@ def list_country_sites(user: CurrentUser = Depends(CC_SITE_REGISTRY_GATE)):
         cur = conn.cursor()
         cur.execute(
             "SELECT country_code, code, name, district, active, created_by, "
-            "       created_at, updated_at, retired_by, retired_at, source "
+            "       created_at, updated_at, retired_by, retired_at, source, "
+            "       ugp_project_ids, canonical_ugp_project_id "
             "FROM country_sites WHERE country_code = %s ORDER BY code",
             (COUNTRY.code,),
         )
         for row in cur.fetchall():
-            # Static config wins on conflict — the UI may never shadow a
-            # code-defined site.
+            # Static config wins on identity conflict — the UI may never
+            # shadow a code-defined site.  The DB row's uGP association
+            # metadata still overlays so legacy sites show the design link.
             if row[1] in out:
+                out[row[1]]["ugp_project_ids"] = list(row[11]) if row[11] else []
+                out[row[1]]["canonical_ugp_project_id"] = row[12]
                 continue
             out[row[1]] = _row_to_dict(row, source=row[10] or "ui")
 
@@ -130,6 +142,15 @@ def list_country_sites(user: CurrentUser = Depends(CC_SITE_REGISTRY_GATE)):
 
 @router.post("", status_code=201)
 def create_country_site(payload: SiteCreate, user: CurrentUser = Depends(CC_SITE_REGISTRY_GATE)):
+    """Emergency-only local creation.  Sites are born in PR (pre-survey
+    spend) and arrive here via the site-sync fanout staged inactive; this
+    path exists for superadmin break-glass situations only."""
+    if user.role != CCRole.superadmin:
+        raise HTTPException(
+            status_code=403,
+            detail="Sites are created in PR (Admin → Reference Data → Sites) and sync here automatically. "
+                   "Local creation is a superadmin-only emergency path.",
+        )
     from country_config import reset_live_site_cache
 
     code = payload.code.strip().upper()
@@ -207,14 +228,27 @@ def update_country_site(code: str, payload: SiteUpdate, user: CurrentUser = Depe
         cur = conn.cursor()
         cur.execute(
             "SELECT country_code, code, name, district, active, created_by, "
-            "       created_at, updated_at, retired_by, retired_at, source "
+            "       created_at, updated_at, retired_by, retired_at, source, "
+            "       ugp_project_ids, canonical_ugp_project_id "
             "FROM country_sites WHERE country_code = %s AND code = %s",
             (country, code),
         )
         row = cur.fetchone()
         if not row:
             raise HTTPException(status_code=404, detail=f"Site '{code}' not found in {country}.")
-        before = _row_to_dict(row, source="ui")
+        before = _row_to_dict(row, source=row[10] or "ui")
+
+        # PR-sourced rows: identity (name/district) is canonical in PR and
+        # syncs via fanout — only the lane-local activation state is editable.
+        if before["source"] == "pr" and (
+            (payload.name is not None and payload.name.strip() != before["name"])
+            or (payload.district is not None and (payload.district.strip() or None) != before["district"])
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=f"'{code}' is managed in PR; edit its name/district there and the change syncs here. "
+                       "Only activation is decided locally.",
+            )
 
         new_name = payload.name.strip() if payload.name else before["name"]
         new_district = (
@@ -228,6 +262,19 @@ def update_country_site(code: str, payload: SiteUpdate, user: CurrentUser = Depe
             raise HTTPException(status_code=400, detail="No changes supplied.")
 
         if new_active and not before["active"]:
+            # Activation at commissioning: the site should already carry its
+            # canonical uGP design link (PR registry → fanout).  Missing link
+            # means someone skipped the association step in uGP — require an
+            # explicit acknowledgement and audit it.
+            has_ugp_link = bool(before["canonical_ugp_project_id"] or before["ugp_project_ids"])
+            if not has_ugp_link and not payload.confirm_missing_ugp_link:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Site '{code}' has no canonical uGP design linked. Remediation: open the "
+                           "design in uGridPLAN and set its site association (or ask Engineering), then "
+                           "retry. To activate without the link anyway, resubmit with "
+                           "confirm_missing_ugp_link=true.",
+                )
             # Reactivation: the global active-code index protects uniqueness.
             cur.execute(
                 "UPDATE country_sites SET active = TRUE, retired_by = NULL, retired_at = NULL, "
@@ -259,7 +306,13 @@ def update_country_site(code: str, payload: SiteUpdate, user: CurrentUser = Depe
         f"{country}:{code}",
         old_values=before,
         new_values=after,
-        metadata={"kind": "country_site_update"},
+        metadata={
+            "kind": "country_site_update",
+            **({"activated_without_ugp_link": True}
+               if new_active and not before["active"]
+               and not (before["canonical_ugp_project_id"] or before["ugp_project_ids"])
+               else {}),
+        },
     )
     logger.info("country site updated: %s:%s by %s -> %s", country, code, user.email, after)
     return {"ok": True, **after}

@@ -3232,6 +3232,9 @@ export interface CountrySite {
   updated_at: string | null;
   retired_by: string | null;
   retired_at: string | null;
+  /** uGP design links mirrored from the PR canonical site registry. */
+  ugp_project_ids: string[];
+  canonical_ugp_project_id: string | null;
 }
 
 export async function getCountrySites(): Promise<{ country_code: string; sites: CountrySite[] }> {

@@ -5,10 +5,15 @@ import {
   updateCountrySite,
   type CountrySite,
 } from '../lib/api';
+import { useAuth } from '../contexts/AuthContext';
 
 const CODE_RE = /^[A-Z]{3}$/;
 
 export default function SiteRegistryPage() {
+  const { user } = useAuth();
+  const roles = user?.roles || user?.cc_roles || (user?.role ? [user.role] : []);
+  const isSuperadmin = roles.includes('superadmin');
+
   const [countryCode, setCountryCode] = useState('');
   const [sites, setSites] = useState<CountrySite[]>([]);
   const [loading, setLoading] = useState(true);
@@ -62,7 +67,7 @@ export default function SiteRegistryPage() {
         name: name.trim(),
         district: district.trim() || undefined,
       });
-      flash(`Site ${normalized} created. It is immediately available for provisioning and customer onboarding.`);
+      flash(`Site ${normalized} created (emergency local path). Prefer creating sites in PR so the full lifecycle is tracked.`);
       setCode('');
       setName('');
       setDistrict('');
@@ -82,11 +87,32 @@ export default function SiteRegistryPage() {
       flash(
         site.active
           ? `Site ${site.code} retired. It no longer appears for new provisioning or onboarding; existing accounts and gateways are unaffected.`
-          : `Site ${site.code} reactivated.`
+          : `Site ${site.code} activated for commissioning.`
       );
       await reload();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
+      // Activation without a canonical uGP design link requires an explicit
+      // acknowledgement — offer it inline.
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!site.active && msg.includes('confirm_missing_ugp_link')) {
+        const confirmed = window.confirm(
+          `${site.code} has no canonical uGP design linked.\n\n` +
+            `Remediation: open the design in uGridPLAN and set its site association ` +
+            `(or ask Engineering), then retry.\n\n` +
+            `Activate ${site.code} WITHOUT the design link? This is audited.`
+        );
+        if (confirmed) {
+          try {
+            await updateCountrySite(site.code, { active: true, confirm_missing_ugp_link: true });
+            flash(`Site ${site.code} activated without a uGP design link (audited).`);
+            await reload();
+          } catch (err2: unknown) {
+            setError(err2 instanceof Error ? err2.message : String(err2));
+          }
+        }
+      } else {
+        setError(msg);
+      }
     } finally {
       setBusy(false);
     }
@@ -100,11 +126,12 @@ export default function SiteRegistryPage() {
       <div className="mb-5">
         <h1 className="text-xl font-semibold text-gray-900">Site Registry — {countryCode}</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Canonical deployment site codes for this country. Creating a site here makes it
-          immediately available to provisioning, customer onboarding, and account numbering — no
-          code deploy required. Codes are three uppercase letters, are globally unique, and are
-          never reused: gateway identities and customer account numbers bind to them for life.
-          Retiring deactivates a code; it never deletes it.
+          Sites are born in <strong>PR</strong> (pre-survey spend), get their canonical design in{' '}
+          <strong>uGridPLAN</strong> after survey, and sync here automatically — staged inactive
+          until someone activates them at commissioning. Activating a site makes it available to
+          provisioning, customer onboarding, and account numbering. Codes are three uppercase
+          letters, globally unique, and never reused: gateway identities and customer account
+          numbers bind to them for life.
         </p>
       </div>
 
@@ -119,51 +146,59 @@ export default function SiteRegistryPage() {
         </div>
       )}
 
-      <form onSubmit={handleCreate} className="mb-6 rounded-xl border border-gray-200 bg-white p-4">
-        <h2 className="text-sm font-semibold text-gray-900 mb-3">Add a deployment site</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-[120px_1fr_1fr_auto] gap-3 items-end">
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Code</label>
-            <input
-              className={`${inputCls} uppercase font-mono`}
-              value={code}
-              onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3))}
-              placeholder="CHI"
-              maxLength={3}
-              required
-            />
+      {isSuperadmin ? (
+        <form onSubmit={handleCreate} className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <h2 className="text-sm font-semibold text-gray-900 mb-1">Emergency local creation</h2>
+          <p className="text-xs text-amber-800 mb-3">
+            Superadmin break-glass only. The normal path is PR → Admin → Reference Data → Sites;
+            sites created there sync here automatically.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-[120px_1fr_1fr_auto] gap-3 items-end">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Code</label>
+              <input
+                className={`${inputCls} uppercase font-mono`}
+                value={code}
+                onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3))}
+                placeholder="CHI"
+                maxLength={3}
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Official name</label>
+              <input
+                className={inputCls}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Chinsali"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">District / Province</label>
+              <input
+                className={inputCls}
+                value={district}
+                onChange={(e) => setDistrict(e.target.value)}
+                placeholder="Muchinga"
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={busy}
+              className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+            >
+              {busy ? 'Saving…' : 'Create site'}
+            </button>
           </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Official name</label>
-            <input
-              className={inputCls}
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Chinsali"
-              required
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">District / Province</label>
-            <input
-              className={inputCls}
-              value={district}
-              onChange={(e) => setDistrict(e.target.value)}
-              placeholder="Muchinga"
-            />
-          </div>
-          <button
-            type="submit"
-            disabled={busy}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            {busy ? 'Saving…' : 'Create site'}
-          </button>
+        </form>
+      ) : (
+        <div className="mb-6 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-900">
+          New sites are created in <strong>PR</strong> (Admin → Reference Data → Sites) at the
+          pre-survey stage and appear here automatically, staged inactive until commissioning.
         </div>
-        <p className="mt-2 text-xs text-gray-500">
-          Confirm the code with the country lead before creating — it cannot be changed afterwards.
-        </p>
-      </form>
+      )}
 
       <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
         <table className="min-w-full divide-y divide-gray-200 text-sm">
@@ -173,6 +208,7 @@ export default function SiteRegistryPage() {
               <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600">Name</th>
               <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600">District</th>
               <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600">Source</th>
+              <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600">uGP design</th>
               <th className="px-4 py-2 text-left text-xs font-semibold text-gray-600">Status</th>
               <th className="px-4 py-2" />
             </tr>
@@ -180,13 +216,13 @@ export default function SiteRegistryPage() {
           <tbody className="divide-y divide-gray-100">
             {loading ? (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-gray-400">
+                <td colSpan={7} className="px-4 py-6 text-center text-gray-400">
                   Loading…
                 </td>
               </tr>
             ) : sites.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-6 text-center text-gray-400">
+                <td colSpan={7} className="px-4 py-6 text-center text-gray-400">
                   No sites registered for {countryCode} yet.
                 </td>
               </tr>
@@ -201,6 +237,10 @@ export default function SiteRegistryPage() {
                       <span className="rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-600">
                         code-defined
                       </span>
+                    ) : site.source === 'pr' ? (
+                      <span className="rounded bg-purple-50 px-2 py-0.5 text-xs text-purple-700">
+                        PR registry
+                      </span>
                     ) : (
                       <span className="rounded bg-blue-50 px-2 py-0.5 text-xs text-blue-700">
                         registry
@@ -208,8 +248,33 @@ export default function SiteRegistryPage() {
                     )}
                   </td>
                   <td className="px-4 py-2">
+                    {site.canonical_ugp_project_id ? (
+                      <span
+                        className="rounded bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700"
+                        title={(site.ugp_project_ids || []).join(', ')}
+                      >
+                        {site.canonical_ugp_project_id}
+                      </span>
+                    ) : site.ugp_project_ids && site.ugp_project_ids.length > 0 ? (
+                      <span
+                        className="rounded bg-yellow-50 px-2 py-0.5 text-xs text-yellow-700"
+                        title="Designs linked but none marked canonical"
+                      >
+                        linked, none canonical
+                      </span>
+                    ) : (
+                      <span className="rounded bg-red-50 px-2 py-0.5 text-xs text-red-600">
+                        missing
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2">
                     {site.active ? (
                       <span className="rounded bg-green-50 px-2 py-0.5 text-xs text-green-700">active</span>
+                    ) : site.source === 'pr' && !site.retired_by ? (
+                      <span className="rounded bg-amber-50 px-2 py-0.5 text-xs text-amber-700">
+                        staged
+                      </span>
                     ) : (
                       <span className="rounded bg-gray-200 px-2 py-0.5 text-xs text-gray-600">
                         retired{site.retired_by ? ` by ${site.retired_by}` : ''}
@@ -228,7 +293,7 @@ export default function SiteRegistryPage() {
                             : 'text-blue-600 hover:text-blue-800'
                         } disabled:opacity-50`}
                       >
-                        {site.active ? 'Retire' : 'Reactivate'}
+                        {site.active ? 'Retire' : site.source === 'pr' ? 'Activate' : 'Reactivate'}
                       </button>
                     )}
                   </td>

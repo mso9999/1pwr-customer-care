@@ -86,21 +86,23 @@ function SiteAdditionGuide({
             uGridPLAN project ID if used, payment scope, and the signed OTA release assignment.
           </li>
           <li>
-            <b>Engineering / IS&amp;T registers the canonical site code.</b> This is the step that
-            makes the site appear in CC.{' '}
+            <b>Procurement registers the site in PR</b> (Admin → Reference Data → Sites) — sites
+            are born in PR at the pre-survey spend stage. After survey, the assigned engineer marks
+            exactly one uGridPLAN design as the site&apos;s canonical design. The site then syncs
+            here automatically, staged inactive.{' '}
             {canManageSites ? (
               <>
-                You hold the <code>manage_site_registry</code> action —{' '}
+                You hold the <code>manage_site_registry</code> action — once the synced site
+                appears,{' '}
                 <Link to="/admin/sites" className="font-semibold text-blue-700 underline">
-                  open the Site Registry and add the site now
-                </Link>
-                ; it takes effect immediately, no deploy needed.
+                  open the Site Registry and activate it
+                </Link>{' '}
+                to begin commissioning.
               </>
             ) : (
               <>
                 A user with the <code>manage_site_registry</code> action (Engineering / IS&amp;T,
-                level C or above) adds it from the Site Registry admin page. The uGridPLAN Sync and
-                generation-site pages do not create the canonical code.
+                level C or above) activates the synced site from the Site Registry admin page.
               </>
             )}
           </li>
