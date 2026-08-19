@@ -730,7 +730,9 @@ arrive here via PR's `fanoutSiteChanges` → `POST /api/site-sync/ingest`
 
 - Ingest stages new sites **inactive** (`country_sites`, `source='pr'`);
   local activation happens at commissioning from the Site Registry UI
-  (`manage_site_registry` action, level C — Engineering/IS&T).
+  (`manage_site_registry` action, level C — Engineering/IS&T). The PR
+  creator is recorded as `created_by` (payload `createdBy`, fallback
+  `pr-site-sync`).
 - Activating a site with no canonical uGP design link returns 409 with
   remediation detail; overriding requires `confirm_missing_ugp_link=true`
   and is audited (`activated_without_ugp_link`).
