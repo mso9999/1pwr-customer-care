@@ -1837,6 +1837,75 @@ def _pole_for_connection(lines: List[Dict[str, Any]], survey_id: str) -> Optiona
     return best
 
 
+def _connection_gps(conns: List[Dict[str, Any]], survey_id: str) -> Optional[tuple]:
+    """Return (lat, lng) for a connection by Survey_ID, or None.
+
+    uGridPLAN stores GPS_X = longitude, GPS_Y = latitude on the connection row.
+    """
+    sid = (survey_id or "").strip()
+    if not sid:
+        return None
+    for c in conns:
+        csv = str(c.get("Survey_ID") or c.get("surveyId") or c.get("ID") or "").strip()
+        if csv != sid:
+            continue
+        gx = c.get("GPS_X") or c.get("gps_x") or c.get("gpsX") or c.get("longitude")
+        gy = c.get("GPS_Y") or c.get("gps_y") or c.get("gpsY") or c.get("latitude")
+        try:
+            return (float(gy), float(gx))  # (lat, lng)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def sync_meter_gps_from_ugp(site_code: str, account_number: str, survey_id: str) -> bool:
+    """Set a meter's lat/lng from its uGridPLAN connection's real install GPS.
+
+    Root-cause fix for meters plotting on the placeholder village-center
+    coordinate: when a meter is bound to a uGP connection (commissioning /
+    assign-PTB), pull the connection's real GPS into the meters row so the fleet
+    map shows the true location. Best-effort; returns True if a meter row was
+    updated. Never raises (caller flows must not fail on a GPS sync).
+    """
+    acct = (account_number or "").strip()
+    sid = (survey_id or "").strip()
+    site = (site_code or "").strip().upper()
+    if not (acct and sid and site):
+        return False
+    try:
+        with get_auth_db() as conn:
+            row = conn.execute(
+                "SELECT project_id FROM cc_site_projects WHERE site_code = ?", (site,)
+            ).fetchone()
+        if not row:
+            return False
+        client = _get_ugp_client()
+        session_id = _load_project_for_site(client, row["project_id"])
+        conns = client.get_connections(session_id)
+        gps = _connection_gps(conns, sid)
+        if not gps:
+            return False
+        from customer_api import get_connection
+        with get_connection() as conn2:
+            cur = conn2.cursor()
+            cur.execute(
+                "UPDATE meters SET latitude = %s, longitude = %s, updated_at = NOW() "
+                "WHERE account_number = %s",
+                (gps[0], gps[1], acct),
+            )
+            conn2.commit()
+            n = cur.rowcount
+        if n:
+            logger.info(
+                "sync_meter_gps_from_ugp: set GPS for account %s (survey=%s) to %s,%s",
+                acct, sid, gps[0], gps[1],
+            )
+        return n > 0
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("sync_meter_gps_from_ugp failed for %s (survey=%s): %s", acct, sid, exc)
+        return False
+
+
 def _gateway_for_meter_serial(meter_serial: str) -> str:
     """Resolve the gateway Thing that reads a meter serial.
 
@@ -2296,6 +2365,14 @@ def assign_ptb(
                 pg.commit()
         except Exception as e:
             logger.warning("account survey_id bind failed for %s: %s", account_number, e)
+
+    # Set the meter's real install GPS from the uGP connection so it plots
+    # correctly on the fleet map (not the placeholder village-center coord).
+    if survey_id:
+        try:
+            sync_meter_gps_from_ugp(site_code, account_number, survey_id)
+        except Exception as e:
+            logger.warning("GPS sync from uGP failed for %s: %s", account_number, e)
 
     return {
         "status": "ok",

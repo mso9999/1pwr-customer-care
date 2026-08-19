@@ -63,7 +63,7 @@ import zipfile
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
@@ -2463,18 +2463,25 @@ def fleet_map(
 
     site_code = site.strip().upper() if site else None
 
-    # 1PDB meters with location
+    # 1PDB meters with location, flagged when the meter is a linked 1Meter
+    # (its serial appears in meter_provisioning).
     with get_connection() as conn:
         cur = conn.cursor()
         sql = """
-            SELECT meter_id, account_number, community, village_name,
-                   latitude, longitude, status, platform
-            FROM meters
-            WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+            SELECT m.meter_id, m.account_number, m.community, m.village_name,
+                   m.latitude, m.longitude, m.status, m.platform,
+                   (p.thing_name IS NOT NULL) AS linked,
+                   p.thing_name AS prov_thing
+            FROM meters m
+            LEFT JOIN meter_provisioning p
+              ON p.meter_serial = m.meter_id
+              OR p.meter_serial = m.meter_number
+              OR ltrim(p.meter_serial, '0') = ltrim(m.meter_id, '0')
+            WHERE m.latitude IS NOT NULL AND m.longitude IS NOT NULL
         """
         params: list = []
         if site_code:
-            sql += " AND community = %s"
+            sql += " AND m.community = %s"
             params.append(site_code)
         cur.execute(sql, params)
         cols = [d[0] for d in cur.description]
@@ -2487,7 +2494,7 @@ def fleet_map(
         start = None
         while True:
             kw = {"TableName": "meter_last_seen",
-                  "ProjectionExpression": "meterId, thingName, last_seen"}
+                  "ProjectionExpression": "meterId, thingName, last_seen, lastAcceptedTime"}
             if start:
                 kw["ExclusiveStartKey"] = start
             resp = ddb.scan(**kw)
@@ -2497,7 +2504,11 @@ def fleet_map(
                     return list(v.values())[0] if v else None
                 mid = g("meterId")
                 if mid:
-                    seen[mid] = {"thing_name": g("thingName"), "last_seen": g("last_seen")}
+                    # Fall back to lastAcceptedTime (the meter's last data sample) when
+                    # last_seen (ingestion timestamp) is absent — e.g. units that last
+                    # reported before the last_seen field was added to the pipeline.
+                    seen[mid] = {"thing_name": g("thingName"),
+                                 "last_seen": g("last_seen") or g("lastAcceptedTime")}
             start = resp.get("LastEvaluatedKey")
             if not start:
                 break
@@ -2542,7 +2553,8 @@ def fleet_map(
             "lng": lng,
             "status": m.get("status"),
             "platform": m.get("platform"),
-            "thing_name": thing,
+            "thing_name": thing or m.get("prov_thing"),
+            "linked": bool(m.get("linked")),
             "last_seen": last_seen,
             "online": online,
         })
@@ -2556,6 +2568,411 @@ def fleet_map(
         "no_gps": no_gps,
         "meters": out,
     }
+
+
+@router.get("/customer-linkage/{account_number}")
+def customer_meter_linkage(
+    account_number: str,
+    _user: CurrentUser = Depends(require_employee),
+):
+    """Meter & linkage card for a customer detail view.
+
+    For the given account, returns the linked 1Meter gateway (Thing / PCB), the
+    customer meter serial it reads, last-comms recency (from DynamoDB
+    `meter_last_seen`), and the physical pole/PTB (best-effort, from uGridPLAN
+    via the customer's connection). Read-only; employee-readable.
+    """
+    from datetime import datetime, timezone, timedelta
+    from customer_api import get_connection
+
+    acct = account_number.strip()
+    acct_upper = acct.upper()
+    # Normalised account without the site suffix (e.g. '4321MAK' -> '4321') so we
+    # match meter_provisioning rows whether they stored '4321MAK' or '4321'.
+    import re as _re
+    m = _re.match(r"^(\d{3,5})([A-Za-z]{2,4})?$", acct_upper)
+    bare = m.group(1) if m else None
+    site_suffix = m.group(2) if m else None
+
+    # 1) meter_provisioning row for this account (gateway Thing / PCB / serial).
+    #    Batch-provisioned gateways (MAK-GW-*) have account_number NULL — the link
+    #    to a customer is via the customer's METER serial (meters.account_number ->
+    #    meters.meter_id == meter_provisioning.meter_serial), so we fall back to a
+    #    serial join when the account match finds nothing.
+    prov = None
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT thing_name, meter_serial, pcb_mac, site, account_number, status,
+                   box_label, commissioned_at, fw_version
+            FROM meter_provisioning
+            WHERE UPPER(account_number) = %s OR UPPER(account_number) = %s
+            ORDER BY updated_at DESC NULLS LAST
+            LIMIT 1
+            """,
+            (acct_upper, bare or acct_upper),
+        )
+        row = cur.fetchone()
+        if not row:
+            # Serial join via the customer's meter (zero-normalised on both sides).
+            cur.execute(
+                """
+                SELECT p.thing_name, p.meter_serial, p.pcb_mac, p.site, p.account_number,
+                       p.status, p.box_label, p.commissioned_at, p.fw_version
+                FROM meter_provisioning p
+                WHERE p.meter_serial IS NOT NULL AND p.meter_serial <> ''
+                  AND EXISTS (
+                      SELECT 1 FROM meters m
+                      WHERE UPPER(m.account_number) = %s
+                        AND (ltrim(m.meter_id, '0') = ltrim(p.meter_serial, '0')
+                             OR ltrim(m.meter_number, '0') = ltrim(p.meter_serial, '0'))
+                  )
+                ORDER BY p.updated_at DESC NULLS LAST
+                LIMIT 1
+                """,
+                (acct_upper,),
+            )
+            row = cur.fetchone()
+        if row:
+            cols = [d[0] for d in cur.description]
+            prov = dict(zip(cols, row))
+
+        # 2) customer plot_number + community (for the pole lookup)
+        cust = None
+        try:
+            cur.execute(
+                "SELECT plot_number, community FROM customers WHERE UPPER(plot_number) LIKE %s LIMIT 1",
+                (f"%{bare}%" if bare else f"%{acct_upper}%",),
+            )
+            crow = cur.fetchone()
+            if crow:
+                cust = {"plot_number": crow[0], "community": crow[1]}
+        except Exception:
+            cust = None
+
+    if not prov:
+        return {"account_number": acct, "linked": False}
+
+    meter_serial = (prov.get("meter_serial") or "").strip()
+    thing_name = prov.get("thing_name")
+    site = (prov.get("site") or site_suffix or (cust or {}).get("community") or "").strip()
+
+    # 3) last comms from DynamoDB meter_last_seen (keyed by meter serial)
+    last_seen = None
+    reporting_thing = None
+    online = False
+    if meter_serial:
+        try:
+            ddb = _client("dynamodb")
+            variants = {meter_serial, meter_serial.lstrip("0") or meter_serial, meter_serial.zfill(12)}
+            for mv in variants:
+                resp = ddb.get_item(
+                    TableName="meter_last_seen",
+                    Key={"meterId": {"S": mv}},
+                    ProjectionExpression="meterId, thingName, last_seen, lastAcceptedTime",
+                )
+                it = resp.get("Item")
+                if it:
+                    # Fall back to lastAcceptedTime when last_seen is absent (units
+                    # that last reported before the last_seen field existed).
+                    last_seen = it.get("last_seen", {}).get("S") or it.get("lastAcceptedTime", {}).get("S")
+                    reporting_thing = it.get("thingName", {}).get("S")
+                    break
+            if last_seen:
+                dt = None
+                for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y%m%d%H%M"):
+                    try:
+                        dt = datetime.strptime(str(last_seen), fmt).replace(tzinfo=timezone.utc)
+                        break
+                    except ValueError:
+                        continue
+                online = bool(dt and dt >= (datetime.now(timezone.utc) - timedelta(hours=24)))
+        except Exception as exc:
+            logger.warning("customer-linkage meter_last_seen lookup failed: %s", exc)
+
+    # 4) pole/PTB best-effort from uGridPLAN via the customer's connection
+    pole_id = None
+    if cust and cust.get("plot_number") and site:
+        try:
+            import sync_ugridplan as sug
+            with sug.get_auth_db() as aconn:
+                prow = aconn.execute(
+                    "SELECT project_id FROM cc_site_projects WHERE site_code = ?",
+                    (site.upper(),),
+                ).fetchone()
+            if prow:
+                client = sug._get_ugp_client()
+                session_id = sug._load_project_for_site(client, prow["project_id"])
+                lines = client.get_lines(session_id)
+                # plot_number is the connection Survey_ID in the common case
+                pole_id = sug._pole_for_connection(lines, str(cust["plot_number"]).strip())
+        except Exception as exc:
+            logger.info("customer-linkage pole lookup failed (best-effort): %s", exc)
+
+    return {
+        "account_number": acct,
+        "linked": True,
+        "meter_serial": meter_serial or None,
+        "thing_name": thing_name,
+        "reporting_thing": reporting_thing,
+        "pcb_mac": prov.get("pcb_mac"),
+        "box_label": prov.get("box_label"),
+        "site": site or None,
+        "status": prov.get("status"),
+        "fw_version": prov.get("fw_version"),
+        "commissioned_at": str(prov.get("commissioned_at")) if prov.get("commissioned_at") else None,
+        "last_seen": last_seen,
+        "online": online,
+        "pole_id": pole_id,
+    }
+
+
+# --- Identity reconciliation & harmonization --------------------------------
+#
+# Canonical identity = the meter_provisioning record (the intentional,
+# account-linked Thing name). A unit's *reporting* identity (DynamoDB
+# meter_last_seen.thingName) should match it. Test identities (SiteTest*, and
+# rows flagged is_test) are excluded from the report per ops decision.
+
+_TEST_THING_PREFIXES = ("sitetest", "testsite", "test-")
+
+
+def _is_test_thing(name: str) -> bool:
+    n = (name or "").strip().lower()
+    return any(n.startswith(p) for p in _TEST_THING_PREFIXES)
+
+
+def _identity_reconciliation():
+    """Join meter_provisioning with meter_last_seen; categorize each unit.
+
+    Returns (categories, seen_map). categories: match / mismatch / silent /
+    unprovisioned. seen_map: meterId -> {thing, last_seen}.
+    """
+    from datetime import datetime, timezone
+    from customer_api import get_connection
+
+    prov = {}
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT DISTINCT ON (meter_serial)
+                   meter_serial, thing_name, account_number, site, pcb_mac, is_test, updated_at
+            FROM meter_provisioning
+            WHERE meter_serial IS NOT NULL AND meter_serial <> ''
+            ORDER BY meter_serial, updated_at DESC NULLS LAST
+            """
+        )
+        for s, t, a, site, pcb, is_test, _upd in cur.fetchall():
+            prov[(s or "").strip()] = {
+                "thing": t, "account": a, "site": site, "pcb": pcb,
+                "is_test": bool(is_test),
+            }
+
+    seen = {}
+    try:
+        ddb = _client("dynamodb")
+        start = None
+        while True:
+            kw = {"TableName": "meter_last_seen",
+                  "ProjectionExpression": "meterId, thingName, last_seen, lastAcceptedTime"}
+            if start:
+                kw["ExclusiveStartKey"] = start
+            resp = ddb.scan(**kw)
+            for it in resp.get("Items", []):
+                mid = it.get("meterId", {}).get("S")
+                if mid:
+                    seen[mid.strip()] = {
+                        "thing": it.get("thingName", {}).get("S"),
+                        "last_seen": it.get("last_seen", {}).get("S") or it.get("lastAcceptedTime", {}).get("S"),
+                    }
+            start = resp.get("LastEvaluatedKey")
+            if not start:
+                break
+    except Exception as exc:
+        logger.warning("reconcile meter_last_seen scan failed: %s", exc)
+
+    def norm(s):
+        return (s or "").lstrip("0") or s
+    seen_norm = {norm(k): v for k, v in seen.items()}
+
+    match, mismatch, silent = [], [], []
+    for serial, p in prov.items():
+        if p["is_test"] or _is_test_thing(p["thing"]):
+            continue
+        s = seen.get(serial) or seen_norm.get(norm(serial))
+        if not s:
+            silent.append({"meter_serial": serial, **p})
+        elif (s["thing"] or "") == (p["thing"] or ""):
+            match.append({"meter_serial": serial, **p, "last_seen": s["last_seen"]})
+        else:
+            mismatch.append({"meter_serial": serial, **p,
+                             "reporting_thing": s["thing"], "last_seen": s["last_seen"]})
+
+    prov_norms = {norm(k) for k in prov}
+    unprovisioned = [
+        {"meter_serial": k, "reporting_thing": v["thing"], "last_seen": v["last_seen"]}
+        for k, v in seen.items()
+        if k not in prov and norm(k) not in prov_norms and not _is_test_thing(v["thing"])
+    ]
+    return {"match": match, "mismatch": mismatch, "silent": silent,
+            "unprovisioned": unprovisioned}, seen
+
+
+@router.get("/reconcile-identities")
+def reconcile_identities(_user: CurrentUser = Depends(require_employee)):
+    """Categorized identity reconciliation report (match / mismatch / silent /
+    unprovisioned). Test identities excluded. Read-only; employee-readable."""
+    cats, _seen = _identity_reconciliation()
+    return {
+        "match_count": len(cats["match"]),
+        "mismatch_count": len(cats["mismatch"]),
+        "silent_count": len(cats["silent"]),
+        "unprovisioned_count": len(cats["unprovisioned"]),
+        **cats,
+    }
+
+
+def _parse_seen_dt(ts):
+    from datetime import datetime, timezone
+    if not ts:
+        return None
+    for fmt in ("%Y-%m-%dT%H:%M:%SZ", "%Y%m%d%H%M"):
+        try:
+            return datetime.strptime(str(ts), fmt).replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+    return None
+
+
+@router.post("/harmonize-identities")
+def harmonize_identities(
+    online_window_minutes: int = 15,
+    user: CurrentUser = Depends(CC_ADMIN_GATE),
+):
+    """Auto-harmonize identity mismatches: for every mismatched unit that is
+    currently online (reported within `online_window_minutes`), publish
+    ``cfg/identity`` to its *current* client id to rename it to the canonical
+    (provisioning-record) Thing, and lodge each action in the mutation log.
+
+    Works over MQTT without re-flashing because the DevicePolicy allows
+    ``iot:Connect`` on a wildcard resource (any client id). Offline units are
+    reported but skipped (rename only lands on a connected device).
+    """
+    from datetime import datetime, timezone, timedelta
+    cats, _seen = _identity_reconciliation()
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=online_window_minutes)
+
+    renamed, skipped_offline, failed = [], [], []
+    for row in cats["mismatch"]:
+        serial = row["meter_serial"]
+        canonical = row["thing"]
+        current = row["reporting_thing"]
+        seen_dt = _parse_seen_dt(row.get("last_seen"))
+        if not (seen_dt and seen_dt >= cutoff):
+            skipped_offline.append({"meter_serial": serial, "canonical": canonical,
+                                    "reporting": current, "last_seen": row.get("last_seen")})
+            continue
+        try:
+            _validate_thing_name(canonical)
+            mac = _norm_mac(row.get("pcb"))
+            site = (row.get("site") or "").strip().upper()
+            cert_arn, cert_id, cert_pem, key_pem = _issue_cert_and_payload(
+                canonical,
+                {"meter_serial": serial, "account": row.get("account") or "",
+                 "site": site, "legacy_id": current},
+                DEFAULT_POLICY,
+            )
+            identity_payload = {"thing_name": canonical, "version": 2,
+                                "cert_pem": cert_pem, "key_pem": key_pem}
+            topic = IDENTITY_TOPIC_FMT.format(client_id=current)
+            iotdata = _client("iot-data")
+            iotdata.publish(topic=topic, qos=1,
+                            payload=json.dumps(identity_payload).encode("utf-8"))
+            # Lodge in the mutation log (audit trail for the auto-rename).
+            try:
+                from customer_api import get_connection
+                with get_connection() as conn:
+                    try_log_mutation(
+                        user, "update", "meter_provisioning", canonical,
+                        new_values={"thing_name": canonical, "from_client_id": current,
+                                    "meter_serial": serial, "cert_id": cert_id},
+                        metadata={"kind": "auto_harmonize_identity",
+                                  "endpoint": "POST /api/provisioning/harmonize-identities",
+                                  "topic": topic, "pcb_mac": mac},
+                        conn=conn,
+                    )
+                    conn.commit()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("harmonize audit log failed: %s", exc)
+            renamed.append({"meter_serial": serial, "from": current, "to": canonical,
+                            "topic": topic})
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("harmonize failed for %s -> %s", current, canonical)
+            failed.append({"meter_serial": serial, "from": current, "to": canonical,
+                           "error": str(exc)})
+
+    return {
+        "renamed": renamed,
+        "renamed_count": len(renamed),
+        "skipped_offline": skipped_offline,
+        "skipped_offline_count": len(skipped_offline),
+        "failed": failed,
+        "failed_count": len(failed),
+        "note": "Online mismatches renamed to canonical via cfg/identity (logged in "
+                "mutation log). Offline units must be renamed when they next connect "
+                "or via the provisioning station.",
+    }
+
+
+IOT_INGEST_KEY = os.environ.get("IOT_INGEST_KEY", "1pwr-iot-ingest-2026")
+
+
+@router.post("/rename-event")
+def rename_event(
+    payload: dict,
+    x_iot_key: Optional[str] = Header(default=None, alias="X-IoT-Key"),
+):
+    """Lodge an applied identity rename in the mutation log.
+
+    Called by the ingestion_gate Lambda (shared-secret X-IoT-Key header, same
+    pattern as `/api/meters/reading`) after it publishes a queued `cfg/identity`
+    rename to a unit that came online. This is the audit trail for the
+    event-driven (no-cron) identity reconciliation.
+    """
+    if x_iot_key != IOT_INGEST_KEY:
+        raise HTTPException(status_code=403, detail="Invalid IoT key")
+
+    meter_id = str(payload.get("meter_id") or "")
+    from_thing = str(payload.get("from_thing") or "")
+    to_thing = str(payload.get("to_thing") or "")
+    status = str(payload.get("status") or "rename_published")
+    if not (meter_id and to_thing):
+        raise HTTPException(status_code=400, detail="meter_id and to_thing required")
+
+    # System identity for the audit row (the actor is the ingestion Lambda).
+    system_user = CurrentUser(
+        user_type="employee", user_id="ingestion_lambda",
+        role="system", name="Ingestion Lambda (auto-reconcile)",
+    )
+    try:
+        from customer_api import get_connection
+        with get_connection() as conn:
+            try_log_mutation(
+                system_user, "update", "meter_provisioning", to_thing,
+                old_values={"thing_name": from_thing} if from_thing else None,
+                new_values={"thing_name": to_thing, "meter_serial": meter_id},
+                metadata={"kind": "auto_rename_applied", "status": status,
+                          "source": "ingestion_gate Lambda", "meter_id": meter_id},
+                conn=conn,
+            )
+            conn.commit()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("rename-event mutation log failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"mutation log failed: {exc}")
+
+    return {"status": "logged", "meter_id": meter_id, "to_thing": to_thing}
 
 
 @router.get("/fleet-live")

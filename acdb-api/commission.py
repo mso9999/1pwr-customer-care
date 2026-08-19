@@ -430,6 +430,14 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
                     conn3.commit()
             except Exception as pe:
                 logger.warning("Could not persist survey_id binding for %s: %s", req.account_number, pe)
+
+            # Set the meter's real install GPS from the uGP connection so it plots
+            # correctly on the fleet map (not the placeholder village-center coord).
+            try:
+                from sync_ugridplan import sync_meter_gps_from_ugp
+                sync_meter_gps_from_ugp(req.site_code, req.account_number, survey_id)
+            except Exception as ge:
+                logger.warning("GPS sync from uGP failed for %s: %s", req.account_number, ge)
         else:
             logger.info(
                 "No UGP Survey_ID found for %s (legacy %s) — skipping UGP sync",

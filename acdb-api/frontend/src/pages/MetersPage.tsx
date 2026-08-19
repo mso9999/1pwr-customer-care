@@ -33,6 +33,7 @@ export default function MetersPage() {
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [filterSite, setFilterSite] = useState('');
+  const [filterLinked, setFilterLinked] = useState(false);
   const [filterCountry, setFilterCountry] = useState('');
   const [filterPlatform, setFilterPlatform] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
@@ -92,20 +93,24 @@ export default function MetersPage() {
 
   const fetchData = useCallback(() => {
     setLoading(true);
-    const filterCol = filterSite ? 'community' : filterPlatform ? 'platform' : filterStatus ? 'status' : undefined;
-    const filterVal = filterSite || filterPlatform || filterStatus || undefined;
+    // Combine site + platform + status into one multi-filter so they compose
+    // (previously selecting one cleared the others).
+    const filters: Record<string, string> = {};
+    if (filterSite) filters.community = filterSite;
+    if (filterPlatform) filters.platform = filterPlatform;
+    if (filterStatus) filters.status = filterStatus;
     listRows('meters', {
       page,
       limit: 50,
       search: search || undefined,
-      filter_col: filterCol,
-      filter_val: filterVal,
+      filters,
+      linked: filterLinked ? 'true' : undefined,
       filter_country: !filterSite && filterCountry ? filterCountry : undefined,
     })
       .then(setData)
       .catch(() => setData(null))
       .finally(() => setLoading(false));
-  }, [page, search, filterSite, filterCountry, filterPlatform, filterStatus]);
+  }, [page, search, filterSite, filterCountry, filterPlatform, filterStatus, filterLinked]);
 
   useEffect(fetchData, [fetchData]);
   useEffect(() => { setSelected(new Set()); }, [page, search, filterSite, filterCountry, filterPlatform, filterStatus]);
@@ -415,11 +420,11 @@ export default function MetersPage() {
         <CountryPill
           sites={sites}
           value={filterCountry}
-          onChange={c => { setFilterCountry(c); setFilterPlatform(''); setFilterStatus(''); setPage(1); }}
+          onChange={c => { setFilterCountry(c); setPage(1); }}
         />
         <select
           value={filterSite}
-          onChange={e => { setFilterSite(e.target.value); setFilterPlatform(''); setFilterStatus(''); setPage(1); }}
+          onChange={e => { setFilterSite(e.target.value); setPage(1); }}
           className="w-full sm:w-auto px-3 py-2 border rounded-lg text-sm bg-white"
         >
           <option value="">{t('meters:allSites')}</option>
@@ -427,7 +432,7 @@ export default function MetersPage() {
         </select>
         <select
           value={filterPlatform}
-          onChange={e => { setFilterPlatform(e.target.value); setFilterSite(''); setFilterStatus(''); setPage(1); }}
+          onChange={e => { setFilterPlatform(e.target.value); setPage(1); }}
           className="w-full sm:w-auto px-3 py-2 border rounded-lg text-sm bg-white"
         >
           <option value="">{t('meters:allPlatforms')}</option>
@@ -435,12 +440,21 @@ export default function MetersPage() {
         </select>
         <select
           value={filterStatus}
-          onChange={e => { setFilterStatus(e.target.value); setFilterSite(''); setFilterPlatform(''); setPage(1); }}
+          onChange={e => { setFilterStatus(e.target.value); setPage(1); }}
           className="w-full sm:w-auto px-3 py-2 border rounded-lg text-sm bg-white"
         >
           <option value="">{t('meters:allStatuses')}</option>
           {['active', 'maintenance', 'faulty', 'test', 'decommissioned'].map(s => <option key={s} value={s}>{s}</option>)}
         </select>
+        <label className="flex items-center gap-1.5 px-3 py-2 border rounded-lg text-sm bg-white cursor-pointer text-gray-700" title="Show only meters linked to a 1Meter gateway">
+          <input
+            type="checkbox"
+            checked={filterLinked}
+            onChange={e => { setFilterLinked(e.target.checked); setPage(1); }}
+            className="rounded"
+          />
+          1Meter linked
+        </label>
       </div>
 
       {canWriteCustomers && selected.size > 0 && (
@@ -873,7 +887,11 @@ export default function MetersPage() {
       )}
 
       {viewMode === 'map' ? (
-        <FleetMap site={filterSite || undefined} />
+        <FleetMap
+          site={filterSite || undefined}
+          sites={visibleSites}
+          onSiteChange={(s) => { setFilterSite(s); setFilterPlatform(''); setFilterStatus(''); }}
+        />
       ) : loading || busy ? (
         <div className="text-center py-8 text-gray-400">{busy ? t('meters:processing') : t('meters:loading')}</div>
       ) : !data || data.rows.length === 0 ? (

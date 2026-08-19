@@ -11,6 +11,7 @@ import {
   uploadPaymentProof, listPaymentProofs, paymentProofDownloadUrl,
   type InferredPaymentStatus, type PaymentProof,
   fetchRegistrationSignatureUrl,
+  getCustomerLinkage, type CustomerLinkage,
 } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useCountry } from '../contexts/CountryContext';
@@ -290,6 +291,7 @@ export default function CustomerDetailPage() {
   const [cohortStatus, setCohortStatus] = useState<InferredCohortStatus | null>(null);
   const [selectedCohortOverride, setSelectedCohortOverride] = useState('');
   const [cohortOverrideSaving, setCohortOverrideSaving] = useState(false);
+  const [linkage, setLinkage] = useState<CustomerLinkage | null>(null);
   const { canWrite, canWriteCustomers, isSuperadmin, user } = useAuth();
   const { config } = useCountry();
   const { t } = useTranslation(['customerDetail', 'customerCohort', 'common']);
@@ -376,6 +378,13 @@ export default function CustomerDetailPage() {
     getInferredCohortStatus(cid).then(setCohortStatus).catch(() => {});
     listPaymentProofs(cid).then(({ proofs: p }) => setProofs(p)).catch(() => {});
   }, [pgId]);
+
+  // Meter & linkage (gateway Thing/PCB, last comms, pole) for this account
+  useEffect(() => {
+    const acct = (accountNumber || urlParam || '').trim();
+    if (!acct) { setLinkage(null); return; }
+    getCustomerLinkage(acct).then(setLinkage).catch(() => setLinkage(null));
+  }, [accountNumber, urlParam]);
 
   // Registration signature image (object URL), when one was captured at registration
   const [signatureUrl, setSignatureUrl] = useState<string | null>(null);
@@ -637,6 +646,38 @@ export default function CustomerDetailPage() {
                 </svg>
               </button>
             ))}
+          </div>
+        </div>
+      )}
+
+      {linkage && linkage.linked && (
+        <div className="bg-white rounded-lg shadow p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Meter &amp; Linkage</h2>
+            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${linkage.online ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+              <span className={`w-2 h-2 rounded-full ${linkage.online ? 'bg-green-600' : 'bg-gray-400'}`} />
+              {linkage.online ? 'Online' : 'Offline'}
+            </span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
+            {linkage.meter_serial && (
+              <div className="flex justify-between gap-2"><span className="text-gray-500">Meter serial</span><span className="font-mono font-medium text-gray-800">{linkage.meter_serial}</span></div>
+            )}
+            {(linkage.reporting_thing || linkage.thing_name) && (
+              <div className="flex justify-between gap-2"><span className="text-gray-500">Thing (PCB)</span><span className="font-mono font-medium text-gray-800">{linkage.reporting_thing || linkage.thing_name}</span></div>
+            )}
+            {linkage.pcb_mac && (
+              <div className="flex justify-between gap-2"><span className="text-gray-500">PCB MAC</span><span className="font-mono font-medium text-gray-800">{linkage.pcb_mac}</span></div>
+            )}
+            {linkage.pole_id && (
+              <div className="flex justify-between gap-2"><span className="text-gray-500">Pole / PTB</span><span className="font-mono font-medium text-gray-800">{linkage.pole_id}</span></div>
+            )}
+            {linkage.last_seen && (
+              <div className="flex justify-between gap-2"><span className="text-gray-500">Last comms</span><span className="font-medium text-gray-800">{linkage.last_seen}</span></div>
+            )}
+            {linkage.site && (
+              <div className="flex justify-between gap-2"><span className="text-gray-500">Site</span><span className="font-medium text-gray-800">{linkage.site}</span></div>
+            )}
           </div>
         </div>
       )}

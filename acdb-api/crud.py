@@ -296,6 +296,23 @@ def list_rows(
     search: Optional[str] = Query(None, description="Search across text columns"),
     filter_col: Optional[str] = Query(None, description="Column to filter"),
     filter_val: Optional[str] = Query(None, description="Value to filter by"),
+    filters: Optional[str] = Query(
+        None,
+        description=(
+            "JSON object of column->value equality filters ANDed together, e.g. "
+            "``{\"community\":\"MAK\",\"platform\":\"1meter\"}``. Composes with "
+            "filter_col/filter_val. Column names are whitelisted against the "
+            "table's actual columns."
+        ),
+    ),
+    linked: Optional[str] = Query(
+        None,
+        description=(
+            "meters table only: 'true' = linked to a 1Meter gateway (meter serial "
+            "present in meter_provisioning), 'false' = not linked. Composes with "
+            "the column filters."
+        ),
+    ),
     filter_country: Optional[str] = Query(
         None,
         description=(
@@ -380,6 +397,41 @@ def list_rows(
         if filter_col and filter_val:
             where_clauses.append(f"{table_name}.{filter_col} = %s")
             params.append(filter_val)
+
+        # Multi-filter: JSON object of column->value equality filters, ANDed.
+        # Each column name is whitelisted against the table's real columns (same
+        # SQL-injection guard as filter_col) before being interpolated.
+        if filters:
+            import json as _json
+            try:
+                fmap = _json.loads(filters)
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail="Invalid `filters` JSON")
+            if not isinstance(fmap, dict):
+                raise HTTPException(status_code=400, detail="`filters` must be a JSON object")
+            for fcol, fval in fmap.items():
+                _validate_identifier(str(fcol), valid_cols, kind="filters")
+                if fval is None or str(fval) == "":
+                    continue
+                where_clauses.append(f"{table_name}.{str(fcol)} = %s")
+                params.append(str(fval))
+
+        # 1Meter-linkage filter (meters only): a meter is "linked" when its serial
+        # appears in meter_provisioning (i.e. a 1Meter gateway reads it). Fixed
+        # subquery — no user input is interpolated, so this is injection-safe.
+        if linked and table_name.lower() == "meters":
+            sub = (
+                "EXISTS (SELECT 1 FROM meter_provisioning p WHERE "
+                f"ltrim(p.meter_serial,'0') = ltrim({table_name}.meter_id,'0') OR "
+                f"ltrim(p.meter_serial,'0') = ltrim({table_name}.meter_number,'0'))"
+            )
+            lv = linked.strip().lower()
+            if lv == "true":
+                where_clauses.append(sub)
+            elif lv == "false":
+                where_clauses.append(f"NOT {sub}")
+            else:
+                raise HTTPException(status_code=400, detail="linked must be 'true' or 'false'")
 
         # Country filter — narrows to that country's communities. Skipped when
         # a more specific community equality filter is already in play.
