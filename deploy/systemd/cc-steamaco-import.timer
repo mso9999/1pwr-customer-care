@@ -1,0 +1,9 @@
+[Unit]
+Description=Steamaco clinic-meter consumption import (4x daily)
+
+[Timer]
+OnCalendar=*-*-* 00,06,12,18:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

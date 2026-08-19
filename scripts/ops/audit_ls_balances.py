@@ -189,7 +189,13 @@ def fetch_sparkmeter_balances() -> dict[str, tuple[float, float, float]]:
 
 def compute_1pdb_balances(conn) -> dict[str, float]:
     cur = conn.cursor()
-    cur.execute("SELECT DISTINCT account_number FROM accounts ORDER BY account_number")
+    # Postpaid institutional accounts (Steamaco clinic meters) have no
+    # SparkMeter counterpart by design — exclude them from the SM comparison.
+    cur.execute(
+        "SELECT DISTINCT account_number FROM accounts "
+        "WHERE COALESCE(billing_model, 'prepaid') = 'prepaid' "
+        "ORDER BY account_number"
+    )
     accounts = [row[0] for row in cur.fetchall()]
     cur.close()
 

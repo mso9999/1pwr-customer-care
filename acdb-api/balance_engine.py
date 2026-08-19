@@ -35,13 +35,15 @@ from datetime import datetime, timezone
 logger = logging.getLogger("cc-api.balance")
 
 
-VALID_PRIORITIES = ("sm", "1m")
+VALID_PRIORITIES = ("sm", "1m", "steamaco")
 DEFAULT_PRIORITY = "sm"
 
 # hourly_consumption.source values that count as the SM (SparkMeter) primary.
 SM_SOURCES = ("thundercloud", "koios")
 # hourly_consumption.source value that counts as the 1M (1Meter) check.
 M1_SOURCES = ("iot",)
+# Steamaco Savi clinic meters (postpaid institutional accounts).
+STEAMACO_SOURCES = ("steamaco",)
 
 
 def _resolve_billing_priority(cur, account_number: str) -> str:
@@ -79,7 +81,8 @@ def _resolve_billing_priority(cur, account_number: str) -> str:
 
 def _consumption_kwh(cur, account_number: str, priority: str) -> float:
     """Sum live consumption from ``hourly_consumption`` for *account_number*
-    using the source-priority rule for *priority* (``'sm'`` or ``'1m'``).
+    using the source-priority rule for *priority* (``'sm'``, ``'1m'``, or
+    ``'steamaco'``).
 
     Per (account, reading_hour) the chosen source wins; the other only fills
     a genuine gap (no row from the chosen source for that hour). This
@@ -100,7 +103,8 @@ def _consumption_kwh(cur, account_number: str, priority: str) -> float:
         WITH per_hour AS (
             SELECT reading_hour,
                 MAX(kwh) FILTER (WHERE source = ANY(%s::transaction_source[])) AS sm_kwh,
-                MAX(kwh) FILTER (WHERE source = ANY(%s::transaction_source[])) AS m1_kwh
+                MAX(kwh) FILTER (WHERE source = ANY(%s::transaction_source[])) AS m1_kwh,
+                MAX(kwh) FILTER (WHERE source = ANY(%s::transaction_source[])) AS steamaco_kwh
             FROM hourly_consumption
             WHERE account_number = %s
             GROUP BY reading_hour
@@ -109,12 +113,16 @@ def _consumption_kwh(cur, account_number: str, priority: str) -> float:
             CASE
                 WHEN %s = 'sm' THEN COALESCE(sm_kwh, m1_kwh)
                 WHEN %s = '1m' THEN COALESCE(m1_kwh, sm_kwh)
+                WHEN %s = 'steamaco' THEN COALESCE(steamaco_kwh, sm_kwh, m1_kwh)
                 ELSE NULL
             END
         ), 0)
         FROM per_hour
         """,
-        (list(SM_SOURCES), list(M1_SOURCES), account_number, priority, priority),
+        (
+            list(SM_SOURCES), list(M1_SOURCES), list(STEAMACO_SOURCES),
+            account_number, priority, priority, priority,
+        ),
     )
     return float(cur.fetchone()[0])
 

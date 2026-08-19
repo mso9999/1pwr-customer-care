@@ -8010,3 +8010,47 @@ Root cause: **Dual registration without synchronization**
 ### What Next Session Should Know
 - Deploy = push to `main`. After deploy: create a test registrar on `/admin/roles`, log in via Committee tab, register a test customer, verify site binding + audit attribution (`created_by` = registrar username).
 - The SOP/field-guide are DRAFTs pending PM document control; Sesotho translation of the field guide is an open task before village rollout.
+
+### Infra change (2026-08-17 evening, outside git)
+- **IAM**: attached inline policy `cc-1meter-telemetry-read` to instance role `cc-postgres-backup-role` (EOL host): read (`GetItem`/`Query`/`Scan`) on DynamoDB `meter_last_seen` + `1meter_data` (+indexes). Root cause: BN API (`/opt/1pdb-bn/.env`) has no AWS creds and falls back to the instance role, which only had backup/registry perms — fleet-map `meter_last_seen` scans were AccessDenied (silently swallowed → all meters showed offline). LS API has its own env-file IAM user creds and was unaffected. Verified from host: scan + query succeed via instance-role creds. No service restart needed (IAM evaluated per-request).
+- **User-facing RCA same evening**: "no meters on check-meters / fleet map" = browser country selector set to **BN**; both pages are LS/MAK-only features. LS data intact (11 active check pairs, 83 MAK meters with GPS).
+
+## Session 2026-08-19 [202608190958] (Steamaco Clinic Meters — Confirmed Outside CC)
+
+### Finding (user asked "confirm")
+Steamaco Savi meters at health clinics are **entirely outside CC/1PDB**: zero codebase references, zero serials in `meters`, and the clinic *customers* don't exist in CC at the Steamaco sites. A parallel manual process runs in Dropbox: `1PWR OM TEAM/3. Clinics/16. SteamaCo Meters/` (weekly consumption exports, PIH invoicing workbooks, CTT credit-token files). Meters DO report hourly to Steamaco's own cloud — the missing wire is Steamaco→1PDB integration, not meter telemetry. Manual process active at least through Jan/Feb 2025 (billing workbook), folder touched Jan 2026.
+
+### Fleet identified (7 serials, `x17922123xxxx`)
+Manamaneng HC (MAN) 179221230032 · Methalananeng HC (MET) 179221230040 · Ketane HC (KET) 179221230057 · unknown (NKU?) 179221230065 · Bobete HC (BOB) 179221230107 · Lebakeng HC (LEB) 0179221230123 · Tlhanyaku HC (TLH) 0179221230131. Plus a KET police Steamaco install per uGridPlan cost records.
+
+### Related registry gap noticed
+KET `meters` table: 172 of 173 rows have `ACCT-`placeholder meter_ids (no physical serial recorded) though consumption flows via Koios by account number. TLH similar (41 placeholders). Registry hygiene issue separate from Steamaco.
+
+### Options presented to user
+(1) Register clinics as CC customers (HC type) + register serials; (2) Steamaco cloud API pull → `hourly_consumption` source='steamaco' (balance engine already multi-source); (3) PIH invoicing stays postpaid via Odoo `invoiced_revenue`. Awaiting user direction.
+
+## Session 2026-08-19 [202608191358] (Steamaco Integration Build)
+
+### Decisions
+- User: Steamaco meters are 3-phase, can't retire soon → **proceed with API integration** (option 2 + registry step 1). Hardware convergence deferred.
+- User correction: **Odoo is Benin-only; Lesotho invoicing is QuickBooks** (no QB integration exists in CC; `invoiced_revenue` is Odoo/BN). PIH invoicing stays in QuickBooks, fed by CC consumption reports.
+
+### Steamaco API (researched via Inensus open-source MicroPowerManager plugin)
+- Base `https://api.steama.co`; DRF token auth: POST `/api-token-auth/` {username,password} → `{"token"}`; then `Authorization: Token`.
+- Readings: `GET /meters/{numeric_id}/utilities/1/readings/?start_time&end_time` → paginated `{timestamp, reading (cumulative kWh), usage_amount (hourly kWh)}`.
+- Meter list: `GET /meters/?page_size=100` → `id` + `reference` (serial). Serial leading-zero variants normalised numerically.
+- Credentials = ui.steama.co portal login (held by OM team; NOT in repo docs — flagged for password manager).
+
+### What was built
+- Migration `065_steamaco_postpaid.sql`: `transaction_source` += 'steamaco'; `accounts.billing_model` ('prepaid' default | 'postpaid'). (064 was taken by the parallel session's country_sites_registry — watch for their uncommitted files in the tree.)
+- `acdb-api/import_steamaco.py`: token auth → meter list → per-meter watermark incremental pull → `hourly_consumption` (source='steamaco', ON CONFLICT (meter_id, reading_hour) DO NOTHING). Env-gated creds; --dry-run.
+- `deploy/systemd/cc-steamaco-import.{service,timer}`: 4x daily (00/06/12/18 UTC).
+- `balance_engine.py`: VALID_PRIORITIES += 'steamaco'; steamaco source wins with sm/1m gap-fill.
+- Postpaid guards: `low_balance_alerts.py` skips postpaid accounts (no SMS spam on unbilled balances); `audit_ls_balances.py` excludes them from SM comparison; `registration.py` skips SparkMeter sync when assigned meter is platform='steamaco'.
+- `scripts/ops/register_steamaco_clinics.py`: idempotent registry bootstrap (7 clinics, HC type, postpaid, steamaco priority, serial'd meters). Default dry-run; --apply to write. **0179221230065 (NKU) name/serial pairing needs ops confirmation** (unlabeled in exports).
+- Tests: `tests/test_import_steamaco.py` (7 tests). Full suite 263 passed.
+
+### What Next Session Should Know
+- NOT yet live: needs (a) deploy, (b) Steamaco creds into `/etc/default/cc-steamaco-import` on the host (STEAMACO_USERNAME/PASSWORD or TOKEN), (c) `register_steamaco_clinics.py --apply` after ops confirms the NKU serial pairing, (d) enable the timer.
+- No What's New folio entry yet on purpose — add one when the clinics actually appear in CC (user-visible), not for the infra alone.
+- First importer run after registration: use STEAMACO_LOOKBACK_DAYS to backfill (e.g. 90) if history depth is wanted for PIH reconciliation.

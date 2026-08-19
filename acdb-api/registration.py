@@ -558,20 +558,40 @@ def register_customer(
 
         sm_result = None
         try:
-            full_name = f"{req.first_name} {req.last_name}".strip()
-            phone = _normalize_phone_for_storage(req.phone) or _normalize_phone_for_storage(req.cell_phone_1)
-            sm_result = create_sparkmeter_customer(
-                account_number=account_number,
-                name=full_name,
-                meter_serial=req.meter_id,
-                phone=phone,
-            )
-            if sm_result.success and not sm_result.skipped:
-                logger.info("SM customer synced: %s -> %s", account_number, sm_result.platform)
-            elif sm_result.skipped:
-                logger.info("SM customer sync deferred for %s: %s", account_number, sm_result.error)
+            # Steamaco-platform meters (clinic postpaid accounts) have no
+            # SparkMeter counterpart — never push those customers to Koios/TC.
+            skip_sm = False
+            if req.meter_id:
+                try:
+                    with _get_connection() as _conn:
+                        _cur = _conn.cursor()
+                        _cur.execute(
+                            "SELECT platform FROM meters WHERE meter_id = %s LIMIT 1",
+                            (req.meter_id,),
+                        )
+                        _row = _cur.fetchone()
+                    skip_sm = bool(_row and str(_row[0] or "").lower() == "steamaco")
+                except Exception as _e:
+                    logger.warning("Meter platform lookup failed for %s: %s", req.meter_id, _e)
+
+            if skip_sm:
+                logger.info("Skipping SM sync for %s — steamaco-platform meter", account_number)
             else:
-                logger.warning("SM customer sync failed for %s: %s", account_number, sm_result.error)
+                full_name = f"{req.first_name} {req.last_name}".strip()
+                phone = _normalize_phone_for_storage(req.phone) or _normalize_phone_for_storage(req.cell_phone_1)
+                sm_result = create_sparkmeter_customer(
+                    account_number=account_number,
+                    name=full_name,
+                    meter_serial=req.meter_id,
+                    phone=phone,
+                )
+            if sm_result is not None:
+                if sm_result.success and not sm_result.skipped:
+                    logger.info("SM customer synced: %s -> %s", account_number, sm_result.platform)
+                elif sm_result.skipped:
+                    logger.info("SM customer sync deferred for %s: %s", account_number, sm_result.error)
+                else:
+                    logger.warning("SM customer sync failed for %s: %s", account_number, sm_result.error)
         except Exception as e:
             logger.error("SM customer sync exception for %s: %s", account_number, e)
 

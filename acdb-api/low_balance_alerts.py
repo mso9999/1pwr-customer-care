@@ -100,6 +100,9 @@ def low_balance_tick(conn, *, dry_run: bool = False) -> dict[str, Any]:
             SELECT 1 FROM meters m
             WHERE m.account_number = a.account_number AND m.status = 'active'
         )
+        -- Postpaid institutional accounts (e.g. PIH clinics on Steamaco meters)
+        -- carry an unbilled-consumption balance by design; never SMS them.
+        AND COALESCE(a.billing_model, 'prepaid') = 'prepaid'
         {commissioned_filter}
         """
     )
