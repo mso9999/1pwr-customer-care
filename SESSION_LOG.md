@@ -8066,6 +8066,12 @@ KET `meters` table: 172 of 173 rows have `ACCT-`placeholder meter_ids (no physic
 - Timer `cc-steamaco-import.timer` enabled on EOL (next 00:00 UTC).
 - Unregistered Steamaco meters pending ops decision: Monnamoholo Badele (TLH, BUS), Rethabile Lempe (site unknown, BUS), Lesotho Sky Bikes ("HQ"), 2 test, 4 spares.
 
+### Ops decisions applied (2026-08-19 21:03 UTC)
+- **Monnamoholo Badele** → registered `0103TLH` (SME, postpaid, steamaco). Meter live; flat consumption mid-Aug (idle load). Backfilled 1,704 rows.
+- **Lesotho Sky Bikes** → registered `0004HHQ` (SME, postpaid, steamaco; CSR project at HQ paying 1PWR directly; HHQ = established HQ-load community per existing 0003HHQ). Backfilled 2,066 rows.
+- **Rethabile Lempe** (0179221230016) → NOT registered: zero all-time readings in Nimbus — never wired/dark unit, not a customer.
+- Importer verified incremental on re-run (watermarks working; +2 rows each for live clinics).
+
 ### CI incident (2026-08-19 18:35 UTC) — concurrent deploy collision
 - Two push-triggered deploy runs (mine 26d9ab2 + parallel session's 1b9d6b5) ran simultaneously against EOL and clobbered each other's `/tmp/cc-backend` staging dir → rsync `mkdir "/tmp/cc-backend/scripts/ops" failed: ENOENT` on attempt 1 of my run. Retry succeeded; the failed-then-succeeded run deployed the superset. Root fix: added a `concurrency` group (`deploy-cc-production`, cancel-in-progress: false) to `.github/workflows/deploy.yml` to serialize deploys.
 - BN (`onepower_bj`) has migration 066 recorded via CI; LS was applied+recorded manually.

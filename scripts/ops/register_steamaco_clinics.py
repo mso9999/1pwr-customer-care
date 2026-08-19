@@ -56,12 +56,18 @@ CLINICS = [
     # Institutional non-clinic accounts on the same Steamaco fleet:
     ("0179221210059", "KET", "Ketane Police Station", "GOV"),
     ("0179221210034", "LEB", "Lebakeng Council", "GOV"),
+    # Business / direct-billed accounts (ops decision 2026-08-19):
+    # Badele: meter live (hourly reports), flat consumption in mid-Aug 2026.
+    ("0179221210042", "TLH", "Monnamoholo Badele", "SME"),
+    # Lesotho Sky Bikes: CSR project at 1PWR HQ, pays 1PWR directly (postpaid).
+    # HHQ is the established HQ-load community (existing account 0003HHQ).
+    ("0179221210026", "HHQ", "Lesotho Sky Bikes", "SME"),
 ]
 
-# Known Steamaco meters deliberately NOT registered here (ops decision needed):
-#   0179221210042  Monnamoholo Badele (TLH/Thoteng, user_type=BUS)
-#   0179221230016  Rethabile Lempe (site unknown, BUS)
-#   0179221210026  Lesotho Sky Bikes (address "HQ")
+# Known Steamaco meters deliberately NOT registered:
+#   0179221230016  Rethabile Lempe — former 1PWR employee; meter has ZERO
+#                  all-time readings in Nimbus (never wired / dark unit).
+#                  No customer account created (2026-08-19).
 #   0179221210018  ONM TEST · 0179221230099 Ntate Khoali TEST  (test meters)
 #   0179221230024 / 0179221230073 / 0179221230081 / 0179221230115 (unassigned spares)
 
