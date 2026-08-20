@@ -1858,7 +1858,8 @@ def _connection_gps(conns: List[Dict[str, Any]], survey_id: str) -> Optional[tup
     return None
 
 
-def sync_meter_gps_from_ugp(site_code: str, account_number: str, survey_id: str) -> bool:
+def sync_meter_gps_from_ugp(site_code: str, account_number: str, survey_id: str,
+                            conns: Optional[List[Dict[str, Any]]] = None) -> bool:
     """Set a meter's lat/lng from its uGridPLAN connection's real install GPS.
 
     Root-cause fix for meters plotting on the placeholder village-center
@@ -1866,6 +1867,9 @@ def sync_meter_gps_from_ugp(site_code: str, account_number: str, survey_id: str)
     assign-PTB), pull the connection's real GPS into the meters row so the fleet
     map shows the true location. Best-effort; returns True if a meter row was
     updated. Never raises (caller flows must not fail on a GPS sync).
+
+    ``conns`` (optional) lets bulk callers pass a pre-fetched connection list
+    instead of re-loading the uGP project per meter.
     """
     acct = (account_number or "").strip()
     sid = (survey_id or "").strip()
@@ -1873,15 +1877,16 @@ def sync_meter_gps_from_ugp(site_code: str, account_number: str, survey_id: str)
     if not (acct and sid and site):
         return False
     try:
-        with get_auth_db() as conn:
-            row = conn.execute(
-                "SELECT project_id FROM cc_site_projects WHERE site_code = ?", (site,)
-            ).fetchone()
-        if not row:
-            return False
-        client = _get_ugp_client()
-        session_id = _load_project_for_site(client, row["project_id"])
-        conns = client.get_connections(session_id)
+        if conns is None:
+            with get_auth_db() as conn:
+                row = conn.execute(
+                    "SELECT project_id FROM cc_site_projects WHERE site_code = ?", (site,)
+                ).fetchone()
+            if not row:
+                return False
+            client = _get_ugp_client()
+            session_id = _load_project_for_site(client, row["project_id"])
+            conns = client.get_connections(session_id)
         gps = _connection_gps(conns, sid)
         if not gps:
             return False
@@ -2221,10 +2226,40 @@ def assign_ptb(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"uGridPLAN unreachable: {e}")
 
+    return _assign_ptb_core(
+        client, session_id, site_code,
+        account_number=account_number, meter_serial=meter_serial,
+        gateway_thing=gateway_thing, survey_id_in=survey_id_in,
+        pole_id_in=(req.pole_id or "").strip(),
+        ptb_serial=req.ptb_serial, operator_id=user.user_id,
+    )
+
+
+def _assign_ptb_core(
+    client: UGPClient,
+    session_id: str,
+    site_code: str,
+    *,
+    account_number: str,
+    meter_serial: str,
+    gateway_thing: str,
+    survey_id_in: Optional[str],
+    pole_id_in: str,
+    ptb_serial: Optional[str],
+    operator_id: str,
+    conns: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """Shared write path for /assign-ptb (single unit) and /auto-link (bulk
+    backfill): find-or-create the PTB on the pole, associate gateway + meter,
+    bind the customer connection, sync GPS, record the meter→gateway link.
+
+    ``conns`` (optional) is a pre-fetched connection list so bulk callers can
+    avoid a uGP round-trip per unit.
+    """
     # Resolve the pole. A customer has exactly one pole (via its connection's
     # service drop). If the operator didn't pick one, derive it from the
     # connection so the pole ALWAYS matches the customer — never a free pick.
-    pole_id = (req.pole_id or "").strip()
+    pole_id = (pole_id_in or "").strip()
     if not pole_id and survey_id_in:
         pole_id = _pole_for_connection(client.get_lines(session_id), survey_id_in) or ""
     if not pole_id:
@@ -2254,9 +2289,9 @@ def assign_ptb(
         try:
             client.create_ptb(
                 session_id, pole_id,
-                serial_number=gateway_thing or (req.ptb_serial or ""),
+                serial_number=gateway_thing or (ptb_serial or ""),
                 channel_serials=[meter_serial] if meter_serial else [],
-                notes=f"created from CC commissioning by {user.user_id}",
+                notes=f"created from CC commissioning by {operator_id}",
             )
             ptb_created = True
         except Exception as e:
@@ -2318,7 +2353,8 @@ def assign_ptb(
                     pole_gps = (c.get("GPS_Y") or c.get("gps_y"), c.get("GPS_X") or c.get("gps_x"))
                     break
             if pole_gps and pole_gps[0] and pole_gps[1]:
-                conns = client.get_connections(session_id)
+                if conns is None:
+                    conns = client.get_connections(session_id)
                 best = None
                 best_d = None
                 import math
@@ -2370,7 +2406,7 @@ def assign_ptb(
     # correctly on the fleet map (not the placeholder village-center coord).
     if survey_id:
         try:
-            sync_meter_gps_from_ugp(site_code, account_number, survey_id)
+            sync_meter_gps_from_ugp(site_code, account_number, survey_id, conns=conns)
         except Exception as e:
             logger.warning("GPS sync from uGP failed for %s: %s", account_number, e)
 
@@ -2398,7 +2434,7 @@ def assign_ptb(
                       linked_by = EXCLUDED.linked_by
                     """,
                     (ms_norm, gateway_thing, ptb_id or None, pole_id or None,
-                     account_number, site_code, f"cc:{user.user_id}"),
+                     account_number, site_code, f"cc:{operator_id}"),
                 )
                 pg.commit()
         except Exception as e:
@@ -2416,6 +2452,339 @@ def assign_ptb(
         "survey_id": survey_id,
         "connection_updated": connection_updated,
         "account_updated": account_updated,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Auto-link backfill: resolve the whole chain from existing data
+# ---------------------------------------------------------------------------
+
+def _auto_link_plan(site_code: str, max_pole_distance_m: float):
+    """Resolve the full link chain for every provisioned unit of a site.
+
+    Returns (project_name, plan_rows). Each row carries thing_name,
+    meter_serial, account_number, survey_id, pole_id, pole_source,
+    pole_distance_m, disposition, detail.
+    """
+    from customer_api import get_connection as get_pg_connection
+
+    with get_pg_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT thing_name, meter_serial, account_number
+            FROM meter_provisioning
+            WHERE site = %s AND COALESCE(is_test, false) = false
+            ORDER BY thing_name
+            """,
+            (site_code,),
+        )
+        units = [
+            {"thing": r[0], "ms": (r[1] or "").strip(), "acct": (r[2] or "").strip()}
+            for r in cur.fetchall()
+        ]
+        cur.execute(
+            """
+            SELECT ltrim(meter_id, '0'), ltrim(meter_number, '0'), account_number
+            FROM meters WHERE UPPER(community) = %s
+            """,
+            (site_code,),
+        )
+        serial2acct: Dict[str, str] = {}
+        for sid_, snum, acct in cur.fetchall():
+            for s in (sid_, snum):
+                if s:
+                    serial2acct.setdefault(s, acct)
+        cur.execute("SELECT account_number, survey_id FROM accounts")
+        acct2sid = {r[0]: (r[1] or "").strip() for r in cur.fetchall()}
+        cur.execute(
+            "SELECT meter_serial FROM meter_gateway_link WHERE site = %s AND pole_id IS NOT NULL",
+            (site_code,),
+        )
+        already = {r[0] for r in cur.fetchall()}
+
+    # Telemetry ground truth: gateway Thing -> meter serials it has reported
+    gw2meters: Dict[str, set] = defaultdict(set)
+    try:
+        ddb = _get_ddb()
+        scan_kwargs: Dict[str, Any] = {
+            "TableName": "meter_last_seen",
+            "ProjectionExpression": "meterId, thingName",
+        }
+        while True:
+            resp = ddb.scan(**scan_kwargs)
+            for item in resp.get("Items", []):
+                t = item.get("thingName", {}).get("S")
+                m = item.get("meterId", {}).get("S")
+                if t and m:
+                    gw2meters[t].add(m)
+            if "LastEvaluatedKey" not in resp:
+                break
+            scan_kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+    except Exception as e:
+        logger.warning("auto-link: telemetry scan failed: %s", e)
+
+    with get_auth_db() as conn:
+        row = conn.execute(
+            "SELECT project_id FROM cc_site_projects WHERE site_code = ?",
+            (site_code,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"No uGridPLAN project configured for site '{site_code}'.")
+    project_name = row["project_id"]
+    try:
+        client = _get_ugp_client()
+        session_id = _load_project_for_site(client, project_name)
+        ugp_conns = client.get_connections(session_id)
+        ugp_lines = client.get_lines(session_id)
+        ugp_poles = client.get_poles(session_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"uGridPLAN fetch failed: {e}")
+
+    conn_by_id = {}
+    for x in ugp_conns:
+        sid_ = _conn_id_of(x) or str(x.get("ID") or "").strip()
+        if sid_:
+            conn_by_id[sid_] = x
+    pole_xy: List[Tuple[str, float, float]] = []
+    for p in ugp_poles:
+        pid_ = _pole_id_of(p)
+        try:
+            px, py = float(p.get("GPS_X")), float(p.get("GPS_Y"))
+        except (TypeError, ValueError):
+            continue
+        if pid_:
+            pole_xy.append((pid_, px, py))
+
+    def _hav_m(lat1, lon1, lat2, lon2) -> float:
+        R = 6371000.0
+        p1, p2 = math.radians(lat1), math.radians(lat2)
+        dp, dl = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
+        a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+        return 2 * R * math.asin(math.sqrt(a))
+
+    def _nearest_pole(survey_id: str):
+        gps = _connection_gps(ugp_conns, survey_id)
+        if not gps:
+            return None, None
+        best, best_d = None, None
+        for pid_, px, py in pole_xy:
+            d = _hav_m(gps[0], gps[1], py, px)
+            if best_d is None or d < best_d:
+                best, best_d = pid_, d
+        return best, best_d
+
+    # Work list is (gateway, meter) pairs: a gateway can serve several meters
+    # (PTB channels), and meter_gateway_link is keyed per meter serial.
+    pairs: List[Dict[str, str]] = []
+    for u in units:
+        serials = set()
+        if u["ms"]:
+            serials.add(u["ms"])
+        serials |= gw2meters.get(u["thing"], set())
+        if not serials:
+            pairs.append({"thing": u["thing"], "ms": "", "acct": u["acct"]})
+        for s in sorted(serials):
+            pairs.append({"thing": u["thing"], "ms": s, "acct": u["acct"]})
+
+    rows = []
+    for pair in pairs:
+        thing, ms, acct = pair["thing"], pair["ms"], pair["acct"]
+        ms_norm = (ms.lstrip("0") or ms) if ms else ""
+        row: Dict[str, Any] = {
+            "thing_name": thing, "meter_serial": ms, "account_number": "",
+            "survey_id": "", "pole_id": "", "pole_source": "",
+            "pole_distance_m": None, "disposition": "", "detail": "",
+        }
+        if not ms:
+            row["disposition"] = "no_meter_data"
+            row["detail"] = "never online and no serial on record — likely uninstalled stock"
+            rows.append(row)
+            continue
+        if ms_norm in already:
+            row["disposition"] = "already_linked"
+            rows.append(row)
+            continue
+        if not acct:
+            acct = serial2acct.get(ms_norm, "")
+        row["account_number"] = acct
+        if not acct:
+            row["disposition"] = "unresolved_customer"
+            row["detail"] = "meter serial matches no meters-table row"
+            rows.append(row)
+            continue
+        sid = acct2sid.get(acct, "")
+        row["survey_id"] = sid
+        if not sid:
+            row["disposition"] = "needs_commissioning"
+            row["detail"] = "account has no uGP connection (survey_id) — commission first"
+            rows.append(row)
+            continue
+        cx = conn_by_id.get(sid, {})
+        pole = str(cx.get("Pole_ID") or cx.get("pole_id") or "").strip()
+        src = "connection.Pole_ID" if pole else ""
+        if not pole:
+            pole = _pole_for_connection(ugp_lines, sid) or ""
+            src = "drop_line" if pole else ""
+        dist = None
+        if not pole:
+            pole, dist = _nearest_pole(sid)
+            src = "nearest_gps" if pole else ""
+        row["pole_id"] = pole or ""
+        row["pole_source"] = src
+        row["pole_distance_m"] = round(dist, 1) if dist is not None else None
+        if not pole:
+            row["disposition"] = "unresolved_pole"
+            row["detail"] = "no Pole_ID, no drop line, no connection GPS"
+        elif src == "nearest_gps" and dist is not None and dist > max_pole_distance_m:
+            row["disposition"] = "flagged_far_pole"
+            row["detail"] = f"nearest pole {dist:.0f} m away (> {max_pole_distance_m:.0f} m) — confirm manually"
+        else:
+            row["disposition"] = "apply"
+            row["detail"] = f"pole via {src}" + (f" ({dist:.0f} m)" if dist is not None else "")
+        rows.append(row)
+
+    return project_name, rows
+
+
+def _auto_link_apply(site_code: str, project_name: str, rows: List[Dict[str, Any]],
+                     user: CurrentUser) -> None:
+    """Background worker for /auto-link?dry_run=false: applies each resolved
+    unit through the shared assign-PTB write path and lodges a mutation-log
+    entry per unit. Runs detached because PTB creates trigger a ~20s uGP
+    payload recompute apiece."""
+    from customer_api import get_connection as get_pg_connection
+    from mutations import try_log_mutation
+
+    logger.info("auto-link %s: applying %d units (operator %s)", site_code, len(rows), user.user_id)
+    try:
+        client = _get_ugp_client()
+        session_id = _load_project_for_site(client, project_name)
+        conns = client.get_connections(session_id)
+    except Exception:
+        logger.exception("auto-link %s: uGP session load failed; aborting", site_code)
+        return
+
+    applied = failed = 0
+    for r in rows:
+        thing = r["thing_name"]
+        try:
+            res = _assign_ptb_core(
+                client, session_id, site_code,
+                account_number=r["account_number"], meter_serial=r["meter_serial"],
+                gateway_thing=thing, survey_id_in=r["survey_id"],
+                pole_id_in=r["pole_id"], ptb_serial=None,
+                operator_id=user.user_id, conns=conns,
+            )
+            # Reflect derived serial/account back onto the provisioning record
+            try:
+                with get_pg_connection() as pg:
+                    cur = pg.cursor()
+                    cur.execute(
+                        """
+                        UPDATE meter_provisioning
+                        SET meter_serial = COALESCE(NULLIF(meter_serial, ''), %s),
+                            account_number = COALESCE(NULLIF(account_number, ''), %s),
+                            updated_at = NOW()
+                        WHERE thing_name = %s
+                        """,
+                        (r["meter_serial"], r["account_number"], thing),
+                    )
+                    pg.commit()
+            except Exception:
+                logger.warning("auto-link: provisioning record update failed for %s", thing)
+            try:
+                with get_pg_connection() as pg:
+                    try_log_mutation(
+                        user, "update", "meter_gateway_link",
+                        (r["meter_serial"].lstrip("0") or r["meter_serial"]),
+                        new_values={
+                            "meter_serial": r["meter_serial"], "gateway_thing": thing,
+                            "account_number": r["account_number"], "survey_id": r["survey_id"],
+                            "pole_id": r["pole_id"], "ptb_id": res.get("ptb_id"),
+                        },
+                        metadata={
+                            "kind": "auto_link_backfill",
+                            "endpoint": "POST /api/sync/auto-link",
+                            "pole_source": r["pole_source"],
+                            "pole_distance_m": r["pole_distance_m"],
+                        },
+                        conn=pg,
+                    )
+                    pg.commit()
+            except Exception:
+                logger.warning("auto-link: mutation log failed for %s", thing)
+            applied += 1
+            logger.info("auto-link %s: %s -> meter %s on pole %s (%s)",
+                        site_code, thing, r["meter_serial"], r["pole_id"], r["pole_source"])
+        except Exception:
+            failed += 1
+            logger.exception("auto-link %s: FAILED %s (meter %s)", site_code, thing, r["meter_serial"])
+    logger.info("auto-link %s: done — applied=%d failed=%d", site_code, applied, failed)
+
+
+@router.post("/auto-link")
+def auto_link(
+    site: str = Query(..., description="Site code (e.g. MAK)"),
+    dry_run: bool = Query(True, description="Compute the plan without writing anything"),
+    max_pole_distance_m: float = Query(35.0, description="Auto-accept nearest-pole matches up to this many metres"),
+    user: CurrentUser = Depends(require_employee),
+):
+    """One-shot backfill of the full link chain for a site's provisioned units:
+
+        Pole → PTB → Gateway → Meter → Customer → Connection
+
+    Every link is resolved from data that already exists — telemetry
+    (meter_last_seen.thingName) for gateway↔meter, the meters table for
+    meter↔customer, accounts.survey_id for customer↔connection, and the uGP
+    model (connection Pole_ID, service-drop line, or nearest-pole-by-GPS
+    within ``max_pole_distance_m``) for connection↔pole. Applied units go
+    through the same write path as /assign-ptb and are lodged in the mutation
+    log.
+
+    Units whose chain can't be resolved from data (never-online gateways,
+    unknown meter serials, uncommissioned accounts, far poles) are reported,
+    not guessed. Re-runnable: already-linked meters are skipped.
+    """
+    _allowed = {CCRole.superadmin.value, CCRole.onm_team.value, "engineering"}
+    if not set(effective_roles(user)) & _allowed:
+        raise_privilege_denied(user, [CCRole.onm_team], "run the auto-link backfill")
+
+    site_code = site.strip().upper()
+    project_name, rows = _auto_link_plan(site_code, max_pole_distance_m)
+
+    summary: Dict[str, int] = defaultdict(int)
+    for r in rows:
+        summary[r["disposition"]] += 1
+
+    if dry_run:
+        return {
+            "site": site_code,
+            "dry_run": True,
+            "max_pole_distance_m": max_pole_distance_m,
+            "summary": dict(summary),
+            "units": rows,
+        }
+
+    apply_rows = [r for r in rows if r["disposition"] == "apply"]
+    import threading
+    t = threading.Thread(
+        target=_auto_link_apply,
+        args=(site_code, project_name, apply_rows, user),
+        daemon=True,
+        name=f"auto-link-{site_code}",
+    )
+    t.start()
+    return {
+        "site": site_code,
+        "dry_run": False,
+        "max_pole_distance_m": max_pole_distance_m,
+        "summary": dict(summary),
+        "applying": len(apply_rows),
+        "units": rows,
+        "note": "Applying in the background (PTB creates trigger a ~20s uGP "
+                "payload recompute each). Watch the service log, then re-run "
+                "with dry_run=true to verify the remaining deficit.",
     }
 
 
