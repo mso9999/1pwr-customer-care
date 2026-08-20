@@ -8130,6 +8130,11 @@ KET `meters` table: 172 of 173 rows have `ACCT-`placeholder meter_ids (no physic
 - TensionDiagram: sag display exaggeration 1×/2×/4×/8× (display-only; label keeps true value, annotated "shown ×N"). uGP dev commit be5b9d8d, version 1.26.1.0.
 - **Eduardo's lost-file issue** (migration discoverability gap): DR app search is capable (title + docKey + full body text), so the gap is guidance, not search. Fixed: (1) rewrote all 846 pointer READMEs with sign-in + search instructions; (2) built `_reports/where_did_my_file_go.csv` — complete 2,159-row lookup (old Dropbox path → control number → DR deep link) for the team; (3) reply for Eduardo drafted for the user to relay. Open question for him: WHICH file — the lookup answers it instantly.
 
+### uGP production deploy + staging shutdown (2026-08-20 11:00 UTC)
+- User: staging is intentionally OFF (cost) — work repo-level, push to main for live deploys. The stopped uGridPLAN-staging instance (i-0cb40cbae4176be49) stays stopped. Staging deploy failures this morning were the stopped instance's SSH:2222 keyscan timing out — expected while it's off.
+- **Tension calculator LIVE in production** (ugp.1pwrafrica.com/tension): fast-forwarded main to dev (f7f28ddc..be5b9d8d, user-approved), deploy run 32351609407 green, verified served bundle contains the tool. Version 1.26.1.0.
+- uGP version-bump gate: every commit to dev/main must bump `web/frontend/src/version.ts` + `web/adapter/version.py` (MINOR for features) or the deploy fails at "Enforce version bump".
+
 ### Key Decisions
 - Cold storage: `/Users/mattmso/Dropbox/1PWR Controlled Docs — COLD STORAGE/` (top-level, unshared).
 - Series-level verification (not version-level): superseded local versions move when the series is live in Nexus.
