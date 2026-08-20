@@ -8092,6 +8092,11 @@ KET `meters` table: 172 of 173 rows have `ACCT-`placeholder meter_ids (no physic
 - User approved moving the 73 stale copies → moved to cold storage (0 errors), logged in `_reports/move_log.csv`, pointers in 38 more folders. Report: `_reports/tier1_overlap_crosscheck.md`.
 - **Total moved to cold storage: 2,058 files.** Remaining escapee review set: 133 distinct + 55 name-only (user approval gate).
 
+### Deep-dive assessment + pattern-gap sweep (2026-08-20 08:37 UTC)
+- Deep-dive of the remaining candidates (`_reports/escapee_deep_dive_assessment.md`): 54 true remaining files (the 188 figure included already-moved files from a stale snapshot — pipeline RCA). Verdicts: **26 INGEST** (10 vendor-manual series → MGM family; 14 internal SOPs → MGD; 2 governance policies), **7 REVIEW** (version pairs, 2 unreadable scanned PDFs, MGD070 numbering anomaly), **9 EXCLUDE** (5 external donor/government reference docs, 4 operational record types).
+- Notable: blank **F015 Policy Agreement Form is unregistered** (signed instances exist in HR records) — flagged for ingestion. `MGD070V01Power line tensioning SOP.docx` is a numbering anomaly (MGD070 = Tension Calculator in the registry).
+- **Second pattern gap found + fixed**: crawl regexes missed underscore-separated (`MGD009V02_MG_ESMP`) and concatenated (`MGD070V01Power`) names (`_` is a word char; `\b` fails). Final sweep moved 99 more verified masters; 590 record-folder files correctly held. **Cold storage total: 2,159 files** (full manifest: `_reports/cold_storage_full_manifest.csv`).
+
 ### Key Decisions
 - Cold storage: `/Users/mattmso/Dropbox/1PWR Controlled Docs — COLD STORAGE/` (top-level, unshared).
 - Series-level verification (not version-level): superseded local versions move when the series is live in Nexus.
