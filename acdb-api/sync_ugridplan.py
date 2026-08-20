@@ -40,7 +40,7 @@ router = APIRouter(prefix="/api/sync", tags=["sync"])
 # Configuration
 # ---------------------------------------------------------------------------
 
-UGP_BASE_URL = os.environ.get("UGP_BASE_URL", "https://dev.ugp.1pwrafrica.com/api")
+UGP_BASE_URL = os.environ.get("UGP_BASE_URL", "https://ugp.1pwrafrica.com/api")
 UGP_SERVICE_USER = os.environ.get("UGP_SERVICE_USER", "whatsapp-cc")
 
 # Nominal LV voltage for Load_A calculation (Watts = kWh_day/24*1000, Amps = W/V)
