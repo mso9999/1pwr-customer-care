@@ -8141,6 +8141,13 @@ KET `meters` table: 172 of 173 rows have `ACCT-`placeholder meter_ids (no physic
 - **Systemic finding**: 28 of 313 series have bare/missing titles (all D-series: D000, D004, D011, D012, D015, D017, D019, D023–D035, D037–D047…) — unfindable by topic. Titles can be derived from current-version filenames; offered to user as a batch fix.
 - Activity logging answer (for the record): Nexus logs sessions (nexus_session_logs) + lastLoginAt; DR app logs only document mutations (documentAuditLog); NO read/search logging exists anywhere — offered as a possible DR feature.
 
+### Mable's D003 issue (2026-08-20 15:10 UTC) — RESOLVED, different root cause from Eduardo's
+- Mable: doc.1pwrafrica.com/policies/D003 showed "No file available for this document record." NOT the D027 findability fix — a different failure mode.
+- RCA: the **deployed DR app was stale** (behind the repo at 0281d4e). D003 is hr_portal-synced; the old bundle lacked the Firestore-file fallback (`LegacyPdfEmbed`/`OpenOriginalButton`), so it called the Laravel policies API for the PDF, and Laravel's D003 record has no file → the error message (a Laravel-side string, not in the DR source).
+- D003's Firestore current version (V05) had a valid accessible Storage file all along.
+- Fix: built + deployed the current DR app to hosting site `doc-1pwrafrica` (bundle index-Cl1fN8ZJ.js; PolicyDetail chunk now carries the legacy-file fallback). D003's page now renders the PDF from Storage.
+- Note: the "No file available" string is a Laravel HR-portal API message — worth knowing for future reports that sound like DR errors but come from the Laravel backend.
+
 ### Key Decisions
 - Cold storage: `/Users/mattmso/Dropbox/1PWR Controlled Docs — COLD STORAGE/` (top-level, unshared).
 - Series-level verification (not version-level): superseded local versions move when the series is live in Nexus.
