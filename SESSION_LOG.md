@@ -8087,6 +8087,11 @@ KET `meters` table: 172 of 173 rows have `ACCT-`placeholder meter_ids (no physic
 - **RCA catch**: first crawl's regex missed the dominant `MGD061V02`-style naming (no word boundary before `V`). Re-crawled with fixed pattern and moved the additional 1,026 files incrementally. Verify pattern coverage before declaring a crawl complete.
 - 1 residual: `D026V02 EAP & FPP_20220316.docx` (EHS TEAM) — Dropbox placeholder locked mid-sync; exists as placeholder in both locations; cosmetic, should self-resolve on sync (or delete from Finder).
 
+### Tier-1 overlap cross-check + stale-copy sweep (2026-08-20 08:35 UTC)
+- Cross-checked 261 hydrated Tier-1 escapee candidates against registry body text (word-3-shingle similarity) + title similarity: **73 content overlaps** (registry newer in ALL 73 — disk copies are stale), 55 name-only, 133 distinct.
+- User approved moving the 73 stale copies → moved to cold storage (0 errors), logged in `_reports/move_log.csv`, pointers in 38 more folders. Report: `_reports/tier1_overlap_crosscheck.md`.
+- **Total moved to cold storage: 2,058 files.** Remaining escapee review set: 133 distinct + 55 name-only (user approval gate).
+
 ### Key Decisions
 - Cold storage: `/Users/mattmso/Dropbox/1PWR Controlled Docs — COLD STORAGE/` (top-level, unshared).
 - Series-level verification (not version-level): superseded local versions move when the series is live in Nexus.
