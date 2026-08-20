@@ -8103,6 +8103,22 @@ KET `meters` table: 172 of 173 rows have `ACCT-`placeholder meter_ids (no physic
 - **Nexus F015 gate built + deployed** (nexus-portal, branch feat/am-rules-claim-only, commit fe527dd; deployed rules + hosting to nexus.1pwrafrica.com): `PolicyAckGate` in ProtectedRoute blocks tools until `policy_acknowledgments/{uid}` exists; online form with per-policy initials + typed-name signature + DR deep links; rules = self-create signed_online only, immutable. 56 HR scans linked as scan_on_file via `functions/linkPolicyScans.mjs` (idempotent, dry-run default).
 - Parallel-session contamination avoided again: App.tsx had their uncommitted Reports route mixed with my gate — hunk-level patch staging kept mine only. Their Reports/icons/Lobby work left uncommitted in the tree.
 
+## Session 2026-08-20 [202608201029] (Tensioning Calculator Online in uGP + MGD070/111 Resolution)
+
+### What Was Done
+- **Analyzed MGD070 "Line Tension Calculator.xlsx"**: 4 cable types (PV 6mm, UTS Fox, ABC 1ph/3ph) with tensile/weight/min-sag params; level/inclined spans; FOS. Found two formula defects: (1) line-length cell uses unit-weight un-squared (dimensionally wrong, underestimates cut length); (2) sag cell hardcodes UTS/Fox weight (underestimates sag for ABC-only spans).
+- **Built the online calculator in uGridPlan**: `web/frontend/src/pages/TensionCalculator.tsx` at `/tension`, lazy route + nav entry in PlatformShell. Faithful replication with the two corrections documented in the page footer. tsc + production build clean. Pushed to `dev` (staging dev.ugp.1pwrafrica.com); production (main) needs explicit user sign-off per uGP rules.
+- **SOP updated**: MGD070's tensioning SOP text re-issued as **MGD111V01** (Power Line Tensioning SOP) referencing the online calculator, corrections documented, rule-of-thumb sag values preserved (Fox 0.40m/80m, ABC 0.25m/50m).
+- **Registry**: MGD111 created + published (V01). MGD070 corrected — the calculator Excel is now the current version; the misfiled SOP PDF demoted with an explanatory note (resolves the numbering anomaly from the escapee review).
+
+### Key Decisions
+- Corrections shipped in the online version (not bug-for-bug fidelity) — documented in SOP + registry so field results remain comparable to rule-of-thumb values.
+- SOP and calculator are now separate series (MGD111 / MGD070) per document-control hygiene.
+
+### What Next Session Should Know
+- uGP production deploy of /tension is pending user sign-off (staging first per uGP CONTEXT.md).
+- The escapee assessment sections B/C/F still await user review.
+
 ### Key Decisions
 - Cold storage: `/Users/mattmso/Dropbox/1PWR Controlled Docs — COLD STORAGE/` (top-level, unshared).
 - Series-level verification (not version-level): superseded local versions move when the series is live in Nexus.
