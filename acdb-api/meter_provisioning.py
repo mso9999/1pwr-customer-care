@@ -2463,20 +2463,25 @@ def fleet_map(
 
     site_code = site.strip().upper() if site else None
 
-    # 1PDB meters with location, flagged when the meter is a linked 1Meter
-    # (its serial appears in meter_provisioning).
+    # 1PDB meters with location, flagged when the meter is a linked 1Meter.
+    # A meter is linked when its serial is in meter_provisioning (primary meter
+    # of a provisioned gateway) OR in meter_gateway_link (assigned to a gateway
+    # via a PTB channel at assign-PTB time).
     with get_connection() as conn:
         cur = conn.cursor()
         sql = """
             SELECT m.meter_id, m.account_number, m.community, m.village_name,
                    m.latitude, m.longitude, m.status, m.platform,
-                   (p.thing_name IS NOT NULL) AS linked,
-                   p.thing_name AS prov_thing
+                   (p.thing_name IS NOT NULL OR gl.gateway_thing IS NOT NULL) AS linked,
+                   COALESCE(p.thing_name, gl.gateway_thing) AS prov_thing
             FROM meters m
             LEFT JOIN meter_provisioning p
               ON p.meter_serial = m.meter_id
               OR p.meter_serial = m.meter_number
               OR ltrim(p.meter_serial, '0') = ltrim(m.meter_id, '0')
+            LEFT JOIN meter_gateway_link gl
+              ON ltrim(gl.meter_serial, '0') = ltrim(m.meter_id, '0')
+              OR ltrim(gl.meter_serial, '0') = ltrim(m.meter_number, '0')
             WHERE m.latitude IS NOT NULL AND m.longitude IS NOT NULL
         """
         params: list = []
@@ -2637,6 +2642,24 @@ def customer_meter_linkage(
         if row:
             cols = [d[0] for d in cur.description]
             prov = dict(zip(cols, row))
+        else:
+            # PTB-channel link (assign-PTB): meter_gateway_link keyed by account.
+            cur.execute(
+                """
+                SELECT gateway_thing, meter_serial, site, account_number, pole_id, ptb_id
+                FROM meter_gateway_link
+                WHERE UPPER(account_number) = %s OR UPPER(account_number) = %s
+                ORDER BY linked_at DESC NULLS LAST
+                LIMIT 1
+                """,
+                (acct_upper, bare or acct_upper),
+            )
+            gl = cur.fetchone()
+            if gl:
+                prov = {"thing_name": gl[0], "meter_serial": gl[1], "pcb_mac": None,
+                        "site": gl[2], "account_number": gl[3], "status": "linked",
+                        "box_label": None, "commissioned_at": None, "fw_version": None,
+                        "pole_id": gl[4]}
 
         # 2) customer plot_number + community (for the pole lookup)
         cust = None
@@ -2691,9 +2714,10 @@ def customer_meter_linkage(
         except Exception as exc:
             logger.warning("customer-linkage meter_last_seen lookup failed: %s", exc)
 
-    # 4) pole/PTB best-effort from uGridPLAN via the customer's connection
-    pole_id = None
-    if cust and cust.get("plot_number") and site:
+    # 4) pole/PTB: prefer the recorded assign-PTB link (meter_gateway_link);
+    #    else best-effort from uGridPLAN via the customer's connection.
+    pole_id = prov.get("pole_id")
+    if not pole_id and cust and cust.get("plot_number") and site:
         try:
             import sync_ugridplan as sug
             with sug.get_auth_db() as aconn:

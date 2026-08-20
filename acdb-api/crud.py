@@ -421,9 +421,12 @@ def list_rows(
         # subquery — no user input is interpolated, so this is injection-safe.
         if linked and table_name.lower() == "meters":
             sub = (
-                "EXISTS (SELECT 1 FROM meter_provisioning p WHERE "
+                "(EXISTS (SELECT 1 FROM meter_provisioning p WHERE "
                 f"ltrim(p.meter_serial,'0') = ltrim({table_name}.meter_id,'0') OR "
                 f"ltrim(p.meter_serial,'0') = ltrim({table_name}.meter_number,'0'))"
+                " OR EXISTS (SELECT 1 FROM meter_gateway_link gl WHERE "
+                f"ltrim(gl.meter_serial,'0') = ltrim({table_name}.meter_id,'0') OR "
+                f"ltrim(gl.meter_serial,'0') = ltrim({table_name}.meter_number,'0')))"
             )
             lv = linked.strip().lower()
             if lv == "true":

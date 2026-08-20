@@ -2374,6 +2374,36 @@ def assign_ptb(
         except Exception as e:
             logger.warning("GPS sync from uGP failed for %s: %s", account_number, e)
 
+    # Record the meter→gateway link CC-side so the fleet map can flag the meter
+    # as 1Meter-linked. (meter_provisioning is one-row-per-gateway/primary-meter,
+    # so it can't capture the many-meters-per-gateway PTB-channel links.)
+    if meter_serial and gateway_thing:
+        try:
+            from customer_api import get_connection as _pg
+            ms_norm = meter_serial.lstrip("0") or meter_serial
+            with _pg() as pg:
+                cur = pg.cursor()
+                cur.execute(
+                    """
+                    INSERT INTO meter_gateway_link
+                      (meter_serial, gateway_thing, ptb_id, pole_id, account_number, site, linked_by)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (meter_serial) DO UPDATE SET
+                      gateway_thing = EXCLUDED.gateway_thing,
+                      ptb_id = EXCLUDED.ptb_id,
+                      pole_id = EXCLUDED.pole_id,
+                      account_number = EXCLUDED.account_number,
+                      site = EXCLUDED.site,
+                      linked_at = NOW(),
+                      linked_by = EXCLUDED.linked_by
+                    """,
+                    (ms_norm, gateway_thing, ptb_id or None, pole_id or None,
+                     account_number, site_code, f"cc:{user.user_id}"),
+                )
+                pg.commit()
+        except Exception as e:
+            logger.warning("meter_gateway_link write failed for %s: %s", meter_serial, e)
+
     return {
         "status": "ok",
         "account_number": account_number,
