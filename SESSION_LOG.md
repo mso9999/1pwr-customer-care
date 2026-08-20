@@ -8135,6 +8135,12 @@ KET `meters` table: 172 of 173 rows have `ACCT-`placeholder meter_ids (no physic
 - **Tension calculator LIVE in production** (ugp.1pwrafrica.com/tension): fast-forwarded main to dev (f7f28ddc..be5b9d8d, user-approved), deploy run 32351609407 green, verified served bundle contains the tool. Version 1.26.1.0.
 - uGP version-bump gate: every commit to dev/main must bump `web/frontend/src/version.ts` + `web/adapter/version.py` (MINOR for features) or the deploy fails at "Enforce version bump".
 
+### Eduardo's issue RESOLVED + the systemic findability gap (2026-08-20 14:55 UTC)
+- Eduardo was searching the DR app for the **company profile** ("profile" → "No results"). Root cause: **D027's registry title was the bare string "D027"** (no human title) — and his app bundle may also have been stale. The content was always indexed; the title was the findability bug.
+- **D027 regularized**: title → "1PWR Company Profile", status → published, and the newest disk version **V26 (April 2024, 87.7 MB)** uploaded as current (registry held V23 from Feb 2023). Verified: search "profile" matches; file accessible.
+- **Systemic finding**: 28 of 313 series have bare/missing titles (all D-series: D000, D004, D011, D012, D015, D017, D019, D023–D035, D037–D047…) — unfindable by topic. Titles can be derived from current-version filenames; offered to user as a batch fix.
+- Activity logging answer (for the record): Nexus logs sessions (nexus_session_logs) + lastLoginAt; DR app logs only document mutations (documentAuditLog); NO read/search logging exists anywhere — offered as a possible DR feature.
+
 ### Key Decisions
 - Cold storage: `/Users/mattmso/Dropbox/1PWR Controlled Docs — COLD STORAGE/` (top-level, unshared).
 - Series-level verification (not version-level): superseded local versions move when the series is live in Nexus.
