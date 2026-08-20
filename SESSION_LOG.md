@@ -8097,6 +8097,12 @@ KET `meters` table: 172 of 173 rows have `ACCT-`placeholder meter_ids (no physic
 - Notable: blank **F015 Policy Agreement Form is unregistered** (signed instances exist in HR records) — flagged for ingestion. `MGD070V01Power line tensioning SOP.docx` is a numbering anomaly (MGD070 = Tension Calculator in the registry).
 - **Second pattern gap found + fixed**: crawl regexes missed underscore-separated (`MGD009V02_MG_ESMP`) and concatenated (`MGD070V01Power`) names (`_` is a word char; `\b` fails). Final sweep moved 99 more verified masters; 590 record-folder files correctly held. **Cold storage total: 2,159 files** (full manifest: `_reports/cold_storage_full_manifest.csv`).
 
+### Ingestion + F015 Nexus gate (2026-08-20 08:53 UTC)
+- **MGM is the existing "Minigrid Manuals" series** (41 entries) — not new. Ingested 9 vendor manuals as **MGM042–MGM050** (EN current/published; ES attached as reference versions). AlphaESS candidate = sha256-identical duplicate of MGM006 → cold storage, not ingested.
+- **F015 Policy Agreement Form** ingested + published (F015 series; blank 2022 master from OM TEAM copy with text layer).
+- **Nexus F015 gate built + deployed** (nexus-portal, branch feat/am-rules-claim-only, commit fe527dd; deployed rules + hosting to nexus.1pwrafrica.com): `PolicyAckGate` in ProtectedRoute blocks tools until `policy_acknowledgments/{uid}` exists; online form with per-policy initials + typed-name signature + DR deep links; rules = self-create signed_online only, immutable. 56 HR scans linked as scan_on_file via `functions/linkPolicyScans.mjs` (idempotent, dry-run default).
+- Parallel-session contamination avoided again: App.tsx had their uncommitted Reports route mixed with my gate — hunk-level patch staging kept mine only. Their Reports/icons/Lobby work left uncommitted in the tree.
+
 ### Key Decisions
 - Cold storage: `/Users/mattmso/Dropbox/1PWR Controlled Docs — COLD STORAGE/` (top-level, unshared).
 - Series-level verification (not version-level): superseded local versions move when the series is live in Nexus.
