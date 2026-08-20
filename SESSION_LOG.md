@@ -8154,6 +8154,11 @@ KET `meters` table: 172 of 173 rows have `ACCT-`placeholder meter_ids (no physic
 - Fix: deployed a **self-destructing `public/sw.js`** (unregisters + clears caches + reloads on next visit) to doc-1pwrafrica hosting; committed to the DR repo (e4d1a68). On his next visit the orphaned SW self-clears and he lands on the current app.
 - Lesson: Firebase SPA + an old service worker = "hard refresh doesn't help". The self-destruct sw.js is the standing fix pattern.
 
+### Universal view-access policy for the registry (2026-08-20 15:35 UTC, MSO directive)
+- Policy: every authenticated staff member VIEWS controlled documents; CRUD stays permission-gated.
+- Implemented: (1) Firestore rules — `controlledDocuments` (+versions) read = `isAuthenticated()` (was: signed users needed read_documents); deployed from nexus-portal (8944073). (2) DR app AuthContext — removed the hard sign-out for signed profiles lacking read_documents; entry allowed for viewing, writes still gated by privilege level/actions + rules (DR repo c4735e5, deployed to doc-1pwrafrica).
+- Eduardo timeline note: his "still the same" (13:07 UTC) predated the SW self-destruct deploy (13:25 UTC) — he needs one more normal visit for the orphaned SW to self-clear.
+
 ### Key Decisions
 - Cold storage: `/Users/mattmso/Dropbox/1PWR Controlled Docs — COLD STORAGE/` (top-level, unshared).
 - Series-level verification (not version-level): superseded local versions move when the series is live in Nexus.
