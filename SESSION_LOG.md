@@ -8077,6 +8077,21 @@ KET `meters` table: 172 of 173 rows have `ACCT-`placeholder meter_ids (no physic
 - **MGD110 reserved in the canonical registry** (title "Committee Tablet Registration Field Guide", status in_review) — version upload goes through the DR app UI.
 - MGD061V03 references + in-app Help updated to MGD110 (e1bbd65); docx files regenerated/renamed in Dropbox.
 
+## Session 2026-08-20 [202608200757] (Controlled-Doc Migration to Cold Storage + Escapee Crawl)
+
+### What Was Done
+- **Canonical registry verification** (gate): 301 series; 260/261 current-version files verified accessible in Nexus Storage; 40 series are metadata-only.
+- **Moved 1,985 verified controlled-document copies** out of shared `/Dropbox/1PWR` team folders → `/Dropbox/1PWR Controlled Docs — COLD STORAGE/` (structure preserved), pointer READMEs left in ~484 vacated folders. Move logs + reports in `_reports/`.
+- **Held back**: 69 files across 4 series registered-but-no-file-in-Nexus (D029, D048, F007, F027 — need version uploads before removal); 492 filled/signed record instances (HR/Facilities/Finance records — not reference copies).
+- **Escapee crawl** (whole 1PWR tree, 1.3M files): 825 unique unregistered governance-doc candidates, tiered 1-4 in `_reports/escapee_approval_shortlist.md` for line-by-line user approval. NOT ingested — approval gate.
+- **RCA catch**: first crawl's regex missed the dominant `MGD061V02`-style naming (no word boundary before `V`). Re-crawled with fixed pattern and moved the additional 1,026 files incrementally. Verify pattern coverage before declaring a crawl complete.
+- 1 residual: `D026V02 EAP & FPP_20220316.docx` (EHS TEAM) — Dropbox placeholder locked mid-sync; exists as placeholder in both locations; cosmetic, should self-resolve on sync (or delete from Finder).
+
+### Key Decisions
+- Cold storage: `/Users/mattmso/Dropbox/1PWR Controlled Docs — COLD STORAGE/` (top-level, unshared).
+- Series-level verification (not version-level): superseded local versions move when the series is live in Nexus.
+- Record instances (signed acknowledgments, filled forms) are operational records — never moved.
+
 ### Regularized as accepted (2026-08-19 23:25 UTC)
 - Both docs **published** in the canonical registry (doc.1pwrafrica.com), replicating the DR app's `uploadNewVersion(publishDirect=true)` write pattern via service account:
   - **MGD061**: V03 docx uploaded to Storage (`controlled/MGD061/V03_*/…docx`), version approved+current (supersedes V02), series status=published. Note: series' Laravel-synced body_markdown still shows V02 text (syncedFrom=hr_portal) — the controlled FILE is V03; the HR-portal text body refreshes on the next Laravel re-publish.
