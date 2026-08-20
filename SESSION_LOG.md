@@ -8119,6 +8119,17 @@ KET `meters` table: 172 of 173 rows have `ACCT-`placeholder meter_ids (no physic
 - uGP production deploy of /tension is pending user sign-off (staging first per uGP CONTEXT.md).
 - The escapee assessment sections B/C/F still await user review.
 
+### Follow-ups (2026-08-20 10:40 UTC)
+- **Catenary diagram added** to the uGP tension tool (`TensionDiagram.tsx`; dev commit 48b4261f). uGP requires a version bump per commit (VERSIONING.md) — first two deploys failed the "Enforce version bump" gate; bumped to 1.26.0.0 (43109e70) to unblock staging.
+- **MGD061V03 commitments audit**: all online-infrastructure commitments verified implemented EXCEPT the registration confirmation SMS — now implemented (registration.py sends Sesotho/French SMS with the account number on registration; wizard shows sms_sent; What's New entry `registration-confirmation-sms`; commit a7da125).
+- **MGD061V03 reference check**: MGF017 ✓, MGF005 ✓, MGD110 ✓. Issues: MGD059 + MGD060 still describe the paper-ledger flow (need revision for coherence with tablet-primary MGD061V3); MGF018's form face reads "MGF006V04" while registered as MGF018 (MGF006 = "Committee Ledger Book_for printing" is separately registered) — numbering inconsistency to resolve with document control.
+- **SparkMeter QA/QC regularized as MGD112** (most evolved = `QA_QC for Sparkmeter Assembly.pdf`, Jan 22 2024; v1 2021 + v2 2023 docx moved to cold storage).
+- **1Meter SOPs** (from the parallel session's dist folders): METER_ADDRESSING_SOP.docx (field, v1.0 2026-05-21) + HQ_BENCH_SOP.md (v1.1 2026-05-26) — recent production-process SOPs, untracked in the CC repo. WhatsApp Production group is NOT machine-accessible (CC bridge only logs the O&M tracker group) — asked user to confirm if a newer assembly SOP circulated there. Recommendation: keep SparkMeter (MGD112) and 1Meter docs separate (different products/processes).
+
+### Sag exaggeration + Eduardo findability fix (2026-08-20 10:50 UTC)
+- TensionDiagram: sag display exaggeration 1×/2×/4×/8× (display-only; label keeps true value, annotated "shown ×N"). uGP dev commit be5b9d8d, version 1.26.1.0.
+- **Eduardo's lost-file issue** (migration discoverability gap): DR app search is capable (title + docKey + full body text), so the gap is guidance, not search. Fixed: (1) rewrote all 846 pointer READMEs with sign-in + search instructions; (2) built `_reports/where_did_my_file_go.csv` — complete 2,159-row lookup (old Dropbox path → control number → DR deep link) for the team; (3) reply for Eduardo drafted for the user to relay. Open question for him: WHICH file — the lookup answers it instantly.
+
 ### Key Decisions
 - Cold storage: `/Users/mattmso/Dropbox/1PWR Controlled Docs — COLD STORAGE/` (top-level, unshared).
 - Series-level verification (not version-level): superseded local versions move when the series is live in Nexus.
