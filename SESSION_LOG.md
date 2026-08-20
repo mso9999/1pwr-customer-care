@@ -8118,3 +8118,8 @@ KET `meters` table: 172 of 173 rows have `ACCT-`placeholder meter_ids (no physic
 ### CI incident (2026-08-19 18:35 UTC) — concurrent deploy collision
 - Two push-triggered deploy runs (mine 26d9ab2 + parallel session's 1b9d6b5) ran simultaneously against EOL and clobbered each other's `/tmp/cc-backend` staging dir → rsync `mkdir "/tmp/cc-backend/scripts/ops" failed: ENOENT` on attempt 1 of my run. Retry succeeded; the failed-then-succeeded run deployed the superset. Root fix: added a `concurrency` group (`deploy-cc-production`, cancel-in-progress: false) to `.github/workflows/deploy.yml` to serialize deploys.
 - BN (`onepower_bj`) has migration 066 recorded via CI; LS was applied+recorded manually.
+
+## 2026-08-20 — Cursor — Cost-signals endpoint for AWS country allocation
+- Added `acdb-api/cost_signals.py`: `GET /api/admin/cost-signals` (X-API-Key gated via new env `COST_SIGNALS_API_KEYS`) reports the lane's active customers, active meters (via meters→accounts→customers join), and `pg_database_size` — the causal drivers for the Nexus AWS cost-by-country rubric. Registered in `customer_api.py`; tests in `tests/test_cost_signals.py` (3 passing).
+- Side effects: `COST_SIGNALS_API_KEYS` appended to `/opt/1pdb/.env`, `/opt/1pdb-bn/.env`, `/opt/1pdb-zm/.env` on the CC host (13.245.142.186); lanes picked it up on the normal deploy restart. Deployed via push to main (run 32347053330). Verified live on all three lanes: LS 2046 customers/1639 meters/18.7 GB, BN 181/188/1.8 GB, ZM 0/0/17 MB.
+- Follow-ups: none.
