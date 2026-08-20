@@ -595,6 +595,36 @@ def register_customer(
         except Exception as e:
             logger.error("SM customer sync exception for %s: %s", account_number, e)
 
+        # Registration confirmation SMS (MGD061 commitment): the customer gets
+        # their account number by text the moment they're registered. Best-effort
+        # — a gateway failure never fails the registration.
+        sms_sent = False
+        try:
+            sms_phone = phone or cell_phone_1 or cell_phone_2
+            if sms_phone:
+                from sms_outbound import send_gateway_sms
+                if COUNTRY.code == "BN":
+                    msg = (
+                        f"Bonjour {req.first_name}. Merci de votre enregistrement chez MIONWA. "
+                        f"Votre numéro de compte : {account_number}. "
+                        f"Utilisez ce numéro comme référence pour vos paiements MTN MoMo."
+                    )
+                else:
+                    msg = (
+                        f"Lumela {req.first_name}. Rea leboha ha u ngolisitse le One Power. "
+                        f"Nomoro ea hau ea akhaonto ke: {account_number}. "
+                        f"Sebelisa nomoro ena ha u patala ka M-PESA."
+                    )
+                sms_sent = send_gateway_sms(
+                    sms_phone,
+                    msg,
+                    sms_type="welcome",
+                    account_number=account_number,
+                    trigger="registration",
+                )
+        except Exception as sms_exc:
+            logger.warning("Registration SMS failed for %s: %s", account_number, sms_exc)
+
         response: dict = {
             "account_number": account_number,
             "customer_id": customer_pg_id,
@@ -603,6 +633,7 @@ def register_customer(
             "last_name": req.last_name,
             "community": community,
         }
+        response["sms_sent"] = sms_sent
         if claimed_payments:
             response["claimed_payments"] = claimed_payments
         if sm_result:

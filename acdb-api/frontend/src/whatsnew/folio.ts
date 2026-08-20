@@ -37,6 +37,23 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW_FOLIO: WhatsNewEntry[] = [
   {
+    id: 'registration-confirmation-sms',
+    date: '2026-08-20',
+    title: 'Customers now get an SMS the moment they are registered',
+    blurb: 'Every new registration texts the customer their account number automatically — no more waiting for the weekly transcription cycle.',
+    pages: [
+      {
+        heading: 'Instant registration confirmation',
+        body:
+          'When a customer is registered in CC (office or committee tablet), they now immediately receive an SMS with their new account number and the payment-reference instruction.\n\n' +
+          '- Automatic whenever the customer record has a phone number\n' +
+          '- Sesotho for Lesotho, French for Benin\n' +
+          '- The success screen shows when the SMS was sent\n\n' +
+          'This completes the MGD061 onboarding commitment: register → instant account number → instant SMS.',
+      },
+    ],
+  },
+  {
     id: 'committee-registrar-logins',
     date: '2026-08-17',
     title: 'Committee logins — register customers on tablets in the field',

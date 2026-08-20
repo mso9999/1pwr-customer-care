@@ -844,6 +844,12 @@ export default function NewCustomerWizard() {
                 <span className="text-sm text-gray-500">{t('newCustomer:success.customerName')}</span>
                 <span className="text-sm font-medium text-gray-900 text-right">{createdName}</span>
               </div>
+              {(createdCustomer as any).sms_sent === true && (
+                <div className="flex items-start justify-between gap-4 px-4 py-3">
+                  <span className="text-sm text-gray-500">{t('newCustomer:success.smsConfirmation')}</span>
+                  <span className="text-sm font-medium text-green-700 text-right">{t('newCustomer:success.smsSent')}</span>
+                </div>
+              )}
               <div className="flex items-start justify-between gap-4 px-4 py-3">
                 <span className="text-sm text-gray-500">{t('newCustomer:success.customerId')}</span>
                 <span className="text-sm font-semibold font-mono text-gray-900 text-right">

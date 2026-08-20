@@ -75,7 +75,9 @@
     "site": "Site",
     "openRecord": "Ouvrir la fiche client",
     "createAnother": "Créer un autre",
-    "backToCustomers": "Retour aux clients"
+    "backToCustomers": "Retour aux clients",
+    "smsConfirmation": "Confirmation SMS",
+    "smsSent": "Envoyée au client"
   },
   "back": "Retour",
   "next": "Suivant",

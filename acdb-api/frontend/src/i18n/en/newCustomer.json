@@ -75,7 +75,9 @@
     "site": "Site",
     "openRecord": "Open Customer Record",
     "createAnother": "Create Another",
-    "backToCustomers": "Back to Customers"
+    "backToCustomers": "Back to Customers",
+    "smsConfirmation": "SMS Confirmation",
+    "smsSent": "Sent to customer"
   },
   "back": "Back",
   "next": "Next",
