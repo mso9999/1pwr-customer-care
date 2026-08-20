@@ -8148,6 +8148,12 @@ KET `meters` table: 172 of 173 rows have `ACCT-`placeholder meter_ids (no physic
 - Fix: built + deployed the current DR app to hosting site `doc-1pwrafrica` (bundle index-Cl1fN8ZJ.js; PolicyDetail chunk now carries the legacy-file fallback). D003's page now renders the PDF from Storage.
 - Note: the "No file available" string is a Laravel HR-portal API message — worth knowing for future reports that sound like DR errors but come from the Laravel backend.
 
+### Eduardo round 3 (2026-08-20 15:20 UTC) — stale service worker
+- After the D027 fix + his hard refresh, Eduardo hit a NEW block: "missing the HR system grant" on doc.1pwrafrica.com. That message exists in NO current DR code or git history — it's an **orphaned service worker** serving a stale bundle (the current app registers no SW; an earlier deployment did).
+- Verified: Eduardo HAS hr.enabled=true (1PWR134) and the employee baseline grants docs:D (read_documents) — the current app lets him in. The block was purely the stale cache.
+- Fix: deployed a **self-destructing `public/sw.js`** (unregisters + clears caches + reloads on next visit) to doc-1pwrafrica hosting; committed to the DR repo (e4d1a68). On his next visit the orphaned SW self-clears and he lands on the current app.
+- Lesson: Firebase SPA + an old service worker = "hard refresh doesn't help". The self-destruct sw.js is the standing fix pattern.
+
 ### Key Decisions
 - Cold storage: `/Users/mattmso/Dropbox/1PWR Controlled Docs — COLD STORAGE/` (top-level, unshared).
 - Series-level verification (not version-level): superseded local versions move when the series is live in Nexus.
