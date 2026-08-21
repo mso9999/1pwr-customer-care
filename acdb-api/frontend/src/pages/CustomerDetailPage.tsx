@@ -17,6 +17,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useCountry } from '../contexts/CountryContext';
 import SignatureCapture from '../components/SignatureCapture';
 import OnboardingStepsPanel from '../components/OnboardingStepsPanel';
+import { formatLastSeen } from '../lib/datetime';
 
 const GENDER_OPTIONS = ['', 'Male', 'Female'];
 
@@ -673,7 +674,7 @@ export default function CustomerDetailPage() {
               <div className="flex justify-between gap-2"><span className="text-gray-500">Pole / PTB</span><span className="font-mono font-medium text-gray-800">{linkage.pole_id}</span></div>
             )}
             {linkage.last_seen && (
-              <div className="flex justify-between gap-2"><span className="text-gray-500">Last comms</span><span className="font-medium text-gray-800">{linkage.last_seen}</span></div>
+              <div className="flex justify-between gap-2"><span className="text-gray-500">Last comms</span><span className="font-medium text-gray-800">{formatLastSeen(linkage.last_seen)}</span></div>
             )}
             {linkage.site && (
               <div className="flex justify-between gap-2"><span className="text-gray-500">Site</span><span className="font-medium text-gray-800">{linkage.site}</span></div>

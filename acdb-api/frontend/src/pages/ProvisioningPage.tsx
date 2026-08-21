@@ -30,6 +30,7 @@ import {
   type MeterValidationStatus,
   type CountryProvisioningReadiness,
 } from '../lib/api';
+import { formatLastSeen } from '../lib/datetime';
 import { useAuth } from '../contexts/AuthContext';
 
 type Mode = 'walkthrough' | 'readiness' | 'guide' | 'canary' | 'batch-test' | 'config' | 'meters' | 'fleet-live' | 'registry';
@@ -1863,7 +1864,7 @@ export default function ProvisioningPage() {
                         {u.connected ? 'connected' : u.operational ? 'operational' : 'offline'}
                       </span>
                     </td>
-                    <td className="px-4 py-2 text-xs text-gray-500">{u.latest_sample || u.last_seen || u.last_accepted || '—'}</td>
+                    <td className="px-4 py-2 text-xs text-gray-500">{formatLastSeen(u.latest_sample || u.last_seen || u.last_accepted || '')}</td>
                     <td className="px-4 py-2 text-xs">{u.power || '—'}</td>
                     <td className="px-4 py-2 text-xs text-gray-500">{u.fw || '—'}</td>
                   </tr>

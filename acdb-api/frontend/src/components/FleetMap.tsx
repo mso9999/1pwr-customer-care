@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaf
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { getFleetMap, type FleetMapResult } from '../lib/api';
+import { formatLastSeen } from '../lib/datetime';
 
 function FitBounds({ points }: { points: [number, number][] }) {
   const map = useMap();
@@ -114,7 +115,7 @@ export default function FleetMap({ site, sites, onSiteChange }: FleetMapProps) {
                     {m.village && <div className="text-xs text-gray-500">{m.village}</div>}
                     {m.linked && <div className="text-xs text-blue-600 font-medium">1Meter linked{m.thing_name ? ` · ${m.thing_name}` : ''}</div>}
                     <div className="text-xs mt-1">{m.online ? 'online / reporting' : 'installed, offline'}</div>
-                    {m.last_seen && <div className="text-xs text-gray-400">last seen {m.last_seen}</div>}
+                    {m.last_seen && <div className="text-xs text-gray-400">last seen {formatLastSeen(m.last_seen)}</div>}
                   </div>
                 </Popup>
               </CircleMarker>
