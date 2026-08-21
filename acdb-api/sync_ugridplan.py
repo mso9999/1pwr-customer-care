@@ -2438,7 +2438,12 @@ def _assign_ptb_core(
     # Record the meter→gateway link CC-side so the fleet map can flag the meter
     # as 1Meter-linked. (meter_provisioning is one-row-per-gateway/primary-meter,
     # so it can't capture the many-meters-per-gateway PTB-channel links.)
-    if meter_serial and gateway_thing:
+    # The link is recorded even when the gateway isn't known yet (pole/PTB
+    # assignment without a gateway): the meter IS on the 1Meter physical
+    # network at that point, and the gateway leg auto-completes when the unit
+    # first reports the meter. An empty gateway never overwrites a known one.
+    link_recorded = False
+    if meter_serial:
         try:
             from customer_api import get_connection as _pg
             ms_norm = meter_serial.lstrip("0") or meter_serial
@@ -2450,7 +2455,11 @@ def _assign_ptb_core(
                       (meter_serial, gateway_thing, ptb_id, pole_id, account_number, site, linked_by)
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (meter_serial) DO UPDATE SET
-                      gateway_thing = EXCLUDED.gateway_thing,
+                      gateway_thing = CASE
+                        WHEN EXCLUDED.gateway_thing IS NOT NULL AND EXCLUDED.gateway_thing <> ''
+                        THEN EXCLUDED.gateway_thing
+                        ELSE meter_gateway_link.gateway_thing
+                      END,
                       ptb_id = EXCLUDED.ptb_id,
                       pole_id = EXCLUDED.pole_id,
                       account_number = EXCLUDED.account_number,
@@ -2458,10 +2467,11 @@ def _assign_ptb_core(
                       linked_at = NOW(),
                       linked_by = EXCLUDED.linked_by
                     """,
-                    (ms_norm, gateway_thing, ptb_id or None, pole_id or None,
+                    (ms_norm, gateway_thing or None, ptb_id or None, pole_id or None,
                      account_number, site_code, f"cc:{operator_id}"),
                 )
                 pg.commit()
+                link_recorded = True
         except Exception as e:
             logger.warning("meter_gateway_link write failed for %s: %s", meter_serial, e)
 
@@ -2494,6 +2504,8 @@ def _assign_ptb_core(
         "account_updated": account_updated,
         "persisted": persisted,
         "persist_error": persist_error,
+        "link_recorded": link_recorded,
+        "gateway_pending": not bool(gateway_thing),
     }
 
 
