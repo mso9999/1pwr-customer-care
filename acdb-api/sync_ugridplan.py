@@ -677,6 +677,25 @@ class UGPClient:
             raise RuntimeError(f"PTB update failed for {ptb_id} ({resp.status_code}): {resp.text[:300]}")
         return resp.json()
 
+    def save_project(self, project_id: str, user_id: str = "cc") -> Dict[str, Any]:
+        """Persist the session's modified layers as a new version in delta
+        storage (adapter POST /project/save-in-place).
+
+        uGP mutations (create_ptb / update_ptb / update_connection) only touch
+        in-memory session state until this is called — an adapter restart
+        discards unsaved sessions. Any CC flow that mutates the model must end
+        with a save or the changes silently vanish on the next restart.
+        """
+        self._ensure_auth()
+        payload = {"projectId": project_id, "userId": user_id}
+        resp = self.session.post(f"{self.base}/project/save-in-place", json=payload, timeout=300)
+        if resp.status_code == 401:
+            self.authenticate()
+            resp = self.session.post(f"{self.base}/project/save-in-place", json=payload, timeout=300)
+        if resp.status_code != 200:
+            raise RuntimeError(f"save-in-place failed ({resp.status_code}): {resp.text[:300]}")
+        return resp.json()
+
 
 # Singleton client
 _ugp_client: Optional[UGPClient] = None
@@ -2248,6 +2267,7 @@ def _assign_ptb_core(
     ptb_serial: Optional[str],
     operator_id: str,
     conns: Optional[List[Dict[str, Any]]] = None,
+    persist: bool = True,
 ) -> Dict[str, Any]:
     """Shared write path for /assign-ptb (single unit) and /auto-link (bulk
     backfill): find-or-create the PTB on the pole, associate gateway + meter,
@@ -2255,6 +2275,11 @@ def _assign_ptb_core(
 
     ``conns`` (optional) is a pre-fetched connection list so bulk callers can
     avoid a uGP round-trip per unit.
+
+    ``persist``: uGP mutations are session-only until saved — an adapter
+    restart discards them. When True (default), the session is saved to delta
+    storage before returning. Bulk callers should pass False and save once at
+    the end of the batch.
     """
     # Resolve the pole. A customer has exactly one pole (via its connection's
     # service drop). If the operator didn't pick one, derive it from the
@@ -2440,6 +2465,21 @@ def _assign_ptb_core(
         except Exception as e:
             logger.warning("meter_gateway_link write failed for %s: %s", meter_serial, e)
 
+    # Persist the uGP session to delta storage. Without this the PTB /
+    # connection writes above live only in adapter memory and vanish on
+    # restart (learned the hard way: 2026-08-20 auto-link applied 36 units,
+    # adapter restarted, all uGP-side writes lost).
+    persisted = False
+    persist_error = None
+    if persist:
+        try:
+            client.save_project(session_id, f"cc:{operator_id}")
+            persisted = True
+        except Exception as e:
+            persist_error = str(e)
+            logger.error("assign-ptb persist failed for %s (pole %s): %s",
+                         meter_serial, pole_id, e)
+
     return {
         "status": "ok",
         "account_number": account_number,
@@ -2452,6 +2492,8 @@ def _assign_ptb_core(
         "survey_id": survey_id,
         "connection_updated": connection_updated,
         "account_updated": account_updated,
+        "persisted": persisted,
+        "persist_error": persist_error,
     }
 
 
@@ -2675,6 +2717,7 @@ def _auto_link_apply(site_code: str, project_name: str, rows: List[Dict[str, Any
                 gateway_thing=thing, survey_id_in=r["survey_id"],
                 pole_id_in=r["pole_id"], ptb_serial=None,
                 operator_id=user.user_id, conns=conns,
+                persist=False,  # batch: one save after the loop
             )
             # Reflect derived serial/account back onto the provisioning record
             try:
@@ -2720,6 +2763,17 @@ def _auto_link_apply(site_code: str, project_name: str, rows: List[Dict[str, Any
         except Exception:
             failed += 1
             logger.exception("auto-link %s: FAILED %s (meter %s)", site_code, thing, r["meter_serial"])
+
+    # Persist the whole batch to uGP delta storage in one save (per-unit saves
+    # would each write a version). Without this the batch lives only in
+    # adapter memory.
+    if applied:
+        try:
+            client.save_project(session_id, f"cc:{user.user_id}")
+            logger.info("auto-link %s: session saved to delta storage", site_code)
+        except Exception:
+            logger.exception("auto-link %s: SAVE FAILED — %d applied units are "
+                             "session-only until a save succeeds", site_code, applied)
     logger.info("auto-link %s: done — applied=%d failed=%d", site_code, applied, failed)
 
 
