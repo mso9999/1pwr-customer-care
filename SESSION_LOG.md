@@ -8165,6 +8165,10 @@ KET `meters` table: 172 of 173 rows have `ACCT-`placeholder meter_ids (no physic
 - **Skipped + flagged: MGD072** ("Tracker Wiring") — the disk file named MGD072V02 is actually the SparkMeter *assembly* SOP (content belongs to MGD042). Numbering anomaly for document control to resolve; do NOT upload it to MGD072.
 - Audit script pattern saved in session (crawl cold+shared for PREFIX###V## files, compare to registry current).
 
+### Full-fidelity companion links in the registry (2026-08-21 09:45 UTC)
+- User: registry should link full-fidelity versions in addition to distributable. Implemented: `DocumentVersion.fullFidelityPath`/`fullFidelityFileName` fields; PolicyDetail shows a "Full fidelity" download button when present. Deployed to doc-1pwrafrica (DR repo d938726).
+- D027 V28: full 106.9 MB print-quality PDF uploaded to Storage and linked as the full-fidelity companion (distributable _sm.pdf remains the default current download).
+
 ### Key Decisions
 - Cold storage: `/Users/mattmso/Dropbox/1PWR Controlled Docs — COLD STORAGE/` (top-level, unshared).
 - Series-level verification (not version-level): superseded local versions move when the series is live in Nexus.
