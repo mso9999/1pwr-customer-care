@@ -8159,6 +8159,12 @@ KET `meters` table: 172 of 173 rows have `ACCT-`placeholder meter_ids (no physic
 - Implemented: (1) Firestore rules — `controlledDocuments` (+versions) read = `isAuthenticated()` (was: signed users needed read_documents); deployed from nexus-portal (8944073). (2) DR app AuthContext — removed the hard sign-out for signed profiles lacking read_documents; entry allowed for viewing, writes still gated by privilege level/actions + rules (DR repo c4735e5, deployed to doc-1pwrafrica).
 - Eduardo timeline note: his "still the same" (13:07 UTC) predated the SW self-destruct deploy (13:25 UTC) — he needs one more normal visit for the orphaned SW to self-clear.
 
+### Stale-version audit + remediation (2026-08-21 09:30 UTC)
+- User report: registry's company profile was stale vs the latest disk version. D027 was at V23 (Feb 2023); disk had up to **V28 (May 2025)**. Fixed D027 to V28 (distributable _sm.pdf as current; full PDF + DOCX source in cold storage).
+- Built a registry-wide stale-version audit (max disk version vs registry current, records-folders excluded): **11 series were stale**. Remediated 9 + D027: D001 V1→V8, D002 V1→V3, D005 V3→V4, D006 V2→V5, D041 V13→V21, MGD006 V1→V2, MGD007 V5→V6, MGD045 V2→V3, MGF005 V3→V4. All verified current + file-accessible.
+- **Skipped + flagged: MGD072** ("Tracker Wiring") — the disk file named MGD072V02 is actually the SparkMeter *assembly* SOP (content belongs to MGD042). Numbering anomaly for document control to resolve; do NOT upload it to MGD072.
+- Audit script pattern saved in session (crawl cold+shared for PREFIX###V## files, compare to registry current).
+
 ### Key Decisions
 - Cold storage: `/Users/mattmso/Dropbox/1PWR Controlled Docs — COLD STORAGE/` (top-level, unshared).
 - Series-level verification (not version-level): superseded local versions move when the series is live in Nexus.
