@@ -66,6 +66,7 @@ export default function MetersPage() {
   const [siteGateways, setSiteGateways] = useState<string[]>([]);
   const [ptbResult, setPtbResult] = useState<AssignPtbResult | null>(null);
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
+  const [focusMeterId, setFocusMeterId] = useState<string | null>(null);
   const [showUGPPicker, setShowUGPPicker] = useState(false);
   const [showPolePicker, setShowPolePicker] = useState(false);
 
@@ -612,7 +613,15 @@ export default function MetersPage() {
                   <div className="flex justify-between"><dt className="text-gray-500">Account</dt><dd className="font-mono font-medium">{ptbResult.account_number}</dd></div>
                 </dl>
                 <p className="text-xs text-gray-500">The connection now carries the pole + meter serial in uGridPLAN, and the account is linked.</p>
-                <button onClick={() => { setPtbResult(null); setModal(null); }} className="w-full py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700">Done</button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => { setFocusMeterId(ptbResult.meter_serial || null); setViewMode('map'); setPtbResult(null); setModal(null); }}
+                    className="flex-1 py-2.5 bg-emerald-600 text-white rounded-xl text-sm font-semibold hover:bg-emerald-700"
+                  >
+                    View on map
+                  </button>
+                  <button onClick={() => { setPtbResult(null); setModal(null); }} className="flex-1 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-semibold hover:bg-blue-700">Done</button>
+                </div>
               </div>
             ) : (
             <>
@@ -891,6 +900,7 @@ export default function MetersPage() {
           site={filterSite || undefined}
           sites={visibleSites}
           onSiteChange={(s) => { setFilterSite(s); setFilterPlatform(''); setFilterStatus(''); }}
+          focusMeterId={focusMeterId}
         />
       ) : loading || busy ? (
         <div className="text-center py-8 text-gray-400">{busy ? t('meters:processing') : t('meters:loading')}</div>
