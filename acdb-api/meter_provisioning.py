@@ -2465,14 +2465,16 @@ def fleet_map(
 
     # 1PDB meters with location, flagged when the meter is a linked 1Meter.
     # A meter is linked when its serial is in meter_provisioning (primary meter
-    # of a provisioned gateway) OR in meter_gateway_link (assigned to a gateway
-    # via a PTB channel at assign-PTB time).
+    # of a provisioned gateway) OR has a meter_gateway_link row (assigned to a
+    # gateway via a PTB channel at assign-PTB time). The link row exists even
+    # when gateway_thing is still NULL (gateway not yet reported), so we test
+    # gl.meter_serial — not gl.gateway_thing — or those meters read as unlinked.
     with get_connection() as conn:
         cur = conn.cursor()
         sql = """
             SELECT m.meter_id, m.account_number, m.community, m.village_name,
                    m.latitude, m.longitude, m.status, m.platform,
-                   (p.thing_name IS NOT NULL OR gl.gateway_thing IS NOT NULL) AS linked,
+                   (p.thing_name IS NOT NULL OR gl.meter_serial IS NOT NULL) AS linked,
                    COALESCE(p.thing_name, gl.gateway_thing) AS prov_thing
             FROM meters m
             LEFT JOIN meter_provisioning p

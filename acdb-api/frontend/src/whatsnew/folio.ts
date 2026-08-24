@@ -37,6 +37,22 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW_FOLIO: WhatsNewEntry[] = [
   {
+    id: 'fleet-map-linked-offline-meters',
+    date: '2026-08-24',
+    title: 'Fleet map now flags every linked 1Meter — even before it first reports',
+    blurb: 'Meters assigned to a gateway via a pole/PTB now show as 1Meter-linked on the fleet map right away, instead of looking unlinked until the unit first reports.',
+    pages: [
+      {
+        heading: 'Linked meters no longer hide on the map',
+        body:
+          'When you assign a meter to a pole/PTB, the fleet map now marks it as 1Meter-linked immediately — with the thicker border and "1Meter linked" label — even if the gateway has not reported yet.\n\n' +
+          '- Previously these meters looked like ordinary unlinked dots until first telemetry\n' +
+          '- The Thing name fills in automatically once the unit reports\n' +
+          '- Use "Find meter / account / gateway" to jump straight to any of them',
+      },
+    ],
+  },
+  {
     id: 'registration-confirmation-sms',
     date: '2026-08-20',
     title: 'Customers now get an SMS the moment they are registered',
