@@ -8189,3 +8189,31 @@ KET `meters` table: 172 of 173 rows have `ACCT-`placeholder meter_ids (no physic
 - Added `acdb-api/cost_signals.py`: `GET /api/admin/cost-signals` (X-API-Key gated via new env `COST_SIGNALS_API_KEYS`) reports the lane's active customers, active meters (via meters→accounts→customers join), and `pg_database_size` — the causal drivers for the Nexus AWS cost-by-country rubric. Registered in `customer_api.py`; tests in `tests/test_cost_signals.py` (3 passing).
 - Side effects: `COST_SIGNALS_API_KEYS` appended to `/opt/1pdb/.env`, `/opt/1pdb-bn/.env`, `/opt/1pdb-zm/.env` on the CC host (13.245.142.186); lanes picked it up on the normal deploy restart. Deployed via push to main (run 32347053330). Verified live on all three lanes: LS 2046 customers/1639 meters/18.7 GB, BN 181/188/1.8 GB, ZM 0/0/17 MB.
 - Follow-ups: none.
+
+## Session 2026-08-24 202608241632 (Fleet map silent linked meters — 0068MAK)
+
+### What Was Done
+- Diagnosed user report: meters linked via pole/PTB but never reported didn't show as 1Meter-linked on the fleet map (reported case: meter 23024497 / account 0068MAK). User hypothesis: backend resolves Thing from DynamoDB `meter_last_seen` instead of the provisioning registry.
+- Traced `GET /api/provisioning/fleet-map` (`meter_provisioning.py`): joins 1PDB `meters` (location/account) with DynamoDB `meter_last_seen` (thingName + last_seen). The `thing or prov_thing` fallback to the registry already existed — that part of the hypothesis was already handled.
+- Found two real defects instead:
+  1. **`meter_gateway_link` had no DDL anywhere** (no migration, no CREATE in git history) despite three readers + one writer. Where missing, the fleet-map LEFT JOIN throws → silent failure. Added `migrations/067_meter_gateway_link.sql` (idempotent).
+  2. **`linked` flag tested `gl.gateway_thing IS NOT NULL`** — but since 2b2877f, assign-PTB records links with `gateway_thing NULL` until the gateway first reports → those meters read as unlinked. Fixed to test `gl.meter_serial IS NOT NULL` (link-row presence).
+- Added `tests/test_fleet_map_linked_meters.py` (3 tests: SQL semantics via in-memory SQLite, never-reported renders linked+offline, reporting meter picks up thing_name/online). Full suite: 282 passed. `tsc -b --noEmit` clean.
+- What's New folio entry `fleet-map-linked-offline-meters` (2026-08-24).
+- PR #13 (branch `cursor/fix-fleet-map-silent-linked-meters-9824`), merged as 9b2d86f, deploy run 32757242698 green: migration 067 applied to `onepower_cc` (NOTICE: table already existed — someone had created it manually; now recorded in `cc_schema_migrations`) and `onepower_bj`; health checks passed.
+
+### Key Decisions
+- Did NOT use the user's local `D:\Benin\...` secrets zip — cloud agent has no access to local Windows paths; credentials must come via Cursor Dashboard → Cloud Agents → Secrets. The fix was code-deterministic so live access wasn't needed.
+- `crud.py` linked filter already used `EXISTS (... meter_gateway_link ...)` — was already correct for the NULL-gateway case; only the fleet-map flag had the bug.
+
+### What Next Session Should Know
+- **Edge case not covered by the fix**: meters assigned *before* 2b2877f (21 Aug 2026) with an unknown gateway have NO `meter_gateway_link` row at all (the write was guarded on `gateway_thing`). If 0068MAK or others still show unlinked after this deploy, re-run assign-PTB (idempotent, ON CONFLICT) or the auto-link backfill to record the link.
+- Meters with no GPS never plot by design (counted in "+N with no GPS").
+- Verification step for the user: fleet map → search 0068MAK → should show thick linked border + "1Meter linked" even before first telemetry.
+
+### Senescence Notes
+- None — short session, no context degradation.
+
+### Protocol Feedback
+- CONTEXT.md had what was needed (fleet map, provisioning, uGP sync all documented). The missing `meter_gateway_link` DDL was a genuine repo gap, not a docs gap.
+- Cloud-agent limitation worth remembering: cannot reach user-local paths (`D:\...`) or pull secrets from local files — state this early when users reference local files.
