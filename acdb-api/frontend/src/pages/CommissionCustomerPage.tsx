@@ -17,8 +17,11 @@ import {
   type UGPConnection,
   type ProvisionedMeter,
   type UpdateSurveyIdResult,
+  getGatewayHealth,
+  type GatewayHealth,
 } from '../lib/api';
 import SignatureCapture from '../components/SignatureCapture';
+import MeterTroubleshoot, { type MeterTroubleContext } from '../components/MeterTroubleshoot';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -394,6 +397,10 @@ export default function CommissionCustomerPage() {
   const [gatewayThingName, setGatewayThingName] = useState('');
   const [availableGateways, setAvailableGateways] = useState<ProvisionedMeter[]>([]);
   const [gatewaysLoading, setGatewaysLoading] = useState(false);
+  const [gwHealth, setGwHealth] = useState<GatewayHealth | null>(null);
+  const [gwGate, setGwGate] = useState<{ code: string; message: string; gateway_thing?: string } | null>(null);
+  const [meterTrouble, setMeterTrouble] = useState<MeterTroubleContext | null>(null);
+  const [forceCommission, setForceCommission] = useState(false);
 
   const [signatureB64, setSignatureB64] = useState('');
 
@@ -446,6 +453,19 @@ export default function CommissionCustomerPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [customerData?.customer.concession]);
 
+  // Live gateway-function check when a gateway is selected. A 1Meter meter only
+  // reports through its gateway, so commissioning onto one that isn't reaching
+  // the cloud yields a dead install — surface that before submit.
+  useEffect(() => {
+    setGwHealth(null);
+    if (!gatewayThingName || !customerData?.customer.concession) return;
+    const site = customerData.customer.concession.trim().toUpperCase();
+    getGatewayHealth(site, gatewayThingName)
+      .then(setGwHealth)
+      .catch(() => setGwHealth(null));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gatewayThingName]);
+
   const validateStep = (): string | null => {
     if (step === 0) {
       if (!customerId.trim()) return t('commission:validation.customerIdRequired');
@@ -493,9 +513,10 @@ export default function CommissionCustomerPage() {
     }
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (force = false) => {
     setSaving(true);
     setError('');
+    setGwGate(null);
     try {
       const acct = accountNumber.trim().toUpperCase();
       const fromAcct = acct.match(/[A-Za-z]{2,4}$/)?.[0] ?? '';
@@ -525,11 +546,20 @@ export default function CommissionCustomerPage() {
         gps_lng: gpsLng || undefined,
         survey_id: surveyId,
         gateway_thing_name: gatewayThingName || undefined,
+        force_commission: (force || forceCommission) || undefined,
         customer_signature: signatureB64,
       });
+      setGwGate(null);
       setResult(res);
     } catch (e: any) {
-      setError(e.message || t('commission:commissionFailed'));
+      // The 1Meter gateway-function gate returns a structured 409 — show its
+      // guidance + a troubleshooter, with a logged override path.
+      const detail = e?.body?.detail;
+      if (e?.status === 409 && detail && (detail.code === 'gateway_not_live' || detail.code === 'gateway_required')) {
+        setGwGate(detail);
+      } else {
+        setError(e.message || t('commission:commissionFailed'));
+      }
     } finally {
       setSaving(false);
     }
@@ -662,6 +692,23 @@ export default function CommissionCustomerPage() {
         <p className="text-xs text-gray-400 mt-1">
           Associate a provisioned gateway with this customer. The gateway Thing name is permanent and will not change.
         </p>
+        {gatewayThingName && gwHealth && (
+          <div className={`mt-2 px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-2 ${
+            gwHealth.state === 'online' || gwHealth.state === 'recent'
+              ? 'bg-green-50 border border-green-200 text-green-700'
+              : gwHealth.state === 'never'
+                ? 'bg-red-50 border border-red-200 text-red-700'
+                : 'bg-amber-50 border border-amber-200 text-amber-700'
+          }`}>
+            <span className={`inline-block w-2 h-2 rounded-full ${
+              gwHealth.state === 'online' || gwHealth.state === 'recent' ? 'bg-green-500' : gwHealth.state === 'never' ? 'bg-red-500' : 'bg-amber-500'
+            }`} />
+            {gwHealth.state === 'online' && `Gateway live on the cloud${gwHealth.age_h != null ? ` (contact ${gwHealth.age_h}h ago)` : ' now'}`}
+            {gwHealth.state === 'recent' && `Gateway last contacted the cloud ${gwHealth.age_h}h ago`}
+            {gwHealth.state === 'offline' && `Gateway offline — last contact ${gwHealth.age_h}h ago. Commissioning will be blocked until it's live.`}
+            {gwHealth.state === 'never' && `Gateway has never contacted the cloud. Commissioning will be blocked until it's live.`}
+          </div>
+        )}
       </div>
 
       <div>
@@ -991,6 +1038,38 @@ export default function CommissionCustomerPage() {
         {error && (
           <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm">{error}</div>
         )}
+
+        {gwGate && (
+          <div className="mt-4 p-4 bg-amber-50 border border-amber-300 rounded-xl">
+            <div className="text-sm font-semibold text-amber-800">
+              {gwGate.code === 'gateway_required' ? 'No gateway associated with this meter' : 'Gateway is not live'}
+            </div>
+            <p className="text-sm text-amber-800 mt-1">{gwGate.message}</p>
+            <div className="flex gap-2 mt-3 flex-wrap">
+              <button
+                onClick={() => setMeterTrouble({
+                  meter_serial: (customerData?.meter?.meter_id || '').toString(),
+                  account_number: accountNumber,
+                  gateway_thing: gwGate.gateway_thing || gatewayThingName || undefined,
+                  site: (customerData?.customer.concession || '').trim().toUpperCase(),
+                  gateway_state: gwHealth?.state,
+                  gateway_age_h: gwHealth?.age_h ?? null,
+                })}
+                className="px-4 py-2.5 bg-amber-600 text-white rounded-xl text-sm font-semibold hover:bg-amber-700"
+              >
+                Troubleshoot
+              </button>
+              <button
+                onClick={() => { setForceCommission(true); setGwGate(null); handleSubmit(true); }}
+                className="px-4 py-2.5 bg-gray-200 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-300"
+                title="Commission anyway — the override is recorded in the audit log"
+              >
+                Commission anyway (logged)
+              </button>
+              <button onClick={() => setGwGate(null)} className="px-4 py-2.5 text-gray-500 text-sm hover:text-gray-700">Dismiss</button>
+            </div>
+          </div>
+        )}
       </div>
 
       {!result && (
@@ -1007,7 +1086,7 @@ export default function CommissionCustomerPage() {
               {t('commission:next')}
             </button>
           ) : (
-            <button onClick={handleSubmit} disabled={saving || !surveyId}
+            <button onClick={() => handleSubmit()} disabled={saving || !surveyId}
               title={!surveyId ? (t('commission:errors.ugpRequired') || 'Select the uGridPLAN connection (PTB/pole) first') : undefined}
               className="flex-1 py-4 bg-green-600 text-white rounded-xl font-semibold text-base hover:bg-green-700 active:bg-green-800 disabled:opacity-50 transition">
               {saving ? (
@@ -1019,6 +1098,13 @@ export default function CommissionCustomerPage() {
             </button>
           )}
         </div>
+      )}
+
+      {meterTrouble && (
+        <MeterTroubleshoot
+          context={meterTrouble}
+          onClose={() => setMeterTrouble(null)}
+        />
       )}
         </>
       )}

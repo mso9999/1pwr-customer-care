@@ -2894,6 +2894,45 @@ def _get_iot():
     return boto3.client("iot", region_name=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
 
 
+def gateway_function_state(site_code: str, thing_name: str) -> Dict[str, Any]:
+    """Live gateway function state from the fleet index (the gateway's own MQTT
+    connection to the cloud — independent of whether it has read any meter).
+
+    state: online (connected or contact <24h) | recent (<72h) | offline | never
+    (no connectivity record) | unknown (no Thing given).
+    """
+    thing = (thing_name or "").strip()
+    if not thing:
+        return {"state": "unknown", "connected": False, "age_h": None}
+    info = _gw_connectivity(site_code.strip().upper()).get(thing)
+    if not info:
+        return {"state": "never", "connected": False, "age_h": None}
+    ts = info.get("ts") or 0
+    now_ms = datetime.now(timezone.utc).timestamp() * 1000
+    age_h = round((now_ms - ts) / 3600000, 1) if ts else None
+    connected = bool(info.get("connected"))
+    if connected or (age_h is not None and age_h < 24):
+        state = "online"
+    elif age_h is not None and age_h < 72:
+        state = "recent"
+    else:
+        state = "offline"
+    return {"state": state, "connected": connected, "age_h": age_h}
+
+
+@router.get("/gateway-health")
+def gateway_health(
+    site: str = Query(...),
+    gateway_thing: str = Query(...),
+    user: CurrentUser = Depends(require_employee),
+):
+    """Live function state for one gateway — used by the commissioning form to
+    show whether the selected gateway can actually read/report before the
+    operator commits a meter to it."""
+    return {"site": site.strip().upper(), "gateway_thing": gateway_thing.strip(),
+            **gateway_function_state(site, gateway_thing)}
+
+
 class InstallGatewayRequest(BaseModel):
     site: str = Field(..., description="Site code (e.g. MAK)")
     gateway_thing: str = Field(..., min_length=1, description="Provisioned gateway Thing (e.g. MAK-GW-0042)")

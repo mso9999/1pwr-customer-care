@@ -86,7 +86,12 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
     const msg = formatApiErrorDetail(body.detail) || res.statusText || `HTTP ${res.status}`;
-    throw new Error(msg);
+    // Attach the raw status + body so callers can branch on structured error
+    // details (e.g. the commissioning gateway-gate 409 carries detail.code).
+    const err = new Error(msg) as Error & { status?: number; body?: unknown };
+    err.status = res.status;
+    err.body = body;
+    throw err;
   }
 
   // Handle empty responses (204, etc.)
@@ -1886,8 +1891,24 @@ export interface CommissionRequest {
   gps_lng?: string;
   survey_id?: string;
   gateway_thing_name?: string;
+  force_commission?: boolean;
   customer_signature: string;
   commissioned_by?: string;
+}
+
+/** Live gateway function state (fleet index) for the commissioning gate. */
+export interface GatewayHealth {
+  site: string;
+  gateway_thing: string;
+  state: 'online' | 'recent' | 'offline' | 'never' | 'unknown';
+  connected: boolean;
+  age_h: number | null;
+}
+
+export async function getGatewayHealth(site: string, gatewayThing: string): Promise<GatewayHealth> {
+  return request<GatewayHealth>(
+    `/sync/gateway-health?site=${encodeURIComponent(site)}&gateway_thing=${encodeURIComponent(gatewayThing)}`
+  );
 }
 
 export interface UpstreamWarning {

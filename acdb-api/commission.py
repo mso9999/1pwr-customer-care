@@ -92,6 +92,12 @@ class CommissionRequest(BaseModel):
         default=None,
         description="Permanent gateway Thing name (e.g. MAK-GW-0001) to associate with this customer. Does NOT rename the Thing.",
     )
+    force_commission: bool = Field(
+        default=False,
+        description="Override the 1Meter gateway-function gate (logged). A 1Meter meter only "
+                    "reports through its gateway, so commissioning onto a gateway that isn't "
+                    "live is blocked unless this is set.",
+    )
     customer_signature: str = Field(
         ...,
         min_length=32,
@@ -226,6 +232,111 @@ async def get_commission_data(identifier: str, user: CurrentUser = Depends(requi
     }
 
 
+def _commission_gateway_gate(req: CommissionRequest, resolved_acct: Optional[str], user: CurrentUser) -> None:
+    """Enforce that a 1Meter commission goes onto a functioning gateway.
+
+    A 1Meter (prototype) meter reports only through its 1Meter gateway, so
+    commissioning one whose gateway isn't reaching the cloud yields a dead
+    install. Blocks (409) when the resolved gateway hasn't contacted the cloud
+    in 24h, or when no gateway is associated at all. ``force_commission``
+    overrides (mutation-logged) for edge cases like fleet-index lag. Fails open
+    only when the check itself can't run (e.g. fleet index unreachable).
+    """
+    acct = (resolved_acct or req.account_number or "").strip()
+    try:
+        with _get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT meter_id, platform FROM meters WHERE account_number = %s "
+                "ORDER BY updated_at DESC NULLS LAST LIMIT 1",
+                (acct,),
+            )
+            mrow = cur.fetchone()
+            if not mrow:
+                return  # no meter on record — nothing to gate
+            meter_serial = str(mrow[0] or "").strip()
+            platform = str(mrow[1] or "").strip().lower()
+            if platform != "prototype":
+                return  # not a 1Meter — vendor-path meter, no gateway gate
+
+            # Resolve the gateway: operator-selected > link table > provisioning record.
+            gw = (req.gateway_thing_name or "").strip()
+            if not gw and meter_serial:
+                ms_norm = meter_serial.lstrip("0") or meter_serial
+                cur.execute(
+                    "SELECT gateway_thing FROM meter_gateway_link "
+                    "WHERE meter_serial = %s AND gateway_thing IS NOT NULL AND gateway_thing <> '' "
+                    "ORDER BY linked_at DESC NULLS LAST LIMIT 1",
+                    (ms_norm,),
+                )
+                r = cur.fetchone()
+                if r:
+                    gw = r[0]
+            if not gw and meter_serial:
+                cur.execute(
+                    "SELECT thing_name FROM meter_provisioning "
+                    "WHERE ltrim(COALESCE(meter_serial,''),'0') = %s LIMIT 1",
+                    (meter_serial.lstrip("0") or meter_serial,),
+                )
+                r = cur.fetchone()
+                if r:
+                    gw = r[0]
+
+            from sync_ugridplan import gateway_function_state
+            state = gateway_function_state(req.site_code, gw) if gw else {"state": "none", "connected": False, "age_h": None}
+
+            block_reason = None
+            if not gw:
+                block_reason = "gateway_required"
+            elif state.get("state") not in ("online", "recent"):
+                block_reason = "gateway_not_live"
+
+            if not block_reason:
+                return  # gateway is live — pass
+
+            detail = {
+                "code": block_reason,
+                "gateway_thing": gw or None,
+                "gateway_state": state.get("state"),
+                "gateway_last_contact_h": state.get("age_h"),
+                "meter_serial": meter_serial,
+                "message": (
+                    f"This 1Meter meter reports through gateway {gw}, which last contacted the "
+                    f"cloud {state.get('age_h')}h ago (state: {state.get('state')}). Verify the "
+                    f"gateway is installed and online first (Provisioning → Field install → "
+                    f"Troubleshoot), then commission."
+                    if gw else
+                    "This 1Meter meter reports through a 1Meter gateway, but no gateway is "
+                    "associated with it yet. Install/identify the gateway first "
+                    "(Provisioning → Field install), then commission."
+                ),
+            }
+            if req.force_commission:
+                logger.warning(
+                    "COMMISSION OVERRIDE: %s commissioned onto %s despite gateway gate (%s) by %s",
+                    acct, gw or "no-gateway", block_reason, getattr(req, "commissioned_by", "?"),
+                )
+                try:
+                    from mutations import try_log_mutation
+                    with _get_connection() as mc:
+                        try_log_mutation(
+                            user, "create", "commission_override", acct,
+                            new_values=detail,
+                            metadata={"kind": "commission_gateway_gate_override"},
+                            conn=mc,
+                        )
+                        mc.commit()
+                except Exception:
+                    pass
+                return
+            raise HTTPException(status_code=409, detail=detail)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # The gate fails open only when the check itself can't run.
+        logger.warning("commission gateway gate could not run for %s (non-blocking): %s", acct, exc)
+
+
 # ---------------------------------------------------------------------------
 # POST /api/commission/execute
 # ---------------------------------------------------------------------------
@@ -258,6 +369,14 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
 
         first_name = req.first_name or str(customer.get("first_name") or "")
         last_name = req.last_name or str(customer.get("last_name") or "")
+
+    # ----- Phase 1b: 1Meter gateway-function gate ----- #
+    # A 1Meter (prototype) meter only reports through its 1Meter gateway, so
+    # commissioning one onto a gateway that isn't reaching the cloud produces a
+    # dead install. Enforce: the resolved gateway must have contacted the cloud
+    # within 24h. force_commission overrides (logged) for edge cases such as
+    # fleet-index lag. Fails open only when the check itself can't run.
+    _commission_gateway_gate(req, resolved_acct, user)
 
     # ----- Phase 2: Generate contracts ----- #
     try:
