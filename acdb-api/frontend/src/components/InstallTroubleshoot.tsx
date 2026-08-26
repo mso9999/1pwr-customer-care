@@ -74,7 +74,7 @@ const STEPS: Record<string, Step> = Object.fromEntries([
     ]),
 
   S('credentials',
-    (c) => `A gateway holds the WiFi credentials from its provisioning. If the site's WiFi password (or SSID) changed after this unit was provisioned, it sees the network but can't join it.\n\nHas the site's WiFi password or network name changed since this gateway was provisioned?`,
+    () => `A gateway holds the WiFi credentials from its provisioning. If the site's WiFi password (or SSID) changed after this unit was provisioned, it sees the network but can't join it.\n\nHas the site's WiFi password or network name changed since this gateway was provisioned?`,
     [
       { label: 'Yes, it changed', next: 'ota_network', tone: 'danger' },
       { label: 'No / unchanged', next: 'mesh', tone: 'ok' },
@@ -112,7 +112,7 @@ const STEPS: Record<string, Step> = Object.fromEntries([
     ]),
 
   S('identity',
-    (c) => `Last field check — confirm the unit is provisioned and is the unit you think. Connect a laptop/phone to the unit's SoftAP (or the site network it's on) and open:\n\nhttp://<unit-ip>/v1/provision/status\n\nRead the JSON. What does it show?`,
+    () => `Last field check — confirm the unit is provisioned and is the unit you think. Connect a laptop/phone to the unit's SoftAP (or the site network it's on) and open:\n\nhttp://<unit-ip>/v1/provision/status\n\nRead the JSON. What does it show?`,
     [
       { label: '"provisioned": false', next: 'reprovision', tone: 'danger' },
       { label: 'thing_name doesn\'t match', next: 'rebind', tone: 'danger' },
@@ -135,7 +135,7 @@ const STEPS: Record<string, Step> = Object.fromEntries([
     ]),
 
   S('cloud',
-    (c) => `Power, network, credentials, mesh and identity all check out, but the cloud still refuses the connection. This is the rare case — the AWS IoT Thing may be inactive, or the certificate/policy is wrong. Not fixable in the field.`,
+    () => `Power, network, credentials, mesh and identity all check out, but the cloud still refuses the connection. This is the rare case — the AWS IoT Thing may be inactive, or the certificate/policy is wrong. Not fixable in the field.`,
     [
       { label: 'Escalate to HQ', next: 'escalate', tone: 'primary' },
     ]),
@@ -227,7 +227,7 @@ export default function InstallTroubleshoot({ context, onClose, onRecheck }: Pro
         <div className="p-5">
           {/* progress trail */}
           <div className="flex gap-1 mb-4 flex-wrap">
-            {path.map((id, i) => (
+            {path.map((_, i) => (
               <span key={i} className={`h-1.5 rounded-full ${i === path.length - 1 ? 'bg-blue-500 w-6' : 'bg-gray-300 w-3'}`} />
             ))}
           </div>
