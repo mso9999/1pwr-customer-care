@@ -207,7 +207,13 @@ export default function FleetMap({ site, sites, onSiteChange, focusMeterId }: Fl
                       <div className="font-semibold">{m.thing_name || m.meter_id}</div>
                       <div className="text-xs text-gray-600">meter {m.meter_id}{m.account_number ? ` · ${m.account_number}` : ''}</div>
                       {m.village && <div className="text-xs text-gray-500">{m.village}</div>}
-                      {m.linked && <div className="text-xs text-blue-600 font-medium">1Meter linked{m.thing_name ? ` · ${m.thing_name}` : ''}</div>}
+                      {m.linked && (
+                        <div className="text-xs text-blue-600 font-medium">
+                          1Meter linked{m.thing_name ? ` · ${m.thing_name}` : ''}
+                          {m.pole_id ? ` · pole ${m.pole_id}` : ''}
+                          {m.gateway_pending ? ' · gateway pending' : ''}
+                        </div>
+                      )}
                       <div className="text-xs mt-1">{m.online ? 'online / reporting' : 'installed, offline'}</div>
                       {m.last_seen && <div className="text-xs text-gray-400">last seen {formatLastSeen(m.last_seen)}</div>}
                     </div>

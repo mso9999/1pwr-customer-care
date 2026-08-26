@@ -1328,6 +1328,8 @@ export interface FleetMapMeter {
   platform?: string;
   thing_name?: string;
   linked?: boolean;
+  pole_id?: string;
+  gateway_pending?: boolean;
   last_seen?: string;
   online: boolean;
 }

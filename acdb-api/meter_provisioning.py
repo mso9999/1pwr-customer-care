@@ -2465,17 +2465,20 @@ def fleet_map(
 
     # 1PDB meters with location, flagged when the meter is a linked 1Meter.
     # A meter is linked when its serial is in meter_provisioning (primary meter
-    # of a provisioned gateway) OR has a meter_gateway_link row (assigned to a
-    # gateway via a PTB channel at assign-PTB time). The link row exists even
-    # when gateway_thing is still NULL (gateway not yet reported), so we test
-    # gl.meter_serial — not gl.gateway_thing — or those meters read as unlinked.
+    # of a provisioned gateway) OR in meter_gateway_link (assigned to a pole/PTB
+    # at assign-PTB time — the gateway leg may still be pending telemetry).
+    # The JOINs fan out (a meter can match several provisioning rows and a link
+    # row), so aggregate back to one row per meter: MAX() ignores NULLs and
+    # picks the known gateway/pole when present.
     with get_connection() as conn:
         cur = conn.cursor()
         sql = """
             SELECT m.meter_id, m.account_number, m.community, m.village_name,
                    m.latitude, m.longitude, m.status, m.platform,
-                   (p.thing_name IS NOT NULL OR gl.meter_serial IS NOT NULL) AS linked,
-                   COALESCE(p.thing_name, gl.gateway_thing) AS prov_thing
+                   BOOL_OR(p.thing_name IS NOT NULL OR gl.meter_serial IS NOT NULL) AS linked,
+                   MAX(p.thing_name) AS prov_thing,
+                   MAX(gl.gateway_thing) AS link_thing,
+                   MAX(gl.pole_id) AS link_pole
             FROM meters m
             LEFT JOIN meter_provisioning p
               ON p.meter_serial = m.meter_id
@@ -2490,6 +2493,10 @@ def fleet_map(
         if site_code:
             sql += " AND m.community = %s"
             params.append(site_code)
+        sql += """
+            GROUP BY m.meter_id, m.account_number, m.community, m.village_name,
+                     m.latitude, m.longitude, m.status, m.platform
+        """
         cur.execute(sql, params)
         cols = [d[0] for d in cur.description]
         meters = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -2552,6 +2559,7 @@ def fleet_map(
         thing = srec.get("thing_name") if srec else None
         seen_dt = parse_seen(last_seen)
         online = bool(seen_dt and seen_dt >= cutoff)
+        resolved_thing = thing or m.get("prov_thing") or m.get("link_thing")
         out.append({
             "meter_id": mid,
             "account_number": m.get("account_number"),
@@ -2560,8 +2568,13 @@ def fleet_map(
             "lng": lng,
             "status": m.get("status"),
             "platform": m.get("platform"),
-            "thing_name": thing or m.get("prov_thing"),
+            "thing_name": resolved_thing,
             "linked": bool(m.get("linked")),
+            "pole_id": m.get("link_pole"),
+            # Linked via pole/PTB but the gateway hasn't been identified yet
+            # (no telemetry, no provisioning record) — show it explicitly
+            # instead of a bare popup that looks unlinked.
+            "gateway_pending": bool(m.get("linked")) and not resolved_thing,
             "last_seen": last_seen,
             "online": online,
         })
