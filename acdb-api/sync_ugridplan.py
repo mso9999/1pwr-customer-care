@@ -2326,6 +2326,15 @@ def _assign_ptb_core(
         if ptb is None:
             raise HTTPException(status_code=502, detail="PTB created but not readable back from uGridPLAN")
 
+    # Inherit the gateway from the pole's existing PTB when the operator didn't
+    # pick one and telemetry doesn't know it: the PTB physically contains the
+    # gateway, so a meter on that PTB is read by that gateway by construction.
+    if not gateway_thing and ptb is not None:
+        ptb_gw = str(ptb.get("serialNumber") or ptb.get("serial_number") or "").strip()
+        if ptb_gw:
+            gateway_thing = ptb_gw
+            logger.info("assign-ptb: inherited gateway %s from existing PTB on %s", gateway_thing, pole_id)
+
     ptb_id = str(ptb.get("ptbId") or ptb.get("ptb_id") or "")
 
     # 2. Associate gateway ↔ PTB (serial_number) and meter ↔ gateway (channel).
