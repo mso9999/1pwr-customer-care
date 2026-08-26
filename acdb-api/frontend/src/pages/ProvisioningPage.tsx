@@ -31,9 +31,10 @@ import {
   type CountryProvisioningReadiness,
 } from '../lib/api';
 import { formatLastSeen } from '../lib/datetime';
+import FieldInstall from '../components/FieldInstall';
 import { useAuth } from '../contexts/AuthContext';
 
-type Mode = 'walkthrough' | 'readiness' | 'guide' | 'canary' | 'batch-test' | 'config' | 'meters' | 'fleet-live' | 'registry';
+type Mode = 'walkthrough' | 'readiness' | 'guide' | 'canary' | 'batch-test' | 'config' | 'meters' | 'fleet-live' | 'field-install' | 'registry';
 type ValidationNetworkMode = 'site' | 'mirror';
 type GuideCheckKey =
   | 'sealed'
@@ -691,6 +692,7 @@ export default function ProvisioningPage() {
           ['config', 'Update Configuration'],
           ['meters', 'Provisioned meters'],
           ['fleet-live', 'Fleet live'],
+          ['field-install', 'Field install'],
           ['registry', 'Registry'],
         ] as [Mode, string][]).map(([m, label]) => (
           <button
@@ -1876,6 +1878,8 @@ export default function ProvisioningPage() {
             </table>
           </div>
         </div>
+      ) : mode === 'field-install' ? (
+        <FieldInstall />
       ) : mode === 'registry' ? (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">

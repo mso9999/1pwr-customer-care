@@ -484,6 +484,23 @@ def ensure_meter_provisioning_table():
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
             """)
+            # Field install binding: which provisioned gateway unit is in which
+            # pole's PTB, captured at installation, with cloud-contact verification.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS gateway_installation (
+                    gateway_thing    VARCHAR(128) PRIMARY KEY,
+                    site             VARCHAR(16) NOT NULL,
+                    pole_id          VARCHAR(64) NOT NULL,
+                    ptb_id           VARCHAR(128),
+                    status           VARCHAR(24) NOT NULL DEFAULT 'awaiting_contact',
+                    installed_by     TEXT,
+                    installed_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    first_online_at  TIMESTAMPTZ,
+                    last_online_at   TIMESTAMPTZ,
+                    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_gi_site ON gateway_installation (site)")
             conn.commit()
     except Exception as exc:  # noqa: BLE001 - never block app startup
         logger.error("meter_provisioning table init failed: %s", exc)

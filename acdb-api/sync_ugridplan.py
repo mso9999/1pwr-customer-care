@@ -21,7 +21,7 @@ import os
 import re
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
@@ -2861,6 +2861,298 @@ def auto_link(
                 "payload recompute each). Watch the service log, then re-run "
                 "with dry_run=true to verify the remaining deficit.",
     }
+
+
+# ---------------------------------------------------------------------------
+# Gateway field install: bind gateway↔PTB↔pole at installation + verify contact
+# ---------------------------------------------------------------------------
+
+def _gw_connectivity(site_code: str) -> Dict[str, Dict[str, Any]]:
+    """Fleet-index connectivity per gateway Thing for a site.
+
+    Returns {thing_name: {"connected": bool, "ts": epoch_ms|None}}. The fleet
+    index connectivity reflects the gateway's own MQTT connection to the cloud
+    — independent of whether it has read any meter — so it is the right signal
+    for "the installed gateway is live and speaking to the cloud".
+    """
+    out: Dict[str, Dict[str, Any]] = {}
+    try:
+        iot = _get_iot()
+        resp = iot.search_index(queryString=f"thingName:{site_code}-GW*")
+        for t in resp.get("things", []):
+            tn = t.get("thingName")
+            conn = t.get("connectivity", {}) or {}
+            if tn:
+                out[tn] = {"connected": bool(conn.get("connected")), "ts": conn.get("timestamp")}
+    except Exception as e:
+        logger.warning("gateway connectivity lookup failed for %s: %s", site_code, e)
+    return out
+
+
+def _get_iot():
+    import boto3
+    return boto3.client("iot", region_name=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
+
+
+class InstallGatewayRequest(BaseModel):
+    site: str = Field(..., description="Site code (e.g. MAK)")
+    gateway_thing: str = Field(..., min_length=1, description="Provisioned gateway Thing (e.g. MAK-GW-0042)")
+    pole_id: str = Field(..., min_length=1, description="Pole the PTB/gateway is mounted on")
+    ptb_serial: Optional[str] = Field(default=None, description="PTB box serial (optional, on create)")
+
+
+@router.post("/install-gateway")
+def install_gateway(
+    req: InstallGatewayRequest,
+    user: CurrentUser = Depends(require_employee),
+):
+    """Bind a provisioned gateway to a pole's PTB at installation, then verify
+    the gateway is live on the cloud.
+
+    Physical model: Pole → PTB (1/pole) → Gateway (1/PTB, inside the box).
+    Meters are assigned to channels later. When the PTB is installed and
+    powered, the gateway should connect to AWS IoT on its own — this endpoint
+    records the binding and checks that contact, so an install whose gateway
+    never comes up is flagged immediately rather than discovered weeks later.
+    """
+    _allowed = {CCRole.superadmin.value, CCRole.onm_team.value, "engineering"}
+    if not set(effective_roles(user)) & _allowed:
+        raise_privilege_denied(user, [CCRole.onm_team], "install a gateway on a pole/PTB")
+
+    site_code = req.site.strip().upper()
+    gateway_thing = req.gateway_thing.strip()
+    pole_id = req.pole_id.strip()
+
+    from customer_api import get_connection as get_pg_connection
+
+    # 1. Gateway must be a provisioned, non-test unit for this site.
+    with get_pg_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT status FROM meter_provisioning WHERE thing_name = %s AND site = %s "
+            "AND COALESCE(is_test,false) = false",
+            (gateway_thing, site_code),
+        )
+        prow = cur.fetchone()
+        if not prow:
+            raise HTTPException(
+                status_code=400,
+                detail=f"'{gateway_thing}' is not a provisioned {site_code} gateway. Provision it first.",
+            )
+        # 2. Not already installed on a different pole.
+        cur.execute(
+            "SELECT pole_id FROM gateway_installation WHERE gateway_thing = %s",
+            (gateway_thing,),
+        )
+        existing = cur.fetchone()
+        if existing and existing[0] != pole_id:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{gateway_thing} is already installed on pole {existing[0]}. "
+                       f"Remove that installation first if it was a mistake.",
+            )
+
+    # 3. uGP: find-or-create the PTB on the pole, set its serial to the gateway.
+    with get_auth_db() as conn:
+        row = conn.execute(
+            "SELECT project_id FROM cc_site_projects WHERE site_code = ?",
+            (site_code,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"No uGridPLAN project configured for site '{site_code}'.")
+    try:
+        client = _get_ugp_client()
+        session_id = _load_project_for_site(client, row["project_id"])
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"uGridPLAN unreachable: {e}")
+
+    pole_exists = any(_pole_id_of(c) == pole_id for c in client.get_poles(session_id))
+    if not pole_exists:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Pole '{pole_id}' is not in the uGridPLAN {site_code} model. "
+                   f"Pick an existing pole from the map, or add the pole to uGridPLAN first.",
+        )
+
+    ptb = client.get_ptb_for_pole(session_id, pole_id)
+    ptb_created = False
+    if ptb is None:
+        try:
+            client.create_ptb(
+                session_id, pole_id,
+                serial_number=gateway_thing or (req.ptb_serial or ""),
+                channel_serials=[],
+                notes=f"gateway install by {user.user_id}",
+            )
+            ptb_created = True
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"PTB create failed on pole {pole_id}: {e}")
+        ptb = client.get_ptb_for_pole(session_id, pole_id)
+        if ptb is None:
+            raise HTTPException(status_code=502, detail="PTB created but not readable back from uGridPLAN")
+
+    ptb_id = str(ptb.get("ptbId") or ptb.get("ptb_id") or "")
+    # Ensure the PTB carries the gateway identity + Installed status.
+    if ptb_id:
+        try:
+            client.update_ptb(session_id, ptb_id, {"serial_number": gateway_thing, "status": "I"})
+        except Exception as e:
+            logger.warning("install-gateway: PTB serial update failed for %s: %s", ptb_id, e)
+
+    # Persist the uGP session so the binding survives adapter restarts.
+    persisted = False
+    persist_error = None
+    try:
+        client.save_project(session_id, f"cc:{user.user_id}")
+        persisted = True
+    except Exception as e:
+        persist_error = str(e)
+        logger.error("install-gateway persist failed for %s on %s: %s", gateway_thing, pole_id, e)
+
+    # 4. Record the installation CC-side.
+    with get_pg_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO gateway_installation
+              (gateway_thing, site, pole_id, ptb_id, status, installed_by)
+            VALUES (%s, %s, %s, %s, 'awaiting_contact', %s)
+            ON CONFLICT (gateway_thing) DO UPDATE SET
+              pole_id = EXCLUDED.pole_id,
+              ptb_id = EXCLUDED.ptb_id,
+              installed_by = EXCLUDED.installed_by,
+              updated_at = NOW()
+            """,
+            (gateway_thing, site_code, pole_id, ptb_id or None, user.user_id),
+        )
+        conn.commit()
+
+    # 5. Verify cloud contact. A freshly powered gateway can take a minute to
+    #    mesh + connect, so "not yet" is awaiting_contact, not failure.
+    conn_info = _gw_connectivity(site_code).get(gateway_thing)
+    verified = False
+    if conn_info:
+        now_ms = datetime.now(timezone.utc).timestamp() * 1000
+        ts = conn_info.get("ts") or 0
+        age_h = (now_ms - ts) / 3600000 if ts else None
+        verified = bool(conn_info.get("connected") or (age_h is not None and age_h < 24))
+    if verified:
+        with get_pg_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE gateway_installation
+                SET status = 'verified',
+                    first_online_at = COALESCE(first_online_at, NOW()),
+                    last_online_at = NOW(),
+                    updated_at = NOW()
+                WHERE gateway_thing = %s
+                """,
+                (gateway_thing,),
+            )
+            conn.commit()
+
+    try:
+        from customer_api import get_connection as _pgc
+        from mutations import try_log_mutation
+        with _pgc() as mconn:
+            try_log_mutation(
+                user, "create", "gateway_installation", gateway_thing,
+                new_values={"gateway_thing": gateway_thing, "pole_id": pole_id,
+                            "ptb_id": ptb_id, "site": site_code, "verified": verified},
+                metadata={"kind": "gateway_install", "endpoint": "POST /api/sync/install-gateway"},
+                conn=mconn,
+            )
+            mconn.commit()
+    except Exception as e:
+        logger.warning("install-gateway mutation log failed: %s", e)
+
+    return {
+        "status": "ok",
+        "gateway_thing": gateway_thing,
+        "pole_id": pole_id,
+        "ptb_id": ptb_id,
+        "ptb_created": ptb_created,
+        "persisted": persisted,
+        "persist_error": persist_error,
+        "verified": verified,
+        "install_status": "verified" if verified else "awaiting_contact",
+        "note": "Gateway bound to the pole's PTB. "
+                + ("It is live on the cloud — install verified."
+                   if verified else
+                   "No cloud contact yet — it should connect within a minute of power-up; "
+                   "the installations list keeps checking and flips to verified on first contact."),
+    }
+
+
+@router.get("/installations")
+def list_installations(
+    site: str = Query(..., description="Site code (e.g. MAK)"),
+    user: CurrentUser = Depends(require_employee),
+):
+    """List gateway installations for a site with live cloud-contact status.
+
+    Each row is re-checked against the fleet index on read: an awaiting_contact
+    install flips to verified (recording first_online_at) the moment its
+    gateway connects. This is the verification half of the install workflow —
+    the team sees at a glance which installed gateways are live and which are
+    silent and need a field revisit.
+    """
+    from datetime import datetime, timezone
+    from customer_api import get_connection as get_pg_connection
+
+    site_code = site.strip().upper()
+    with get_pg_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT gateway_thing, pole_id, ptb_id, status, installed_by,
+                   installed_at, first_online_at, last_online_at
+            FROM gateway_installation
+            WHERE site = %s
+            ORDER BY installed_at DESC
+            """,
+            (site_code,),
+        )
+        cols = [d[0] for d in cur.description]
+        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+    conn_map = _gw_connectivity(site_code)
+    now_ms = datetime.now(timezone.utc).timestamp() * 1000
+    newly_verified = []
+    for r in rows:
+        ci = conn_map.get(r["gateway_thing"])
+        r["connected"] = bool(ci and ci.get("connected"))
+        ts = (ci or {}).get("ts") or 0
+        r["last_contact_age_h"] = round((now_ms - ts) / 3600000, 1) if ts else None
+        if r["status"] == "awaiting_contact" and ci:
+            age_h = (now_ms - ts) / 3600000 if ts else None
+            if ci.get("connected") or (age_h is not None and age_h < 24):
+                r["status"] = "verified"
+                newly_verified.append(r["gateway_thing"])
+    if newly_verified:
+        with get_pg_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE gateway_installation
+                SET status = 'verified',
+                    first_online_at = COALESCE(first_online_at, NOW()),
+                    last_online_at = NOW(),
+                    updated_at = NOW()
+                WHERE gateway_thing = ANY(%s)
+                """,
+                (newly_verified,),
+            )
+            conn.commit()
+
+    summary = {
+        "total": len(rows),
+        "verified": sum(1 for r in rows if r["status"] == "verified"),
+        "awaiting_contact": sum(1 for r in rows if r["status"] == "awaiting_contact"),
+        "connected_now": sum(1 for r in rows if r["connected"]),
+    }
+    return {"site": site_code, "summary": summary, "installations": rows}
 
 
 # ---------------------------------------------------------------------------

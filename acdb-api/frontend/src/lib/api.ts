@@ -1310,6 +1310,52 @@ export async function assignPtb(data: AssignPtbRequest): Promise<AssignPtbResult
   });
 }
 
+// --- Gateway field install (bind gateway↔PTB↔pole + cloud-contact verification) ---
+export interface InstallGatewayResult {
+  status: string;
+  gateway_thing: string;
+  pole_id: string;
+  ptb_id: string;
+  ptb_created: boolean;
+  persisted: boolean;
+  persist_error?: string | null;
+  verified: boolean;
+  install_status: 'verified' | 'awaiting_contact';
+  note: string;
+}
+
+export async function installGateway(data: {
+  site: string;
+  gateway_thing: string;
+  pole_id: string;
+}): Promise<InstallGatewayResult> {
+  return request<InstallGatewayResult>('/sync/install-gateway', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}
+
+export interface GatewayInstallation {
+  gateway_thing: string;
+  pole_id: string;
+  ptb_id?: string | null;
+  status: 'verified' | 'awaiting_contact' | string;
+  installed_by?: string | null;
+  installed_at?: string | null;
+  first_online_at?: string | null;
+  last_online_at?: string | null;
+  connected?: boolean;
+  last_contact_age_h?: number | null;
+}
+
+export async function listGatewayInstallations(site: string): Promise<{
+  site: string;
+  summary: { total: number; verified: number; awaiting_contact: number; connected_now: number };
+  installations: GatewayInstallation[];
+}> {
+  return request(`/sync/installations?site=${encodeURIComponent(site)}`);
+}
+
 /** Derive the physical pole a customer connection drops from (node1 of the drop line). */
 export async function getPoleForConnection(site: string, surveyId: string): Promise<{ pole_id: string | null }> {
   return request<{ pole_id: string | null }>(
