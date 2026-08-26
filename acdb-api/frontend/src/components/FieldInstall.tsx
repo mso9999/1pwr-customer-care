@@ -8,6 +8,7 @@ import {
   type ProvisionedMeter,
 } from '../lib/api';
 import UGPPolePicker from './UGPPolePicker';
+import InstallTroubleshoot, { type TroubleshootContext } from './InstallTroubleshoot';
 
 /**
  * Field install workflow: bind a provisioned gateway to a pole's PTB at
@@ -31,6 +32,7 @@ export default function FieldInstall() {
   const [result, setResult] = useState<InstallGatewayResult | null>(null);
   const [error, setError] = useState('');
   const [loadErr, setLoadErr] = useState('');
+  const [trouble, setTrouble] = useState<TroubleshootContext | null>(null);
 
   const refreshInstalls = async (s: string) => {
     try {
@@ -79,6 +81,21 @@ export default function FieldInstall() {
     rows.sort((a, b) => Number(a.taken) - Number(b.taken) || a.name.localeCompare(b.name));
     return rows;
   }, [prov, installs]);
+
+  // Build the troubleshooter context from what CC already knows about the unit.
+  const openTrouble = (gatewayThing: string, pole: string) => {
+    const reg = prov.find((m) => m.thing_name === gatewayThing);
+    const inst = installs.find((i) => i.gateway_thing === gatewayThing);
+    setTrouble({
+      gateway_thing: gatewayThing,
+      pole_id: pole,
+      site,
+      expected_ssid: reg?.deployment_wifi_ssid || undefined,
+      prov_status: reg?.status || undefined,
+      ever_online: !!(inst?.first_online_at || inst?.connected),
+      neighbors_online: installs.some((i) => i.gateway_thing !== gatewayThing && i.connected),
+    });
+  };
 
   const submit = async () => {
     setBusy(true);
@@ -168,6 +185,14 @@ export default function FieldInstall() {
               <div className="flex justify-between"><dt className="text-gray-500">PTB</dt><dd className="font-mono">{result.ptb_id}{result.ptb_created ? ' (created)' : ' (existing)'}</dd></div>
             </dl>
             <p className="text-xs text-gray-600 mt-2">{result.note}</p>
+            {!result.verified && (
+              <button
+                onClick={() => openTrouble(result.gateway_thing, result.pole_id)}
+                className="mt-3 w-full py-2.5 bg-amber-600 text-white rounded-xl text-sm font-semibold hover:bg-amber-700"
+              >
+                Run guided troubleshooting
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -203,6 +228,14 @@ export default function FieldInstall() {
               <div className="flex items-center gap-2">
                 {i.connected && <span className="inline-block w-2 h-2 rounded-full bg-green-500" title="Connected now" />}
                 {statusBadge(i)}
+                {i.status === 'awaiting_contact' && (
+                  <button
+                    onClick={() => openTrouble(i.gateway_thing, i.pole_id)}
+                    className="px-2.5 py-1 bg-amber-600 text-white rounded-lg text-xs font-medium hover:bg-amber-700"
+                  >
+                    Troubleshoot
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -214,6 +247,14 @@ export default function FieldInstall() {
           site={site}
           onSelect={(p) => { setPoleId(p.pole_id); setPickerOpen(false); }}
           onClose={() => setPickerOpen(false)}
+        />
+      )}
+
+      {trouble && (
+        <InstallTroubleshoot
+          context={trouble}
+          onClose={() => setTrouble(null)}
+          onRecheck={() => refreshInstalls(site)}
         />
       )}
     </div>
