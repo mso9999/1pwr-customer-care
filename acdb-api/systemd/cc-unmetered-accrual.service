@@ -1,0 +1,17 @@
+[Unit]
+Description=Monthly unmetered service-fee accrual (1PDB)
+Documentation=file:///opt/cc-portal/backend/scripts/ops/accrue_unmetered_service_fees.py
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=cc_api
+Group=cc_api
+WorkingDirectory=/opt/cc-portal/backend
+EnvironmentFile=/opt/1pdb/.env
+Environment=PYTHONPATH=/opt/cc-portal/backend
+ExecStart=/opt/cc-portal/backend/venv/bin/python /opt/cc-portal/backend/scripts/ops/accrue_unmetered_service_fees.py
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cc-unmetered-accrual

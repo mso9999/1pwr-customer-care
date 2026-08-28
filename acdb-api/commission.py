@@ -439,6 +439,22 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
                 resolved_acct or req.account_number,
                 legacy_id,
             )
+
+            # Auto-exit: commissioning ends unmetered service. Best-effort
+            # after the commission commit — the accrual guard reconciles.
+            try:
+                from unmetered_service import end_unmetered_service
+                if end_unmetered_service(
+                    conn, (resolved_acct or req.account_number or "").strip().upper(),
+                    "commissioned", user.user_id,
+                ):
+                    conn.commit()
+            except Exception as exc:
+                conn.rollback()
+                logger.warning(
+                    "unmetered-service exit hook failed for %s (accrual guard will reconcile): %s",
+                    resolved_acct or req.account_number, exc,
+                )
     except Exception as exc:
         logger.error(
             "Persist commissioning after PDF failed (legacy_id=%s): %s",

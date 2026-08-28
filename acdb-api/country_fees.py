@@ -54,7 +54,7 @@ def _require_fee_admin(user: CurrentUser) -> None:
 # Helper: read live values
 # ---------------------------------------------------------------------------
 
-_KEYS = ("connection_fee_amount", "readyboard_fee_amount")
+_KEYS = ("connection_fee_amount", "readyboard_fee_amount", "unmetered_service_fee_amount")
 
 
 def _read_system_float(conn, key: str, fallback: float) -> float:
@@ -140,6 +140,9 @@ def get_country_fees(conn) -> dict:
         "readyboard_fee_amount": _read_fee_amount(
             conn, "readyboard_fee_amount", COUNTRY.default_readyboard_fee
         ),
+        "unmetered_service_fee_amount": _read_fee_amount(
+            conn, "unmetered_service_fee_amount", COUNTRY.default_unmetered_service_fee
+        ),
         "low_balance_kwh_threshold": lb_warn,
         "low_balance_kwh_clear": lb_clear,
         "sms_balance_reply_max_per_hour": sms_rates["sms_balance_reply_max_per_hour"],
@@ -165,6 +168,10 @@ class CountryFeesUpdate(BaseModel):
     )
     readyboard_fee_amount: Optional[float] = Field(
         None, ge=0, description="Country readyboard fee. 0 disables auto-classification."
+    )
+    unmetered_service_fee_amount: Optional[float] = Field(
+        None, ge=0,
+        description="Monthly flat service fee for connected-but-unmetered accounts. 0 disables enrollment.",
     )
     low_balance_kwh_threshold: Optional[float] = Field(
         None,
@@ -219,6 +226,7 @@ def update_country_fees(
     if (
         payload.connection_fee_amount is None
         and payload.readyboard_fee_amount is None
+        and payload.unmetered_service_fee_amount is None
         and payload.low_balance_kwh_threshold is None
         and payload.low_balance_kwh_clear is None
         and payload.sms_balance_reply_max_per_hour is None
@@ -233,6 +241,8 @@ def update_country_fees(
         updates.append(("connection_fee_amount", float(payload.connection_fee_amount)))
     if payload.readyboard_fee_amount is not None:
         updates.append(("readyboard_fee_amount", float(payload.readyboard_fee_amount)))
+    if payload.unmetered_service_fee_amount is not None:
+        updates.append(("unmetered_service_fee_amount", float(payload.unmetered_service_fee_amount)))
 
     with get_connection() as conn:
         old = get_country_fees(conn)
@@ -305,6 +315,7 @@ def update_country_fees(
             old_values={
                 "connection_fee_amount": old["connection_fee_amount"],
                 "readyboard_fee_amount": old["readyboard_fee_amount"],
+                "unmetered_service_fee_amount": old["unmetered_service_fee_amount"],
                 "low_balance_kwh_threshold": old["low_balance_kwh_threshold"],
                 "low_balance_kwh_clear": old["low_balance_kwh_clear"],
                 "sms_balance_reply_max_per_hour": old.get("sms_balance_reply_max_per_hour"),
@@ -314,6 +325,7 @@ def update_country_fees(
             new_values={
                 "connection_fee_amount": new["connection_fee_amount"],
                 "readyboard_fee_amount": new["readyboard_fee_amount"],
+                "unmetered_service_fee_amount": new["unmetered_service_fee_amount"],
                 "low_balance_kwh_threshold": new["low_balance_kwh_threshold"],
                 "low_balance_kwh_clear": new["low_balance_kwh_clear"],
                 "sms_balance_reply_max_per_hour": new.get("sms_balance_reply_max_per_hour"),

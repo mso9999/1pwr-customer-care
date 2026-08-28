@@ -88,20 +88,30 @@ def compute_fee_then_advance_split(
     amount: float,
     fee_debts: dict[str, Any],
     advance: Optional[dict],
+    service_enrollment: Optional[dict] = None,
 ) -> dict[str, Any]:
-    """Split an electricity payment: fee cap (50%), then advance on remainder.
+    """Split an electricity payment: fee cap (50%), then service fee, then advance.
+
+    Order: onboarding fee debt (connection → readyboard, capped at half) →
+    unmetered service-fee debt (``repayment_fraction`` of the remainder, capped
+    at outstanding) → advance split on what is left → electricity.
 
     Returns keys:
-      fee_repayment_portion, advance_portion, electricity_portion,
+      fee_repayment_portion, service_fee_portion, unmetered_service_id,
+      advance_portion, electricity_portion,
       advance_id, fee_to_connection, fee_to_readyboard
     """
     from advances import compute_advance_split  # noqa: WPS433 — avoid import cycle with advances
+    from unmetered_service import compute_service_fee_split  # noqa: WPS433 — same
 
     amt = _dec(amount)
     if amt <= 0:
+        sf = compute_service_fee_split(service_enrollment, 0.0)
         adv = compute_advance_split(advance, 0.0)
         return {
             "fee_repayment_portion": 0.0,
+            "service_fee_portion": sf["service_fee_portion"],
+            "unmetered_service_id": sf["unmetered_service_id"],
             "advance_portion": adv["advance_portion"],
             "electricity_portion": adv["electricity_portion"],
             "advance_id": adv["advance_id"],
@@ -143,10 +153,14 @@ def compute_fee_then_advance_split(
         left -= take
 
     remainder = (amt - fee_portion).quantize(Decimal("0.01"))
-    adv_split = compute_advance_split(advance, float(remainder))
+    sf_split = compute_service_fee_split(service_enrollment, float(remainder))
+    after_service_fee = _dec(sf_split["remainder_portion"])
+    adv_split = compute_advance_split(advance, float(after_service_fee))
 
     return {
         "fee_repayment_portion": float(fee_portion),
+        "service_fee_portion": sf_split["service_fee_portion"],
+        "unmetered_service_id": sf_split["unmetered_service_id"],
         "advance_portion": adv_split["advance_portion"],
         "electricity_portion": adv_split["electricity_portion"],
         "advance_id": adv_split["advance_id"],

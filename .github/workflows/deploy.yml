@@ -308,7 +308,7 @@ jobs:
               fi
             }
 
-            for timer_base in sms-reconcile cc-sm-credit-mirror cc-ls-balance-audit cc-balance-rate cc-balance-refresh cc-db-isolation; do
+            for timer_base in sms-reconcile cc-sm-credit-mirror cc-ls-balance-audit cc-balance-rate cc-balance-refresh cc-db-isolation cc-unmetered-accrual; do
               install_timer_pair "$timer_base"
             done
 
