@@ -57,6 +57,7 @@ from fee_debt import (
     get_customer_id_for_account,
     maybe_sync_commissioning_flags_from_fee_debt,
 )
+from unmetered_service import apply_service_fee_payment, get_active_enrollment
 from payment_verification import create_verification_entry
 from merchant_unmatched import park_unmatched_payment
 
@@ -1032,7 +1033,8 @@ def _sms_incoming_process_raw(
                     fee_debts = fetch_fee_debts(conn, cust_id, for_update=True)
 
                 advance = get_active_advance(conn, account)
-                pack = compute_fee_then_advance_split(amount, fee_debts, advance)
+                service_enrollment = get_active_enrollment(conn, account)
+                pack = compute_fee_then_advance_split(amount, fee_debts, advance, service_enrollment)
                 if contract_fee_gateway:
                     rem = round(
                         pack["advance_portion"] + pack["electricity_portion"], 2,
@@ -1164,6 +1166,13 @@ def _sms_incoming_process_raw(
                             source_transaction_id=txn_db_id,
                             created_by="sms_gateway_contract",
                         )
+                    applied_sf = 0.0
+                    if pack.get("unmetered_service_id") and pack["service_fee_portion"] > 0:
+                        _, applied_sf = apply_service_fee_payment(
+                            conn, pack["unmetered_service_id"], pack["service_fee_portion"],
+                            source_transaction_id=txn_db_id,
+                            created_by="sms_gateway_contract",
+                        )
                     left = round(rem - applied_adv, 2)
                     ex_c = 0.0
                     ex_r = 0.0
@@ -1183,10 +1192,14 @@ def _sms_incoming_process_raw(
                         """
                         UPDATE transactions
                            SET fee_repayment_portion = %s,
-                               advance_portion = %s
+                               advance_portion = %s,
+                               service_fee_portion = %s,
+                               unmetered_service_id = %s
                          WHERE id = %s
                         """,
-                        (fee_rep_total, applied_adv, txn_db_id),
+                        (fee_rep_total, applied_adv, applied_sf,
+                         pack["unmetered_service_id"] if applied_sf > 0 else None,
+                         txn_db_id),
                     )
 
                     conn.commit()
@@ -1265,6 +1278,7 @@ def _sms_incoming_process_raw(
                     advance_portion = pack["advance_portion"]
                     electricity_portion = pack["electricity_portion"]
                     fee_rep = pack["fee_repayment_portion"]
+                    service_fee_portion = pack["service_fee_portion"]
                     kwh = round(electricity_portion / rate, 4) if rate > 0 else 0.0
 
                     # ``current_balance`` is a per-row kWh snapshot (matches
@@ -1284,10 +1298,10 @@ def _sms_incoming_process_raw(
                                  is_payment, current_balance, source,
                                  payment_reference, sms_payer_phone, sms_remark_raw, sms_allocation,
                                  payment_category, advance_portion, electricity_portion, advance_id,
-                                 fee_repayment_portion)
+                                 fee_repayment_portion, service_fee_portion, unmetered_service_id)
                             VALUES (%s, '', %s, %s, %s, %s, true, %s, 'sms_gateway',
                                     %s, %s, %s, %s,
-                                    'electricity', %s, %s, %s, %s)
+                                    'electricity', %s, %s, %s, %s, %s, %s)
                             RETURNING id
                         """, (
                             account, ts, amount, rate, kwh, new_balance,
@@ -1296,7 +1310,7 @@ def _sms_incoming_process_raw(
                             remark_stored or None,
                             allocation,
                             advance_portion, electricity_portion, pack["advance_id"],
-                            fee_rep,
+                            fee_rep, service_fee_portion, pack["unmetered_service_id"],
                         ))
                     except psycopg2.IntegrityError:
                         conn.rollback()
@@ -1309,6 +1323,7 @@ def _sms_incoming_process_raw(
                             "payment_category" in err or "advance_portion" in err
                             or "advance_id" in err or "electricity_portion" in err
                             or "fee_repayment_portion" in err
+                            or "service_fee_portion" in err or "unmetered_service_id" in err
                         ) and "does not exist" in err:
                             # Migration 019 not yet applied — fall back to legacy
                             # SMS-meta INSERT (still the SMS-aware one, just
@@ -1371,6 +1386,13 @@ def _sms_incoming_process_raw(
                     if advance and advance_portion > 0:
                         apply_advance_payment(
                             conn, pack["advance_id"], advance_portion,
+                            source_transaction_id=txn_db_id,
+                            created_by="sms_gateway",
+                        )
+
+                    if pack.get("unmetered_service_id") and service_fee_portion > 0:
+                        apply_service_fee_payment(
+                            conn, pack["unmetered_service_id"], service_fee_portion,
                             source_transaction_id=txn_db_id,
                             created_by="sms_gateway",
                         )

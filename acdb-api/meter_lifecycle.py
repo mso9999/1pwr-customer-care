@@ -655,6 +655,20 @@ def assign_meter(
                 conn=conn,
             )
             conn.commit()
+
+            # Auto-exit: a metered account is no longer on unmetered service.
+            # Best-effort after the assignment commit — the monthly accrual
+            # job's active-meter guard reconciles anything missed here.
+            try:
+                from unmetered_service import end_unmetered_service
+                if end_unmetered_service(conn, account_number, "meter_assigned", user.user_id):
+                    conn.commit()
+            except Exception as exc:
+                conn.rollback()
+                logger.warning(
+                    "unmetered-service exit hook failed for %s (accrual guard will reconcile): %s",
+                    account_number, exc,
+                )
         except HTTPException:
             conn.rollback()
             raise

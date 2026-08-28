@@ -37,6 +37,7 @@ from fee_debt import (
     get_customer_id_for_account,
     maybe_sync_commissioning_flags_from_fee_debt,
 )
+from unmetered_service import apply_service_fee_payment, get_active_enrollment
 from payment_verification import create_verification_entry
 from middleware import require_employee
 from models import CurrentUser
@@ -318,7 +319,10 @@ def payment_webhook(
                 fee_debts = fetch_fee_debts(conn, cust_id, for_update=True)
 
             advance = get_active_advance(conn, payload.account_number)
-            pack = compute_fee_then_advance_split(payload.amount, fee_debts, advance)
+            service_enrollment = get_active_enrollment(conn, payload.account_number)
+            pack = compute_fee_then_advance_split(
+                payload.amount, fee_debts, advance, service_enrollment,
+            )
 
             fin_split = compute_financing_split(
                 conn, payload.account_number, pack["electricity_portion"],
@@ -352,6 +356,13 @@ def payment_webhook(
                     created_by="sms_gateway",
                 )
 
+            if pack.get("unmetered_service_id") and pack["service_fee_portion"] > 0:
+                apply_service_fee_payment(
+                    conn, pack["unmetered_service_id"], pack["service_fee_portion"],
+                    source_transaction_id=txn_id,
+                    created_by="sms_gateway",
+                )
+
             if fin_split["has_financing"] and financing_portion > 0:
                 apply_financing_payment(
                     conn, fin_split["agreement_id"], financing_portion,
@@ -367,11 +378,15 @@ def payment_webhook(
                        advance_portion     = %s,
                        advance_id          = %s,
                        electricity_portion = %s,
-                       fee_repayment_portion = %s
+                       fee_repayment_portion = %s,
+                       service_fee_portion = %s,
+                       unmetered_service_id = %s
                  WHERE id = %s
                 """,
                 (financing_portion, advance_portion,
-                 pack["advance_id"], elec_amount, fee_rep, txn_id),
+                 pack["advance_id"], elec_amount, fee_rep,
+                 pack["service_fee_portion"], pack["unmetered_service_id"],
+                 txn_id),
             )
             conn.commit()
 
@@ -551,7 +566,10 @@ def record_manual_payment(
                 fee_debts = fetch_fee_debts(conn, cust_id, for_update=True)
 
             advance = get_active_advance(conn, payload.account_number)
-            pack = compute_fee_then_advance_split(payload.amount, fee_debts, advance)
+            service_enrollment = get_active_enrollment(conn, payload.account_number)
+            pack = compute_fee_then_advance_split(
+                payload.amount, fee_debts, advance, service_enrollment,
+            )
 
             fin_split = compute_financing_split(
                 conn, payload.account_number, pack["electricity_portion"],
@@ -595,6 +613,13 @@ def record_manual_payment(
                     created_by=user.user_id,
                 )
 
+            if pack.get("unmetered_service_id") and pack["service_fee_portion"] > 0:
+                apply_service_fee_payment(
+                    conn, pack["unmetered_service_id"], pack["service_fee_portion"],
+                    source_transaction_id=txn_id,
+                    created_by=user.user_id,
+                )
+
             if fin_split["has_financing"] and financing_portion > 0:
                 apply_financing_payment(
                     conn, fin_split["agreement_id"], financing_portion,
@@ -610,11 +635,15 @@ def record_manual_payment(
                        advance_portion     = %s,
                        advance_id          = %s,
                        electricity_portion = %s,
-                       fee_repayment_portion = %s
+                       fee_repayment_portion = %s,
+                       service_fee_portion = %s,
+                       unmetered_service_id = %s
                  WHERE id = %s
                 """,
                 (financing_portion, advance_portion,
-                 pack["advance_id"], elec_amount, fee_rep, txn_id),
+                 pack["advance_id"], elec_amount, fee_rep,
+                 pack["service_fee_portion"], pack["unmetered_service_id"],
+                 txn_id),
             )
 
             new_values = {
