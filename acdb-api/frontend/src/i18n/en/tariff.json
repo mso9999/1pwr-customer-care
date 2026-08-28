@@ -17,6 +17,7 @@
     "saved": "Country fees updated.",
     "connection": "Connection fee",
     "readyboard": "Readyboard fee",
+    "unmetered": "Unmetered service fee / month",
     "help": "A customer paying exactly the connection or readyboard fee is auto-tagged for finance verification rather than credited as kWh. After the fee is verified, future payments of the same amount route normally."
   },
   "lowBalance": {
