@@ -67,17 +67,15 @@ const STEPS: Record<string, Step> = Object.fromEntries([
       { label: 'Fixed / re-wired — recheck', next: 'modbus_addr', tone: 'primary' },
       { label: 'Wiring is definitely right', next: 'modbus_addr', tone: 'muted' },
     ],
-    () => 'If you have the USB-RS485 addressing tool, run a scan to confirm the meter answers at all — that isolates wiring vs addressing in one step.'),
+    () => 'This is a visual/physical check inside the PTB — no laptop or serial tool needed.'),
 
   S('modbus_addr',
-    () => `The gateway polls the meter at a specific Modbus address. If the meter's address doesn't match, the gateway gets silence even with perfect wiring.\n\nWith the USB-RS485 tool (set_meter_address.py):\n1. Run a scan (it tries IDs 1–11) — does the meter answer, and on which ID?\n2. If it answers on the wrong ID, set it to the gateway's expected ID.\n3. If it doesn't answer on ANY ID, the link is physical — go back to the RS-485 wiring.`,
+    () => `The gateway polls the meter at a specific Modbus address, which is set at the bench before installation — there's no serial/scan access to an installed meter, so this can't be re-checked in the field.\n\nIf the RS-485 wiring is confirmed right (previous step) and the meter is powered but the gateway still gets silence, the address is the likely culprit — and that's a bench fix, not a field one.`,
     [
-      { label: 'Meter answers on the right ID now', next: 'recheck', tone: 'ok' },
-      { label: 'Meter answers on wrong ID — corrected it', next: 'recheck', tone: 'ok' },
-      { label: 'Meter doesn\'t answer any ID', next: 'escalate', tone: 'danger' },
-      { label: 'No tool here — escalate', next: 'escalate', tone: 'muted' },
+      { label: 'Wiring confirmed right — still silent', next: 'escalate', tone: 'danger' },
+      { label: 'Found a wiring issue — fixed it, recheck', next: 'recheck', tone: 'ok' },
     ],
-    () => null),
+    () => 'Modbus re-addressing needs the bench tool — an installed meter can\'t be re-scanned in the field. If it comes to that, the unit goes back to HQ.'),
 
   S('recheck',
     (c) => `Watch CC for the meter's first reading — the meter's "last seen" updates and it goes green on the fleet map once the gateway reports it (within a few minutes).\n\nIs meter ${c.meter_serial} reporting now?`,
@@ -133,7 +131,7 @@ export default function MeterTroubleshoot({ context, onClose, onRecheck }: Props
       `Path taken: ${trail}`,
       `Time: ${new Date().toLocaleString()}`,
       ``,
-      `Please attach: photo of the meter terminals + RS-485 wiring, and the set_meter_address.py scan output if you ran it.`,
+      `Please attach: a photo of the meter terminals + RS-485 wiring inside the PTB, and whether the meter display is on.`,
     ].filter(Boolean).join('\n');
   }, [path, context]);
 

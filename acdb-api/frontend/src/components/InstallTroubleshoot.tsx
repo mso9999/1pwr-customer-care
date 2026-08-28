@@ -112,15 +112,13 @@ const STEPS: Record<string, Step> = Object.fromEntries([
     ]),
 
   S('identity',
-    () => `Last field check — confirm the unit is provisioned and is the unit you think. Connect a laptop/phone to the unit's SoftAP (or the site network it's on) and open:\n\nhttp://<unit-ip>/v1/provision/status\n\nRead the JSON. What does it show?`,
+    (c) => `Last field check — confirm the unit is provisioned and is the unit you bound (${c.gateway_thing}). There's no serial/USB access to an installed unit, so do this over the network:\n\nPower the unit and watch CC — the Thing that comes online in the fleet/installations view is the unit in this PTB. Is it the one you bound?\n\n(If you can reach the unit over the site network, http://<unit-ip>/v1/provision/status also reports its thing_name + provisioned state.)`,
     [
-      { label: '"provisioned": false', next: 'reprovision', tone: 'danger' },
-      { label: 'thing_name doesn\'t match', next: 'rebind', tone: 'danger' },
-      { label: 'has_runtime_wifi or tls: false', next: 'reprovision', tone: 'danger' },
-      { label: 'All good (provisioned, right thing, wifi+tls true)', next: 'cloud', tone: 'ok' },
-      { label: 'Can\'t read it', next: 'cloud', tone: 'muted' },
+      { label: 'It came online and it\'s the right unit', next: 'recheck', tone: 'ok' },
+      { label: 'A different Thing came online', next: 'rebind', tone: 'danger' },
+      { label: 'It won\'t come online at all', next: 'cloud', tone: 'muted' },
     ],
-    () => 'A virgin/factory unit never joins the site network — it hunts the provisioning bench network and must be provisioned first.'),
+    () => 'A virgin/factory unit never joins the site network — it hunts the provisioning bench network and must be provisioned first. If nothing comes online when you power it, that\'s likely why.'),
 
   S('reprovision',
     (c) => `This unit isn't fully provisioned (factory state, or missing WiFi/TLS material). It can't work at a site until it's provisioned.\n\nTake it through the provisioning station, then redo the install binding for ${c.gateway_thing}.`,
