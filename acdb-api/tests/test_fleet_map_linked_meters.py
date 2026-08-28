@@ -28,7 +28,22 @@ import meter_provisioning as mp
 COLS = [
     "meter_id", "account_number", "community", "village_name",
     "latitude", "longitude", "status", "platform", "linked", "prov_thing",
+    "link_thing", "link_pole",
 ]
+
+
+class _BoolOr:
+    """SQLite stand-in for the Postgres BOOL_OR aggregate."""
+
+    def __init__(self):
+        self.val = False
+
+    def step(self, x):
+        if x:
+            self.val = True
+
+    def finalize(self):
+        return 1 if self.val else 0
 
 # The reported meter: assigned to a pole/PTB, gateway not yet known, never reported.
 METER_ID = "23024497"
@@ -84,6 +99,7 @@ class TestFleetMapLinkedFlagSql(unittest.TestCase):
 
     def _sqlite_rows(self, sql):
         db = sqlite3.connect(":memory:")
+        db.create_aggregate("BOOL_OR", 1, _BoolOr)
         db.executescript(
             """
             CREATE TABLE meters (
@@ -91,7 +107,8 @@ class TestFleetMapLinkedFlagSql(unittest.TestCase):
                 community TEXT, village_name TEXT,
                 latitude REAL, longitude REAL, status TEXT, platform TEXT);
             CREATE TABLE meter_provisioning (meter_serial TEXT, thing_name TEXT);
-            CREATE TABLE meter_gateway_link (meter_serial TEXT, gateway_thing TEXT);
+            CREATE TABLE meter_gateway_link (
+                meter_serial TEXT, gateway_thing TEXT, pole_id TEXT);
             """
         )
         # 0068MAK's meter: linked via PTB with gateway_thing NULL (never reported).
@@ -99,7 +116,7 @@ class TestFleetMapLinkedFlagSql(unittest.TestCase):
             "INSERT INTO meters VALUES (?, NULL, ?, 'MAK', 'Ha Makebe', -29.1, 27.5, 'installed', 'prototype')",
             (METER_ID, ACCOUNT),
         )
-        db.execute("INSERT INTO meter_gateway_link VALUES (?, NULL)", (METER_ID,))
+        db.execute("INSERT INTO meter_gateway_link VALUES (?, NULL, NULL)", (METER_ID,))
         # Control 1: gateway-linked via provisioning (primary meter of a gateway).
         db.execute(
             "INSERT INTO meters VALUES ('23022628', NULL, '0005MAK', 'MAK', 'Ha Makebe', -29.1, 27.5, 'installed', 'prototype')"
@@ -134,9 +151,9 @@ class TestFleetMapNeverReportedMeter(unittest.TestCase):
     """End-to-end assembly: linked meter with no meter_last_seen row."""
 
     def test_linked_meter_without_last_seen_renders_linked_and_offline(self):
-        # Row as the fixed SQL returns it: linked=True, prov_thing=None.
+        # Row as the fixed SQL returns it: linked=True, prov_thing/link_thing=None.
         rows = [(METER_ID, ACCOUNT, "MAK", "Ha Makebe", -29.1, 27.5,
-                 "installed", "prototype", True, None)]
+                 "installed", "prototype", True, None, None, None)]
         result, _sql = _run_fleet_map(rows=rows, ddb_items=[])  # never reported
 
         self.assertEqual(result["total"], 1)
@@ -152,7 +169,7 @@ class TestFleetMapNeverReportedMeter(unittest.TestCase):
 
     def test_reporting_meter_gets_thing_name_and_online(self):
         rows = [(METER_ID, ACCOUNT, "MAK", "Ha Makebe", -29.1, 27.5,
-                 "installed", "prototype", True, None)]
+                 "installed", "prototype", True, None, None, None)]
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         items = [{
             "meterId": {"S": METER_ID},
