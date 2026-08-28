@@ -2978,17 +2978,29 @@ def install_gateway(
                 status_code=400,
                 detail=f"'{gateway_thing}' is not a provisioned {site_code} gateway. Provision it first.",
             )
-        # 2. Not already installed on a different pole.
+        # 2. Not already bound to a different pole — via a prior install
+        #    (gateway_installation) OR via a meter assigned through it
+        #    (meter_gateway_link). A gateway is one physical unit in one PTB on
+        #    one pole; binding it to a second pole is always a mistake.
         cur.execute(
             "SELECT pole_id FROM gateway_installation WHERE gateway_thing = %s",
             (gateway_thing,),
         )
         existing = cur.fetchone()
-        if existing and existing[0] != pole_id:
+        if not existing:
+            cur.execute(
+                "SELECT pole_id FROM meter_gateway_link "
+                "WHERE gateway_thing = %s AND pole_id IS NOT NULL AND pole_id <> '' "
+                "ORDER BY linked_at DESC NULLS LAST LIMIT 1",
+                (gateway_thing,),
+            )
+            existing = cur.fetchone()
+        if existing and existing[0] and existing[0] != pole_id:
             raise HTTPException(
                 status_code=409,
-                detail=f"{gateway_thing} is already installed on pole {existing[0]}. "
-                       f"Remove that installation first if it was a mistake.",
+                detail=f"{gateway_thing} is already bound to pole {existing[0]}. "
+                       f"A gateway sits in one PTB on one pole — if that's wrong, "
+                       f"correct the existing association first.",
             )
 
     # 3. uGP: find-or-create the PTB on the pole, set its serial to the gateway.
