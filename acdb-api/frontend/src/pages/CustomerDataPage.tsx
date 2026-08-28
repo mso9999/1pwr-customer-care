@@ -8,6 +8,7 @@ import {
 import {
   getCustomerData, createRecord, updateRecord, deleteRecord,
   getAccountMeterHistory, getCustomerFinancing, listAdvances,
+  getUnmeteredServiceByAccount,
   type CustomerDataResponse, type Transaction, type HourlyPoint, type MeterAssignment,
   type CustomerFinancingSummary, type Advance,
 } from '../lib/api';
@@ -230,6 +231,11 @@ export default function CustomerDataPage() {
   // Connection / readyboard advances
   const [advances, setAdvances] = useState<Advance[]>([]);
 
+  // Unmetered service (connected, no meter → flat monthly service fee)
+  const [unmetered, setUnmetered] = useState<{
+    monthly_fee: number; outstanding: number; currency: string; started_at: string | null;
+  } | null>(null);
+
   // Fetch data when account changes (or after CRUD refresh)
   useEffect(() => {
     if (!account) return;
@@ -248,6 +254,9 @@ export default function CustomerDataPage() {
     listAdvances({ account_number: account, status: 'active' })
       .then(res => setAdvances(res.advances || []))
       .catch(() => setAdvances([]));
+    getUnmeteredServiceByAccount(account)
+      .then(res => setUnmetered(res.enrolled ? res.enrollment : null))
+      .catch(() => setUnmetered(null));
   }, [account, refreshKey]);
 
   // CRUD helpers
@@ -561,6 +570,30 @@ export default function CustomerDataPage() {
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* Unmetered service (connected, no meter → flat monthly fee) */}
+          {unmetered && (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-bold text-amber-800">{t('unmeteredService:badge.unmetered')}</h3>
+                <button
+                  onClick={() => navigate('/unmetered-service')}
+                  className="text-xs bg-amber-200 text-amber-800 px-2 py-0.5 rounded-full font-medium hover:bg-amber-300"
+                >
+                  {t('common:view')}
+                </button>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-gray-700">
+                  {t('unmeteredService:badge.monthly', { fee: `${Number(unmetered.monthly_fee).toFixed(2)} ${unmetered.currency}` })}
+                  {unmetered.started_at ? ` · ${t('unmeteredService:table.started')} ${unmetered.started_at.slice(0, 10)}` : ''}
+                </span>
+                <span className="text-red-600 font-bold tabular-nums">
+                  {t('unmeteredService:badge.owes', { amount: `${Number(unmetered.outstanding).toFixed(2)} ${unmetered.currency}` })}
+                </span>
               </div>
             </div>
           )}

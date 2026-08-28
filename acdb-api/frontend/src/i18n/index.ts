@@ -37,6 +37,7 @@ import programsEn from './en/programs.json';
 import coverageEn from './en/coverage.json';
 import analyticsEn from './en/analytics.json';
 import customerCohortEn from './en/customerCohort.json';
+import unmeteredServiceEn from './en/unmeteredService.json';
 
 import commonFr from './fr/common.json';
 import loginFr from './fr/login.json';
@@ -74,6 +75,7 @@ import programsFr from './fr/programs.json';
 import coverageFr from './fr/coverage.json';
 import analyticsFr from './fr/analytics.json';
 import customerCohortFr from './fr/customerCohort.json';
+import unmeteredServiceFr from './fr/unmeteredService.json';
 
 const savedLang = localStorage.getItem('cc_lang');
 
@@ -120,6 +122,7 @@ i18n.use(initReactI18next).init({
       coverage: coverageEn,
       analytics: analyticsEn,
       customerCohort: customerCohortEn,
+      unmeteredService: unmeteredServiceEn,
     },
     fr: {
       common: commonFr,
@@ -158,6 +161,7 @@ i18n.use(initReactI18next).init({
       coverage: coverageFr,
       analytics: analyticsFr,
       customerCohort: customerCohortFr,
+      unmeteredService: unmeteredServiceFr,
     },
   },
 });

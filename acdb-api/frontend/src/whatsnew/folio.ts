@@ -37,6 +37,31 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW_FOLIO: WhatsNewEntry[] = [
   {
+    id: 'unmetered-service-billing',
+    date: '2026-08-28',
+    title: 'Unmetered service: track connected customers awaiting a meter',
+    blurb: 'Customers connected without a meter can now be enrolled in unmetered service — a flat monthly service fee (50 LSL default) is recorded against the account and paid down automatically from their top-ups.',
+    pages: [
+      {
+        heading: 'A formal record for connected-but-unmetered customers',
+        body:
+          'Some customers are connected to the grid before a meter is installed. They now get a formal status instead of an informal arrangement:\n\n' +
+          '- Enroll from the new Unmetered Service page (Commerce menu) with the account number\n' +
+          '- The monthly service fee accrues automatically on the 1st of each month\n' +
+          '- When the customer tops up, part of the payment pays down their service-fee balance first\n' +
+          '- The customer page shows an amber "Unmetered service" strip with what they owe\n\n' +
+          'The fee amount is configurable per country under Tariff Management → Country fees.',
+      },
+      {
+        heading: 'Automatic exit when the meter arrives',
+        body:
+          'No manual cleanup needed: when a meter is assigned to the account (or the customer is commissioned), the enrollment ends automatically and monthly fees stop accruing.\n\n' +
+          '- The enrollment record and full payment ledger stay available under the Ended filter\n' +
+          '- Opening arrears can be recorded at enrollment for customers who already owe for past months',
+      },
+    ],
+  },
+  {
     id: 'fleet-map-linked-offline-meters',
     date: '2026-08-24',
     title: 'Fleet map now flags every linked 1Meter — even before it first reports',
