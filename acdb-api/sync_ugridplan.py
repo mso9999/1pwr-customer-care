@@ -3078,6 +3078,28 @@ def install_gateway(
         )
         conn.commit()
 
+    # 4b. Meters already assigned to this pole inherit the gateway: a meter on a
+    #     PTB is read by the gateway in that PTB by construction, so binding the
+    #     gateway completes those meters' links (they were pole-assigned with the
+    #     gateway still pending). Only fills rows whose gateway is still unknown.
+    meters_linked = 0
+    try:
+        with get_pg_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE meter_gateway_link
+                SET gateway_thing = %s, linked_at = NOW(), linked_by = %s
+                WHERE site = %s AND pole_id = %s
+                  AND (gateway_thing IS NULL OR gateway_thing = '')
+                """,
+                (gateway_thing, f"cc:{user.user_id} (install)", site_code, pole_id),
+            )
+            meters_linked = cur.rowcount
+            conn.commit()
+    except Exception as e:
+        logger.warning("install-gateway: meter-link inheritance failed for pole %s: %s", pole_id, e)
+
     # 5. Verify cloud contact. A freshly powered gateway can take a minute to
     #    mesh + connect, so "not yet" is awaiting_contact, not failure.
     conn_info = _gw_connectivity(site_code).get(gateway_thing)
@@ -3128,6 +3150,7 @@ def install_gateway(
         "persist_error": persist_error,
         "verified": verified,
         "install_status": "verified" if verified else "awaiting_contact",
+        "meters_linked": meters_linked,
         "note": "Gateway bound to the pole's PTB. "
                 + ("It is live on the cloud — install verified."
                    if verified else

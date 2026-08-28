@@ -1326,6 +1326,7 @@ export interface InstallGatewayResult {
   persist_error?: string | null;
   verified: boolean;
   install_status: 'verified' | 'awaiting_contact';
+  meters_linked?: number;
   note: string;
 }
 

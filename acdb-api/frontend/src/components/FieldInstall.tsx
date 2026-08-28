@@ -183,6 +183,9 @@ export default function FieldInstall() {
               <div className="flex justify-between"><dt className="text-gray-500">Gateway</dt><dd className="font-mono">{result.gateway_thing}</dd></div>
               <div className="flex justify-between"><dt className="text-gray-500">Pole</dt><dd className="font-mono">{result.pole_id}</dd></div>
               <div className="flex justify-between"><dt className="text-gray-500">PTB</dt><dd className="font-mono">{result.ptb_id}{result.ptb_created ? ' (created)' : ' (existing)'}</dd></div>
+              {(result.meters_linked ?? 0) > 0 && (
+                <div className="flex justify-between"><dt className="text-gray-500">Meters linked</dt><dd className="font-medium text-green-700">{result.meters_linked} on this pole completed</dd></div>
+              )}
             </dl>
             <p className="text-xs text-gray-600 mt-2">{result.note}</p>
             {!result.verified && (
