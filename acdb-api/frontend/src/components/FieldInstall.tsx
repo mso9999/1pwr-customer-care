@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  getFleetLive,
   getProvisionedMeters,
   installGateway,
   listGatewayInstallations,
@@ -33,6 +34,8 @@ export default function FieldInstall() {
   const [error, setError] = useState('');
   const [loadErr, setLoadErr] = useState('');
   const [trouble, setTrouble] = useState<TroubleshootContext | null>(null);
+  const [watching, setWatching] = useState(false);
+  const [recentUnits, setRecentUnits] = useState<{ thing: string; ageSec: number }[]>([]);
 
   const refreshInstalls = async (s: string) => {
     try {
@@ -60,6 +63,27 @@ export default function FieldInstall() {
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [installs, site]);
+
+  // "Watch for a unit coming online": poll the fleet and surface only units that
+  // CONNECTED within the last few minutes — that's how you tell the unit you just
+  // powered from everything already online (differentiated by connect recency).
+  useEffect(() => {
+    if (!watching) return;
+    const poll = async () => {
+      try {
+        const r = await getFleetLive();
+        const nowMs = Date.now();
+        const recent = (r.units || [])
+          .filter((u) => u.connected && u.connect_ts && nowMs - u.connect_ts < 3 * 60 * 1000)
+          .map((u) => ({ thing: u.thing_name, ageSec: Math.round((nowMs - (u.connect_ts || nowMs)) / 1000) }))
+          .sort((a, b) => a.ageSec - b.ageSec);
+        setRecentUnits(recent);
+      } catch { /* keep polling */ }
+    };
+    poll();
+    const t = setInterval(poll, 15000);
+    return () => clearInterval(t);
+  }, [watching]);
 
   // Gateway options: provisioned, non-test units; unassigned first, taken ones labeled.
   const gwOptions = useMemo(() => {
@@ -144,6 +168,51 @@ export default function FieldInstall() {
               ))}
             </select>
           </div>
+        </div>
+
+        {/* Identify the physical unit with no cables: power it and watch which
+            Thing connects. Differentiated from already-online units by connect
+            recency — only units that connected in the last few minutes show. */}
+        <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="text-xs text-gray-600">
+              <span className="font-medium text-gray-700">Don't know which unit it is?</span> Power it and watch — the one that just connected is yours.
+            </div>
+            <button
+              onClick={() => setWatching((w) => !w)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium ${watching ? 'bg-green-600 text-white' : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-100'}`}
+            >
+              {watching ? 'Watching… (tap to stop)' : 'Watch for a unit coming online'}
+            </button>
+          </div>
+          {watching && (
+            <div className="mt-2.5">
+              {recentUnits.length === 0 ? (
+                <div className="text-xs text-gray-500 py-1.5 flex items-center gap-2">
+                  <span className="animate-spin inline-block w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full" />
+                  Listening… power the unit now. Nothing new in the last 3 min.
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {recentUnits.map((u) => (
+                    <div key={u.thing} className="flex items-center justify-between gap-2 bg-white border border-green-200 rounded-lg px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                        <span className="font-mono text-sm font-medium text-gray-800">{u.thing}</span>
+                        <span className="text-xs text-gray-500">connected {u.ageSec < 60 ? `${u.ageSec}s` : `${Math.round(u.ageSec / 60)}m`} ago</span>
+                      </div>
+                      <button
+                        onClick={() => { setGateway(u.thing); setWatching(false); }}
+                        className="px-2.5 py-1 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700"
+                      >
+                        Use this unit
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div>
