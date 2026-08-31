@@ -246,10 +246,25 @@ def _lock_provisioned_gateway_for_assignment(
             status_code=409,
             detail=f"Gateway {thing_name} is already commissioned to {existing_account}.",
         )
-    if not gateway.get("last_seen_online"):
+    # Live connectivity check: the gateway must actually be reaching the cloud
+    # (connected now or within 72h), not merely "observed online at some point".
+    # The registry's last_seen_online can be weeks stale and misleads operators
+    # into assigning meters onto gateways that aren't connecting.
+    try:
+        from sync_ugridplan import gateway_function_state
+        gw_state = gateway_function_state(community, thing_name)
+    except Exception as exc:
+        gw_state = None
+        logger.warning("gateway live-state check failed for %s (non-blocking): %s", thing_name, exc)
+    if gw_state is not None and gw_state.get("state") not in ("online", "recent"):
+        age = gw_state.get("age_h")
         raise HTTPException(
             status_code=409,
-            detail=f"Gateway {thing_name} has not been observed online.",
+            detail=(
+                f"Gateway {thing_name} is not reaching the cloud "
+                + (f"(last contact {age:.0f}h ago)" if age is not None else "(never connected)")
+                + ". Power it and confirm it connects before assigning a meter to it."
+            ),
         )
     if str(gateway.get("ota_status") or "").upper() != "SUCCEEDED":
         raise HTTPException(
