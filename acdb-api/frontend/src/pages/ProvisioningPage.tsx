@@ -20,6 +20,7 @@ import {
   getCountryProvisioningReadiness,
   updateProvisioningActivationStep,
   approveFactoryOtaRelease,
+  createSiteOtaRelease,
   type UpdateConfigResult,
   type OtaReadiness,
   type OtaPromotionStatus,
@@ -153,6 +154,12 @@ export default function ProvisioningPage() {
   const [guideSites, setGuideSites] = useState<ProvisioningSiteCode[]>([]);
   const [guideSite, setGuideSite] = useState('');
   const [guideDownloaded, setGuideDownloaded] = useState(false);
+  const [releaseSource, setReleaseSource] = useState('');
+  const [releaseSourceVersion, setReleaseSourceVersion] = useState('');
+  const [releaseFallbackSsid, setReleaseFallbackSsid] = useState('');
+  const [releaseConfirm, setReleaseConfirm] = useState('');
+  const [releaseBusy, setReleaseBusy] = useState(false);
+  const [releaseError, setReleaseError] = useState('');
   const [validationNetworkMode, setValidationNetworkMode] = useState<ValidationNetworkMode>('site');
   const [commandCopied, setCommandCopied] = useState(false);
   const [guideChecks, setGuideChecks] = useState<Record<GuideCheckKey, boolean>>({
@@ -472,6 +479,44 @@ export default function ProvisioningPage() {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setApprovalBusy(false);
+    }
+  };
+
+  const handleReleaseSourceChange = async (source: string) => {
+    setReleaseSource(source);
+    setReleaseSourceVersion('');
+    setReleaseConfirm('');
+    setReleaseError('');
+    if (!source) return;
+    try {
+      const r = await getFactoryOtaReadiness(source);
+      setReleaseSourceVersion(r.release.target_firmware_version || '');
+    } catch (e) {
+      setReleaseError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const handleCreateRelease = async () => {
+    if (!guideSite || !releaseSource) return;
+    setReleaseError('');
+    setReleaseBusy(true);
+    try {
+      await createSiteOtaRelease({
+        site_code: guideSite,
+        source_site: releaseSource,
+        fallback_ssid: releaseFallbackSsid || undefined,
+        confirmation: releaseConfirm,
+      });
+      setReleaseConfirm('');
+      setReleaseSource('');
+      setReleaseSourceVersion('');
+      setReleaseFallbackSsid('');
+      setOtaReadiness(await getFactoryOtaReadiness(guideSite));
+      loadCountryReadiness();
+    } catch (e) {
+      setReleaseError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setReleaseBusy(false);
     }
   };
 
@@ -1380,15 +1425,65 @@ export default function ProvisioningPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="p-4 rounded-lg border border-red-200 bg-red-50 text-sm text-red-900">
-                    <div className="font-semibold">Stop — this site is not ready for provisioning</div>
-                    <div className="mt-1">
-                      {otaReadinessError || `Missing/failed: ${[
-                        ...(otaReadiness?.missing || []),
-                        ...Object.entries(otaReadiness?.checks || {}).filter(([, value]) => !value.ok).map(([key]) => key),
-                      ].join(', ') || 'unknown readiness check'}.`}
-                      {' '}Engineering must approve a valid release before the portal unlocks the next step.
+                  <div className="space-y-4">
+                    <div className="p-4 rounded-lg border border-red-200 bg-red-50 text-sm text-red-900">
+                      <div className="font-semibold">Stop — this site is not ready for provisioning</div>
+                      <div className="mt-1">
+                        {otaReadinessError || `Missing/failed: ${[
+                          ...(otaReadiness?.missing || []),
+                          ...Object.entries(otaReadiness?.checks || {}).filter(([, value]) => !value.ok).map(([key]) => key),
+                        ].join(', ') || 'unknown readiness check'}.`}
+                        {' '}Engineering must approve a valid release before the portal unlocks the next step.
+                      </div>
                     </div>
+                    {canApproveRelease && (otaReadiness?.release.approved_sites?.length ?? 0) > 0 && (
+                      <div className="p-4 rounded-lg border border-blue-200 bg-blue-50 text-sm text-blue-950 max-w-xl">
+                        <div className="font-semibold">Create a release for {guideSite}</div>
+                        <p className="mt-1 text-xs text-blue-900">
+                          This site has no approved firmware release yet. Create one by copying the
+                          current known-good build from another site. The site then provisions one
+                          canary gateway before batch unlocks. The site's WiFi password is{' '}
+                          <b>not</b> stored here — it is entered in the provisioning station.
+                        </p>
+                        <div className="mt-3 space-y-3">
+                          <div>
+                            <label className={labelCls}>Copy release from</label>
+                            <select className={inputCls} value={releaseSource} onChange={(e) => handleReleaseSourceChange(e.target.value)}>
+                              <option value="">Select a known-good site…</option>
+                              {(otaReadiness?.release.approved_sites || []).filter((s) => s !== guideSite).map((s) => (
+                                <option key={s} value={s}>{s}</option>
+                              ))}
+                            </select>
+                          </div>
+                          {releaseSourceVersion && (
+                            <div className="text-xs text-blue-900">
+                              This will configure <b>{guideSite}</b> with firmware{' '}
+                              <b>v{releaseSourceVersion}</b> (copied from {releaseSource}).
+                            </div>
+                          )}
+                          <div>
+                            <label className={labelCls}>Site WiFi network name (SSID) — optional, non-secret</label>
+                            <input className={inputCls} value={releaseFallbackSsid} onChange={(e) => setReleaseFallbackSsid(e.target.value)}
+                              placeholder="e.g. KOTOKPA (documentation only)" />
+                          </div>
+                          <div>
+                            <label className={labelCls}>
+                              Type <b>CREATE RELEASE {guideSite} {releaseSourceVersion || '<version>'}</b> to confirm
+                            </label>
+                            <input className={inputCls} value={releaseConfirm} onChange={(e) => setReleaseConfirm(e.target.value)}
+                              placeholder={`CREATE RELEASE ${guideSite} ${releaseSourceVersion || ''}`.trim()} />
+                          </div>
+                          {releaseError && <div className="text-xs text-red-700">{releaseError}</div>}
+                          <button
+                            disabled={releaseBusy || !releaseSource || !releaseSourceVersion || releaseConfirm.trim() !== `CREATE RELEASE ${guideSite} ${releaseSourceVersion}`}
+                            onClick={handleCreateRelease}
+                            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium disabled:opacity-40"
+                          >
+                            {releaseBusy ? 'Creating…' : `Create release for ${guideSite}`}
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
                 <div className="flex justify-end">

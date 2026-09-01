@@ -501,6 +501,27 @@ def ensure_meter_provisioning_table():
                 )
             """)
             cur.execute("CREATE INDEX IF NOT EXISTS idx_gi_site ON gateway_installation (site)")
+            # Self-serve per-site OTA release config. Durable (DB survives the
+            # deploy rsync that resets the ota_releases.json file); a row here
+            # wins over the file catalog for that site. Non-secret only — WiFi
+            # passwords are never stored (runtime NVS via the station).
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS onemeter_ota_site_releases (
+                    site_code               VARCHAR(16) PRIMARY KEY,
+                    artifact_key            TEXT NOT NULL,
+                    artifact_version_id     TEXT NOT NULL,
+                    target_firmware_version VARCHAR(32) NOT NULL,
+                    factory_baseline_version VARCHAR(32) NOT NULL DEFAULT '1.1.56',
+                    signing_profile         TEXT NOT NULL DEFAULT '1PWR_OTA_ESP32_v2',
+                    role_arn                TEXT NOT NULL,
+                    fallback_ssid           VARCHAR(64),
+                    canary_only             BOOLEAN NOT NULL DEFAULT TRUE,
+                    max_per_minute          INTEGER NOT NULL DEFAULT 1,
+                    created_by              TEXT,
+                    created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+            """)
             conn.commit()
     except Exception as exc:  # noqa: BLE001 - never block app startup
         logger.error("meter_provisioning table init failed: %s", exc)
@@ -774,6 +795,19 @@ class OtaReleaseApprovalRequest(BaseModel):
     validation_session_id: Optional[str] = None
     waive_physical_validation: bool = False
     waiver_reason: Optional[str] = Field(default=None, max_length=500)
+    confirmation: str = Field(..., min_length=1, max_length=160)
+
+
+class OtaSiteReleaseRequest(BaseModel):
+    site_code: str = Field(..., min_length=2, max_length=16)
+    source_site: Optional[str] = Field(default=None, max_length=16)
+    target_firmware_version: Optional[str] = Field(default=None, max_length=32)
+    artifact_key: Optional[str] = Field(default=None, max_length=512)
+    artifact_version_id: Optional[str] = Field(default=None, max_length=256)
+    factory_baseline_version: Optional[str] = Field(default=None, max_length=32)
+    fallback_ssid: Optional[str] = Field(default=None, max_length=64)
+    canary_only: bool = True
+    max_per_minute: int = Field(default=1, ge=1, le=50)
     confirmation: str = Field(..., min_length=1, max_length=160)
 
 
@@ -1284,6 +1318,44 @@ def _release_approval(site: str, artifact_version_id: str, target_version: str) 
         return None
 
 
+def _db_site_releases() -> dict:
+    """Load self-serve per-site OTA releases from the DB (durable across deploys).
+
+    Returns ``{SITE: {field: value}}``. DB rows win over the file catalog for
+    the same site. Fail-open to empty so a missing table never breaks reads.
+    """
+    try:
+        from customer_api import get_connection
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT site_code, artifact_key, artifact_version_id,
+                       target_firmware_version, factory_baseline_version,
+                       signing_profile, role_arn, fallback_ssid,
+                       canary_only, max_per_minute
+                  FROM onemeter_ota_site_releases
+                """
+            )
+            out = {}
+            for row in cur.fetchall():
+                out[str(row[0]).upper()] = {
+                    "artifact_key": row[1],
+                    "artifact_version_id": row[2],
+                    "target_firmware_version": row[3],
+                    "factory_baseline_version": row[4],
+                    "signing_profile": row[5],
+                    "role_arn": row[6],
+                    "fallback_ssid": row[7],
+                    "canary_only": bool(row[8]),
+                    "max_per_minute": row[9],
+                }
+            return out
+    except Exception as exc:  # noqa: BLE001 - pre-migration must not break reads
+        logger.debug("Unable to load DB site releases: %s", exc)
+        return {}
+
+
 def _ota_release(site_code: Optional[str] = None) -> dict:
     """Resolve the immutable approved OTA release for a destination site.
 
@@ -1324,15 +1396,21 @@ def _ota_release(site_code: Optional[str] = None) -> dict:
         except OSError as exc:
             release["config_error"] = f"Unable to read OTA release catalog: {exc}"
             return release
-    if not catalog_json:
+    db_releases = _db_site_releases()
+    if not catalog_json and not db_releases:
         return release
-    try:
-        catalog = json.loads(catalog_json)
-        if not isinstance(catalog, dict):
-            raise ValueError("root must be an object keyed by canonical site code")
-    except Exception as exc:  # noqa: BLE001
-        release["config_error"] = f"ONEMETER_OTA_RELEASES_JSON is invalid: {exc}"
-        return release
+    catalog: dict = {}
+    if catalog_json:
+        try:
+            parsed = json.loads(catalog_json)
+            if not isinstance(parsed, dict):
+                raise ValueError("root must be an object keyed by canonical site code")
+            catalog = {str(k).upper(): v for k, v in parsed.items()}
+        except Exception as exc:  # noqa: BLE001
+            release["config_error"] = f"ONEMETER_OTA_RELEASES_JSON is invalid: {exc}"
+            return release
+    # DB rows win over the file catalog for the same site (self-serve overrides).
+    catalog.update(db_releases)
 
     release["approved_sites"] = sorted(str(key).upper() for key in catalog)
     site = release["site_code"]
@@ -1848,6 +1926,139 @@ def approve_ota_release(
         "ready": not approved["canary_only"],
         "approval": approved.get("approval"),
         "note": "The immutable release is approved for controlled batch provisioning.",
+    }
+
+
+@router.post("/ota/site-release")
+def create_site_ota_release(
+    payload: OtaSiteReleaseRequest,
+    user: CurrentUser = Depends(CC_APPROVE_GATE),
+):
+    """Self-serve OTA release config for a site that has none (new-site onboarding).
+
+    Stores the release in the durable DB table (survives the deploy rsync that
+    resets ``ota_releases.json``); a DB row wins over the file catalog. The
+    artifact details are normally copied from a known-good ``source_site`` so the
+    operator never handles S3 keys. Non-secret only — the site's WiFi password is
+    never stored here; it is entered in the provisioning station and lives in
+    device NVS (``credentials_mode: runtime_nvs``).
+    """
+    site = payload.site_code.strip().upper()
+    if site not in _active_site_map():
+        raise HTTPException(status_code=400, detail=f"Unknown canonical site code '{site}'.")
+
+    # Resolve the base artifact config: copy from a source site, or explicit.
+    base: dict = {}
+    if payload.source_site:
+        src = payload.source_site.strip().upper()
+        src_release = _ota_release(src)
+        if _ota_missing_config(src_release):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Source site '{src}' has no configured release to copy from.",
+            )
+        base = {
+            "artifact_key": src_release["artifact_key"],
+            "artifact_version_id": src_release["artifact_version_id"],
+            "target_firmware_version": src_release["target_firmware_version"],
+            "factory_baseline_version": src_release["factory_baseline_version"],
+            "signing_profile": src_release["signing_profile"],
+            "role_arn": src_release["role_arn"],
+        }
+    artifact_key = (payload.artifact_key or base.get("artifact_key") or "").strip()
+    artifact_version_id = (payload.artifact_version_id or base.get("artifact_version_id") or "").strip()
+    target_version = (payload.target_firmware_version or base.get("target_firmware_version") or "").strip()
+    baseline = (payload.factory_baseline_version or base.get("factory_baseline_version")
+                or OTA_FACTORY_BASELINE_VERSION).strip()
+    signing_profile = (base.get("signing_profile") or OTA_SIGNING_PROFILE).strip()
+    role_arn = (base.get("role_arn") or OTA_ROLE_ARN).strip()
+    if not (artifact_key and artifact_version_id and target_version):
+        raise HTTPException(
+            status_code=400,
+            detail="Provide a source_site to copy from, or explicit artifact_key, "
+                   "artifact_version_id, and target_firmware_version.",
+        )
+
+    expected = f"CREATE RELEASE {site} {target_version}"
+    if payload.confirmation.strip() != expected:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Type '{expected}' exactly to create this release.",
+        )
+
+    # Preflight the constructed release before persisting it.
+    candidate = {
+        "bucket": OTA_BUCKET,
+        "artifact_key": artifact_key,
+        "artifact_version_id": artifact_version_id,
+        "target_firmware_version": target_version,
+        "factory_baseline_version": baseline,
+        "signing_profile": signing_profile,
+        "role_arn": role_arn,
+    }
+    checks = _ota_release_checks(candidate)
+    failed = [name for name, check in checks.items() if not check.get("ok")]
+    if failed:
+        detail = "; ".join(f"{n}: {checks[n].get('error', 'failed')}" for n in failed)
+        raise HTTPException(status_code=503, detail=f"Release preflight failed: {detail}")
+
+    from customer_api import get_connection
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO onemeter_ota_site_releases
+                (site_code, artifact_key, artifact_version_id, target_firmware_version,
+                 factory_baseline_version, signing_profile, role_arn, fallback_ssid,
+                 canary_only, max_per_minute, created_by, created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+            ON CONFLICT (site_code) DO UPDATE SET
+                artifact_key = EXCLUDED.artifact_key,
+                artifact_version_id = EXCLUDED.artifact_version_id,
+                target_firmware_version = EXCLUDED.target_firmware_version,
+                factory_baseline_version = EXCLUDED.factory_baseline_version,
+                signing_profile = EXCLUDED.signing_profile,
+                role_arn = EXCLUDED.role_arn,
+                fallback_ssid = EXCLUDED.fallback_ssid,
+                canary_only = EXCLUDED.canary_only,
+                max_per_minute = EXCLUDED.max_per_minute,
+                updated_at = NOW()
+            """,
+            (
+                site, artifact_key, artifact_version_id, target_version,
+                baseline, signing_profile, role_arn,
+                (payload.fallback_ssid or "").strip() or None,
+                bool(payload.canary_only), int(payload.max_per_minute),
+                str(user.user_id),
+            ),
+        )
+        try_log_mutation(
+            user,
+            "update",
+            "onemeter_ota_site_releases",
+            f"{site}:{target_version}",
+            new_values={
+                "site": site,
+                "target_firmware_version": target_version,
+                "artifact_version_id": artifact_version_id,
+                "source_site": payload.source_site,
+                "canary_only": bool(payload.canary_only),
+                "fallback_ssid": (payload.fallback_ssid or "").strip() or None,
+            },
+            metadata={
+                "kind": "create_site_ota_release",
+                "endpoint": "POST /api/provisioning/ota/site-release",
+            },
+            conn=conn,
+        )
+        conn.commit()
+
+    resolved = _ota_release(site)
+    return {
+        "site_code": site,
+        "configured": not _ota_missing_config(resolved),
+        "release": _ota_public_config(resolved),
+        "note": "Release configured. Provision one canary gateway first; batch unlocks after it succeeds.",
     }
 
 

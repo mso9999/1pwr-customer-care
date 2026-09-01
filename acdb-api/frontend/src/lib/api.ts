@@ -4312,6 +4312,31 @@ export async function approveFactoryOtaRelease(body: {
   });
 }
 
+export interface OtaSiteReleaseResult {
+  site_code: string;
+  configured: boolean;
+  release: OtaReadiness['release'];
+  note: string;
+}
+
+export async function createSiteOtaRelease(body: {
+  site_code: string;
+  source_site?: string;
+  target_firmware_version?: string;
+  artifact_key?: string;
+  artifact_version_id?: string;
+  factory_baseline_version?: string;
+  fallback_ssid?: string;
+  canary_only?: boolean;
+  max_per_minute?: number;
+  confirmation: string;
+}): Promise<OtaSiteReleaseResult> {
+  return request<OtaSiteReleaseResult>('/provisioning/ota/site-release', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 export interface OtaExecutionStatus {
   thing_name: string;
   status?: string | null;
