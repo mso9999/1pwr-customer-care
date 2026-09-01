@@ -1,0 +1,69 @@
+{
+  "title": "Unmetered Service",
+  "subtitle": "Connected customers without a meter, billed a flat monthly service fee",
+  "enroll": "+ Enroll account",
+  "enrollTitle": "Enroll in unmetered service",
+  "enrollSubmit": "Enroll",
+  "loading": "Loading…",
+  "emptyList": "No enrollments match these filters.",
+  "emptyActive": "No accounts are currently in unmetered service.",
+  "endPrompt": "End this enrollment? Do this only for non-meter reasons — meter assignment and commissioning end it automatically.",
+  "endSubmit": "End enrollment",
+  "summary": {
+    "active": "Active enrollments",
+    "outstanding": "Total outstanding",
+    "monthlyFee": "Configured monthly fee"
+  },
+  "table": {
+    "account": "Account",
+    "customer": "Customer",
+    "site": "Site",
+    "started": "Started",
+    "monthlyFee": "Monthly fee",
+    "outstanding": "Outstanding",
+    "monthsAccrued": "Months accrued",
+    "lastAccrual": "Last accrual",
+    "status": "Status",
+    "ended": "Ended",
+    "endReason": "End reason",
+    "actions": "Actions"
+  },
+  "status": {
+    "active": "Active",
+    "ended": "Ended"
+  },
+  "fields": {
+    "account": "Account number",
+    "monthlyFee": "Monthly fee (leave blank for country default)",
+    "repaymentFraction": "Top-up repayment fraction (0–1, default 0.5)",
+    "openingOutstanding": "Opening arrears (optional)",
+    "note": "Note (optional)"
+  },
+  "detail": {
+    "ledgerTitle": "Ledger",
+    "type": "Type",
+    "amount": "Amount",
+    "balanceAfter": "Balance after",
+    "period": "Period",
+    "by": "By",
+    "date": "Date",
+    "note": "Note",
+    "accrual": "Monthly accrual",
+    "repayment": "Repayment",
+    "adjustment": "Adjustment"
+  },
+  "endReasons": {
+    "meter_assigned": "Meter assigned",
+    "commissioned": "Commissioned",
+    "terminated": "Terminated",
+    "manual": "Manual"
+  },
+  "errors": {
+    "accountRequired": "Account number is required"
+  },
+  "badge": {
+    "unmetered": "Unmetered service",
+    "monthly": "{{fee}}/month",
+    "owes": "owes {{amount}}"
+  }
+}

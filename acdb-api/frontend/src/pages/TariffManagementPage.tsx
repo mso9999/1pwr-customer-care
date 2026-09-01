@@ -16,7 +16,7 @@ function CountryFeesCard() {
   const canEdit = (user?.roles || user?.cc_roles || (user?.role ? [user.role] : [])).some((role) => FEE_ADMIN_ROLES.has(role));
   const [fees, setFees] = useState<CountryFees | null>(null);
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ connection: 0, readyboard: 0 });
+  const [draft, setDraft] = useState({ connection: 0, readyboard: 0, unmetered: 0 });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -28,6 +28,7 @@ function CountryFeesCard() {
       setDraft({
         connection: data.connection_fee_amount,
         readyboard: data.readyboard_fee_amount,
+        unmetered: data.unmetered_service_fee_amount,
       });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
@@ -43,6 +44,7 @@ function CountryFeesCard() {
       await updateCountryFees({
         connection_fee_amount: draft.connection,
         readyboard_fee_amount: draft.readyboard,
+        unmetered_service_fee_amount: draft.unmetered,
       });
       setSuccess(t('tariff:countryFees.saved'));
       setTimeout(() => setSuccess(''), 4000);
@@ -82,7 +84,7 @@ function CountryFeesCard() {
       )}
 
       {!editing ? (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-3 gap-4">
           <div>
             <span className="text-xs text-gray-400 uppercase tracking-wide">{t('tariff:countryFees.connection')}</span>
             <div className="mt-1 text-2xl font-bold text-gray-800 tabular-nums">
@@ -95,9 +97,15 @@ function CountryFeesCard() {
               {fees.readyboard_fee_amount.toFixed(2)} <span className="text-base text-gray-400">{fees.currency}</span>
             </div>
           </div>
+          <div>
+            <span className="text-xs text-gray-400 uppercase tracking-wide">{t('tariff:countryFees.unmetered')}</span>
+            <div className="mt-1 text-2xl font-bold text-gray-800 tabular-nums">
+              {fees.unmetered_service_fee_amount.toFixed(2)} <span className="text-base text-gray-400">{fees.currency}</span>
+            </div>
+          </div>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-3 gap-4">
           <label className="block">
             <span className="text-xs text-gray-500 uppercase tracking-wide">{t('tariff:countryFees.connection')}</span>
             <input
@@ -120,10 +128,21 @@ function CountryFeesCard() {
               className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none"
             />
           </label>
-          <div className="col-span-2 flex justify-end gap-3 pt-1">
+          <label className="block">
+            <span className="text-xs text-gray-500 uppercase tracking-wide">{t('tariff:countryFees.unmetered')}</span>
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              value={draft.unmetered}
+              onChange={e => setDraft({ ...draft, unmetered: Number(e.target.value) })}
+              className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none"
+            />
+          </label>
+          <div className="col-span-3 flex justify-end gap-3 pt-1">
             <button
               type="button"
-              onClick={() => { setEditing(false); setDraft({ connection: fees.connection_fee_amount, readyboard: fees.readyboard_fee_amount }); }}
+              onClick={() => { setEditing(false); setDraft({ connection: fees.connection_fee_amount, readyboard: fees.readyboard_fee_amount, unmetered: fees.unmetered_service_fee_amount }); }}
               className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
             >
               {t('tariff:modal.cancel')}

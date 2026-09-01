@@ -325,6 +325,7 @@ from programs import router as programs_router
 from coverage_audit import router as coverage_audit_router
 from advances import router as advances_router
 from country_fees import router as country_fees_router
+from unmetered_service import router as unmetered_service_router
 from site_registry import router as site_registry_router
 from site_sync_ingest import router as site_sync_ingest_router
 from sms_log import router as sms_log_router
@@ -387,6 +388,7 @@ app.include_router(programs_router)
 app.include_router(coverage_audit_router)
 app.include_router(advances_router)
 app.include_router(country_fees_router)
+app.include_router(unmetered_service_router)
 app.include_router(site_registry_router)
 app.include_router(site_sync_ingest_router)
 app.include_router(sms_log_router)

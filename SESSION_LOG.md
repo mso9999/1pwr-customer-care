@@ -8217,3 +8217,38 @@ KET `meters` table: 172 of 173 rows have `ACCT-`placeholder meter_ids (no physic
 ### Protocol Feedback
 - CONTEXT.md had what was needed (fleet map, provisioning, uGP sync all documented). The missing `meter_gateway_link` DDL was a genuine repo gap, not a docs gap.
 - Cloud-agent limitation worth remembering: cannot reach user-local paths (`D:\...`) or pull secrets from local files — state this early when users reference local files.
+
+## Session 2026-08-28 202608281438 (Unmetered service billing — connected, no meter → 50 LSL/month)
+
+### What Was Done
+- **Question**: does CC formally differentiate fully-onboarded (commissioned meter) customers from connected-but-unmetered customers who should pay 50 LSL/month? Answer: partially — the cohort page computes `*_not_metered` statuses on the fly and the pipeline funnel shows the airdac_connected→meter_installed drop-off, but there was no stored billing status, no service-fee mechanism, and no recordkeeping.
+- **Built the full feature** (user decisions via AskQuestion: auto-accrue into a service-fee debt ledger with payment-split paydown; manual entry / automatic exit; LS-only but country-configurable):
+  - Migration `068_unmetered_service.sql`: `unmetered_service` (one active enrollment per account, fee snapshot, outstanding) + `unmetered_service_ledger` (append-only audit, idempotent accrual via partial unique index) + `transactions.service_fee_portion`/`unmetered_service_id`.
+  - `unmetered_service.py`: enroll/end/list/detail/by-account API + `get_active_enrollment` / `compute_service_fee_split` / `apply_service_fee_payment` / `end_unmetered_service` / `accrue_period` helpers (all deploy-window-safe with missing-table degradation).
+  - Payment split: `fee_debt.compute_fee_then_advance_split` gained optional `service_enrollment` param (order: onboarding fee debt → service fee → advance → financing → electricity); wired into payments.py (webhook + portal record) and both ingest.py SMS branches (fallback chains extended for the new columns).
+  - Auto-exit hooks: `meter_lifecycle.assign_meter` (meter_assigned) and `commission.execute_commission` (commissioned), both best-effort post-commit with the accrual job's active-meter guard as safety net.
+  - Fee config: `unmetered_service_fee_amount` in system_config via country_fees (`_KEYS`, GET/PUT, mutation log); LS seed default 50.0 in country_config, other lanes 0 (disabled).
+  - Monthly accrual: `scripts/ops/accrue_unmetered_service_fees.py` + `acdb-api/systemd/cc-unmetered-accrual.{service,timer}` (1st of month 02:30 UTC); added to the deploy.yml timer-install list.
+  - Frontend: UnmeteredServicePage (Commerce nav; summary cards, status filter, ledger modal, enroll/end for fee-admin roles), amber unmetered strip on CustomerDataPage, third field on the Country Fees card, EN+FR i18n (`unmeteredService` namespace + `common.view`/`common.all` additions), What's New entry `unmetered-service-billing`.
+- **Tests**: 15 new (split ordering/summing, accrual idempotency, second-month, auto-exit, dry-run, repayment cap, exit hook, deploy-window degradation). Full suite 300 passed. Also repaired `test_fleet_map_linked_meters.py` for the BOOL_OR aggregate added by 8dd316e (registered a SQLite stand-in aggregate).
+- PR #14 on branch `cursor/unmetered-service-billing` (3 commits: backend, tests, frontend). `tsc -b --noEmit` clean.
+
+### Key Decisions
+- Service-fee debt is SEPARATE from the connection/readyboard fee-debt columns — those feed the cohort "fully_paid" computation and advance gating; service-fee debt must not block either.
+- Split fraction defaults to 0.5 of the post-fee-debt remainder (mirrors advances `repayment_fraction`), capped at outstanding; configurable per enrollment.
+- Mid-month enrollments first accrue on the next 1st-of-month run (documented in module docstring).
+- Contract-fee SMS gateway branch also pays down service-fee debt (any incoming money can settle it) so the allocation always sums.
+- Circular-import discipline: unmetered_service imports customer_api/country_fees lazily inside functions (top-level import broke test collection: test → unmetered_service → country_fees → customer_api → country_fees cycle).
+
+### What Next Session Should Know
+- PR #14 needs merge; on deploy watch for `068_unmetered_service.sql` applying on both DBs and the `cc-unmetered-accrual` timer installing (`systemctl list-timers | grep unmetered` on the host).
+- After deploy, enroll the known unmetered-connected customers (ops decision who qualifies); opening arrears field exists for back-capture.
+- First real accrual runs 2026-09-01 02:30 UTC — worth checking `journalctl -u cc-unmetered-accrual` that morning.
+- `acdb-api/cc_auth.db` shows as locally modified — that's a dev artifact from running the app import locally; do not commit it.
+
+### Senescence Notes
+- None — single focused build, no context degradation.
+
+### Protocol Feedback
+- The advances/fee-debt patterns in CONTEXT.md made the design straightforward; the "Why advances are NOT in financing_agreements" note directly informed keeping service fees out of both ledgers.
+- The AskQuestion-first flow worked well: three business decisions settled before any code was written.

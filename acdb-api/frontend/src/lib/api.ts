@@ -3264,6 +3264,8 @@ export async function setFleetBillingPriority(
 export interface CountryFees {
   connection_fee_amount: number;
   readyboard_fee_amount: number;
+  /** Monthly flat service fee for connected-but-unmetered accounts (0 disables enrollment). */
+  unmetered_service_fee_amount: number;
   /** Low-balance SMS: warn at or below this remaining kWh (country-specific). */
   low_balance_kwh_threshold: number;
   /** Reset “already warned” after balance rises above this kWh. */
@@ -3338,6 +3340,7 @@ export async function updateCountryFees(
       CountryFees,
       | 'connection_fee_amount'
       | 'readyboard_fee_amount'
+      | 'unmetered_service_fee_amount'
       | 'low_balance_kwh_threshold'
       | 'low_balance_kwh_clear'
       | 'sms_balance_reply_max_per_hour'
@@ -3599,6 +3602,112 @@ export async function refundContractCredit(input: {
   return request('/advances/contract-credit/refund', {
     method: 'POST',
     body: JSON.stringify(input),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Unmetered service (connected, no meter → flat monthly service fee)
+// ---------------------------------------------------------------------------
+
+export type UnmeteredServiceStatus = 'active' | 'ended';
+
+export interface UnmeteredServiceEnrollment {
+  id: number;
+  account_number: string;
+  customer_id: number | null;
+  status: UnmeteredServiceStatus;
+  monthly_fee: number;
+  outstanding: number;
+  currency: string;
+  repayment_fraction: number;
+  started_at: string;
+  ended_at: string | null;
+  end_reason: string | null;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  community?: string | null;
+  months_accrued?: number;
+  last_accrual_period?: string | null;
+}
+
+export interface UnmeteredServiceLedgerEntry {
+  id: number;
+  entry_type: 'accrual' | 'repayment' | 'adjustment';
+  amount: number;
+  balance_after: number;
+  accrual_period: string | null;
+  source_transaction_id: number | null;
+  created_by: string | null;
+  note: string | null;
+  created_at: string;
+}
+
+export interface UnmeteredServiceListResponse {
+  count: number;
+  active_count: number;
+  total_outstanding: number;
+  currency: string;
+  currency_symbol: string;
+  monthly_fee_configured: number;
+  enrollments: UnmeteredServiceEnrollment[];
+}
+
+export async function listUnmeteredService(params?: {
+  status?: 'active' | 'ended' | 'all';
+  site?: string;
+}): Promise<UnmeteredServiceListResponse> {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set('status', params.status);
+  if (params?.site) qs.set('site', params.site);
+  const q = qs.toString();
+  return request(`/unmetered-service${q ? '?' + q : ''}`);
+}
+
+export async function getUnmeteredService(id: number): Promise<{
+  enrollment: UnmeteredServiceEnrollment;
+  ledger: UnmeteredServiceLedgerEntry[];
+}> {
+  return request(`/unmetered-service/${id}`);
+}
+
+export async function getUnmeteredServiceByAccount(accountNumber: string): Promise<{
+  account_number: string;
+  enrolled: boolean;
+  enrollment: {
+    id: number;
+    monthly_fee: number;
+    outstanding: number;
+    currency: string;
+    started_at: string | null;
+  } | null;
+  currency_symbol: string;
+}> {
+  return request(`/unmetered-service/by-account/${encodeURIComponent(accountNumber)}`);
+}
+
+export async function enrollUnmeteredService(input: {
+  account_number: string;
+  monthly_fee?: number;
+  repayment_fraction?: number;
+  opening_outstanding?: number;
+  note?: string;
+}): Promise<{ status: string; id: number; account_number: string }> {
+  return request('/unmetered-service', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+}
+
+export async function endUnmeteredService(
+  id: number,
+  input?: { reason?: string; note?: string },
+): Promise<{ status: string; id: number; account_number: string; end_reason: string }> {
+  return request(`/unmetered-service/${id}/end`, {
+    method: 'POST',
+    body: JSON.stringify(input ?? {}),
   });
 }
 
