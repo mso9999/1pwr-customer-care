@@ -1451,6 +1451,17 @@ function ProvisioningContent() {
         <li><Bold>Country O&amp;M:</Bold> run the first OTA canary and recommended physical batch validation.</li>
         <li><Bold>Engineering/superadmin:</Bold> approve the immutable release for controlled batches using the recorded evidence.</li>
       </Ul>
+      <SubHead>New site with no firmware release?</SubHead>
+      <P>
+        The walkthrough&apos;s first step blocks with <Bold>release_configured</Bold> until the site has an
+        approved OTA release. A user with the release-approval privilege can now create it in place:
+        with the site selected, use the <Bold>Create release</Bold> panel to copy the current known-good
+        build from another site (no S3 keys involved), optionally record the site&apos;s WiFi network name
+        (non-secret), and type the confirmation phrase. The site then provisions one canary gateway before
+        batch unlocks. The site&apos;s WiFi <Bold>password</Bold> is never entered in CC — it goes in the
+        provisioning station at provision time. Registering the site code itself remains a controlled
+        country-configuration step, and the site must be activated before provisioning runs.
+      </P>
       <Warning>Zambia remains intentionally fail-closed until its site roster, tariff/fees, metering mapping, payment integration, OTA candidate, and canary evidence are approved. The Operator walkthrough and Country readiness tab are the source of truth for the remaining gates.</Warning>
       <SubHead>Factory-virgin means boot firmware is already installed</SubHead>
       <Ul>
@@ -1533,6 +1544,55 @@ function ProvisioningContent() {
       <P>Track every unit and its locational assignment in the <Bold>Provisioned meters</Bold> tab.</P>
       <Tip>Batch-provision gateways ahead of installation. The customer-account link is the last step (commissioning), not part of provisioning.</Tip>
       <Warning>Never use <Code>TestSite*</Code> / <Code>HQTEST*</Code> / ad-hoc client IDs in the field — always provision through the station so a registered Thing + cert are created and recorded. Identity rotation (<Code>/rotate</Code>) is superadmin-only and reserved for exceptional cases (e.g. PCB reuse at another site).</Warning>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  Field-validating a new firmware build                             */
+/* ------------------------------------------------------------------ */
+
+function FieldValidationContent() {
+  return (
+    <>
+      <P>
+        When a new 1Meter firmware build passes its cloud canary (one gateway updated and healthy),
+        validate the field features on that unit before batch rollout. This is done at the device —
+        no USB, no serial cable, no opening the enclosure.
+      </P>
+      <SubHead>Confirm the unit is on the new build</SubHead>
+      <P>
+        Open <PageLink to="/provisioning">Provisioning</PageLink> → <Bold>Fleet live</Bold> and confirm the
+        gateway shows the target firmware version and is <Bold>connected</Bold>. The OTA job fires
+        automatically once the unit connects; do not power-cycle it while a job is queued.
+      </P>
+      <SubHead>Re-acquire meters without a power cycle (re-acquire button)</SubHead>
+      <P>
+        If a meter was wired to the gateway <Bold>while the gateway was already running</Bold>, older
+        firmware never discovered it until the next reboot. The re-acquire button fixes that:
+      </P>
+      <Ol>
+        <li>Wire the meter to the gateway's RS-485 — A, B, <Bold>and GND</Bold> (the ground is essential).</li>
+        <li><Bold>Long-press the gateway's PRG button for ≥3 seconds.</Bold></li>
+        <li>The status LED bursts rapidly while it re-scans the RS-485 string.</li>
+        <li>The meter is discovered and starts reporting within about a minute — no power cycle needed.</li>
+      </Ol>
+      <Tip>Use this whenever a meter is added or re-wired on a live gateway. It beats power-cycling, which drops the whole mesh node.</Tip>
+      <SubHead>Read the device log over WiFi (no serial cable)</SubHead>
+      <P>
+        The gateway keeps a recent boot / Modbus / mesh log in memory. With your phone or laptop on the
+        same network as the gateway, open <Code>http://&lt;gateway-ip&gt;/v1/diag/logs</Code> in a browser
+        to read it. Use this to capture the exact error before escalating — no cracking the case, no
+        serial wires.
+      </P>
+      <SubHead>What to report back</SubHead>
+      <Ul>
+        <li>Did the unit come online and land on the target firmware version?</li>
+        <li>Did the re-acquire button discover the meter without a power cycle?</li>
+        <li>Did <Code>/v1/diag/logs</Code> return the log?</li>
+        <li>For anything that failed: the gateway's Thing name, what you observed, a photo, and the log output.</li>
+      </Ul>
+      <Warning>Validate on exactly one canary unit first. Batch rollout stays locked until the canary is confirmed healthy and the release is approved.</Warning>
     </>
   );
 }
@@ -1683,6 +1743,7 @@ export function useHelpSections(): HelpSection[] {
     { id: 'financing',            content: <FinancingContent /> },
     { id: 'meters',               content: <MetersContent /> },
     { id: 'provisioning',         content: <ProvisioningContent />, searchKeywords: 'gateway station batch virgin bootstrap commissioning provision certificate softap mak-gw download laptop' },
+    { id: 'field-validation',     content: <FieldValidationContent />, searchKeywords: 'firmware canary validate field reacquire re-acquire button prg meter discover diag logs serial gateway ip new build ota' },
     { id: 'reports',              content: <ReportsContent /> },
     { id: 'investor-analytics',   content: <InvestorAnalyticsContent />, searchKeywords: 'investor analytics kpi portfolio arpu capex ebitda opex scada odoo sparkmeter etl fx usd availability asset register' },
     { id: 'data-browsers',        content: <DataBrowsersContent />, searchKeywords: 'accounts transactions tables sql browse' },
