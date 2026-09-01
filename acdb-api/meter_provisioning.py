@@ -188,6 +188,26 @@ def _active_site_map() -> dict[str, str]:
     return live_site_abbrev(COUNTRY.code)
 
 
+def _registered_site_codes() -> set[str]:
+    """All valid site codes: the active map ∪ the canonical ``sites`` registry.
+
+    The active map is active-only, but a newly registered site (staged inactive
+    pending activation) is still a valid release-creation target during
+    onboarding — so we union in the canonical registry. Provisioning itself
+    (promote/approve) still requires the site to be active.
+    """
+    codes = {str(code).upper() for code in _active_site_map()}
+    try:
+        from customer_api import get_connection
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT code FROM sites")
+            codes.update(str(row[0]).upper() for row in cur.fetchall() if row and row[0])
+    except Exception as exc:  # noqa: BLE001 - fall back to the active map
+        logger.debug("Unable to load sites registry for validation: %s", exc)
+    return codes
+
+
 def _norm_mac(mac: str) -> str:
     return mac.strip().lower().replace("-", ":")
 
@@ -1944,7 +1964,7 @@ def create_site_ota_release(
     device NVS (``credentials_mode: runtime_nvs``).
     """
     site = payload.site_code.strip().upper()
-    if site not in _active_site_map():
+    if site not in _registered_site_codes():
         raise HTTPException(status_code=400, detail=f"Unknown canonical site code '{site}'.")
 
     # Resolve the base artifact config: copy from a source site, or explicit.
