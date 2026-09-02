@@ -8217,3 +8217,13 @@ KET `meters` table: 172 of 173 rows have `ACCT-`placeholder meter_ids (no physic
 ### Protocol Feedback
 - CONTEXT.md had what was needed (fleet map, provisioning, uGP sync all documented). The missing `meter_gateway_link` DDL was a genuine repo gap, not a docs gap.
 - Cloud-agent limitation worth remembering: cannot reach user-local paths (`D:\...`) or pull secrets from local files — state this early when users reference local files.
+
+## 2026-09-02 — Cursor — "Can't commission, Generate Contract disabled" = orphaned service worker
+
+- **Incident**: 1PWR LS CC group report — commissioning blocked, "Generate Contract & SM" disabled with spurious "Account number is required" (screenshot: 0068MAK / Litšeoane Kheoang).
+- **RCA (verified against live bundle, not guessed)**: the screenshot's subtitle ("Fill in the commissioning details and generate the contract") never existed in this repo — it predates the Feb 2026 repo move from Email Overlord; the current subtitle dates from the April i18n rebuild (4b8325a). The reporter's browser ran a **≥5-month-old bundle**. Live bundle `index-BAzWteMA.js` contains the current strings + UGP picker → production current; the client was stale. Leading mechanism: **orphaned service worker** from a pre-move deployment (same failure mode as the DR app incident 2026-08-20 — hard refresh doesn't help; the SW intercepts all loads). No SW has ever existed in this repo's source; `/sw.js` on the live site returned the SPA fallback HTML.
+- **Fix**: `acdb-api/frontend/public/sw.js` self-destructing SW (unregister + clear caches + reload clients), same pattern as DR repo e4d1a68. PR #16 (`cursor/sw-self-destruct-cc`, from a worktree — main tree had another session's uncommitted provisioning work; do not disturb). Build verified (`dist/sw.js` emitted, tsc clean).
+- **Process gap found**: commissioning changes 7cb330f (PTB/pole uGP link REQUIRED, Aug 12) and 6d146cd (gateway liveness enforced, Aug 26) shipped with NO What's New entry → staff met the disabled button with no explanation. Backfilled `commissioning-requires-ugp-link` entry (dated 2026-09-02, includes stale-app pointer) in the same PR.
+- **User-side fix relayed**: clear site data for cc.1pwrafrica.com (or DevTools → Application → Service Workers → Unregister + Clear storage) → reload → current 4-step wizard appears; Generate enables after linking the uGP connection in step 2 (+ live gateway for 1Meter).
+- **Note**: PR #14 (unmetered service) still open/unmerged at this time.
+- Side effects: none beyond the PR. Follow-ups: after merge, affected browsers self-heal on next visit; watch for repeat "app looks old" reports from other staff (same rescue path covers them).
