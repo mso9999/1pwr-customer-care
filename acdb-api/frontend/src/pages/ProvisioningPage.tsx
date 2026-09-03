@@ -590,7 +590,14 @@ export default function ProvisioningPage() {
   const otaFailed = otaProgress?.executions.filter((x) =>
     ['FAILED', 'REJECTED', 'CANCELED', 'REMOVED'].includes(x.status || '')).length || 0;
   const otaQueued = Math.max(0, otaExpected - otaSucceeded - otaInProgress - otaFailed);
-  const otaPercent = otaExpected ? Math.round((otaSucceeded / otaExpected) * 100) : 0;
+  // Live download percent: while a unit is actively downloading, the firmware
+  // reports blocks_received/blocks_total -> percent. Prefer that over the
+  // units-succeeded fraction so a single canary shows real download progress.
+  const activeExec = (otaProgress?.executions || []).find((x) => x.status === 'IN_PROGRESS' && typeof x.percent === 'number');
+  const downloadPercent = activeExec?.percent;
+  const otaPercent = otaSucceeded === otaExpected && otaExpected > 0
+    ? 100
+    : (downloadPercent ?? 0);
   const canApproveRelease = hasPrivilegeAction('approve_financial_and_control');
   const canConfigureSiteSystems = hasPrivilegeAction('administer_cc');
   const canManageSiteRegistry = hasPrivilegeAction('manage_site_registry');
@@ -1311,15 +1318,28 @@ export default function ProvisioningPage() {
                 <div className="h-3 bg-gray-200 rounded-full overflow-hidden">
                   <div className={`h-full ${otaFailed ? 'bg-red-500' : otaPercent === 100 ? 'bg-green-600' : 'bg-blue-600'}`} style={{ width: `${otaPercent}%` }} />
                 </div>
-                <div className="text-sm font-semibold">{otaPercent}% complete</div>
+                <div className="text-sm font-semibold">
+                  {otaPercent}% {activeExec ? 'downloaded' : 'complete'}
+                </div>
                 {(otaProgress?.executions || []).map((execution) => (
                   <div key={execution.thing_name} className="flex justify-between gap-4 p-3 rounded-lg bg-gray-50 border text-sm">
                     <span className="font-mono">{execution.thing_name}</span>
+                    <span className="text-gray-500">
+                      {execution.status === 'IN_PROGRESS' && typeof execution.percent === 'number'
+                        ? `${execution.percent}% · ${execution.blocks_received ?? '?'}/${execution.blocks_total ?? '?'} blocks`
+                        : ''}
+                    </span>
                     <span className={execution.status === 'SUCCEEDED' ? 'text-green-700 font-semibold' : otaFailed ? 'text-red-700 font-semibold' : 'text-blue-700'}>
                       {execution.status || 'QUEUED'}
                     </span>
                   </div>
                 ))}
+                {activeExec && (
+                  <p className="text-xs text-gray-500">
+                    Downloading over the live link — resumes across drops. If the percent doesn't move for
+                    ~5 min while the unit stays connected, the link is too weak; improve signal and retry.
+                  </p>
+                )}
                 {otaProgressError && <div className="text-sm text-red-700">{otaProgressError}</div>}
                 {otaPercent === 100 && (
                   <div className="p-3 rounded-lg border border-green-200 bg-green-50 text-sm text-green-900">

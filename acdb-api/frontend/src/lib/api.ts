@@ -4362,6 +4362,9 @@ export interface OtaExecutionStatus {
   started_at?: string | null;
   last_updated_at?: string | null;
   execution_number?: number | null;
+  percent?: number;
+  blocks_received?: number;
+  blocks_total?: number;
 }
 
 export interface OtaPromotionStatus {

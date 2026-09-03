@@ -2200,14 +2200,33 @@ def ota_promotion_status(
             resp = _client("iot").list_job_executions_for_job(jobId=job_id, maxResults=250)
             for item in resp.get("executionSummaries", []):
                 summary = item.get("jobExecutionSummary", {})
-                executions.append({
-                    "thing_name": str(item.get("thingArn") or "").rsplit("/", 1)[-1],
+                thing = str(item.get("thingArn") or "").rsplit("/", 1)[-1]
+                execution = {
+                    "thing_name": thing,
                     "status": summary.get("status"),
                     "queued_at": str(summary.get("queuedAt") or "") or None,
                     "started_at": str(summary.get("startedAt") or "") or None,
                     "last_updated_at": str(summary.get("lastUpdatedAt") or "") or None,
                     "execution_number": summary.get("executionNumber"),
-                })
+                }
+                # Live download progress: the firmware publishes percent /
+                # blocks_received / blocks_total into the job execution's
+                # statusDetails while blocks flow. Enrich active executions so
+                # the UI can show a real percent-complete bar (and distinguish
+                # "downloading" from "connected but stalled at 0 blocks").
+                if execution["status"] in ("IN_PROGRESS", "QUEUED"):
+                    try:
+                        det = _client("iot").describe_job_execution(jobId=job_id, thingName=thing)["execution"]
+                        dm = det.get("statusDetails", {}).get("detailsMap", {})
+                        if dm.get("percent") is not None:
+                            execution["percent"] = int(dm["percent"])
+                        if dm.get("blocks_received") is not None:
+                            execution["blocks_received"] = int(dm["blocks_received"])
+                        if dm.get("blocks_total") is not None:
+                            execution["blocks_total"] = int(dm["blocks_total"])
+                    except Exception:  # noqa: BLE001 - progress is best-effort
+                        pass
+                executions.append(execution)
         except Exception as exc:  # noqa: BLE001
             logger.warning("Unable to list OTA job executions for %s: %s", job_id, exc)
 
