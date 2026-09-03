@@ -831,6 +831,11 @@ class OtaSiteReleaseRequest(BaseModel):
     confirmation: str = Field(..., min_length=1, max_length=160)
 
 
+class RetireTestUnitRequest(BaseModel):
+    thing_name: str = Field(..., min_length=1, max_length=128)
+    confirmation: str = Field(..., min_length=1, max_length=160)
+
+
 class ActivationStepUpdateRequest(BaseModel):
     site_code: str
     step_key: str
@@ -2079,6 +2084,99 @@ def create_site_ota_release(
         "configured": not _ota_missing_config(resolved),
         "release": _ota_public_config(resolved),
         "note": "Release configured. Provision one canary gateway first; batch unlocks after it succeeds.",
+    }
+
+
+@router.post("/ota/retire-test-unit")
+def retire_test_unit(
+    payload: RetireTestUnitRequest,
+    user: CurrentUser = Depends(CC_OPERATE_GATE),
+):
+    """Release a site's authorized test (canary) gateway so a fresh unit can take its place.
+
+    A site is allowed exactly one test gateway at a time; a stuck/abandoned canary
+    blocks allocating a new one. This clears the unit's test flag (the slot-blocking
+    Postgres write always succeeds) and, best-effort, clears the registry flag and
+    cancels any queued OTA job. The unit keeps its Thing identity/certs and can be
+    re-provisioned later; it is simply no longer the site's authorized canary.
+    """
+    thing = payload.thing_name.strip()
+    if not re.match(r"^[A-Za-z0-9_-]+$", thing):
+        raise HTTPException(status_code=400, detail=f"Thing name '{thing}' has invalid characters.")
+    expected = f"RETIRE {thing}"
+    if payload.confirmation.strip() != expected:
+        raise HTTPException(status_code=400, detail=f"Type '{expected}' exactly to retire this test unit.")
+
+    from customer_api import get_connection
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT thing_name, site, is_test, ota_update_id FROM meter_provisioning WHERE thing_name = %s",
+            (thing,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail=f"'{thing}' is not provisioned on this lane.")
+        if not row[2]:
+            raise HTTPException(status_code=409, detail=f"'{thing}' is not marked as a test unit.")
+        ota_update_id = row[3]
+        cur.execute(
+            """
+            UPDATE meter_provisioning
+               SET is_test = FALSE, ota_status = NULL, ota_update_id = NULL,
+                   ota_target_version = NULL, updated_at = NOW()
+             WHERE thing_name = %s
+            """,
+            (thing,),
+        )
+        try_log_mutation(
+            user,
+            "update",
+            "meter_provisioning",
+            thing,
+            old_values={"is_test": True, "ota_update_id": ota_update_id},
+            new_values={"is_test": False},
+            metadata={"kind": "retire_test_unit", "endpoint": "POST /api/provisioning/ota/retire-test-unit"},
+            conn=conn,
+        )
+        conn.commit()
+
+    # Best-effort cloud cleanup (the lane may not hold AWS credentials; the slot
+    # is already freed above regardless).
+    aws_note = "cloud cleanup skipped"
+    try:
+        ddb = _client("dynamodb")
+        rows = _registry_get_by_thing(thing)
+        for r in rows:
+            mac = r.get("pcb_mac", {}).get("S")
+            if mac:
+                ddb.update_item(
+                    TableName=REGISTRY_TABLE,
+                    Key={"pcb_mac": {"S": mac}},
+                    UpdateExpression="SET is_test = :f",
+                    ExpressionAttributeValues={":f": {"BOOL": False}},
+                )
+        if ota_update_id:
+            iot = _client("iot")
+            try:
+                info = iot.get_ota_update(otaUpdateId=ota_update_id).get("otaUpdateInfo", {})
+                jid = info.get("awsIotJobId")
+                if jid:
+                    iot.cancel_job(jobId=jid, force=True)
+                iot.delete_ota_update(otaUpdateId=ota_update_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("retire test unit OTA cleanup for %s: %s", thing, exc)
+        aws_note = "registry flag cleared" + (", OTA job cancelled" if ota_update_id else "")
+    except Exception as exc:  # noqa: BLE001
+        aws_note = f"cloud cleanup failed (slot still freed): {exc}"
+        logger.warning("retire test unit cloud cleanup for %s: %s", thing, exc)
+
+    return {
+        "thing_name": thing,
+        "is_test": False,
+        "ota_update_id": ota_update_id,
+        "aws_cleanup": aws_note,
+        "note": f"{thing} is no longer the authorized test unit. You can now allocate a fresh canary gateway.",
     }
 
 

@@ -21,6 +21,7 @@ import {
   updateProvisioningActivationStep,
   approveFactoryOtaRelease,
   createSiteOtaRelease,
+  retireTestUnit,
   type UpdateConfigResult,
   type OtaReadiness,
   type OtaPromotionStatus,
@@ -160,6 +161,10 @@ export default function ProvisioningPage() {
   const [releaseConfirm, setReleaseConfirm] = useState('');
   const [releaseBusy, setReleaseBusy] = useState(false);
   const [releaseError, setReleaseError] = useState('');
+  const [retireTarget, setRetireTarget] = useState('');
+  const [retireConfirm, setRetireConfirm] = useState('');
+  const [retireBusy, setRetireBusy] = useState(false);
+  const [retireResult, setRetireResult] = useState('');
   const [validationNetworkMode, setValidationNetworkMode] = useState<ValidationNetworkMode>('site');
   const [commandCopied, setCommandCopied] = useState(false);
   const [guideChecks, setGuideChecks] = useState<Record<GuideCheckKey, boolean>>({
@@ -517,6 +522,24 @@ export default function ProvisioningPage() {
       setReleaseError(e instanceof Error ? e.message : String(e));
     } finally {
       setReleaseBusy(false);
+    }
+  };
+
+  const handleRetireTestUnit = async () => {
+    if (!retireTarget) return;
+    setReleaseError('');
+    setRetireResult('');
+    setRetireBusy(true);
+    try {
+      const res = await retireTestUnit({ thing_name: retireTarget, confirmation: retireConfirm });
+      setRetireResult(res.note);
+      setRetireTarget('');
+      setRetireConfirm('');
+      if (guideSite) setOtaReadiness(await getFactoryOtaReadiness(guideSite));
+    } catch (e) {
+      setRetireResult(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRetireBusy(false);
     }
   };
 
@@ -1247,6 +1270,36 @@ export default function ProvisioningPage() {
             >
               {canaryStarting ? 'Creating OTA canary…' : 'Start one-gateway OTA canary'}
             </button>
+            {(otaReadiness?.canary_things || []).length > 0 && (
+              <details className="pt-3 border-t border-gray-100">
+                <summary className="cursor-pointer text-xs font-semibold text-gray-500">
+                  Test unit stuck or abandoned? Retire it to free the slot
+                </summary>
+                <div className="mt-3 space-y-3">
+                  <p className="text-xs text-gray-500">
+                    A site allows one test gateway at a time. Retiring clears the unit's test flag (and
+                    best-effort cancels its queued OTA) so you can allocate a fresh canary. The unit keeps
+                    its identity and can be re-provisioned later.
+                  </p>
+                  <select className={inputCls} value={retireTarget} onChange={(e) => { setRetireTarget(e.target.value); setRetireConfirm(''); }}>
+                    <option value="">Select the test unit to retire…</option>
+                    {(otaReadiness?.canary_things || []).map((name) => <option key={name} value={name}>{name}</option>)}
+                  </select>
+                  {retireTarget && (
+                    <input className={inputCls} value={retireConfirm} onChange={(e) => setRetireConfirm(e.target.value)}
+                      placeholder={`Type RETIRE ${retireTarget}`} />
+                  )}
+                  <button
+                    onClick={handleRetireTestUnit}
+                    disabled={retireBusy || !retireTarget || retireConfirm.trim() !== `RETIRE ${retireTarget}`}
+                    className="px-4 py-2 bg-red-600 text-white rounded-lg text-xs font-semibold disabled:opacity-40"
+                  >
+                    {retireBusy ? 'Retiring…' : `Retire ${retireTarget || 'test unit'}`}
+                  </button>
+                  {retireResult && <div className="text-xs text-gray-600">{retireResult}</div>}
+                </div>
+              </details>
+            )}
           </div>
           <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
             <div>

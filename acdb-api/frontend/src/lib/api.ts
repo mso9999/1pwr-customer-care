@@ -4337,6 +4337,24 @@ export async function createSiteOtaRelease(body: {
   });
 }
 
+export interface RetireTestUnitResult {
+  thing_name: string;
+  is_test: boolean;
+  ota_update_id?: string | null;
+  aws_cleanup?: string;
+  note: string;
+}
+
+export async function retireTestUnit(body: {
+  thing_name: string;
+  confirmation: string;
+}): Promise<RetireTestUnitResult> {
+  return request<RetireTestUnitResult>('/provisioning/ota/retire-test-unit', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 export interface OtaExecutionStatus {
   thing_name: string;
   status?: string | null;
