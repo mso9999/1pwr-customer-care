@@ -1,8 +1,8 @@
 {
   "GBO": {
-    "artifact_key": "firmware-releases/v1.1.60/MAK-GW-0020/FeaturedFreeRTOSIoTIntegration.bin",
-    "artifact_version_id": "a4xNK7Cz4X0BDU99pSDqKFR4Kw_fObPs",
-    "target_firmware_version": "1.1.60",
+    "artifact_key": "firmware-releases/v1.1.61/SIN-GW-0001/FeaturedFreeRTOSIoTIntegration.bin",
+    "artifact_version_id": "19Wkwy6_rUQ6D2aaC1bZShC4Gq.DQ53Q",
+    "target_firmware_version": "1.1.61",
     "factory_baseline_version": "1.1.56",
     "signing_profile": "1PWR_OTA_ESP32_v2",
     "role_arn": "arn:aws:iam::758201218523:role/1pwr-ota-service-role",
@@ -12,9 +12,9 @@
     "max_per_minute": 1
   },
   "SAM": {
-    "artifact_key": "firmware-releases/v1.1.60/MAK-GW-0020/FeaturedFreeRTOSIoTIntegration.bin",
-    "artifact_version_id": "a4xNK7Cz4X0BDU99pSDqKFR4Kw_fObPs",
-    "target_firmware_version": "1.1.60",
+    "artifact_key": "firmware-releases/v1.1.61/SIN-GW-0001/FeaturedFreeRTOSIoTIntegration.bin",
+    "artifact_version_id": "19Wkwy6_rUQ6D2aaC1bZShC4Gq.DQ53Q",
+    "target_firmware_version": "1.1.61",
     "factory_baseline_version": "1.1.56",
     "signing_profile": "1PWR_OTA_ESP32_v2",
     "role_arn": "arn:aws:iam::758201218523:role/1pwr-ota-service-role",
@@ -24,9 +24,9 @@
     "max_per_minute": 1
   },
   "MAK": {
-    "artifact_key": "firmware-releases/v1.1.60/MAK-GW-0020/FeaturedFreeRTOSIoTIntegration.bin",
-    "artifact_version_id": "a4xNK7Cz4X0BDU99pSDqKFR4Kw_fObPs",
-    "target_firmware_version": "1.1.60",
+    "artifact_key": "firmware-releases/v1.1.61/SIN-GW-0001/FeaturedFreeRTOSIoTIntegration.bin",
+    "artifact_version_id": "19Wkwy6_rUQ6D2aaC1bZShC4Gq.DQ53Q",
+    "target_firmware_version": "1.1.61",
     "factory_baseline_version": "1.1.56",
     "signing_profile": "1PWR_OTA_ESP32_v2",
     "role_arn": "arn:aws:iam::758201218523:role/1pwr-ota-service-role",
@@ -36,9 +36,9 @@
     "max_per_minute": 1
   },
   "KOT": {
-    "artifact_key": "firmware-releases/v1.1.60/MAK-GW-0020/FeaturedFreeRTOSIoTIntegration.bin",
-    "artifact_version_id": "a4xNK7Cz4X0BDU99pSDqKFR4Kw_fObPs",
-    "target_firmware_version": "1.1.60",
+    "artifact_key": "firmware-releases/v1.1.61/SIN-GW-0001/FeaturedFreeRTOSIoTIntegration.bin",
+    "artifact_version_id": "19Wkwy6_rUQ6D2aaC1bZShC4Gq.DQ53Q",
+    "target_firmware_version": "1.1.61",
     "factory_baseline_version": "1.1.56",
     "signing_profile": "1PWR_OTA_ESP32_v2",
     "role_arn": "arn:aws:iam::758201218523:role/1pwr-ota-service-role",
@@ -48,9 +48,9 @@
     "max_per_minute": 1
   },
   "SIN": {
-    "artifact_key": "firmware-releases/v1.1.60/MAK-GW-0020/FeaturedFreeRTOSIoTIntegration.bin",
-    "artifact_version_id": "a4xNK7Cz4X0BDU99pSDqKFR4Kw_fObPs",
-    "target_firmware_version": "1.1.60",
+    "artifact_key": "firmware-releases/v1.1.61/SIN-GW-0001/FeaturedFreeRTOSIoTIntegration.bin",
+    "artifact_version_id": "19Wkwy6_rUQ6D2aaC1bZShC4Gq.DQ53Q",
+    "target_firmware_version": "1.1.61",
     "factory_baseline_version": "1.1.56",
     "signing_profile": "1PWR_OTA_ESP32_v2",
     "role_arn": "arn:aws:iam::758201218523:role/1pwr-ota-service-role",
@@ -60,9 +60,9 @@
     "max_per_minute": 1
   },
   "AGL": {
-    "artifact_key": "firmware-releases/v1.1.60/MAK-GW-0020/FeaturedFreeRTOSIoTIntegration.bin",
-    "artifact_version_id": "a4xNK7Cz4X0BDU99pSDqKFR4Kw_fObPs",
-    "target_firmware_version": "1.1.60",
+    "artifact_key": "firmware-releases/v1.1.61/SIN-GW-0001/FeaturedFreeRTOSIoTIntegration.bin",
+    "artifact_version_id": "19Wkwy6_rUQ6D2aaC1bZShC4Gq.DQ53Q",
+    "target_firmware_version": "1.1.61",
     "factory_baseline_version": "1.1.56",
     "signing_profile": "1PWR_OTA_ESP32_v2",
     "role_arn": "arn:aws:iam::758201218523:role/1pwr-ota-service-role",
