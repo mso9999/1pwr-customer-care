@@ -59,6 +59,7 @@ import logging
 import os
 import re
 import hashlib
+import time
 import zipfile
 from datetime import datetime, timezone
 from typing import Optional
@@ -3377,6 +3378,116 @@ def rename_event(
         raise HTTPException(status_code=500, detail=f"mutation log failed: {exc}")
 
     return {"status": "logged", "meter_id": meter_id, "to_thing": to_thing}
+
+
+@router.get("/gateway-stability")
+def gateway_stability(
+    thing_name: str,
+    window_min: int = 30,
+    _user: CurrentUser = Depends(CC_OPERATE_GATE),
+):
+    """Objective connection-stability report for a gateway, from the AWS IoT logs.
+
+    Computes connect/disconnect rate, mean/max session duration, and disconnect
+    reasons over the window. This is the signal for whether a stalled OTA is a
+    flaky network (the unit can't hold a connection long enough to complete a
+    ~4 KB block) versus a device/job problem. A healthy unit holds one connection
+    for the whole window; a unit on a flaky link drops every few seconds.
+    """
+    thing = thing_name.strip()
+    if not re.match(r"^[A-Za-z0-9_-]{1,128}$", thing):
+        raise HTTPException(status_code=400, detail="Invalid thing name.")
+    window_min = max(5, min(int(window_min or 30), 360))
+
+    logs = _client("logs")
+    query = (
+        "fields @timestamp, eventType, disconnectReason, clientId\n"
+        f'| filter clientId = "{thing}" and (eventType = "Connect" or eventType = "Disconnect")\n'
+        "| sort @timestamp asc\n"
+        "| limit 1000"
+    )
+    start = int(time.time()) - window_min * 60
+    try:
+        qid = logs.start_query(
+            logGroupName="AWSIotLogsV2",
+            startTime=start,
+            endTime=int(time.time()),
+            queryString=query,
+        )["queryId"]
+        results = []
+        deadline = time.time() + 25
+        while time.time() < deadline:
+            time.sleep(1.5)
+            res = logs.get_query_results(queryId=qid)
+            if res["status"] == "Complete":
+                results = res.get("results", [])
+                break
+            if res["status"] in ("Failed", "Cancelled", "Timeout"):
+                raise HTTPException(status_code=502, detail=f"Stability query {res['status'].lower()}.")
+        else:
+            raise HTTPException(status_code=504, detail="Stability query timed out; try a shorter window.")
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Unable to read IoT logs: {exc}") from exc
+
+    # Parse connect/disconnect events into session durations.
+    events = []
+    for row in results:
+        d = {f["field"]: f["value"] for f in row}
+        ts = d.get("@timestamp")
+        et = d.get("eventType")
+        reason = d.get("disconnectReason") or ""
+        try:
+            t = datetime.strptime(ts, "%Y-%m-%d %H:%M:%S.%f").timestamp()
+        except Exception:
+            continue
+        events.append((t, et, reason))
+    events.sort()
+    sessions = []
+    disc_reasons: dict[str, int] = {}
+    conn_at = None
+    for t, et, reason in events:
+        if et == "Connect":
+            conn_at = t
+        elif et == "Disconnect":
+            disc_reasons[reason or "unknown"] = disc_reasons.get(reason or "unknown", 0) + 1
+            if conn_at is not None:
+                sessions.append(t - conn_at)
+                conn_at = None
+    n_conn = sum(1 for _, e, _ in events if e == "Connect")
+    n_disc = sum(1 for _, e, _ in events if e == "Disconnect")
+    drops_per_hr = round(n_disc / (window_min / 60), 1)
+    mean_s = round(sum(sessions) / len(sessions)) if sessions else 0
+    max_s = round(max(sessions)) if sessions else 0
+
+    if n_disc == 0 and n_conn <= 1:
+        verdict = "stable"
+        note = "Holds a single connection — the network is not the OTA blocker."
+    elif mean_s >= 300:
+        verdict = "stable"
+        note = "Long-lived sessions — connection is stable enough for OTA."
+    elif mean_s >= 60:
+        verdict = "marginal"
+        note = "Sessions drop every minute or two — large OTA blocks may stall; improve the link."
+    else:
+        verdict = "unstable"
+        note = ("Connection drops every few seconds — too unstable to complete OTA blocks. "
+                "Put the unit on a stable, always-on network (not a flapping hotspot) and re-check.")
+
+    return {
+        "thing_name": thing,
+        "window_min": window_min,
+        "connects": n_conn,
+        "disconnects": n_disc,
+        "drops_per_hour": drops_per_hr,
+        "sessions_completed": len(sessions),
+        "mean_session_s": mean_s,
+        "max_session_s": max_s,
+        "disconnect_reasons": disc_reasons,
+        "verdict": verdict,
+        "note": note,
+    }
 
 
 @router.get("/fleet-live")

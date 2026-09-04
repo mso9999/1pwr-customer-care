@@ -22,6 +22,7 @@ import {
   approveFactoryOtaRelease,
   createSiteOtaRelease,
   retireTestUnit,
+  getGatewayStability,
   type UpdateConfigResult,
   type OtaReadiness,
   type OtaPromotionStatus,
@@ -31,6 +32,7 @@ import {
   type FleetLiveResult,
   type MeterValidationStatus,
   type CountryProvisioningReadiness,
+  type GatewayStability,
 } from '../lib/api';
 import { formatLastSeen } from '../lib/datetime';
 import FieldInstall from '../components/FieldInstall';
@@ -165,6 +167,10 @@ export default function ProvisioningPage() {
   const [retireConfirm, setRetireConfirm] = useState('');
   const [retireBusy, setRetireBusy] = useState(false);
   const [retireResult, setRetireResult] = useState('');
+  const [stabThing, setStabThing] = useState('');
+  const [stabBusy, setStabBusy] = useState(false);
+  const [stabResult, setStabResult] = useState<GatewayStability | null>(null);
+  const [stabError, setStabError] = useState('');
   const [validationNetworkMode, setValidationNetworkMode] = useState<ValidationNetworkMode>('site');
   const [commandCopied, setCommandCopied] = useState(false);
   const [guideChecks, setGuideChecks] = useState<Record<GuideCheckKey, boolean>>({
@@ -543,6 +549,21 @@ export default function ProvisioningPage() {
       setRetireResult(e instanceof Error ? e.message : String(e));
     } finally {
       setRetireBusy(false);
+    }
+  };
+
+  const handleCheckStability = async () => {
+    const thing = (stabThing || canaryTarget || '').trim();
+    if (!thing) return;
+    setStabBusy(true);
+    setStabError('');
+    setStabResult(null);
+    try {
+      setStabResult(await getGatewayStability(thing, 30));
+    } catch (e) {
+      setStabError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setStabBusy(false);
     }
   };
 
@@ -1315,6 +1336,40 @@ export default function ProvisioningPage() {
             <div>
               <h2 className="text-lg font-semibold text-gray-900">Live OTA status</h2>
               <p className="text-sm text-gray-500 mt-1">{trackedOtaId || 'No canary started in this session.'}</p>
+            </div>
+            <div className="border-t border-gray-100 pt-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">Connection stability</div>
+              <p className="text-xs text-gray-500 mt-1">
+                OTA stuck at 0%? Check whether the unit can even hold a connection. A healthy unit holds one
+                session; a flaky network drops it every few seconds (too unstable to complete a block).
+              </p>
+              <div className="flex gap-2 mt-2">
+                <input className={inputCls} value={stabThing} onChange={(e) => setStabThing(e.target.value)}
+                  placeholder={canaryTarget || 'Thing name (e.g. SIN-GW-0001)'} />
+                <button onClick={handleCheckStability} disabled={stabBusy || !(stabThing || canaryTarget)}
+                  className="px-3 py-2 bg-gray-700 text-white rounded-lg text-xs font-semibold disabled:opacity-40 whitespace-nowrap">
+                  {stabBusy ? 'Checking…' : 'Check'}
+                </button>
+              </div>
+              {stabError && <div className="text-xs text-red-700 mt-2">{stabError}</div>}
+              {stabResult && (
+                <div className={`mt-2 p-3 rounded-lg border text-sm ${
+                  stabResult.verdict === 'stable' ? 'border-green-200 bg-green-50 text-green-900'
+                  : stabResult.verdict === 'marginal' ? 'border-amber-200 bg-amber-50 text-amber-900'
+                  : 'border-red-200 bg-red-50 text-red-900'}`}>
+                  <div className="font-semibold capitalize">{stabResult.verdict} — {stabResult.thing_name}</div>
+                  <div className="mt-1 text-xs">
+                    {stabResult.disconnects} drops in {stabResult.window_min} min ({stabResult.drops_per_hour}/hr)
+                    {stabResult.sessions_completed > 0 && ` · mean session ${stabResult.mean_session_s}s · max ${stabResult.max_session_s}s`}
+                  </div>
+                  {Object.keys(stabResult.disconnect_reasons).length > 0 && (
+                    <div className="text-xs mt-0.5">
+                      Reasons: {Object.entries(stabResult.disconnect_reasons).map(([k, v]) => `${k}×${v}`).join(', ')}
+                    </div>
+                  )}
+                  <div className="text-xs mt-1">{stabResult.note}</div>
+                </div>
+              )}
             </div>
             {trackedOtaId && (
               <>

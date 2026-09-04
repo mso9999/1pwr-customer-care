@@ -4355,6 +4355,26 @@ export async function retireTestUnit(body: {
   });
 }
 
+export interface GatewayStability {
+  thing_name: string;
+  window_min: number;
+  connects: number;
+  disconnects: number;
+  drops_per_hour: number;
+  sessions_completed: number;
+  mean_session_s: number;
+  max_session_s: number;
+  disconnect_reasons: Record<string, number>;
+  verdict: 'stable' | 'marginal' | 'unstable';
+  note: string;
+}
+
+export async function getGatewayStability(thingName: string, windowMin = 30): Promise<GatewayStability> {
+  return request<GatewayStability>(
+    `/provisioning/gateway-stability?thing_name=${encodeURIComponent(thingName)}&window_min=${windowMin}`
+  );
+}
+
 export interface OtaExecutionStatus {
   thing_name: string;
   status?: string | null;
