@@ -332,7 +332,10 @@ export default function ProvisioningPage() {
   }, [guideSite]);
 
   useEffect(() => {
-    if (guideStep < 5 || !guideSite) return;
+    // Auto-detect the site's in-flight OTA whenever a site is selected and we're
+    // in a view that shows OTA status (walkthrough step 5+ OR the OTA canary tab)
+    // — so a canary queued outside this session still surfaces its progress bar.
+    if (!guideSite || (guideStep < 5 && mode !== 'canary')) return;
     let cancelled = false;
     const discoverUpdate = () => {
       getProvisionedMeters(guideSite)
@@ -355,7 +358,7 @@ export default function ProvisioningPage() {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [guideStep, guideSite]);
+  }, [guideStep, guideSite, mode]);
 
   useEffect(() => {
     if (!trackedOtaId) {
