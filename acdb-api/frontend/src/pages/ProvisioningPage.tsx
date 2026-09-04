@@ -1826,6 +1826,19 @@ export default function ProvisioningPage() {
                 <div className="p-3 rounded-lg border border-amber-200 bg-amber-50 text-sm text-amber-900">
                   Keep the gateway and {validationNetworkMode === 'mirror' ? 'HQ mirrored access point' : 'site Starlink router'} powered. “Bootstrap delivered” is not completion.
                 </div>
+                <div className="p-4 rounded-lg border border-blue-200 bg-blue-50 text-sm text-blue-950">
+                  <div className="font-semibold">Before the OTA starts — give the gateway a clear run</div>
+                  <p className="text-xs text-blue-900 mt-1">
+                    Virgin (factory) firmware has just enough memory for the download if nothing else is
+                    running — the first OTA is the hardest thing these units do. Set it up to succeed:
+                  </p>
+                  <ul className="text-xs text-blue-900 list-disc pl-4 mt-1 space-y-1">
+                    <li><b>Disconnect the meter leads (RS485)</b> from the gateway — reconnect them after the OTA completes.</li>
+                    <li><b>Power off every other 1Meter unit in the room</b> — the canary must not bridge mesh traffic for others.</li>
+                    <li><b>Place the gateway right next to the 1Meter router</b> — strong signal, no retransmissions.</li>
+                    <li>Stay on the provisioning network: the unit is <i>supposed</i> to remain on “1Meter” after provisioning — this OTA is what moves it onto the site network.</li>
+                  </ul>
+                </div>
                 <label className="flex gap-3 items-start p-3 rounded-lg border border-gray-200 cursor-pointer">
                   <input type="checkbox" className="mt-0.5" checked={guideChecks.bootstrapDelivered} onChange={() => toggleGuideCheck('bootstrapDelivered')} />
                   <span className="text-sm text-gray-700">The station shows identity/bootstrap delivery completed and the gateway rebooted.</span>
@@ -1915,6 +1928,27 @@ export default function ProvisioningPage() {
                 {otaFailed > 0 && (
                   <div className="p-4 rounded-lg border border-red-200 bg-red-50 text-sm text-red-900">
                     <b>Stop.</b> At least one gateway failed or rejected the OTA. Preserve the update ID and do not create another Thing or update blindly.
+                  </div>
+                )}
+
+                {trackedOtaId && otaFailed === 0 && otaPercent === 0 && (otaInProgress > 0 || otaQueued > 0) && (
+                  <div className="p-4 rounded-lg border border-amber-200 bg-amber-50 text-sm text-amber-950">
+                    <div className="font-semibold">Bar sitting at 0%? The unit is choking, not idle</div>
+                    <p className="text-xs mt-1">
+                      Virgin firmware runs out of memory a few blocks into the download, reboots, and
+                      restarts from zero — progress only becomes durable at the first checkpoint
+                      (block 16). Break the loop:
+                    </p>
+                    <ol className="text-xs list-decimal pl-4 mt-1 space-y-1">
+                      <li>Unplug the meter leads (RS485) from the gateway.</li>
+                      <li>Power off any other 1Meter units nearby.</li>
+                      <li>Move the gateway right next to the router.</li>
+                      <li>Power-cycle the gateway once, then leave it — it may reboot itself a few times; each run resumes from the last checkpoint.</li>
+                    </ol>
+                    <p className="text-xs mt-2">
+                      If it still never moves after 30 minutes fully unloaded, set the unit aside and flag
+                      it — it becomes a data point for the manufacturer power investigation.
+                    </p>
                   </div>
                 )}
                 <div className="flex justify-between">
