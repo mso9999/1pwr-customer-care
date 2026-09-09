@@ -32,6 +32,7 @@ import CheckMeterPage from './pages/CheckMeterPage';
 import BillingPriorityPage from './pages/BillingPriorityPage';
 import FinancingPage from './pages/FinancingPage';
 import AdvancesPage from './pages/AdvancesPage';
+import UnmeteredServicePage from './pages/UnmeteredServicePage';
 import RecordPaymentPage from './pages/RecordPaymentPage';
 import PaymentVerificationPage from './pages/PaymentVerificationPage';
 import UnmatchedPaymentsPage from './pages/UnmatchedPaymentsPage';
@@ -102,6 +103,7 @@ export default function App() {
             <Route path="billing-priority" element={<ProtectedRoute requireEmployee><BillingPriorityPage /></ProtectedRoute>} />
             <Route path="financing" element={<ProtectedRoute requireEmployee><FinancingPage /></ProtectedRoute>} />
             <Route path="advances" element={<ProtectedRoute requireEmployee><AdvancesPage /></ProtectedRoute>} />
+            <Route path="unmetered-service" element={<ProtectedRoute requireEmployee><UnmeteredServicePage /></ProtectedRoute>} />
             <Route path="record-payment" element={<ProtectedRoute requireEmployee><RecordPaymentPage /></ProtectedRoute>} />
             <Route path="payment-verification" element={<ProtectedRoute requireEmployee><PaymentVerificationPage /></ProtectedRoute>} />
             <Route path="unmatched-payments" element={<ProtectedRoute requireEmployee><UnmatchedPaymentsPage /></ProtectedRoute>} />

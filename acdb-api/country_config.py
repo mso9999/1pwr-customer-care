@@ -43,6 +43,11 @@ class CountryConfig:
     # without a redeploy; CountryConfig only provides the seed default.
     default_connection_fee: float = 0.0
     default_readyboard_fee: float = 0.0
+    # Monthly flat service fee for connected-but-UNMETERED customers
+    # (``unmetered_service`` enrollments, migration 068). Live value in
+    # ``system_config`` (key ``unmetered_service_fee_amount``); 0 disables
+    # enrollment on that lane.
+    default_unmetered_service_fee: float = 0.0
     # Low-balance SMS job (``low_balance_alerts``): seeds when ``system_config`` missing.
     default_low_balance_kwh_threshold: float = 10.0
     default_low_balance_kwh_clear: float = 20.0
@@ -100,6 +105,8 @@ LESOTHO = CountryConfig(
     display_name="Lesotho",
     default_connection_fee=501.0,
     default_readyboard_fee=499.0,
+    # Connected-but-unmetered customers pay M50/month for service (O&M 2026-08).
+    default_unmetered_service_fee=50.0,
     # Warn at M10.00 (= 2 kWh @ 5 LSL/kWh), clear at M20.00 (per O&M 2026-06-09).
     default_low_balance_kwh_threshold=2.0,
     default_low_balance_kwh_clear=4.0,

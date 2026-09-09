@@ -1,0 +1,69 @@
+{
+  "title": "Service non compté",
+  "subtitle": "Clients connectés sans compteur, facturés d'un forfait mensuel de service",
+  "enroll": "+ Inscrire un compte",
+  "enrollTitle": "Inscrire au service non compté",
+  "enrollSubmit": "Inscrire",
+  "loading": "Chargement…",
+  "emptyList": "Aucune inscription ne correspond à ces filtres.",
+  "emptyActive": "Aucun compte n'est actuellement en service non compté.",
+  "endPrompt": "Terminer cette inscription ? À faire uniquement pour des raisons non liées au compteur — l'attribution d'un compteur et la mise en service y mettent fin automatiquement.",
+  "endSubmit": "Terminer l'inscription",
+  "summary": {
+    "active": "Inscriptions actives",
+    "outstanding": "Total impayé",
+    "monthlyFee": "Forfait mensuel configuré"
+  },
+  "table": {
+    "account": "Compte",
+    "customer": "Client",
+    "site": "Site",
+    "started": "Début",
+    "monthlyFee": "Forfait mensuel",
+    "outstanding": "Impayé",
+    "monthsAccrued": "Mois facturés",
+    "lastAccrual": "Dernière facturation",
+    "status": "Statut",
+    "ended": "Terminé",
+    "endReason": "Raison de fin",
+    "actions": "Actions"
+  },
+  "status": {
+    "active": "Actif",
+    "ended": "Terminé"
+  },
+  "fields": {
+    "account": "Numéro de compte",
+    "monthlyFee": "Forfait mensuel (laisser vide pour la valeur par défaut du pays)",
+    "repaymentFraction": "Fraction de remboursement par recharge (0–1, défaut 0,5)",
+    "openingOutstanding": "Arriérés initiaux (optionnel)",
+    "note": "Note (optionnel)"
+  },
+  "detail": {
+    "ledgerTitle": "Journal",
+    "type": "Type",
+    "amount": "Montant",
+    "balanceAfter": "Solde après",
+    "period": "Période",
+    "by": "Par",
+    "date": "Date",
+    "note": "Note",
+    "accrual": "Facturation mensuelle",
+    "repayment": "Remboursement",
+    "adjustment": "Ajustement"
+  },
+  "endReasons": {
+    "meter_assigned": "Compteur attribué",
+    "commissioned": "Mis en service",
+    "terminated": "Résilié",
+    "manual": "Manuel"
+  },
+  "errors": {
+    "accountRequired": "Le numéro de compte est requis"
+  },
+  "badge": {
+    "unmetered": "Service non compté",
+    "monthly": "{{fee}}/mois",
+    "owes": "doit {{amount}}"
+  }
+}
