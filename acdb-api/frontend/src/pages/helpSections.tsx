@@ -80,6 +80,7 @@ const FEATURE_ROWS: [string, string, string, string, string][] = [
   ['Payments',       'Paiements',             'Record missed payment',             'Enregistrer un paiement manqué',           '/record-payment'],
   ['Payments',       'Paiements',             'Payment verification',              'Vérification des paiements',               '/payment-verification'],
   ['Advances',       'Avances',               'Connection / readyboard advance ledger', 'Grand livre des avances raccordement / tableau', '/advances'],
+  ['Commerce',       'Commerce',              'Unmetered service ledger',          'Service non compté (sans compteur)',      '/unmetered-service'],
   ['Financing',      'Financement',           'Product templates & agreements',    'Modèles de produits et accords',           '/financing'],
   ['Financing',      'Financement',           'Extend credit (from customer page)','Accorder un crédit (depuis la fiche client)', '/customers/:id'],
   ['Reports',        'Rapports',              'O&M quarterly report',              'Rapport trimestriel O&M',                  '/om-report'],
@@ -514,9 +515,10 @@ function PaymentsContent() {
         <SubHead>Ordre de répartition d'un paiement « électricité »</SubHead>
         <Ul>
           <li><Bold>Étape 1 (dette frais)</Bold> : jusqu'à <Bold>50 %</Bold> du paiement peut d'abord rembourser la dette de frais de raccordement / readyboard restante (raccordement en priorité, puis readyboard).</li>
-          <li><Bold>Étape 2 (avance)</Bold> : sur le montant restant, la <Bold>fraction de remboursement</Bold> de l'avance est appliquée (par défaut 50 %), plafonnée au solde d'avance restant.</li>
-          <li><Bold>Étape 3 (financement)</Bold> : sur la portion électricité restante, la logique de financement peut prélever sa part.</li>
-          <li><Bold>Étape 4 (kWh)</Bold> : seule la <Bold>portion électricité finale</Bold> est convertie en kWh et créditée sur le compteur.</li>
+          <li><Bold>Étape 2 (service non compté)</Bold> : si le compte est inscrit au <PageLink to="#unmetered-service">service non compté</PageLink>, une part du reste (par défaut 50 %) rembourse ce forfait mensuel.</li>
+          <li><Bold>Étape 3 (avance)</Bold> : sur le montant restant, la <Bold>fraction de remboursement</Bold> de l'avance est appliquée (par défaut 50 %), plafonnée au solde d'avance restant.</li>
+          <li><Bold>Étape 4 (financement)</Bold> : sur la portion électricité restante, la logique de financement peut prélever sa part.</li>
+          <li><Bold>Étape 5 (kWh)</Bold> : seule la <Bold>portion électricité finale</Bold> est convertie en kWh et créditée sur le compteur.</li>
         </Ul>
         <P>En conséquence, il est possible qu'un paiement de 5.00 ne crédite que 2.50 en électricité ; le reste est visible comme remboursement de dette.</P>
 
@@ -570,9 +572,10 @@ function PaymentsContent() {
       <SubHead>Allocation order for an "electricity" payment</SubHead>
       <Ul>
         <li><Bold>Step 1 (fee debt)</Bold>: up to <Bold>50%</Bold> of the payment may first repay outstanding connection/readyboard fee debt (connection bucket first, then readyboard).</li>
-        <li><Bold>Step 2 (advance)</Bold>: from the remainder, the configured advance repayment fraction is applied (default 50%), capped by remaining advance outstanding.</li>
-        <li><Bold>Step 3 (financing)</Bold>: from the remaining electricity slice, financing logic may take its debt portion.</li>
-        <li><Bold>Step 4 (kWh credit)</Bold>: only the <Bold>final electricity portion</Bold> is converted to kWh and credited to the meter.</li>
+        <li><Bold>Step 2 (unmetered service)</Bold>: if the account is enrolled in <PageLink to="#unmetered-service">unmetered service</PageLink>, a share of the remainder (default 50%) pays down that monthly fee.</li>
+        <li><Bold>Step 3 (advance)</Bold>: from the remainder, the configured advance repayment fraction is applied (default 50%), capped by remaining advance outstanding.</li>
+        <li><Bold>Step 4 (financing)</Bold>: from the remaining electricity slice, financing logic may take its debt portion.</li>
+        <li><Bold>Step 5 (kWh credit)</Bold>: only the <Bold>final electricity portion</Bold> is converted to kWh and credited to the meter.</li>
       </Ul>
       <P>So a payment of 5.00 can legitimately credit only 2.50 to electricity when the other 2.50 is routed to debt repayment.</P>
 
@@ -761,6 +764,99 @@ function AdvancesContent() {
       <Tip>
         On the <PageLink to="/customer-data">Customer Data</PageLink> page, an <Bold>Active Advances</Bold> panel
         shows the outstanding balance and a deep-link to the Advances page for management.
+      </Tip>
+    </>
+  );
+}
+
+function UnmeteredServiceContent() {
+  const fr = useHelpLangIsFr();
+
+  if (fr) {
+    return (
+      <>
+        <P>
+          La page <PageLink to="/unmetered-service">Service non compté</PageLink> suit les clients
+          <Bold> raccordés sans compteur</Bold> qui doivent un forfait mensuel (50 LSL par défaut au Lesotho).
+          C'est un statut de facturation enregistré — pas seulement une vue calculée du pipeline.
+        </P>
+        <Warning>
+          Distinct des <PageLink to="#advances">avances</PageLink> (frais de raccordement / tableau) et du
+          <PageLink to="/financing">financement</PageLink> (biens mobiliers). Un compte peut avoir les trois ;
+          l'ordre de répartition est décrit sous <PageLink to="#payments">Paiements</PageLink>.
+        </Warning>
+
+        <SubHead>Inscrire un compte</SubHead>
+        <P>Commerce → <PageLink to="/unmetered-service">Service non compté</PageLink> → <Bold>Inscrire un compte</Bold> :</P>
+        <Ol>
+          <li><Bold>Numéro de compte</Bold> — le client doit déjà être enregistré (ex. <Code>0045MAK</Code>).</li>
+          <li><Bold>Forfait mensuel</Bold> — prérempli depuis <PageLink to="/tariffs">Tarifs → Frais pays</PageLink> (modifiable pour cette inscription).</li>
+          <li><Bold>Fraction de remboursement</Bold> — part de chaque top-up affectée au forfait (par défaut 50 %).</li>
+          <li><Bold>Solde d'ouverture</Bold> — facultatif, pour les mois déjà dus avant l'inscription.</li>
+        </Ol>
+        <P>Une seule inscription <Bold>active</Bold> par compte. Le montant mensuel est figé à l'inscription.</P>
+
+        <SubHead>Accrual et remboursement</SubHead>
+        <Ul>
+          <li>Le 1er de chaque mois (~02:30 UTC), <Code>cc-unmetered-accrual</Code> ajoute le forfait au solde. Relancer le job le même mois ne double pas la ligne.</li>
+          <li>Les top-ups remboursent d'abord la dette de frais de mise en service, puis ce forfait, puis les avances, puis l'électricité.</li>
+          <li>La fiche client affiche une bandeau ambre <Bold>Service non compté</Bold> avec le solde dû.</li>
+        </Ul>
+
+        <SubHead>Fin automatique</SubHead>
+        <P>
+          L'inscription se termine toute seule quand un compteur est attribué ou quand le client est
+          <PageLink to="/commission">mis en service</PageLink>. Les frais mensuels s'arrêtent ; le grand livre reste
+          visible sous le filtre <Bold>Terminé</Bold>. Pour une autre raison, utiliser <Bold>Terminer l'inscription</Bold> sur la page.
+        </P>
+        <Tip>
+          Le montant par défaut se règle sous <PageLink to="/tariffs">Tarifs</PageLink> (carte Frais pays).
+          Mettre 0 désactive les nouvelles inscriptions pour ce pays.
+        </Tip>
+      </>
+    );
+  }
+
+  return (
+    <>
+      <P>
+        The <PageLink to="/unmetered-service">Unmetered Service</PageLink> page tracks
+        <Bold> connected customers who do not yet have a meter</Bold> and who owe a flat monthly
+        service fee (50 LSL default in Lesotho). This is a stored billing status — not just a
+        computed pipeline view.
+      </P>
+      <Warning>
+        Separate from <PageLink to="#advances">advances</PageLink> (connection / readyboard fees) and
+        <PageLink to="/financing">financing</PageLink> (movable assets). An account can have all three;
+        payment order is under <PageLink to="#payments">Payments</PageLink>.
+      </Warning>
+
+      <SubHead>Enroll an account</SubHead>
+      <P>Commerce → <PageLink to="/unmetered-service">Unmetered Service</PageLink> → <Bold>Enroll account</Bold>:</P>
+      <Ol>
+        <li><Bold>Account number</Bold> — the customer must already be registered (e.g. <Code>0045MAK</Code>).</li>
+        <li><Bold>Monthly fee</Bold> — pre-filled from <PageLink to="/tariffs">Tariffs → Country fees</PageLink> (can be overridden for this enrollment).</li>
+        <li><Bold>Repayment fraction</Bold> — share of each top-up that pays the fee (default 50%).</li>
+        <li><Bold>Opening outstanding</Bold> — optional, for months already owed before enrollment.</li>
+      </Ol>
+      <P>One <Bold>active</Bold> enrollment per account. The monthly amount is snapshotted at enrollment.</P>
+
+      <SubHead>Accrual and paydown</SubHead>
+      <Ul>
+        <li>On the 1st of each month (~02:30 UTC), <Code>cc-unmetered-accrual</Code> adds the fee to the balance. Re-running the same month does not double-charge.</li>
+        <li>Top-ups pay onboarding fee debt first, then this service fee, then advances, then electricity.</li>
+        <li>The customer page shows an amber <Bold>Unmetered service</Bold> strip with what they owe.</li>
+      </Ul>
+
+      <SubHead>Automatic exit</SubHead>
+      <P>
+        Enrollment ends on its own when a meter is assigned or the customer is
+        <PageLink to="/commission">commissioned</PageLink>. Monthly fees stop; the ledger stays under the
+        <Bold>Ended</Bold> filter. For any other reason, use <Bold>End enrollment</Bold> on the page.
+      </P>
+      <Tip>
+        The default fee is on <PageLink to="/tariffs">Tariffs</PageLink> (Country fees card).
+        Set it to 0 to block new enrollments for that country.
       </Tip>
     </>
   );
@@ -1286,6 +1382,7 @@ function TariffsContent() {
         <Tip>
           Réservé aux rôles <Bold>superadmin</Bold>, <Bold>onm_team</Bold> ou <Bold>finance_team</Bold>.
           Les avances accordées avant un changement conservent leur montant initial — voir <PageLink to="#advances">Avances</PageLink>.
+          Le forfait <PageLink to="#unmetered-service">service non compté</PageLink> se règle sur la même carte.
         </Tip>
       </>
     );
@@ -1311,6 +1408,7 @@ function TariffsContent() {
       <Tip>
         Restricted to <Bold>superadmin</Bold>, <Bold>onm_team</Bold>, and <Bold>finance_team</Bold> roles.
         Advances granted before a fee change keep their original amount — see <PageLink to="#advances">Advances</PageLink>.
+        The <PageLink to="#unmetered-service">unmetered service</PageLink> monthly fee is on the same card.
       </Tip>
     </>
   );
@@ -1742,6 +1840,7 @@ export function useHelpSections(): HelpSection[] {
     { id: 'payments',             content: <PaymentsContent />, searchKeywords: 'fee classifier connection readyboard exact match 499 501 lesotho benin verification' },
     { id: 'balance-adjustments',  content: <BalanceAdjustmentsContent /> },
     { id: 'advances',             content: <AdvancesContent />, searchKeywords: 'advance ledger connection readyboard fee monthly accrual contract upload writeoff repayment fraction premium' },
+    { id: 'unmetered-service',    content: <UnmeteredServiceContent />, searchKeywords: 'unmetered service fee connected no meter 50 lsl enroll accrual monthly ledger' },
     { id: 'financing',            content: <FinancingContent /> },
     { id: 'meters',               content: <MetersContent /> },
     { id: 'provisioning',         content: <ProvisioningContent />, searchKeywords: 'gateway station batch virgin bootstrap commissioning provision certificate softap mak-gw download laptop' },
