@@ -37,6 +37,23 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW_FOLIO: WhatsNewEntry[] = [
   {
+    id: 'commissioning-requires-ugp-link',
+    date: '2026-09-02',
+    title: 'Commissioning now requires linking the uGridPLAN connection',
+    blurb: 'The "Generate Contract & SMS" button stays disabled until the unit\'s uGridPLAN connection (pole/PTB) is linked in step 2 — and, for 1Meter installs, until the gateway is live on the cloud.',
+    pages: [
+      {
+        heading: 'Why the Generate button is disabled',
+        body:
+          'Commissioning now records WHERE the unit is installed, so the fleet map and O&M ticketing stay accurate. Before you can generate the contract:\n\n' +
+          '- Step 2 asks you to link the uGridPLAN connection (pole/PTB) — tap "Link UGP Connection" and pick the customer\'s connection\n' +
+          '- For 1Meter installs, the selected gateway must be live on the cloud (a status line shows its last contact)\n' +
+          '- The Generate button enables once both are satisfied\n\n' +
+          'If the page looks different from what this describes, your app is out of date — close and reopen it, or clear the browser\'s site data for cc.1pwrafrica.com.',
+      },
+    ],
+  },
+  {
     id: 'fleet-map-linked-offline-meters',
     date: '2026-08-24',
     title: 'Fleet map now flags every linked 1Meter — even before it first reports',
