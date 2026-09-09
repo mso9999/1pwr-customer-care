@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 import re
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from contract_gen import (
     CONTRACTS_DIR,
@@ -104,6 +104,14 @@ class CommissionRequest(BaseModel):
         description="Base64 JPEG from canvas or upload; must be non-trivial.",
     )
     commissioned_by: Optional[str] = None
+
+    @field_validator("gps_lat", "gps_lng", mode="before")
+    @classmethod
+    def _coerce_gps_to_str(cls, v):
+        """JSON from the form may send numeric GPS (Postgres float / UGP number)."""
+        if v is None or v == "":
+            return None
+        return str(v).strip() or None
 
     @model_validator(mode="after")
     def _derive_site_code(self) -> "CommissionRequest":
@@ -233,8 +241,8 @@ async def get_commission_data(identifier: str, user: CurrentUser = Depends(requi
             "national_id": customer.get("national_id", ""),
             "concession": customer.get("community", ""),
             "customer_type": customer.get("customer_position", ""),
-            "gps_x": customer.get("gps_lat", ""),
-            "gps_y": customer.get("gps_lon", ""),
+            "gps_x": "" if customer.get("gps_lat") is None else str(customer.get("gps_lat")),
+            "gps_y": "" if customer.get("gps_lon") is None else str(customer.get("gps_lon")),
             "date_connected": str(customer.get("date_service_connected", "") or ""),
         },
         "meter": {

@@ -440,8 +440,8 @@ export default function CommissionCustomerPage() {
           if (c.customer_type && !customerType) setCustomerType(c.customer_type);
           if (c.national_id && !nationalId) setNationalId(c.national_id);
           if (c.phone && !phoneNumber) setPhoneNumber(c.phone);
-          if (c.gps_y && !gpsLat) setGpsLat(c.gps_y);
-          if (c.gps_x && !gpsLng) setGpsLng(c.gps_x);
+          if (c.gps_y && !gpsLat) setGpsLat(String(c.gps_y));
+          if (c.gps_x && !gpsLng) setGpsLng(String(c.gps_x));
           if (data.account_number && !accountNumber) setAccountNumber(data.account_number);
           if (data.survey_id && !surveyId) setSurveyId(data.survey_id);
         })
@@ -551,8 +551,8 @@ export default function CommissionCustomerPage() {
         phone_number: phoneNumber.trim(),
         first_name: customerData?.customer.first_name || '',
         last_name: customerData?.customer.last_name || '',
-        gps_lat: gpsLat || undefined,
-        gps_lng: gpsLng || undefined,
+        gps_lat: gpsLat !== '' && gpsLat != null ? String(gpsLat) : undefined,
+        gps_lng: gpsLng !== '' && gpsLng != null ? String(gpsLng) : undefined,
         survey_id: surveyId,
         gateway_thing_name: gatewayThingName || undefined,
         force_commission: (force || forceCommission) || undefined,
