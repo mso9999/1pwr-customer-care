@@ -14,6 +14,7 @@ const SECTION_TITLE_KEYS: Record<string, string> = {
   payments: 'help:sections.payments',
   'balance-adjustments': 'help:sections.balanceAdjustments',
   advances: 'help:sections.advances',
+  'unmetered-service': 'help:sections.unmeteredService',
   financing: 'help:sections.financing',
   meters: 'help:sections.metering',
   provisioning: 'help:sections.provisioning',

@@ -74,6 +74,13 @@ export const TUTORIAL_WORKFLOWS: TutorialWorkflowDef[] = [
     helpSectionIds: ['tariffs', 'advances', 'advances', 'advances', 'payments', 'advances'],
   },
   {
+    id: 'unmeteredService',
+    i18nKey: 'workflows.unmeteredService',
+    rolesKey: 'roles.financeOnm',
+    links: ['/tariffs', '/unmetered-service', '/customer-data', '/commission', '/unmetered-service'],
+    helpSectionIds: ['tariffs', 'unmetered-service', 'unmetered-service', 'commission', 'unmetered-service'],
+  },
+  {
     id: 'provisioning',
     i18nKey: 'workflows.provisioning',
     rolesKey: 'roles.onmSuperadmin',
@@ -120,8 +127,8 @@ export const TUTORIAL_WORKFLOWS: TutorialWorkflowDef[] = [
     id: 'commerce',
     i18nKey: 'workflows.commerce',
     rolesKey: 'roles.financeOps',
-    links: ['/tariffs', '/financing', '/export'],
-    helpSectionIds: ['tariffs', 'financing', 'export'],
+    links: ['/tariffs', '/financing', '/unmetered-service', '/export'],
+    helpSectionIds: ['tariffs', 'financing', 'unmetered-service', 'export'],
   },
   {
     id: 'dataAudit',

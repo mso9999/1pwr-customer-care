@@ -31,7 +31,7 @@
       "steps": [
         "Register the customer FIRST — before any payment or installation. Registration issues the account number (e.g. 0042MAK) that the customer needs as the payment reference for the connection fee, so nothing else can start until this is done.",
         "When the customer pays the connection fee or full readyboard fee by mobile money, the portal recognises the exact amount automatically and queues it for finance verification — no manual matching required. If the customer can't pay it in full, grant an advance instead (see the Advances walkthrough).",
-        "Run the commissioning wizard to verify details, signatures, and paperwork.",
+        "Run the commissioning wizard: look up the customer, fill details, then link the uGridPLAN connection (pole/PTB) — required, or Generate Contract stays blocked — capture the signature, and generate the bilingual contract and SMS.",
         "Assign or confirm the meter and serial in the meter registry.",
         "Use Customer Data for balances, charts, and transaction history (including any active advances).",
         "Track funnel position on the Pipeline page."
@@ -70,7 +70,7 @@
       "title": "Payments & reconciliation",
       "description": "When SMS gateway data is missing or needs review, and how to trace credits.",
       "steps": [
-        "Record a missed mobile-money payment so 1PDB and SparkMeter stay aligned. The classifier auto-detects connection / readyboard fees by exact amount; an active advance is repaid before electricity credit is applied.",
+        "Record a missed mobile-money payment so 1PDB and SparkMeter stay aligned. The classifier auto-detects connection / readyboard fees by exact amount. Remaining electricity payments then pay unmetered-service fees (if enrolled), then advances, then kWh.",
         "Work the verification queue for fees and deposits that need human matching — connection and readyboard fees auto-route here.",
         "Browse Transactions for recent credits and amounts site-wide; the kWh balance column reflects the kWh balance after each row.",
         "Drill into Customer Data for a specific account’s history, balance context, and any Active Advances panel."
@@ -86,6 +86,17 @@
         "Open Customer Data for the affected account to see the Active Advances panel with progress bar; deep-link back to the Advances page to edit or replace the contract.",
         "Recognised fee payments still flow through Payment Verification — the advance is only repaid by subsequent electricity payments, not by the matched fee.",
         "When contract/debt credit is positive, use manual debt-credit decisions on Advances: either Convert Debt Credit (to kWh/SparkMeter) or Refund Debt Credit. The system does not auto-convert these credits."
+      ]
+    },
+    "unmeteredService": {
+      "title": "Unmetered service (connected, no meter)",
+      "description": "Enroll connected customers who do not yet have a meter, accrue the monthly service fee, and let commissioning or meter assignment end it.",
+      "steps": [
+        "Confirm the country monthly fee on Tariffs → Country fees (Lesotho default 50 LSL). Set it to 0 to block new enrollments.",
+        "On Unmetered Service (Commerce menu), enroll the account. Optionally record opening arrears for months already owed. One active enrollment per account.",
+        "Open Customer Data to see the amber Unmetered service strip. Top-ups pay this fee after onboarding fee debt and before advances or kWh.",
+        "When a meter is assigned or the customer is commissioned, enrollment ends automatically and monthly accrual stops. The ledger stays under the Ended filter.",
+        "For any other reason, use End enrollment on the Unmetered Service page. Do not leave connected-unmetered customers as an informal side arrangement."
       ]
     },
     "reporting": {
@@ -111,10 +122,11 @@
     },
     "commerce": {
       "title": "Tariffs, financing, and exports",
-      "description": "Rate configuration, asset financing, and bulk extracts for analysis.",
+      "description": "Rate configuration, asset financing, unmetered service, and bulk extracts for analysis.",
       "steps": [
-        "Tariffs: site/concession rates that drive kWh conversion for new payments.",
+        "Tariffs: site/concession rates that drive kWh conversion for new payments, plus country fees (connection, readyboard, unmetered service).",
         "Financing: products, agreements, and ledger views.",
+        "Unmetered Service: enroll connected customers awaiting a meter; see the dedicated walkthrough.",
         "Export: CSV/XLSX extracts for offline analysis (respect data-handling policy)."
       ]
     },

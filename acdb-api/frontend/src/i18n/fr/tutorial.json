@@ -31,7 +31,7 @@
       "steps": [
         "Enregistrer le client D'ABORD — avant tout paiement ou installation. L'enregistrement délivre le numéro de compte (ex. 0042MAK) dont le client a besoin comme référence pour payer le frais de raccordement ; rien d'autre ne peut commencer avant.",
         "Lorsque le client paie le frais de raccordement ou le tableau complet par mobile money, le portail reconnaît automatiquement le montant exact et le place en file de vérification — aucun rapprochement manuel requis. S'il ne peut pas payer la totalité, accordez plutôt une avance (voir le parcours Avances).",
-        "Lancer l’assistant de mise en service pour vérifier les informations, signatures et documents.",
+        "Lancer l’assistant de mise en service : rechercher le client, remplir les détails, lier le raccordement uGridPLAN (poteau/PTB) — obligatoire, sinon Générer le contrat reste bloqué — capturer la signature, puis générer le contrat bilingue et le SMS.",
         "Attribuer ou confirmer le compteur et le numéro de série dans le registre.",
         "Utiliser Données clients pour soldes, graphiques et historique des transactions (y compris toute avance active).",
         "Suivre l’avancement dans le Pipeline."
@@ -70,7 +70,7 @@
       "title": "Paiements et rapprochement",
       "description": "Lorsque la passerelle SMS est incomplète ou à contrôler, et pour tracer les crédits.",
       "steps": [
-        "Enregistrer un paiement mobile manquant pour garder 1PDB et SparkMeter alignés. La passerelle de classification détecte automatiquement les frais de raccordement / tableau par montant exact ; toute avance active est remboursée avant l'application du crédit électricité.",
+        "Enregistrer un paiement mobile manquant pour garder 1PDB et SparkMeter alignés. La passerelle de classification détecte automatiquement les frais de raccordement / tableau par montant exact. Le reste paie ensuite le forfait service non compté (si inscrit), puis les avances, puis les kWh.",
         "Traiter la file de vérification pour les frais et acomptes à rapprocher — les frais de raccordement et tableau y sont automatiquement routés.",
         "Parcourir les Transactions pour les crédits récents et les montants par site ; la colonne Solde (kWh) reflète le solde en kWh après chaque ligne.",
         "Approfondir avec Données clients pour l’historique, le contexte de solde et le panneau Avances actives."
@@ -86,6 +86,17 @@
         "Ouvrir Données clients pour voir le panneau Avances actives avec barre de progression ; un lien profond renvoie à la page Avances pour modification ou remplacement de contrat.",
         "Les paiements de frais reconnus passent toujours par la Vérification des paiements — l'avance n'est remboursée que par les paiements d'électricité ultérieurs, jamais par le frais reconnu.",
         "Lorsqu'un crédit dette/contrat devient positif, utilisez les décisions manuelles sur Avances : soit Convertir crédit dette (vers kWh/SparkMeter), soit Rembourser crédit dette. Le système ne convertit pas automatiquement ce crédit."
+      ]
+    },
+    "unmeteredService": {
+      "title": "Service non compté (raccordé, sans compteur)",
+      "description": "Inscrire les clients raccordés sans compteur, accumuler le forfait mensuel, et laisser la mise en service ou l'attribution du compteur y mettre fin.",
+      "steps": [
+        "Vérifier le forfait mensuel pays sur Tarifs → Frais pays (50 LSL par défaut au Lesotho). Mettre 0 bloque les nouvelles inscriptions.",
+        "Sur Service non compté (menu Commerce), inscrire le compte. Enregistrer éventuellement les arriérés d'ouverture. Une inscription active par compte.",
+        "Ouvrir Données clients pour voir le bandeau ambre Service non compté. Les top-ups paient ce forfait après la dette de frais de mise en service et avant les avances ou les kWh.",
+        "Quand un compteur est attribué ou le client mis en service, l'inscription se termine automatiquement et l'accrual mensuel s'arrête. Le grand livre reste sous le filtre Terminé.",
+        "Pour une autre raison, utiliser Terminer l'inscription sur la page. Ne pas laisser ces clients en arrangement informel."
       ]
     },
     "reporting": {
@@ -111,10 +122,11 @@
     },
     "commerce": {
       "title": "Tarifs, financement et exports",
-      "description": "Paramétrage des taux, financement d’actifs et extractions pour analyse.",
+      "description": "Paramétrage des taux, financement d’actifs, service non compté et extractions pour analyse.",
       "steps": [
-        "Tarifs : taux par site/concession pour la conversion kWh des nouveaux paiements.",
+        "Tarifs : taux par site/concession pour la conversion kWh, plus les frais pays (raccordement, tableau, service non compté).",
         "Financement : produits, accords et journaux.",
+        "Service non compté : inscrire les clients raccordés en attente de compteur ; voir le parcours dédié.",
         "Export : extraits CSV/XLSX pour analyse hors ligne (respecter la politique de données)."
       ]
     },
