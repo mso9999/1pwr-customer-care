@@ -33,6 +33,9 @@
     "accountNumber": "Numéro de compte",
     "gpsCoordinates": "Coordonnées GPS",
     "ugpConnection": "Raccordement UGP",
+    "ugpHint": "Obligatoire — choisissez le poteau/PTB où cette unité est installée. La génération reste bloquée tant que ce lien n'est pas fait.",
+    "ugpMissing": "Non lié — revenez à Détails et appuyez sur Lier un raccordement uGridPlan",
+    "ugpNoSite": "Impossible de charger les raccordements tant que le client n'a pas de site (communauté) ou que le compte ne se termine pas par un code site (ex. 0068MAK).",
     "remove": "Retirer",
     "linkUgp": "Lier un raccordement uGridPlan"
   },
@@ -61,7 +64,8 @@
     "nationalIdRequired": "Le numéro d'identité nationale est requis",
     "phoneRequired": "Le numéro de téléphone est requis",
     "accountRequired": "Le numéro de compte est requis",
-    "signatureRequired": "La signature est requise"
+    "signatureRequired": "La signature est requise",
+    "ugpRequired": "Liez le raccordement uGridPLAN (poteau/PTB) avant de continuer. Cela indique où l'unité est installée."
   },
   "commissionFailed": "Échec de la mise en service",
   "errors": {

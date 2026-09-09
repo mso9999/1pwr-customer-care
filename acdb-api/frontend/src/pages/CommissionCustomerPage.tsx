@@ -31,6 +31,10 @@ const CUSTOMER_TYPES = ['HH1', 'HH2', 'HH3', 'SME', 'CHU', 'SCP', 'SCH', 'HC', '
 const SERVICE_PHASES = ['Single', 'Three'];
 const TOTAL_STEPS = 4; // Identify, Details, Signature, Review
 
+function siteCodeFromAccount(account: string): string {
+  return account.trim().toUpperCase().match(/[A-Z]{2,4}$/)?.[0] ?? '';
+}
+
 // ---------------------------------------------------------------------------
 // GPS Capture (reused pattern from AssignMeterPage)
 // ---------------------------------------------------------------------------
@@ -412,6 +416,11 @@ export default function CommissionCustomerPage() {
   const [energizing, setEnergizing] = useState(false);
   const [energizeResult, setEnergizeResult] = useState<{ updated: number; failed: number } | null>(null);
 
+  const ugpSite = (
+    (customerData?.customer.concession || '').trim().toUpperCase()
+    || siteCodeFromAccount(accountNumber)
+  );
+
   useEffect(() => {
     if (!customerId.trim()) {
       setCustomerData(null);
@@ -434,6 +443,7 @@ export default function CommissionCustomerPage() {
           if (c.gps_y && !gpsLat) setGpsLat(c.gps_y);
           if (c.gps_x && !gpsLng) setGpsLng(c.gps_x);
           if (data.account_number && !accountNumber) setAccountNumber(data.account_number);
+          if (data.survey_id && !surveyId) setSurveyId(data.survey_id);
         })
         .catch(err => { if (!cancelled) setLookupError(err.message || 'Customer not found'); })
         .finally(() => { if (!cancelled) setLookupLoading(false); });
@@ -443,24 +453,22 @@ export default function CommissionCustomerPage() {
   }, [customerId]);
 
   useEffect(() => {
-    if (!customerData?.customer.concession) return;
-    const site = customerData.customer.concession.trim().toUpperCase();
+    if (!ugpSite) return;
     setGatewaysLoading(true);
-    getProvisionedMeters(site)
+    getProvisionedMeters(ugpSite)
       .then((r) => setAvailableGateways(r.meters.filter(m => !m.account_number)))
       .catch(() => {})
       .finally(() => setGatewaysLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customerData?.customer.concession]);
+  }, [ugpSite]);
 
   // Live gateway-function check when a gateway is selected. A 1Meter meter only
   // reports through its gateway, so commissioning onto one that isn't reaching
   // the cloud yields a dead install — surface that before submit.
   useEffect(() => {
     setGwHealth(null);
-    if (!gatewayThingName || !customerData?.customer.concession) return;
-    const site = customerData.customer.concession.trim().toUpperCase();
-    getGatewayHealth(site, gatewayThingName)
+    if (!gatewayThingName || !ugpSite) return;
+    getGatewayHealth(ugpSite, gatewayThingName)
       .then(setGwHealth)
       .catch(() => setGwHealth(null));
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -477,6 +485,7 @@ export default function CommissionCustomerPage() {
       if (!nationalId.trim()) return t('commission:validation.nationalIdRequired');
       if (!phoneNumber.trim()) return t('commission:validation.phoneRequired');
       if (!accountNumber.trim()) return t('commission:validation.accountRequired');
+      if (!surveyId.trim()) return t('commission:validation.ugpRequired');
     }
     if (step === 2) {
       if (!signatureB64) return t('commission:validation.signatureRequired');
@@ -712,7 +721,7 @@ export default function CommissionCustomerPage() {
       </div>
 
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">{t('commission:fields.ugpConnection')}</label>
+        <label className="block text-sm font-medium text-gray-700 mb-2">{t('commission:fields.ugpConnection')} <span className="text-red-400">*</span></label>
         {surveyId ? (
           <div className="flex items-center gap-2 px-4 py-3 bg-blue-50 border border-blue-200 rounded-xl">
             <svg className="w-5 h-5 text-blue-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -727,7 +736,7 @@ export default function CommissionCustomerPage() {
           <button
             type="button"
             onClick={() => setShowUGPPicker(true)}
-            disabled={!customerData?.customer.concession}
+            disabled={!ugpSite}
             className="w-full py-3 bg-gray-100 border-2 border-dashed border-gray-300 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-200 active:bg-gray-300 disabled:opacity-40 transition flex items-center justify-center gap-2"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -736,11 +745,15 @@ export default function CommissionCustomerPage() {
             {t('commission:fields.linkUgp')}
           </button>
         )}
+        <p className="text-xs text-gray-500 mt-1">{t('commission:fields.ugpHint')}</p>
+        {!surveyId && !ugpSite && (
+          <p className="text-xs text-red-500 mt-1">{t('commission:fields.ugpNoSite')}</p>
+        )}
       </div>
 
-      {showUGPPicker && customerData?.customer.concession && (
+      {showUGPPicker && ugpSite && (
         <UGPConnectionPicker
-          site={customerData.customer.concession}
+          site={ugpSite}
           accountNumber={accountNumber || undefined}
           onSelect={(conn) => {
             setSurveyId(conn.survey_id);
@@ -911,17 +924,25 @@ export default function CommissionCustomerPage() {
       { label: t('commission:fields.ampacity'), value: ampacity },
     ];
     if (gpsLat && gpsLng) items.push({ label: 'GPS', value: `${gpsLat}, ${gpsLng}` });
-    if (surveyId) items.push({ label: t('commission:fields.ugpConnection'), value: surveyId });
+    items.push({
+      label: t('commission:fields.ugpConnection'),
+      value: surveyId || t('commission:fields.ugpMissing'),
+    });
     if (gatewayThingName) items.push({ label: 'Gateway', value: gatewayThingName });
 
     return (
       <div className="space-y-4">
         <p className="text-gray-500 text-sm">Review the information below. This will update the customer record and generate bilingual contracts.</p>
+        {!surveyId && (
+          <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-amber-800 text-sm">
+            {t('commission:errors.ugpRequired')}
+          </div>
+        )}
         <div className="bg-gray-50 rounded-xl border divide-y">
           {items.map(item => (
             <div key={item.label} className="flex justify-between items-start px-4 py-3">
               <span className="text-sm text-gray-500 shrink-0 mr-4">{item.label}</span>
-              <span className="text-sm font-medium text-gray-800 text-right">{item.value}</span>
+              <span className={`text-sm font-medium text-right ${item.label === t('commission:fields.ugpConnection') && !surveyId ? 'text-red-600' : 'text-gray-800'}`}>{item.value}</span>
             </div>
           ))}
           <div className="flex justify-between items-center px-4 py-3">
@@ -1086,8 +1107,14 @@ export default function CommissionCustomerPage() {
               {t('commission:next')}
             </button>
           ) : (
-            <button onClick={() => handleSubmit()} disabled={saving || !surveyId}
-              title={!surveyId ? (t('commission:errors.ugpRequired') || 'Select the uGridPLAN connection (PTB/pole) first') : undefined}
+            <button onClick={() => {
+                if (!surveyId) {
+                  setError(t('commission:errors.ugpRequired'));
+                  setStep(1);
+                  return;
+                }
+                handleSubmit();
+              }} disabled={saving}
               className="flex-1 py-4 bg-green-600 text-white rounded-xl font-semibold text-base hover:bg-green-700 active:bg-green-800 disabled:opacity-50 transition">
               {saving ? (
                 <span className="flex items-center justify-center gap-2">

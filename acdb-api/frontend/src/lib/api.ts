@@ -1869,6 +1869,7 @@ export interface CommissionData {
   customer: CommissionCustomer;
   meter: { meter_id: string; community: string } | null;
   account_number: string;
+  survey_id?: string | null;
   existing_contracts: CommissionContract[];
 }
 
