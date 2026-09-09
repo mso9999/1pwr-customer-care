@@ -1,3 +1,26 @@
+## Session 2026-09-09 [202609090640] (Commission Generate button disabled — UGP link UX)
+
+### What Was Done
+- RCA of LS Customer Care "Generate Contract & SM appears disabled" (WA 2026-09-02,
+  still open 2026-09-09). Console logs showed **frontend 3.1.1 built 2026-09-01** —
+  this is the current app, not a stale bundle.
+- Root cause: Generate was silently `disabled={!surveyId}` after staff skipped the
+  optional-looking UGP link on Details. Review hid the missing row; only a hover
+  tooltip explained it (invisible on mobile).
+- Fix: require UGP on Details Next; mark the field required; derive site from
+  account suffix if community is blank; pre-fill `accounts.survey_id`; Review
+  always shows UGP; Generate stays clickable and sends the user back to Details.
+
+### Key Decisions
+- Keep the UGP-link requirement (fleet map / O&M). Fail visibly instead of a
+  greyed-out button.
+
+### What Next Session Should Know
+- Staff can commission on the old bundle by Back → Link uGridPlan Connection.
+- After this ships they get a visible required field and a What's New primer.
+
+---
+
 ## Session 2026-07-02 [202607020547] (What's New login primer + HR-as-department-source follow-through)
 
 ### What Was Done

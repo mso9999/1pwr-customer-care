@@ -442,6 +442,7 @@ function CommissionContent() {
         <Ol>
           <li><Bold>Rechercher</Bold> le client par numéro de compte ou ID client.</li>
           <li><Bold>Vérifier/mettre à jour</Bold> les détails : nom, ID national, téléphone, coordonnées GPS, type de client, phase de service, ampérage.</li>
+          <li><Bold>Lier le raccordement uGridPLAN</Bold> (poteau/PTB) — obligatoire. Sans ce lien, le bouton Générer reste bloqué.</li>
           <li><Bold>Capturer la signature</Bold> — le client signe sur l'écran de la tablette/téléphone.</li>
           <li><Bold>Générer les contrats</Bold> — des PDF bilingues (anglais/sesotho) sont générés et enregistrés.</li>
           <li><Bold>Envoyer le SMS</Bold> — le lien de téléchargement du contrat est envoyé automatiquement au client.</li>
@@ -469,6 +470,7 @@ function CommissionContent() {
       <Ol>
         <li><Bold>Look up</Bold> the customer by account number or customer ID.</li>
         <li><Bold>Verify/update</Bold> details: name, national ID, phone, GPS coordinates, customer type, service phase, ampacity.</li>
+        <li><Bold>Link the uGridPLAN connection</Bold> (pole/PTB) — required. Generate Contract stays blocked until this is linked.</li>
         <li><Bold>Capture signature</Bold> — the customer signs on the tablet/phone canvas.</li>
         <li><Bold>Generate contracts</Bold> — bilingual (English/Sesotho) PDFs are generated and stored.</li>
         <li><Bold>Send SMS</Bold> — the contract download link is sent to the customer automatically.</li>

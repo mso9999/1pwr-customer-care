@@ -206,6 +206,20 @@ async def get_commission_data(identifier: str, user: CurrentUser = Depends(requi
         if not customer:
             raise HTTPException(status_code=404, detail="Customer not found")
 
+        survey_id = ""
+        if account_number:
+            try:
+                cursor.execute(
+                    "SELECT survey_id FROM accounts "
+                    "WHERE account_number = %s AND survey_id IS NOT NULL AND survey_id != ''",
+                    (account_number,),
+                )
+                srow = cursor.fetchone()
+                if srow and srow[0]:
+                    survey_id = str(srow[0])
+            except Exception:
+                survey_id = ""
+
     existing_contracts = []
     if account_number:
         existing_contracts = list_customer_contracts(account_number)
@@ -228,6 +242,7 @@ async def get_commission_data(identifier: str, user: CurrentUser = Depends(requi
             "community": meter.get("community", "") if meter else "",
         } if meter else None,
         "account_number": account_number,
+        "survey_id": survey_id,
         "existing_contracts": existing_contracts,
     }
 

@@ -33,6 +33,9 @@
     "accountNumber": "Account Number",
     "gpsCoordinates": "GPS Coordinates",
     "ugpConnection": "UGP Connection",
+    "ugpHint": "Required — pick the pole/PTB where this unit is installed. Generate stays blocked until this is linked.",
+    "ugpMissing": "Not linked — go back to Details and tap Link uGridPlan Connection",
+    "ugpNoSite": "Cannot load connections until the customer has a site (community) or the account ends with a site code (e.g. 0068MAK).",
     "remove": "Remove",
     "linkUgp": "Link uGridPlan Connection"
   },
@@ -61,7 +64,8 @@
     "nationalIdRequired": "National ID is required",
     "phoneRequired": "Phone number is required",
     "accountRequired": "Account number is required",
-    "signatureRequired": "Signature is required"
+    "signatureRequired": "Signature is required",
+    "ugpRequired": "Link the uGridPLAN connection (pole/PTB) before continuing. This tells us where the unit is installed."
   },
   "commissionFailed": "Commissioning failed",
   "errors": {

@@ -37,6 +37,23 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW_FOLIO: WhatsNewEntry[] = [
   {
+    id: 'commission-ugp-link-required',
+    date: '2026-09-09',
+    title: 'Commissioning: link the uGridPLAN connection before generating the contract',
+    blurb: 'Generate Contract & SMS now explains why it was blocked — you must link the customer\'s pole/PTB on the Details step.',
+    pages: [
+      {
+        heading: 'Why Generate was greyed out',
+        body:
+          'The last step used to disable Generate Contract & SMS with no on-screen reason if the uGridPLAN connection (pole/PTB) was not linked. That looked like a broken button.\n\n' +
+          '- On Details, tap "Link uGridPlan Connection" and pick the customer\'s pole/PTB — it is now marked required\n' +
+          '- Next will not advance until that link is set\n' +
+          '- If you reach Review without it, Generate sends you back to Details with the explanation\n' +
+          '- An existing accounts.survey_id binding is filled in automatically',
+      },
+    ],
+  },
+  {
     id: 'fleet-map-linked-offline-meters',
     date: '2026-08-24',
     title: 'Fleet map now flags every linked 1Meter — even before it first reports',
