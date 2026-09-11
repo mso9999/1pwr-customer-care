@@ -4574,8 +4574,10 @@ export async function reconcileProvisioning(): Promise<{
 
 export interface FleetLiveUnit {
   thing_name: string;
+  site?: string;
   connected: boolean;
   connect_ts?: number;
+  disconnect_reason?: string;
   meter_id?: string;
   last_accepted?: string;
   last_seen?: string;

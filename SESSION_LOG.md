@@ -1,3 +1,19 @@
+## Session 2026-09-11 — Cursor — Fleet live includes SIN/SAM/KOT-GW
+
+### What Was Done
+- Fleet live only queried `thingName:OneMeter*` and `MAK-GW*`, so Benin
+  `*-GW-*` Things never appeared. BN instance role also lacked `iot:SearchIndex`.
+- Backend: paginated `OneMeter*` + `attributes.role:gateway`; rows include
+  `site` and `disconnect_reason`. Frontend: Site column + disconnect reason.
+- IAM (already applied live): `iot:SearchIndex` on `cc-postgres-backup-role`
+  / `cc-1meter-provisioning`. Host hotfix already running; this commit keeps
+  the next `deploy.yml` rsync from reverting it.
+
+### Side effects
+- None in this commit. Production API was restarted earlier today.
+
+---
+
 ## Session 2026-09-09 [202609090640] (Commission Generate button disabled — UGP link UX)
 
 ### What Was Done

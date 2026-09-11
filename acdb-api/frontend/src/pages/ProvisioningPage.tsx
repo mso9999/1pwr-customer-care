@@ -2105,6 +2105,7 @@ export default function ProvisioningPage() {
               <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
                 <tr>
                   <th className="text-left px-4 py-2">Thing</th>
+                  <th className="text-left px-4 py-2">Site</th>
                   <th className="text-left px-4 py-2">Meter serial</th>
                   <th className="text-left px-4 py-2">Status</th>
                   <th className="text-left px-4 py-2">Latest sample</th>
@@ -2116,6 +2117,7 @@ export default function ProvisioningPage() {
                 {(fleetLive?.units || []).map((u, i) => (
                   <tr key={i} className="hover:bg-gray-50">
                     <td className="px-4 py-2 font-mono text-gray-900">{u.thing_name}</td>
+                    <td className="px-4 py-2 text-xs text-gray-500">{u.site || '—'}</td>
                     <td className="px-4 py-2 font-mono">{u.meter_id || '—'}</td>
                     <td className="px-4 py-2">
                       <span className={`px-2 py-0.5 rounded-full text-xs ${
@@ -2125,6 +2127,9 @@ export default function ProvisioningPage() {
                       }`}>
                         {u.connected ? 'connected' : u.operational ? 'operational' : 'offline'}
                       </span>
+                      {!u.connected && u.disconnect_reason && (
+                        <div className="text-[11px] text-gray-400 mt-0.5">{u.disconnect_reason}</div>
+                      )}
                     </td>
                     <td className="px-4 py-2 text-xs text-gray-500">{formatLastSeen(u.latest_sample || u.last_seen || u.last_accepted || '')}</td>
                     <td className="px-4 py-2 text-xs">{u.power || '—'}</td>
@@ -2132,7 +2137,7 @@ export default function ProvisioningPage() {
                   </tr>
                 ))}
                 {(!fleetLive?.units || !fleetLive.units.length) && !fleetLiveLoading && (
-                  <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No fleet data yet.</td></tr>
+                  <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No fleet data yet.</td></tr>
                 )}
               </tbody>
             </table>

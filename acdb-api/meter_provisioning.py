@@ -3490,6 +3490,22 @@ def gateway_stability(
     }
 
 
+def _iot_search_index_all(iot, query: str) -> list[dict]:
+    """Paginate ``search_index`` so a 200-hit page cannot hide new sites."""
+    things: list[dict] = []
+    token = None
+    while True:
+        kwargs: dict = {"queryString": query, "maxResults": 100}
+        if token:
+            kwargs["nextToken"] = token
+        resp = iot.search_index(**kwargs)
+        things.extend(resp.get("things") or [])
+        token = resp.get("nextToken")
+        if not token:
+            break
+    return things
+
+
 @router.get("/fleet-live")
 def fleet_live(_user: CurrentUser = Depends(CC_OPERATE_GATE)):
     """Live fleet status: which units are connected and/or providing telemetry.
@@ -3505,18 +3521,26 @@ def fleet_live(_user: CurrentUser = Depends(CC_OPERATE_GATE)):
     ddb = _client("dynamodb")
     iot = _client("iot")
 
-    # 1. Fleet index connectivity (OneMeter* + MAK-GW*)
+    # 1. Fleet index. Legacy OneMeter* plus every <SITE>-GW-#### Thing
+    # (role=gateway). The old OneMeter* + MAK-GW* pair hid SIN/SAM/KOT
+    # and every future site.
     connected = {}
-    for pattern in ("thingName:OneMeter*", "thingName:MAK-GW*"):
+    for pattern in (
+        "thingName:OneMeter*",
+        "attributes.role:gateway",
+    ):
         try:
-            resp = iot.search_index(queryString=pattern, maxResults=200)
-            for t in resp.get("things", []):
+            for t in _iot_search_index_all(iot, pattern):
                 name = t.get("thingName")
-                conn = t.get("connectivity", {})
+                if not name:
+                    continue
+                conn = t.get("connectivity", {}) or {}
+                attrs = t.get("attributes", {}) or {}
                 connected[name] = {
                     "connected": conn.get("connected", False),
                     "connect_ts": conn.get("timestamp"),
                     "disconnect_reason": conn.get("disconnectReason"),
+                    "site": attrs.get("site") or "",
                 }
         except Exception as exc:
             logger.warning("fleet index query failed for %s: %s", pattern, exc)
@@ -3583,8 +3607,10 @@ def fleet_live(_user: CurrentUser = Depends(CC_OPERATE_GATE)):
         is_operational = conn.get("connected") or bool(tele.get("latest_sample"))
         rows.append({
             "thing_name": tn,
+            "site": conn.get("site") or "",
             "connected": conn.get("connected"),
             "connect_ts": conn.get("connect_ts"),
+            "disconnect_reason": conn.get("disconnect_reason"),
             "meter_id": ls.get("meter_id"),
             "last_accepted": ls.get("last_accepted"),
             "last_seen": ls.get("last_seen"),
