@@ -126,6 +126,24 @@
         </div>
       </div>
 
+      <div id="repointCard" class="card">
+        <h3 style="margin-top:0">Repoint Wi-Fi (already provisioned)</h3>
+        <p class="muted">After the first provision the unit will <b>not</b> rejoin <span class="mono">1Meter</span>. CC Config needs MQTT. Join the unit SoftAP <span class="mono">1Meter_xxxxxx</span> / <span class="mono">1Meter00</span>, then change only the site STA SSID. Do <b>not</b> Confirm &amp; provision again.</p>
+        <div class="row">
+          <div><label>Gateway IP</label><input id="repointIp" value="192.168.4.1" /></div>
+          <div><label>Thing (auto-filled after probe)</label><input id="repointThing" placeholder="SAM-GW-0001" /></div>
+        </div>
+        <div class="row">
+          <div><label>New site Wi-Fi SSID</label><input id="repointSsid" placeholder="1PWRBENIN_SIN" /></div>
+          <div><label>New site Wi-Fi password</label><input id="repointPass" type="password" autocomplete="new-password" /></div>
+        </div>
+        <div id="repointResult" class="muted" style="margin-top:10px"></div>
+        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+          <button class="ghost" id="repointProbeBtn" onclick="probeRepoint()">Probe device</button>
+          <button class="primary" id="repointBtn" onclick="repointWifi()">Apply new site Wi-Fi</button>
+        </div>
+      </div>
+
       <div id="assignCard" class="card hide">
         <h3 style="margin-top:0">Assignment (batch)</h3>
         <div class="row">
@@ -676,6 +694,60 @@ async function loadProvisioned(){
       <td class="muted">${(m.provisioned_at||'').slice(0,16)}</td></tr>`).join('')
       || '<tr><td colspan="10" class="muted" style="text-align:center;padding:24px">No provisioned meters yet.</td></tr>';
   }catch(e){ showError(e.message); }
+}
+
+async function probeRepoint(){
+  clearError();
+  const ip = document.getElementById('repointIp').value.trim() || '192.168.4.1';
+  const btn = document.getElementById('repointProbeBtn');
+  btn.disabled = true;
+  document.getElementById('repointResult').textContent = 'Probing '+ip+'…';
+  try{
+    const r = await api('/api/scan-softap','POST',{ip});
+    const g = (r.gateways||[])[0];
+    if(!g){
+      document.getElementById('repointResult').textContent = r.note || ('No device at '+ip);
+      return;
+    }
+    if(g.thing_name) document.getElementById('repointThing').value = g.thing_name;
+    document.getElementById('repointResult').innerHTML =
+      (g.provisioned || g.has_runtime_tls)
+        ? '<span class="state s-done">provisioned</span> '+ (g.thing_name||'') + ' · ' + (g.pcb_mac||'')
+        : '<span class="state s-queued">virgin</span> — use Confirm &amp; provision, not Repoint.';
+  }catch(e){
+    showError(e.message);
+    document.getElementById('repointResult').textContent = '';
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+async function repointWifi(){
+  clearError();
+  const ip = document.getElementById('repointIp').value.trim() || '192.168.4.1';
+  const ssid = document.getElementById('repointSsid').value.trim();
+  const wpw = document.getElementById('repointPass').value;
+  const thing = document.getElementById('repointThing').value.trim();
+  if(!ssid) return showError('Enter the new site Wi-Fi SSID (not 1Meter).');
+  if(ssid === '1Meter' || ssid === '1Meter00') return showError('That is the provisioning LAN. Use the site AP.');
+  if(!wpw) return showError('Enter the new site Wi-Fi password.');
+  if(!confirm('Repoint '+(thing||ip)+' to '+ssid+'?\nThing name and certificates stay the same.')) return;
+  const btn = document.getElementById('repointBtn');
+  btn.disabled = true;
+  document.getElementById('repointResult').textContent = 'Writing new STA Wi-Fi…';
+  try{
+    const r = await api('/api/repoint-wifi','POST',{
+      ip, thing_name: thing, wifi_ssid: ssid, wifi_password: wpw,
+    });
+    if(r.thing_name) document.getElementById('repointThing').value = r.thing_name;
+    document.getElementById('repointResult').innerHTML =
+      '<span class="state s-done">ok</span> '+(r.thing_name||'')+' via '+(r.path||'device')+'. '+(r.note||'');
+  }catch(e){
+    showError(friendlyCcError(e.message));
+    document.getElementById('repointResult').textContent = '';
+  }finally{
+    btn.disabled = false;
+  }
 }
 
 boot();

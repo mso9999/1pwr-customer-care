@@ -51,7 +51,7 @@ COUNTRY_API_PREFIX = {
     "BN": "/api/bn",
     "ZM": "/api/zm",
 }
-STATION_VERSION = "2026.08.09.1"
+STATION_VERSION = "2026.09.11.1"
 
 # ---------------------------------------------------------------------------
 # In-memory session (single technician per running station)
@@ -325,6 +325,57 @@ def deliver_bootstrap(ip: str, bootstrap: dict, timeout: float = 30.0) -> dict:
         raise  # e.g. connection refused / host unreachable -> real failure
 
 
+def post_device_json(ip: str, path: str, payload: dict, timeout: float = 30.0) -> dict:
+    data = json.dumps(payload).encode()
+    req = urllib.request.Request(
+        f"http://{ip}{path}", data=data,
+        headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return {"status": "done", "device_response": json.loads(resp.read().decode() or "{}")}
+    except urllib.error.HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode(errors="replace")[:200]
+        except Exception:
+            pass
+        raise RuntimeError(f"device rejected {path}: HTTP {e.code} {body}".strip())
+    except (socket.timeout, TimeoutError, http.client.RemoteDisconnected, ConnectionResetError):
+        return {"status": "rebooting"}
+    except urllib.error.URLError as e:
+        reason = getattr(e, "reason", None)
+        if isinstance(reason, (socket.timeout, TimeoutError, ConnectionResetError)):
+            return {"status": "rebooting"}
+        raise
+
+
+def deliver_wifi_repoint(ip: str, ssid: str, password: str, thing_name: str,
+                         wifi_version: int = 0, supports_network_repoint: bool = False) -> dict:
+    """Change STA Wi-Fi only. Keeps Thing + certs. SoftAP path for offline units."""
+    version = max(int(wifi_version or 0) + 1, 1)
+    payload = {"ssid": ssid, "password": password, "version": version}
+    if supports_network_repoint:
+        result = post_device_json(ip, "/v1/provision/network", payload)
+        result["path"] = "network"
+        result["version"] = version
+        return result
+    try:
+        result = post_device_json(ip, "/v1/provision/network", payload)
+        result["path"] = "network"
+        result["version"] = version
+        return result
+    except RuntimeError as e:
+        if "HTTP 404" not in str(e) and "HTTP 405" not in str(e):
+            raise
+    if not thing_name:
+        raise RuntimeError("device has no thing_name; cannot keep identity via bootstrap fallback")
+    result = post_device_json(ip, "/v1/provision/bootstrap",
+                              {"thing_name": thing_name, **payload})
+    result["path"] = "bootstrap"
+    result["version"] = version
+    return result
+
+
 # ---------------------------------------------------------------------------
 # HTTP handler (serves UI + local JSON API)
 # ---------------------------------------------------------------------------
@@ -447,6 +498,26 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 return self._send(500, {"error": str(e)})
 
+        if self.path == "/api/scan-softap":
+            ip = (body.get("ip") or "192.168.4.1").strip()
+            try:
+                status = probe_device(ip, timeout=3.0)
+                if status is None:
+                    return self._send(200, {"gateways": [], "ip": ip,
+                                            "note": f"No device at {ip}. Join SoftAP 1Meter_xxxxxx / 1Meter00."})
+                mac = (status.get("pcb_mac") or "").strip().lower() or resolve_mac(ip)
+                return self._send(200, {"ip": ip, "gateways": [{
+                    "ip": ip,
+                    "pcb_mac": mac,
+                    "provisioned": bool(status.get("provisioned")),
+                    "thing_name": status.get("thing_name"),
+                    "has_runtime_tls": bool(status.get("has_runtime_tls")),
+                    "wifi_version": status.get("wifi_version") or 0,
+                    "supports_network_repoint": bool(status.get("supports_network_repoint")),
+                }]})
+            except Exception as e:
+                return self._send(500, {"error": str(e)})
+
         if self.path == "/api/reprobe":
             units = body.get("units") or []
             if not units:
@@ -455,6 +526,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, {"units": reprobe_units(units)})
             except Exception as e:
                 return self._send(500, {"error": str(e)})
+
+        if self.path == "/api/repoint-wifi":
+            return self._handle_repoint_wifi(body)
 
         if self.path == "/api/allocate":
             return self._handle_allocate(body)
@@ -485,6 +559,48 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(502, {"error": str(e)})
 
         return self._send(404, {"error": "not found"})
+
+    def _handle_repoint_wifi(self, body: dict):
+        ip = (body.get("ip") or "192.168.4.1").strip()
+        ssid = (body.get("wifi_ssid") or "").strip()
+        password = body.get("wifi_password") or ""
+        thing = (body.get("thing_name") or "").strip()
+        if not ssid:
+            return self._send(400, {"error": "wifi_ssid is required"})
+        if not password:
+            return self._send(400, {"error": "wifi_password is required"})
+        status = probe_device(ip, timeout=3.0)
+        if status is None:
+            return self._send(404, {
+                "error": (f"no device at {ip}. Join its SoftAP "
+                          "(SSID 1Meter_<last6 of MAC>, password 1Meter00) first."),
+            })
+        thing = thing or (status.get("thing_name") or "").strip()
+        if not (status.get("provisioned") or status.get("has_runtime_tls")):
+            return self._send(409, {
+                "error": "device looks virgin — use Confirm & provision, not Repoint Wi-Fi",
+            })
+        if not thing:
+            return self._send(400, {"error": "device has no Thing name; cannot keep identity"})
+        try:
+            result = deliver_wifi_repoint(
+                ip, ssid, password, thing,
+                wifi_version=int(status.get("wifi_version") or body.get("wifi_version") or 0),
+                supports_network_repoint=bool(status.get("supports_network_repoint")),
+            )
+        except Exception as e:
+            return self._send(502, {"error": str(e), "thing_name": thing})
+        rebooting = result.get("status") == "rebooting"
+        return self._send(200, {
+            "ok": True,
+            "rebooting": rebooting,
+            "thing_name": thing,
+            "path": result.get("path"),
+            "version": result.get("version"),
+            "note": ("device applied the new STA Wi-Fi and rebooted. "
+                     "It will not rejoin 1Meter. Confirm on the site AP / Fleet live.")
+                    if rebooting else "device accepted the new STA Wi-Fi.",
+        })
 
     def _handle_allocate(self, body: dict):
         if not SESSION.token:

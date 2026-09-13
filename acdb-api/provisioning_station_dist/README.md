@@ -68,8 +68,14 @@ python provisioning_station.py --cc https://cc.1pwrafrica.com
 
 Then open the exact versioned URL printed after `Open:` in PowerShell, select
 the deployment country, and sign in. The page header must show station version
-`2026.08.09.1` or later; if it does not, close the old station, download again,
+`2026.09.11.1` or later; if it does not, close the old station, download again,
 and extract into a new folder.
+
+Already-provisioned units will not rejoin `1Meter`. To change site Wi-Fi
+without allocating a new Thing: join the unit SoftAP (`1Meter_xxxxxx` /
+`1Meter00`), use **Repoint Wi-Fi** on the Detect tab, or run
+`py -3 repoint_wifi.py --ssid 1PWRBENIN_SIN --password "..."`.
+
 The country selection controls the database, canonical sites, currency, and OTA
 catalog. The page checks CC’s approved OTA release
 before it permits a batch. Scan, verify serial/MAC matches, choose the canonical
