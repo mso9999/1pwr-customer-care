@@ -680,6 +680,14 @@ historical only and should not be treated as evidence of an Access / ODBC stack.
 **Key rule**: No shared code. All integration via HTTP API calls. `1PDB` is the
 single source of truth behind the CC API.
 
+## Related System: uGridPREDICT
+
+Forecast / D1 reads CC through **`GET /api/integration/forecast/*`** with
+`X-CC-Integration-Key` (same `CC_INTEGRATION_KEY` as Nexus Reports). Canonical
+connection measure is **`customer_commissioned`** month-end stock. Join key is
+the 3-letter PR site code. Contract: `docs/FORECAST_INTEGRATION.md`. Forecast
+must not write CC or treat UGP `St_code_3` as commissioned.
+
 ---
 
 ## Related Documentation
@@ -695,6 +703,7 @@ single source of truth behind the CC API.
 | `docs/ops/sms-gateway-cpanel-deploy.md` | **LS vs BN** manual cPanel deploy, archive-before-overwrite, two hosts |
 | `docs/credentials-and-secrets.md` | **Where credentials live** (GitHub secrets, server `.env`, AWS, related repos)—nothing secret in git |
 | `docs/inter-repo-credentials.md` | **Inter-repo credential map** (same doc copied in 1PDB, SMSComms, uGridPlan, om-portal, ingestion_gate, onepwr-aws-mesh, etc.) |
+| `docs/FORECAST_INTEGRATION.md` | **uGridPREDICT ← CC**: integration-key monthly `customer_commissioned`, kWh/connection, billed vs collected |
 | `docs/ops/ugp-cc-sync-contract.md` | **uGridPlan ↔ CC HTTP sync**: registry keys, `/projects/.../load` session `projectId`, `table-data`, `batch-connection-update`, `cc_site_projects` |
 | In-app **Help** (`/help`) | User guide: bilingual EN/FR body copy in `frontend/src/pages/helpSections.tsx`; UI chrome in `i18n/*/help.json`. Use **FR** toggle for full translation. |
 | In-app **Tutorial** (`/tutorial`) | UX onboarding: orientation plus workflow walkthroughs; copy in `i18n/*/tutorial.json`, routes in `pages/tutorialWorkflows.ts`. |

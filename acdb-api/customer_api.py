@@ -345,6 +345,7 @@ from capex_import import router as capex_import_router
 from report_engine import router as report_engine_router
 from mak_connectivity import router as mak_connectivity_router
 from integration import router as integration_router
+from integration_forecast import router as integration_forecast_router
 
 from db_auth import init_auth_db
 init_auth_db()
@@ -409,6 +410,7 @@ app.include_router(capex_import_router)
 app.include_router(report_engine_router)
 app.include_router(mak_connectivity_router)
 app.include_router(integration_router)
+app.include_router(integration_forecast_router)
 ensure_meter_assignments_table()
 ensure_meter_provisioning_table()
 warm_stats_cache()

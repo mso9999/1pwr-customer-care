@@ -1,3 +1,39 @@
+## Session 2026-09-13 [202609131404] (WIP cleanup + forecast integration-key)
+
+### What Was Done
+- Discarded stale `cursor/unmetered-service-billing` dirty tree (would have reverted GPS 422 + Help). Fast-forwarded local `main` to `origin/main` (`4d3b404`).
+- Closed leftover April drafts: PRs #2, #5, #7, #8. Left #15 (OTA runbook draft) and #16 (optional sw.js) open.
+- Unmetered enrollment is ops-only: no account list and no CC host access from this session. Timer still needs `systemctl list-timers | grep unmetered` on the host.
+- Implemented additive read-only forecast series for uGridPREDICT on the existing `X-CC-Integration-Key` gate. Existing `/api/integration/om/*` and `/doe/*` unchanged. 15 unit tests pass.
+- Preserved uncommitted station Repoint Wi-Fi (`2026.09.11.1`) on the working tree — laptop tool, not part of the forecast API.
+
+### Key Decisions
+- Canonical measure is month-end `customer_commissioned` stock. `service_connected` is a named sibling only. No ARPU field. Join key is the 3-letter PR/CC site code.
+- Register in this repo (`docs/FORECAST_INTEGRATION.md`) and Nexus `CANONICAL_DATA_OWNERSHIP.md` (local edit in nexus-portal; not deployed).
+
+### What Next Session Should Know
+- Forecast code is **uncommitted** on local `main`. Pushing `main` auto-deploys to cc.1pwrafrica.com — ask before commit/push.
+- uGridPREDICT adapter is still unwritten. Confirm `CC_INTEGRATION_KEY` on the LS host (already used by Nexus Reports).
+- Station Repoint Wi-Fi files are still uncommitted beside this work; commit them separately.
+
+---
+
+## Session 2026-09-11 — Cursor — station Repoint Wi-Fi (SAM/KOT)
+
+### What Was Done
+- Field hole: after first provision the gateway leaves `1Meter`; CC Config is MQTT-only, so SAMIONTA/KOTOKPA units cannot be re-pointed from the portal.
+- Station dist `2026.09.11.1`: Detect-tab **Repoint Wi-Fi** + `/api/repoint-wifi` + `repoint_wifi.py`. Keeps Thing/certs. 1.1.68 uses bootstrap fallback; newer FW uses `/v1/provision/network`.
+- Do not Confirm & provision already-named SAM/KOT units.
+
+### Side effects
+- none (laptop tool only; not a CC API deploy)
+
+### Open items
+- Nils: SoftAP-repoint SAM-GW-0001 to `1PWRBENIN_SIN`, or SAMIONTA phone hotspot then CC Config.
+- Mesh firmware network endpoint is in `onepwr-aws-mesh` for the next image, not 1.1.68/69.
+
+---
+
 ## Session 2026-09-11 — Cursor — Fleet live includes SIN/SAM/KOT-GW
 
 ### What Was Done
@@ -11,6 +47,25 @@
 
 ### Side effects
 - None in this commit. Production API was restarted earlier today.
+
+---
+
+## Session 2026-09-09 — Cursor — SIN OTA release 1.1.62 → 1.1.69 (canary-only)
+
+### What Was Done
+- Pointed CC site **SIN** at firmware **1.1.69** so Benin canary promote no longer ships factory 1.1.62.
+- DB upsert on `onemeter_ota_site_releases` for `SIN` in **both** lanes (onepower_cc + onepower_bj) at 17:29 UTC:
+  - artifact `firmware-releases/v1.1.69/SIN-GW-0001/FeaturedFreeRTOSIoTIntegration.bin`
+  - VersionId `LgB5jWIy06RgP46rHxMYRtbhM.CaUywS`
+  - `canary_only=true`, `max_per_minute=1`, baseline 1.1.56
+- No `onemeter_ota_release_approvals` row for 1.1.69. SAM/MAK unchanged (1.1.62).
+- Retired **SIN-GW-0001** as the site test unit (BN `meter_provisioning` + DDB registry `is_test=false`) so a virgin can take the canary slot. Did not cancel historical jobs; unit stays on 1.1.69.
+
+### Side effects
+- Production Postgres writes on onepower_cc and onepower_bj. DDB `1meter_provisioning_registry` update for MAC `44:bd:8d:1c:c7:38`. No AWS IoT job created. No CC deploy. No release approval.
+
+### Open items
+- Virgin 1.1.56 → AWS OTA 1.1.69 still unproven. Nils: one unit, `CANARY <thing>`, do not Approve.
 
 ---
 
@@ -34,6 +89,39 @@
 ### What Next Session Should Know
 - Staff can commission on the old bundle by Back → Link uGridPlan Connection.
 - After this ships they get a visible required field and a What's New primer.
+
+---
+
+## Session 2026-09-04 — Cursor — Provisioning wizard: first-OTA heap-choke checklist
+
+### What Was Done
+- **Root-caused the Benin "OTA stuck at 0%" report** (Nils, WA): virgin KOT-GW-0003
+  on factory v1.1.56 chokes 2 blocks into its first OTA — heap collapses
+  (`largest_free_block` ~1.5 KB, `min_free_heap` ~1.3 KB), unit resets, restarts
+  from block 0, never reaches the 16-block checkpoint. Connection stable
+  throughout — not a network issue. Trace: CloudWatch `/iot/onemeter-diag`.
+- **ProvisioningPage.tsx Step 5** (commit 2409e75 on main, via worktree; deployed
+  by run 33880071045): (a) prep checklist panel — disconnect RS485 meter leads,
+  power off other 1Meter units, gateway next to router, staying on the "1Meter"
+  provisioning network is expected (the initial OTA allocates the site network);
+  (b) auto-surfaced recovery panel when the bar sits at 0% with an active/queued
+  execution, including the power-cycle instruction and the 30-minute escalation rule.
+- Also this session (mesh repo): cancelled two stale AWS IoT jobs (KOT-GW-0002's
+  orphaned v1.1.61 job — retire auto-cleanup hit BN-lane IAM gap
+  `iot:CancelJob` denied on cc-postgres-backup-role; SIN-GW-0001's stale v1.1.61
+  job superseded by the v1.1.62 release). Released v1.1.62 to SAM+SIN canaries
+  via `onemeter_ota_site_releases` DB rows (no deploy needed; verified via
+  backend resolver: SAM/SIN => 1.1.62, MAK/KOT => 1.1.61).
+
+### Side effects
+- CC frontend deployed to production (provisioning wizard copy only — no logic
+  or API changes). Production DB: 2 rows inserted into main-lane
+  `onemeter_ota_site_releases`. AWS IoT: 2 jobs cancelled.
+
+### Open items
+- BN-lane IAM role needs `iot:CancelJob` + `iot:DeleteOTAUpdate` for retire
+  auto-cleanup.
+- KOT-GW-0003 OTA still looping until Nils applies the unload steps.
 
 ---
 
