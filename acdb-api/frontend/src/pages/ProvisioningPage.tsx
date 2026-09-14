@@ -2092,7 +2092,8 @@ export default function ProvisioningPage() {
               <span className="text-sm font-medium text-gray-700">Fleet live status</span>
               {fleetLive && (
                 <span className="ml-3 text-xs text-gray-500">
-                  {fleetLive.operational} operational · {fleetLive.connected} connected · {fleetLive.total_things} total
+                  {fleetLive.operational} operational · {fleetLive.connected} connected · {fleetLive.total_things} gateways
+                  {fleetLive.total_meters != null ? ` · ${fleetLive.total_meters} meters` : ''}
                 </span>
               )}
             </div>
@@ -2106,7 +2107,7 @@ export default function ProvisioningPage() {
                 <tr>
                   <th className="text-left px-4 py-2">Thing</th>
                   <th className="text-left px-4 py-2">Site</th>
-                  <th className="text-left px-4 py-2">Meter serial</th>
+                  <th className="text-left px-4 py-2">Meters</th>
                   <th className="text-left px-4 py-2">Status</th>
                   <th className="text-left px-4 py-2">Latest sample</th>
                   <th className="text-left px-4 py-2">Power</th>
@@ -2114,11 +2115,32 @@ export default function ProvisioningPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {(fleetLive?.units || []).map((u, i) => (
-                  <tr key={i} className="hover:bg-gray-50">
+                {(fleetLive?.units || []).map((u, i) => {
+                  const meters = (u.meters && u.meters.length)
+                    ? u.meters
+                    : (u.meter_id
+                      ? [{ meter_id: u.meter_id, latest_sample: u.latest_sample, last_seen: u.last_seen, last_accepted: u.last_accepted, power: u.power }]
+                      : []);
+                  return (
+                  <tr key={i} className="hover:bg-gray-50 align-top">
                     <td className="px-4 py-2 font-mono text-gray-900">{u.thing_name}</td>
                     <td className="px-4 py-2 text-xs text-gray-500">{u.site || '—'}</td>
-                    <td className="px-4 py-2 font-mono">{u.meter_id || '—'}</td>
+                    <td className="px-4 py-2">
+                      {meters.length === 0 ? (
+                        <span className="font-mono text-gray-400">—</span>
+                      ) : (
+                        <div className="space-y-1">
+                          {meters.map((m, mi) => (
+                            <div key={m.meter_id || mi} className="font-mono text-gray-900">
+                              {m.meter_id || '—'}
+                            </div>
+                          ))}
+                          {meters.length > 1 && (
+                            <div className="text-[11px] text-gray-400">{meters.length} on this gateway</div>
+                          )}
+                        </div>
+                      )}
+                    </td>
                     <td className="px-4 py-2">
                       <span className={`px-2 py-0.5 rounded-full text-xs ${
                         u.connected ? 'bg-green-100 text-green-700'
@@ -2131,11 +2153,34 @@ export default function ProvisioningPage() {
                         <div className="text-[11px] text-gray-400 mt-0.5">{u.disconnect_reason}</div>
                       )}
                     </td>
-                    <td className="px-4 py-2 text-xs text-gray-500">{formatLastSeen(u.latest_sample || u.last_seen || u.last_accepted || '')}</td>
-                    <td className="px-4 py-2 text-xs">{u.power || '—'}</td>
+                    <td className="px-4 py-2 text-xs text-gray-500">
+                      {meters.length === 0 ? (
+                        formatLastSeen(u.latest_sample || u.last_seen || u.last_accepted || '')
+                      ) : (
+                        <div className="space-y-1">
+                          {meters.map((m, mi) => (
+                            <div key={m.meter_id || mi}>
+                              {formatLastSeen(m.latest_sample || m.last_seen || m.last_accepted || '')}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-xs">
+                      {meters.length === 0 ? (
+                        u.power || '—'
+                      ) : (
+                        <div className="space-y-1">
+                          {meters.map((m, mi) => (
+                            <div key={m.meter_id || mi}>{m.power || '—'}</div>
+                          ))}
+                        </div>
+                      )}
+                    </td>
                     <td className="px-4 py-2 text-xs text-gray-500">{u.fw || '—'}</td>
                   </tr>
-                ))}
+                  );
+                })}
                 {(!fleetLive?.units || !fleetLive.units.length) && !fleetLiveLoading && (
                   <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400">No fleet data yet.</td></tr>
                 )}

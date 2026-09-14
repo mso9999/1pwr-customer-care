@@ -37,6 +37,22 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW_FOLIO: WhatsNewEntry[] = [
   {
+    id: 'fleet-live-multi-meter',
+    date: '2026-09-14',
+    title: 'Fleet live lists every meter on a gateway',
+    blurb: 'A 1Meter gateway can carry several meters on one RS-485 string. Fleet live now shows each serial and its last sample — not just one.',
+    pages: [
+      {
+        heading: 'Several meters, one gateway',
+        body:
+          'Open Provisioning → Fleet live. Each gateway row now lists every meter that is reporting through it, with that meter’s last sample and power.\n\n' +
+          '- No customer account or load is required — newly wired meters appear as soon as the gateway discovers them\n' +
+          '- The summary counts gateways and meters separately\n' +
+          '- If a serial is still missing, the meter has not been acquired yet (check RS-485 A/B/GND, then long-press PRG to re-scan)',
+      },
+    ],
+  },
+  {
     id: 'commission-ugp-link-required',
     date: '2026-09-09',
     title: 'Commissioning: link the uGridPLAN connection before generating the contract',

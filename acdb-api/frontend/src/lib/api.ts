@@ -4572,6 +4572,17 @@ export async function reconcileProvisioning(): Promise<{
   return request('/provisioning/reconcile', { method: 'POST' });
 }
 
+export interface FleetLiveMeter {
+  meter_id?: string;
+  last_accepted?: string;
+  last_seen?: string;
+  latest_sample?: string;
+  power?: string;
+  energy?: string;
+  relay?: string;
+  fw?: string;
+}
+
 export interface FleetLiveUnit {
   thing_name: string;
   site?: string;
@@ -4579,6 +4590,9 @@ export interface FleetLiveUnit {
   connect_ts?: number;
   disconnect_reason?: string;
   meter_id?: string;
+  meter_ids?: string[];
+  meters?: FleetLiveMeter[];
+  meter_count?: number;
   last_accepted?: string;
   last_seen?: string;
   latest_sample?: string;
@@ -4589,6 +4603,7 @@ export interface FleetLiveUnit {
 
 export interface FleetLiveResult {
   total_things: number;
+  total_meters?: number;
   operational: number;
   connected: number;
   units: FleetLiveUnit[];

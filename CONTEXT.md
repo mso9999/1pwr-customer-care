@@ -339,6 +339,13 @@ Three 1Meter prototypes are installed at MAK in series with SparkMeters for vali
 New meters are registered with one `INSERT INTO meters` row — the ingest API resolves
 meters dynamically from the DB (no hardcoded dicts).
 
+**Several meters per gateway:** one PCB talks to up to 8 DDS8888 meters on a shared
+RS-485 bus (unique Modbus IDs). DynamoDB `meter_last_seen` is keyed by meter serial;
+many serials can share one `thingName`. **Provisioning → Fleet live** lists every
+reporting serial on that Thing (no account or load required). `meter_provisioning`
+stays one-row-per-gateway (primary serial); many-to-one customer/PTB links live in
+`meter_gateway_link`.
+
 **Energy resolution**: The DDS8888 Modbus register reports energy in 0.01 kWh (10 Wh) steps.
 Firmware implements power integration (trapezoidal rule on `activePowerW`) to get ~0.8 Wh
 effective resolution, published as `EnergyIntegrated` alongside `EnergyActive` in the MQTT payload.

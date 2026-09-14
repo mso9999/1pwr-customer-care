@@ -43,6 +43,7 @@ PowerShell flow (`onepwr-aws-mesh/scripts/provisioning_registry.py`).
 | POST | `/api/provisioning/validation/sessions/{id}/payment` | Add an isolated synthetic payment after acknowledged cutoff; queues relay-close. |
 | POST | `/api/provisioning/validation/sessions/{id}/complete` | Pass only after positive load, acknowledged read-back `0`, and acknowledged read-back `1`. |
 | GET  | `/api/provisioning/meters` | CC system-of-record view: provisioned meters joined to `meters`/`accounts` for locational assignment (site, village, GPS, customer) + `allocation` stage. Optional `?site=MAK`. |
+| GET  | `/api/provisioning/fleet-live` | Live gateway status from AWS IoT + `meter_last_seen` + `1meter_data`. One row per Thing; `meters[]` lists every serial reporting through that gateway (a PCB can carry several DDS8888s on one RS-485 bus). |
 | GET  | `/api/provisioning/registry` | List the DynamoDB device/cert registry (bench + field). |
 
 ## Naming: two modes
