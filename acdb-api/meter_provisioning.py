@@ -3506,6 +3506,160 @@ def _iot_search_index_all(iot, query: str) -> list[dict]:
     return things
 
 
+def _ddb_scalar(item: dict, key: str):
+    """Unwrap a DynamoDB attribute map ``{S|N|BOOL: value}`` to a Python value."""
+    v = item.get(key)
+    if v is None:
+        return None
+    if not isinstance(v, dict):
+        return v
+    if not v:
+        return None
+    return next(iter(v.values()))
+
+
+def _normalize_last_seen_item(item: dict) -> Optional[dict]:
+    """Flatten one ``meter_last_seen`` item. Table is keyed by meter serial."""
+    meter_id = _ddb_scalar(item, "meterId")
+    thing_name = _ddb_scalar(item, "thingName") or ""
+    if not meter_id and not thing_name:
+        return None
+    return {
+        "meter_id": meter_id,
+        "thing_name": thing_name,
+        "last_accepted": _ddb_scalar(item, "lastAcceptedTime"),
+        "last_seen": _ddb_scalar(item, "last_seen"),
+        "energy": _ddb_scalar(item, "EnergyActive"),
+        "relay": _ddb_scalar(item, "Relay"),
+        "power": _ddb_scalar(item, "Power"),
+        "fw": _ddb_scalar(item, "FirmwareVersion"),
+    }
+
+
+def _group_last_seen_by_thing(items: list[dict]) -> dict[str, list[dict]]:
+    """Group ``meter_last_seen`` rows by gateway Thing.
+
+    One PCB / gateway talks to up to 8 DDS8888 meters on a shared RS-485 bus.
+    ``meter_last_seen`` is keyed by ``meterId``, so several serials can share
+    the same ``thingName``. Never collapse that map to one serial per Thing.
+    """
+    by: dict[str, list[dict]] = {}
+    for raw in items:
+        row = _normalize_last_seen_item(raw)
+        if not row or not row.get("thing_name"):
+            continue
+        by.setdefault(row["thing_name"], []).append(row)
+    for meters in by.values():
+        meters.sort(
+            key=lambda m: (
+                m.get("last_accepted") or m.get("last_seen") or "",
+                m.get("meter_id") or "",
+            ),
+            reverse=True,
+        )
+    return by
+
+
+def _first_present(rows: list[dict], key: str):
+    for row in rows:
+        val = row.get(key)
+        if val not in (None, ""):
+            return val
+    return None
+
+
+def _assemble_fleet_live_units(
+    connected: dict,
+    meters_by_thing: dict[str, list[dict]],
+    telemetry: dict,
+) -> list[dict]:
+    """Build one Fleet-live row per gateway, with every reporting meter.
+
+    ``telemetry`` is keyed by meter serial (from ``1meter_data``). Top-level
+    ``meter_id`` / ``power`` / ``latest_sample`` stay on the most recently
+    sampled meter so older clients keep working.
+    """
+    rows = []
+    for tn in sorted(set(connected.keys()) | set(meters_by_thing.keys())):
+        if not tn:
+            continue
+        conn = connected.get(tn) or {}
+        meters_out = []
+        for m in meters_by_thing.get(tn) or []:
+            mid = m.get("meter_id")
+            tele = telemetry.get(mid) or {} if mid else {}
+            latest = (
+                tele.get("latest_sample")
+                or m.get("last_accepted")
+                or m.get("last_seen")
+            )
+            meters_out.append({
+                "meter_id": mid,
+                "last_accepted": m.get("last_accepted"),
+                "last_seen": m.get("last_seen"),
+                "latest_sample": latest,
+                "power": tele.get("power") if tele.get("power") not in (None, "") else m.get("power"),
+                "energy": m.get("energy"),
+                "relay": m.get("relay"),
+                "fw": tele.get("fw") if tele.get("fw") not in (None, "") else m.get("fw"),
+            })
+        primary = meters_out[0] if meters_out else {}
+        latest_sample = _first_present(meters_out, "latest_sample")
+        is_operational = bool(conn.get("connected")) or bool(latest_sample)
+        rows.append({
+            "thing_name": tn,
+            "site": conn.get("site") or "",
+            "connected": conn.get("connected"),
+            "connect_ts": conn.get("connect_ts"),
+            "disconnect_reason": conn.get("disconnect_reason"),
+            "meter_id": primary.get("meter_id"),
+            "meter_ids": [m["meter_id"] for m in meters_out if m.get("meter_id")],
+            "meters": meters_out,
+            "meter_count": len(meters_out),
+            "last_accepted": primary.get("last_accepted"),
+            "last_seen": primary.get("last_seen"),
+            "latest_sample": latest_sample,
+            "power": primary.get("power"),
+            "fw": _first_present(meters_out, "fw"),
+            "operational": is_operational,
+        })
+
+    def sort_key(r):
+        return (not r["connected"], r.get("latest_sample") or "", r["thing_name"])
+
+    rows.sort(key=sort_key)
+    return rows
+
+
+def _latest_telemetry_by_meter(ddb, meter_ids: list[str]) -> dict:
+    """Latest ``1meter_data`` sample per meter serial. Failures are non-fatal."""
+    telemetry: dict = {}
+    for mid in meter_ids:
+        if not mid or mid in telemetry:
+            continue
+        try:
+            r = ddb.query(
+                TableName="1meter_data",
+                KeyConditionExpression="device_id = :m",
+                ExpressionAttributeValues={":m": {"S": mid}},
+                ScanIndexForward=False,
+                Limit=1,
+            )
+        except Exception as exc:
+            logger.warning("1meter_data query failed for %s: %s", mid, exc)
+            continue
+        items = r.get("Items") or []
+        if not items:
+            continue
+        it = items[0]
+        telemetry[mid] = {
+            "latest_sample": _ddb_scalar(it, "sample_time"),
+            "power": _ddb_scalar(it, "Power"),
+            "fw": _ddb_scalar(it, "FirmwareVersion"),
+        }
+    return telemetry
+
+
 @router.get("/fleet-live")
 def fleet_live(_user: CurrentUser = Depends(CC_OPERATE_GATE)):
     """Live fleet status: which units are connected and/or providing telemetry.
@@ -3513,8 +3667,9 @@ def fleet_live(_user: CurrentUser = Depends(CC_OPERATE_GATE)):
     Joins three sources:
     - AWS IoT fleet index (`connectivity.connected`) — MQTT session up.
     - `meter_last_seen` (`lastAcceptedTime` = meter's sample time, `last_seen` =
-      ingestion time) — last accepted reading.
-    - `1meter_data` (latest `sample_time`) — actual telemetry recency.
+      ingestion time) — last accepted reading. Keyed by meter serial: several
+      meters on one RS-485 gateway all appear under that Thing.
+    - `1meter_data` (latest `sample_time`) — actual telemetry recency per meter.
 
     A unit is "operational" if it's connected OR has recent telemetry.
     """
@@ -3545,90 +3700,44 @@ def fleet_live(_user: CurrentUser = Depends(CC_OPERATE_GATE)):
         except Exception as exc:
             logger.warning("fleet index query failed for %s: %s", pattern, exc)
 
-    # 2. meter_last_seen (last accepted reading + ingestion time)
-    last_seen = {}
+    # 2. meter_last_seen — one row per meter serial, not per gateway.
+    last_seen_items: list[dict] = []
     start = None
     try:
         while True:
-            kw = {"TableName": "meter_last_seen",
-                  "ProjectionExpression": "meterId, thingName, lastAcceptedTime, last_seen, EnergyActive, Relay"}
+            kw = {
+                "TableName": "meter_last_seen",
+                "ProjectionExpression": (
+                    "meterId, thingName, lastAcceptedTime, last_seen, "
+                    "EnergyActive, Relay, Power, FirmwareVersion"
+                ),
+            }
             if start:
                 kw["ExclusiveStartKey"] = start
             resp = ddb.scan(**kw)
-            for it in resp.get("Items", []):
-                def g(k):
-                    v = it.get(k, {})
-                    return list(v.values())[0] if v else None
-                tn = g("thingName") or ""
-                last_seen[tn] = {
-                    "meter_id": g("meterId"),
-                    "last_accepted": g("lastAcceptedTime"),
-                    "last_seen": g("last_seen"),
-                    "energy": g("EnergyActive"),
-                    "relay": g("Relay"),
-                }
+            last_seen_items.extend(resp.get("Items") or [])
             start = resp.get("LastEvaluatedKey")
             if not start:
                 break
     except Exception as exc:
         logger.warning("meter_last_seen scan failed: %s", exc)
 
-    # 3. Latest telemetry per meter from 1meter_data (sample_time)
-    telemetry = {}
-    try:
-        for tn, info in last_seen.items():
-            mid = info.get("meter_id")
-            if not mid:
-                continue
-            r = ddb.query(
-                TableName="1meter_data",
-                KeyConditionExpression="device_id = :m",
-                ExpressionAttributeValues={":m": {"S": mid}},
-                ScanIndexForward=False,
-                Limit=1,
-            )
-            items = r.get("Items", [])
-            if items:
-                it = items[0]
-                telemetry[tn] = {
-                    "latest_sample": list(it.get("sample_time", {}).values())[0] if it.get("sample_time") else None,
-                    "power": list(it.get("Power", {}).values())[0] if it.get("Power") else None,
-                    "fw": list(it.get("FirmwareVersion", {}).values())[0] if it.get("FirmwareVersion") else None,
-                }
-    except Exception as exc:
-        logger.warning("1meter_data query failed: %s", exc)
-
-    # 4. Build unified rows
-    rows = []
-    for tn in sorted(set(connected.keys()) | set(last_seen.keys())):
-        conn = connected.get(tn, {})
-        ls = last_seen.get(tn, {})
-        tele = telemetry.get(tn, {})
-        is_operational = conn.get("connected") or bool(tele.get("latest_sample"))
-        rows.append({
-            "thing_name": tn,
-            "site": conn.get("site") or "",
-            "connected": conn.get("connected"),
-            "connect_ts": conn.get("connect_ts"),
-            "disconnect_reason": conn.get("disconnect_reason"),
-            "meter_id": ls.get("meter_id"),
-            "last_accepted": ls.get("last_accepted"),
-            "last_seen": ls.get("last_seen"),
-            "latest_sample": tele.get("latest_sample"),
-            "power": tele.get("power"),
-            "fw": tele.get("fw"),
-            "operational": is_operational,
-        })
-
-    # Sort: connected first, then by latest_sample desc
-    def sort_key(r):
-        return (not r["connected"], r.get("latest_sample") or "", r["thing_name"])
-    rows.sort(key=sort_key)
+    meters_by_thing = _group_last_seen_by_thing(last_seen_items)
+    meter_ids = [
+        m["meter_id"]
+        for meters in meters_by_thing.values()
+        for m in meters
+        if m.get("meter_id")
+    ]
+    telemetry = _latest_telemetry_by_meter(ddb, meter_ids)
+    rows = _assemble_fleet_live_units(connected, meters_by_thing, telemetry)
 
     operational = sum(1 for r in rows if r["operational"])
     connected_count = sum(1 for r in rows if r["connected"])
+    total_meters = sum(r.get("meter_count") or 0 for r in rows)
     return {
         "total_things": len(rows),
+        "total_meters": total_meters,
         "operational": operational,
         "connected": connected_count,
         "units": rows,

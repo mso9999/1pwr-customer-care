@@ -1641,7 +1641,7 @@ function ProvisioningContent() {
         <li><Bold>serial-acquired</Bold> — telemetry seen; CC auto-binds the gateway to its meter serial.</li>
         <li><Bold>allocated</Bold> — meter serial and gateway linked to a customer account through <PageLink to="/assign-meter">Assign Meter</PageLink>.</li>
       </Ol>
-      <P>Track every unit and its locational assignment in the <Bold>Provisioned meters</Bold> tab.</P>
+      <P>Track every unit and its locational assignment in the <Bold>Provisioned meters</Bold> tab. That table is one row per gateway (primary serial). To see every meter reporting through a gateway — including newly wired meters with no load or customer yet — use <Bold>Fleet live</Bold>.</P>
       <Tip>Batch-provision gateways ahead of installation. The customer-account link is the last step (commissioning), not part of provisioning.</Tip>
       <Warning>Never use <Code>TestSite*</Code> / <Code>HQTEST*</Code> / ad-hoc client IDs in the field — always provision through the station so a registered Thing + cert are created and recorded. Identity rotation (<Code>/rotate</Code>) is superadmin-only and reserved for exceptional cases (e.g. PCB reuse at another site).</Warning>
     </>
@@ -1663,7 +1663,9 @@ function FieldValidationContent() {
       <SubHead>Confirm the unit is on the new build</SubHead>
       <P>
         Open <PageLink to="/provisioning">Provisioning</PageLink> → <Bold>Fleet live</Bold> and confirm the
-        gateway shows the target firmware version and is <Bold>connected</Bold>. The OTA job fires
+        gateway shows the target firmware version and is <Bold>connected</Bold>. A gateway can carry several
+        meters on one RS-485 string — Fleet live lists every discovered serial and its last sample, even
+        before a load or customer is assigned. The OTA job fires
         automatically once the unit connects; do not power-cycle it while a job is queued.
       </P>
       <SubHead>Re-acquire meters without a power cycle (re-acquire button)</SubHead>

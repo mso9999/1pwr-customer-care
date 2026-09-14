@@ -1,3 +1,20 @@
+## Session 2026-09-14 [202609141525] (Fleet live: all meters on a gateway)
+
+### What Was Done
+- RCA: Fleet live keyed DynamoDB `meter_last_seen` by `thingName`, so a multi-meter RS-485 string showed one serial.
+- `GET /api/provisioning/fleet-live` now groups by Thing and returns `meters[]` / `meter_ids` / `total_meters`.
+- Provisioning → Fleet live lists every reporting serial with that meter's last sample and power.
+- Tests: `acdb-api/tests/test_fleet_live_multi_meter.py`. What's New folio entry added.
+
+### Key Decisions
+- `meter_last_seen` (keyed by meter serial) is the source for discovered meters — no account or load required.
+- `meter_provisioning` stays one-row-per-gateway (primary serial). Do not conflate with Fleet live.
+
+### What Next Session Should Know
+- If a wired meter still does not appear, the gateway has not published that serial to `meter_last_seen` (Modbus ID conflict / not acquired). Fleet live cannot invent it.
+
+---
+
 ## Session 2026-09-13 [202609131404] (WIP cleanup + forecast integration-key)
 
 ### What Was Done
