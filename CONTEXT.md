@@ -393,6 +393,8 @@ Benin runs two sites: **GBO** (Gbowélé) and **SAM** (Samondji), both using Spa
 - The hourly script downloads daily reading CSVs, bins 15-min intervals into hourly buckets, inserts with `ON CONFLICT DO NOTHING`
 - BN `accounts` table has no `status` column (unlike LS)
 
+**Koios vs CC kWh gap (2026-09):** a matched-account, deduped, one-row-per-hour comparison of Koios daily reports to the Analytics hourly download is **5–10% CC-low** on GBO/SAM. Two causes: (1) **missing daytime / weekend hours** (incomplete first report + 7-day window / skip-if-any-rows); (2) **thin UTC hours 19–23**, especially hour 23 (~−65%). This is the BN report path, not LS `data/historical`. Full write-up and proposed fix: [`docs/ops/bn-koios-cc-consumption-gap-2026-09.md`](docs/ops/bn-koios-cc-consumption-gap-2026-09.md).
+
 **Balance computation**: `balance_engine.get_balance_kwh()` works the same for BN:
 `balance = SUM(payment kWh from transactions) - SUM(hourly consumption) - SUM(legacy debits)`
 
@@ -707,6 +709,7 @@ must not write CC or treat UGP `St_code_3` as commissioned.
 | `docs/admin-guide-country-setup.md` | Admin guide & tutorial: business-side country setup (tariffs, fees, thresholds, roles, verification) |
 | `docs/ops/manual-adjustment-sms-discrepancies.md` | Team instructions: manual Koios + 1PDB corrections after SMS misallocations |
 | `docs/ops/bn-sms-1pdb-gap.md` | Benin: CC API is ready; SMSComms-BN PHP must mirror to `/api/bn/sms/incoming` (not in this repo) |
+| `docs/ops/bn-koios-cc-consumption-gap-2026-09.md` | **GBO/SAM:** Koios daily report vs Analytics hourly download (~5–10% CC low). Missing daytime/weekend hours + thin UTC hour 23. Analysis only; pipeline fix not implemented. |
 | `docs/ops/sms-gateway-cpanel-deploy.md` | **LS vs BN** manual cPanel deploy, archive-before-overwrite, two hosts |
 | `docs/credentials-and-secrets.md` | **Where credentials live** (GitHub secrets, server `.env`, AWS, related repos)—nothing secret in git |
 | `docs/inter-repo-credentials.md` | **Inter-repo credential map** (same doc copied in 1PDB, SMSComms, uGridPlan, om-portal, ingestion_gate, onepwr-aws-mesh, etc.) |
