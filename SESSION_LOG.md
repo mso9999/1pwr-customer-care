@@ -8396,3 +8396,26 @@ KET `meters` table: 172 of 173 rows have `ACCT-`placeholder meter_ids (no physic
 ### Protocol Feedback
 - The advances/fee-debt patterns in CONTEXT.md made the design straightforward; the "Why advances are NOT in financing_agreements" note directly informed keeping service fees out of both ledgers.
 - The AskQuestion-first flow worked well: three business decisions settled before any code was written.
+
+## Session 2026-09-16 [202609161433] (BN Koios vs CC consumption gap — analysis note)
+
+### What Was Done
+- Traced how CC pulls Koios consumption and how Analytics hourly download aggregates it.
+- User comparison (GBO + SAM only): deduped Koios daily reports vs hourly download, matching accounts, one row per (account, hour).
+- Findings documented in `docs/ops/bn-koios-cc-consumption-gap-2026-09.md`: CC 5–10% low. Missing daytime/weekend hours + thin UTC 19–23 (hour 23 ~−65%). Not LS `data/historical`.
+- Linked from CONTEXT.md BN pipeline + Related Documentation. No pipeline code change.
+
+### Key Decisions
+- Two independent defects: holes (retry/completeness) vs thin last hour (open-day first write + `DO NOTHING`, or WAT vs UTC).
+- June 2026 0–18 overlap ≈ 0 is the control that complete report days match.
+- Live host writer (`import_hourly_bn.py` vs `import_benin_hourly.py`) must be confirmed before any code fix.
+
+### What Next Session Should Know
+- Do not start with LS `import_hourly.py`. Gate is Phase 3 on the CC host.
+- Missing-data fix: completeness gate, 30–60 day retry, Monday Thu–Sun pull, API report as writer.
+- Hour-23 fix: closed WAT days or `DO UPDATE`; explicit timezone.
+- User asked for the doc/PR only — no importer edits in this session.
+
+### Protocol Feedback
+- CONTEXT.md BN section still says web CSV + `DO NOTHING`; host may have drifted. The new doc tells the next session to verify before patching.
+- SESSION_LOG had the June 2026 BN re-import and dup RCA; the hour-of-day table was new and was not in the docs.
