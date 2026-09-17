@@ -384,14 +384,15 @@ Benin runs two sites: **GBO** (Gbowélé) and **SAM** (Samondji), both using Spa
 
 | Component | Script | Method | Timer Arg |
 |-----------|--------|--------|-----------|
-| Hourly consumption | `import_hourly_bn.py` | Koios web UI daily report CSV download | `$WEEK_AGO` (7-day rolling window for gap recovery) |
+| Hourly consumption | `import_hourly_bn.py` (1PDB `services/`) | Koios web UI daily report CSV | `$BN_FROM` (45 days) → `$YESTERDAY` (closed UTC day) |
 | Transactions (payments) | `import_transactions_bn.py` | Koios web UI payment CSV download | `$YESTERDAY` |
 | Customer types | `sync_bn_customer_types.py` | Koios web session + census spreadsheet | (no date arg) |
 
 **Key differences from LS pipeline**:
-- BN uses **web session scraping** (not Koios v1/v2 API) because the BN org is not API-enabled for reads
-- The hourly script downloads daily reading CSVs, bins 15-min intervals into hourly buckets, inserts with `ON CONFLICT DO NOTHING`
-- BN `accounts` table has no `status` column (unlike LS)
+- BN uses **web session scraping** (not Koios v1/v2 API) because the BN org is not API-enabled for reads.
+- Hourly path bins 15-min heartbeats (deduped on serial+start, summed per account-hour) and **`ON CONFLICT DO UPDATE`** `kwh`.
+- A site-day is skipped only when it already has **≥23 hours and ≥17 daytime (0–18) hours**. The old `MAX(reading_hour)` skip retired incomplete yesterday as soon as today had one row — that plus `DO NOTHING` on an open-day stub is the GBO/SAM 5–10% CC-low vs Koios (hour 23 ~−65%). See `docs/ops/bn-koios-cc-consumption-gap-2026-09.md`.
+- BN `accounts` table has no `status` column (unlike LS). Do not patch LS `import_hourly.py` for this.
 
 **Balance computation**: `balance_engine.get_balance_kwh()` works the same for BN:
 `balance = SUM(payment kWh from transactions) - SUM(hourly consumption) - SUM(legacy debits)`
@@ -711,6 +712,7 @@ must not write CC or treat UGP `St_code_3` as commissioned.
 | `docs/credentials-and-secrets.md` | **Where credentials live** (GitHub secrets, server `.env`, AWS, related repos)—nothing secret in git |
 | `docs/inter-repo-credentials.md` | **Inter-repo credential map** (same doc copied in 1PDB, SMSComms, uGridPlan, om-portal, ingestion_gate, onepwr-aws-mesh, etc.) |
 | `docs/FORECAST_INTEGRATION.md` | **uGridPREDICT ← CC**: integration-key monthly `customer_commissioned`, kWh/connection, billed vs collected |
+| `docs/ops/bn-koios-cc-consumption-gap-2026-09.md` | **GBO/SAM CC-low vs Koios**: missing daytime hours + thin hour 23; live writer is 1PDB `import_hourly_bn.py` |
 | `docs/ops/ugp-cc-sync-contract.md` | **uGridPlan ↔ CC HTTP sync**: registry keys, `/projects/.../load` session `projectId`, `table-data`, `batch-connection-update`, `cc_site_projects` |
 | In-app **Help** (`/help`) | User guide: bilingual EN/FR body copy in `frontend/src/pages/helpSections.tsx`; UI chrome in `i18n/*/help.json`. Use **FR** toggle for full translation. |
 | In-app **Tutorial** (`/tutorial`) | UX onboarding: orientation plus workflow walkthroughs; copy in `i18n/*/tutorial.json`, routes in `pages/tutorialWorkflows.ts`. |

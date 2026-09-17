@@ -1,3 +1,13 @@
+## 2026-09-17 — Cursor — BN kWh discrepancy: live writer confirmed + 1PDB fix
+- Host `import_hourly_bn.py` matches 1PDB: `DO NOTHING`, skip days before `MAX(reading_hour)`, window `$WEEK_AGO`→today. Not reactive energy.
+- 1PDB `fix/bn-hourly-completeness`: completeness gate, `DO UPDATE`, 45d→yesterday. Push to 1PDB `main` deploys `/opt/1pdb/services`.
+- CC: `docs/ops/bn-koios-cc-consumption-gap-2026-09.md` + CONTEXT BN pipeline pointer. Did not commit `onemeter_validation.py`.
+
+## 2026-09-13 — Cursor — Nexus ownership map registered
+- Merged onepowerLS/nexus-portal PR #10 (`5957ca6`) at 20:01 UTC. Docs-only: `docs/CANONICAL_DATA_OWNERSHIP.md` (+11/−4).
+- Side effects: Nexus `main` push queued Deploy Nexus Portal run 34779465041 (hosting + rules + safe functions + EC2 frontend of current main). No TDL/functions source in the PR. Did not run `firebase deploy`.
+- Left the local Nexus checkout on `fix/tdl-departed-members`; its dirty TDL files were not committed.
+
 ## 2026-09-13 — Cursor — Forecast integration-key series (uncommitted)
 - Cleaned stale unmetered-branch dirty tree; local `main` now matches `origin/main` (`4d3b404`). Closed April draft PRs #2/#5/#7/#8. Left #15/#16.
 - Added read-only `GET /api/integration/forecast/{sites,connections,consumption,collections}` on `X-CC-Integration-Key`. Month-end `customer_commissioned` stock; kWh/connection; billed vs collected; no ARPU. Existing integration payloads unchanged.
