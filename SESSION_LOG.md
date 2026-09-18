@@ -11,7 +11,7 @@
 
 ### What Next Session Should Know
 - Last-hour gate is on 1PDB `main` (auto-deploys `/opt/1pdb/services`). Host already had hour-count completeness + `DO UPDATE` + 45d (17k upserts 17 Sep).
-- `monthly_consumption` rebuild still pending until hourly looks improved. Local CC `onemeter_validation.py` hotfix remains uncommitted.
+- `monthly_consumption` rebuild still pending until hourly looks improved. BN validation ISO `last_seen` hotfix is now on CC `main`.
 
 ### Side effects
 - 1PDB `main` push deploys `/opt/1pdb/services` (BN hourly writer). CC `main` push is docs only.

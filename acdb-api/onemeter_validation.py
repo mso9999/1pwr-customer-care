@@ -61,6 +61,31 @@ def _number(value: object) -> float:
     return float(match.group()) if match else 0.0
 
 
+def _parse_meter_timestamp(iso: Optional[str], compact: Optional[str]) -> datetime:
+    """Prefer ISO ``last_seen`` (UTC). Compact ``lastAcceptedTime`` is a fallback.
+
+    Ingestion writes ``lastAcceptedTime`` as a wall-clock ``YYYYMMDDHHMM`` that
+    does not match every CC country timezone. On the BN lane that made a fresh
+    Lesotho-offset stamp look ~1 h in the future and fail the stale check
+    while Fleet live (ISO ``last_seen``) showed the meter as live.
+    """
+    if iso:
+        raw = iso.strip()
+        if "T" in raw:
+            ts = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            return ts.astimezone(timezone.utc)
+        compact = compact or raw
+    if compact:
+        return (
+            datetime.strptime(compact.strip(), "%Y%m%d%H%M")
+            .replace(tzinfo=ZoneInfo(COUNTRY.timezone))
+            .astimezone(timezone.utc)
+        )
+    raise ValueError("no timestamp")
+
+
 def _read_meter_state(meter_id: str) -> dict[str, Any]:
     response = _ddb().get_item(
         TableName=METER_LAST_SEEN_TABLE,
@@ -75,17 +100,17 @@ def _read_meter_state(meter_id: str) -> dict[str, Any]:
         raw = item.get(name) or {}
         return str(raw.get("S") or raw.get("N") or "") or None
 
+    iso = value("last_seen")
+    compact = value("lastAcceptedTime")
     state = {
         "meter_id": meter_id,
         "thing_name": value("thingName"),
         "energy_kwh": _number(value("EnergyActive")),
         "relay": value("Relay"),
-        "last_seen": value("lastAcceptedTime") or value("last_seen"),
+        "last_seen": iso or compact,
     }
     try:
-        last_seen = datetime.strptime(
-            str(state["last_seen"]), "%Y%m%d%H%M"
-        ).replace(tzinfo=ZoneInfo(COUNTRY.timezone)).astimezone(timezone.utc)
+        last_seen = _parse_meter_timestamp(iso, compact)
     except (TypeError, ValueError):
         raise HTTPException(
             status_code=409,
