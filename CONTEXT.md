@@ -391,7 +391,7 @@ Benin runs two sites: **GBO** (Gbowélé) and **SAM** (Samondji), both using Spa
 **Key differences from LS pipeline**:
 - BN uses **web session scraping** (not Koios v1/v2 API) because the BN org is not API-enabled for reads.
 - Hourly path bins 15-min heartbeats (deduped on serial+start, summed per account-hour) and **`ON CONFLICT DO UPDATE`** `kwh`.
-- A site-day is skipped only when it already has **≥23 hours and ≥17 daytime (0–18) hours**. The old `MAX(reading_hour)` skip retired incomplete yesterday as soon as today had one row — that plus `DO NOTHING` on an open-day stub is the GBO/SAM 5–10% CC-low vs Koios (hour 23 ~−65%). See `docs/ops/bn-koios-cc-consumption-gap-2026-09.md`.
+- A site-day is skipped only when it already has **≥23 hours, ≥17 daytime (0–18) hours, hour 23 present, and site-total hour-23 kWh ≥ ⅓ of hour 21**. Hour-count alone treated a 24-slot stub as done. `DO UPDATE` then keeps following Koios until the later file replaces the first-look stub. Override the ratio with `BN_LAST_HOUR_MIN_RATIO`. `--repair` is bounded to the CLI date range (default: yesterday). See `docs/ops/bn-koios-cc-consumption-gap-2026-09.md`.
 - BN `accounts` table has no `status` column (unlike LS). Do not patch LS `import_hourly.py` for this.
 
 **Balance computation**: `balance_engine.get_balance_kwh()` works the same for BN:

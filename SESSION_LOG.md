@@ -1,3 +1,34 @@
+## Session 2026-09-17 [202609172149] — BN last-hour gate (track Koios)
+
+### What Was Done
+- RCA: CC < Koios because CC froze the first Koios snapshot. Hour-count skip then treated 24-slot stub days as done (GBO 2026-09-05 h23/h21 = 0.215).
+- Implemented last-hour energy retry in 1PDB `services/import_hourly_bn.py`: missing or thin hour 23 (< ⅓ of hour 21, site totals) stays on the 45-day re-pull list; `DO UPDATE` replaces the stub. `--repair` now respects the CLI date range.
+- 15 unit tests pass. Docs: `CONTEXT.md` BN pipeline, `docs/ops/bn-koios-cc-consumption-gap-2026-09.md`.
+
+### Key Decisions
+- Same `hourly_consumption` rows — no second Koios store. Threshold is hour 23 vs hour 21 (gap note), not vs Koios, so real GBO evenings (~0.55–0.75) still skip.
+- Do not run pre-45-day `--repair` until new closed days prove the gate. Do not patch LS `import_hourly.py`.
+
+### What Next Session Should Know
+- Last-hour gate is on 1PDB `main` (auto-deploys `/opt/1pdb/services`). Host already had hour-count completeness + `DO UPDATE` + 45d (17k upserts 17 Sep).
+- `monthly_consumption` rebuild still pending until hourly looks improved. Local CC `onemeter_validation.py` hotfix remains uncommitted.
+
+### Side effects
+- 1PDB `main` push deploys `/opt/1pdb/services` (BN hourly writer). CC `main` push is docs only.
+
+---
+
+## Session 2026-09-17 — Cursor — BN batch-validation false stale
+
+### What Was Done
+- Batch validation used compact `lastAcceptedTime` as `COUNTRY.timezone`. On BN (`Africa/Porto-Novo`) a UTC+2 stamp (`202609171652` vs ISO `14:52Z`) looked 45 min in the future and failed `age < -300` while Fleet live showed 23021767 live (0.11 kWh).
+- `onemeter_validation.py` now prefers ISO `last_seen` UTC. Host `/opt/cc-portal/backend/onemeter_validation.py` (bak `*.bak-20260917-stale-tz`). Restarted **1pdb-api-bn** only.
+
+### Side effects
+- BN API restart ~15:10 UTC 17 Sep. LS/ZM still on old process until their next restart (same file on disk).
+
+---
+
 ## Session 2026-09-14 [202609141525] (Fleet live: all meters on a gateway)
 
 ### What Was Done
@@ -32,6 +63,20 @@
 - Forecast code is **uncommitted** on local `main`. Pushing `main` auto-deploys to cc.1pwrafrica.com — ask before commit/push.
 - uGridPREDICT adapter is still unwritten. Confirm `CC_INTEGRATION_KEY` on the LS host (already used by Nexus Reports).
 - Station Repoint Wi-Fi files are still uncommitted beside this work; commit them separately.
+
+---
+
+## Session 2026-09-14 — Cursor — Fleet live multi-meter merged
+
+### What Was Done
+- Merged [PR #20](https://github.com/mso9999/1pwr-customer-care/pull/20) to `main` (`2a834b6`) so Fleet live lists every `meter_last_seen` serial on a gateway (SIN-1’s three bench meters).
+- Deploy CC Portal run **34866545477 succeeded** (frontend + LS/BN/ZM health). Live is `2a834b6`.
+
+### Side effects
+- Production CC frontend+backend 2026-09-14 ~16:09 UTC (`main` `b56883d` → `2a834b6`). Local `main` left dirty (`session-log.md` Nexus note, not committed).
+
+### Open items
+- Comfort/Nils: hard-refresh Fleet live (Benin), SIN-GW-0001 should list 23021750/757/718.
 
 ---
 

@@ -1,15 +1,15 @@
 # Benin Koios vs CC consumption gap (GBO / SAM)
 
-**Date:** 2026-09-16; live writer confirmed 2026-09-17  
+**Date:** 2026-09-16; live writer confirmed 2026-09-17; last-hour gate 2026-09-17  
 **Sites:** Gbowélé (GBO) and Samondji (SAM) only — **not** Lesotho  
-**Status:** Live writer confirmed on the CC host. Fix is in 1PDB `services/import_hourly_bn.py` + `sync_consumption.sh` (branch `fix/bn-hourly-completeness`). Not deployed until that branch is pushed to 1PDB `main`.  
+**Status:** First ingest fix is on 1PDB `main` / host (`DO UPDATE`, 45-day window, closed day, hour-count completeness). Last-hour energy gate is in 1PDB `services/import_hourly_bn.py` and deploys to `/opt/1pdb/services` on push to 1PDB `main`.  
 **Audience:** Ops, finance, and anyone comparing Koios daily reports to Customer Care Analytics.
 
 ## Live writer (step 0 — 17 Sep 2026)
 
-SSH to `EOL` (`i-04291e12e64de36d7`), files match 1PDB `main` at confirmation:
+SSH to `EOL` (`i-04291e12e64de36d7`). What was on the host **before** the first fix (why the gap existed):
 
-| Item | Live value |
+| Item | Value at confirmation |
 |------|------------|
 | Script | `/opt/1pdb/services/import_hourly_bn.py` (web-session CSV, **not** CC `import_benin_hourly.py`) |
 | Timer | `sync_consumption.sh` Phase 3: `import_hourly_bn.py "$WEEK_AGO" --no-aggregate` (to-date defaulted to **today**) |
@@ -18,6 +18,10 @@ SSH to `EOL` (`i-04291e12e64de36d7`), files match 1PDB `main` at confirmation:
 | Skip | `if day_str < MAX(reading_hour)::date` — one row on the latest date retires every earlier day |
 
 That skip is why the 7-day window never repaired Saturday daytime. Pulling **today** plus `DO NOTHING` is why hour 23 stayed at ~⅓ of Koios.
+
+**After first deploy (same day):** 45 days → yesterday UTC, `DO UPDATE`, skip only when ≥23 hours and ≥17 daytime hours. First 45-day tick upserted 17,283 rows; 18 site-days stayed incomplete because Koios’s current file is still thin. Hour-count skip still treated 24-slot days with stub hour 23 as done (e.g. GBO 2026-09-05, h23/h21 = 0.215).
+
+**Last-hour gate (this change):** a site-day is also incomplete when hour 23 is missing or site-total hour-23 kWh is < ⅓ of hour 21. The timer then re-pulls and `DO UPDATE`s until Koios’s later file fills the stub. `--repair` is bounded to the CLI date range (default: yesterday) so a year of historical stubs is not scraped by accident. Do not run pre-45-day `--repair` until new closed days prove the gate.
 
 ---
 
@@ -206,7 +210,7 @@ Depends on step 0:
 - If the live job still uses **`DO NOTHING`** and pulls **today**: only ingest **closed WAT days**, or keep today but **`DO UPDATE`** `kwh`, `account_number`, and `community` so tonight’s stub is replaced tomorrow.
 - If it already **upserts**: parse `heartbeat_start` with an explicit timezone (`Africa/Porto-Novo` vs UTC — verify on one file) and store `timestamptz` UTC so the hourly download and Koios use the same clock.
 
-After each site-day, the **last local hour** should have ~4 intervals per live meter. If hour 23 kWh is ~⅓ of hour 21, fail the day and retry.
+After each site-day, the **last local hour** should have ~4 intervals per live meter. If hour 23 kWh is ~⅓ of hour 21, fail the day and retry. Implemented in `import_hourly_bn.py` as `last_hour_is_thin` (site-total kWh, default ratio ⅓, override `BN_LAST_HOUR_MIN_RATIO`). Hour-count-complete days with a stub last hour stay on the retry list inside the 45-day window.
 
 ### 3. One `meter_id` convention
 
@@ -233,14 +237,14 @@ Use June 2026 0–18 overlap ≈ 0 as the control.
 ## Suggested implementation order
 
 1. Identify the live BN script and conflict / `meter_id` behaviour.  
-2. Completeness gate + no skip-if-any-rows (stops new daytime / weekend holes).  
-3. 30–60 day retry + Monday Thu–Sun pull.  
+2. Completeness gate + no skip-if-any-rows (stops new daytime / weekend holes). **Done** (hour count).  
+3. 30–60 day retry + Monday Thu–Sun pull. **45-day window done**; Monday force-pull still optional.  
 4. API report as the writer.  
-5. Closed-day only or `DO UPDATE` (hour 23).  
+5. Closed-day only or `DO UPDATE` (hour 23). **Done.** Last-hour energy retry **on 1PDB `main`**.  
 6. Explicit WAT→UTC.  
 7. Single `meter_id` convention.  
 8. BN `monthly_consumption` rebuild.  
-9. Backfill incomplete historical days.  
+9. Backfill incomplete historical days. **Do not `--repair` before 45 days until new days prove out.**  
 10. Alarms (missing 0–18 / weekend; thin last hour).
 
 Steps 2–4 are the missing-data fix. Step 5 is the thin hour-23 fix. They are independent; do the missing-data work first if weekend holes are the operational pain.
