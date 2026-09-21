@@ -3,7 +3,7 @@
 - Cause: dropdown required `ota_status === SUCCEEDED` plus site + meter_serial + no account. USB 1.1.68 field hops never get SUCCEEDED (that is CC OTA only). Submit also requires a gateway when platform is 1Meter, so Legacy/manual cannot complete the assign.
 - BN `meter_provisioning` at last check: no GBO rows; SAM-GW-0001 is the only unassigned SUCCEEDED+serial unit; SIN-1 has serial but no OTA; SIN-3 already account 0001SIN.
 - Fix: drop the SUCCEEDED gate; list unassigned gateways that have reported a serial; empty-state explains wrong site / no serial / already assigned.
-- Side effects: push CC `main` deploys the frontend via GitHub Actions. Nils should hard-refresh Assign Meter after the deploy finishes.
+- Side effects: pushed `3713cc7` to `main` at 15:00 UTC. Deploy CC Portal [35615991498](https://github.com/mso9999/1pwr-customer-care/actions/runs/35615991498) succeeded (frontend 58s, backend 2m26s, LS/BN/ZM health OK). Live frontend now lists USB 1.1.68 gateways. Nils should hard-refresh Assign Meter.
 - Key files: `acdb-api/frontend/src/pages/AssignMeterPage.tsx`
 - Follow-ups: tell Nils pick site matching Thing (SIN/SAM/KOT, not GBO unless provisioned as GBO); run Reconcile if serial missing.
 
