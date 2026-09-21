@@ -68,10 +68,13 @@ class TestSiteSyncIngest(unittest.TestCase):
         self._key = "test-sync-key"
         os.environ["CC_SITE_SYNC_API_KEY"] = self._key
         country_config.reset_live_site_cache()
+        self._ugp_patch = patch.object(site_sync_ingest, "upsert_cc_site_project")
+        self._ugp_patch.start()
 
     def tearDown(self):
         os.environ.pop("CC_SITE_SYNC_API_KEY", None)
         country_config.reset_live_site_cache()
+        self._ugp_patch.stop()
 
     def test_rejects_bad_key(self):
         with self.assertRaises(Exception) as ctx:
@@ -239,6 +242,21 @@ class TestSiteSyncIngest(unittest.TestCase):
         assert out["action"] == "deactivated"
         update = next(w for w in writes if "active = false" in w[0])
         assert "retired_by = 'pr-site-sync'" in update[0]
+
+
+class TestUgpRegistryKey(unittest.TestCase):
+    def test_prefers_canonical_minigrid_key(self):
+        ev = _event()
+        key = site_sync_ingest.ugp_registry_key(ev.site, "CHI")
+        self.assertEqual(key, "CHI_minigrid")
+
+    def test_falls_back_to_site_code(self):
+        ev = _event(canonicalUgpProjectId=None, ugpProjects=[])
+        self.assertEqual(site_sync_ingest.ugp_registry_key(ev.site, "SIN"), "SIN")
+
+    def test_rejects_garbage_canonical(self):
+        ev = _event(canonicalUgpProjectId="not a key!!!", ugpProjects=[])
+        self.assertEqual(site_sync_ingest.ugp_registry_key(ev.site, "SIN"), "SIN")
 
 
 if __name__ == "__main__":

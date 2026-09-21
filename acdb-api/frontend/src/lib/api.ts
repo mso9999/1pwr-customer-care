@@ -3335,6 +3335,16 @@ export async function updateCountrySite(
   });
 }
 
+export async function reconcileSitesFromPr(): Promise<{
+  ok: boolean;
+  catalog: number;
+  applied_count: number;
+  ignored_count: number;
+  applied: { code: string; name: string; action?: string }[];
+}> {
+  return request('/site-sync/reconcile', { method: 'POST', body: '{}' });
+}
+
 export async function updateCountryFees(
   payload: Partial<
     Pick<

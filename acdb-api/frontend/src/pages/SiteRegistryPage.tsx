@@ -3,6 +3,7 @@ import {
   getCountrySites,
   createCountrySite,
   updateCountrySite,
+  reconcileSitesFromPr,
   type CountrySite,
 } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -46,6 +47,22 @@ export default function SiteRegistryPage() {
   const flash = (msg: string) => {
     setSuccess(msg);
     setTimeout(() => setSuccess(''), 5000);
+  };
+
+  const handleReconcile = async () => {
+    setError('');
+    setBusy(true);
+    try {
+      const result = await reconcileSitesFromPr();
+      flash(
+        `Pulled ${result.catalog} sites from PR / Nexus: ${result.applied_count} applied to this lane, ${result.ignored_count} skipped (other country or invalid).`
+      );
+      await reload();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -126,13 +143,20 @@ export default function SiteRegistryPage() {
       <div className="mb-5">
         <h1 className="text-xl font-semibold text-gray-900">Site Registry — {countryCode}</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Sites are born in <strong>PR</strong> (pre-survey spend), get their canonical design in{' '}
-          <strong>uGridPLAN</strong> after survey, and sync here automatically — staged inactive
-          until someone activates them at commissioning. Activating a site makes it available to
-          provisioning, customer onboarding, and account numbering. Codes are three uppercase
-          letters, globally unique, and never reused: gateway identities and customer account
-          numbers bind to them for life.
+          Sites are born in <strong>PR</strong> (pre-survey spend) or registered from{' '}
+          <strong>uGridPLAN</strong>, then sync here from the Nexus / PR master list — staged
+          inactive until someone activates them at commissioning. Activating a site makes it
+          available to provisioning, customer onboarding, and the uGridPlan connection picker.
+          Codes are three uppercase letters, globally unique, and never reused.
         </p>
+        <button
+          type="button"
+          onClick={handleReconcile}
+          disabled={busy}
+          className="mt-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-800 hover:bg-blue-100 disabled:opacity-50"
+        >
+          Refresh from PR / Nexus
+        </button>
       </div>
 
       {error && (

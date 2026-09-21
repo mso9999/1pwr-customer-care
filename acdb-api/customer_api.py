@@ -727,7 +727,7 @@ def list_sites():
 
     Each entry carries a ``country`` field so UIs can group/badge by country.
     """
-    from country_config import COUNTRY, live_known_sites
+    from country_config import COUNTRY, live_known_sites, live_site_abbrev
 
     sql = """
         SELECT community, COUNT(*) AS customer_count
@@ -742,11 +742,18 @@ def list_sites():
             cursor.execute(sql)
             rows = cursor.fetchall()
 
+            name_to_code = {
+                str(name).strip().upper(): code.upper()
+                for code, name in live_site_abbrev(COUNTRY.code).items()
+                if name
+            }
+
             counts: dict = {}
             for row in rows:
                 if not row[0]:
                     continue
-                code = row[0].strip().upper()
+                raw = row[0].strip().upper()
+                code = name_to_code.get(raw, raw)
                 counts[code] = counts.get(code, 0) + (row[1] or 0)
 
             # Each API process owns one country database. Never leak another

@@ -751,7 +751,11 @@ Sites are **born in PR** (pre-survey spend), get exactly one **canonical
 uGP design** after survey (PR `linkUgpProject` enforces uniqueness), and
 arrive here via PR's `fanoutSiteChanges` → `POST /api/site-sync/ingest`
 (machine `X-API-Key`, env `CC_SITE_SYNC_API_KEY`; idempotent via
-`site_sync_events`).
+`site_sync_events`). A site created in **uGP** is written to PR first
+(`ingestUgpSite`), then the same fanout runs. Ingest also upserts
+`cc_site_projects` so the New Customer uGridPlan picker can load the
+design. Site Registry → **Refresh from PR / Nexus** pulls
+`prCatalogApi/api/sites` as a catch-up when a push was missed.
 
 - Ingest stages new sites **inactive** (`country_sites`, `source='pr'`);
   local activation happens at commissioning from the Site Registry UI

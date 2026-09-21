@@ -1,3 +1,43 @@
+## Session 2026-09-21 [202609211415] — Live PR/Nexus site list → CC
+
+### What Was Done
+- RCA: PR `fanoutSiteChanges` already POSTs to CC `/api/site-sync/ingest`. LS received ZZT (Aug 23). BN `country_sites` (SIN/KOT/AGL) were local UI rows, never PR events. Fanout dropped the whole delivery when GPS was missing. Ingest never wrote `cc_site_projects`, so the New Customer picker stayed empty for BN.
+- CC ingest now upserts `cc_site_projects` (code + display-name alias) from the canonical uGP key or the site code.
+- Site Registry → **Refresh from PR / Nexus** (`POST /api/site-sync/reconcile`) pulls `prCatalogApi/api/sites`. Uses `PR_CATALOG_API_KEY` or `CC_SITE_SYNC_API_KEY`.
+- PR `fanoutSiteChanges`: always deliver CC; skip AM/FM only when coordinates are missing. `prCatalogApi` accepts `SITE_SYNC_FANOUT_API_KEY` so CC can pull with the existing fanout key.
+
+### Key Decisions
+- PR remains the master list. uGP creates/links through PR (`ingestUgpSite` / `linkUgpProject`), then fanout. CC does not scrape uGP `/projects` (service account cannot list).
+- New PR sites stay staged inactive until Site Registry activation.
+
+### What Next Session Should Know
+- Not pushed. CC `main` auto-deploys the ingest/reconcile/UI. PR functions must deploy via `scripts/deploy-functions.sh --functions=fanoutSiteChanges,prCatalogApi` (never bare `firebase deploy`).
+- Confirm Firebase `SITE_SYNC_CC_ENDPOINTS` includes `/api/site-sync/ingest`, `/api/bn/site-sync/ingest`, `/api/zm/site-sync/ingest`.
+- After deploy, tap Refresh on the BN lane to pull existing PR sites.
+
+### Side effects
+- none yet (no deploy)
+
+---
+
+## Session 2026-09-21 [202609211410] — BN uGridPLAN connections 404
+
+### What Was Done
+- New Customer → uGridPlan picker 404'd `No uGridPLAN project configured for site 'SINLITA'` (also SAM).
+- RCA: `cc_site_projects` had LS sites only. BN `country_sites` has `SIN` named SINLITA (no `canonical_ugp_project_id`). One BN customer community is `Sinlita`, so the dropdown sent `SINLITA` instead of `SIN`. SAM/GBO were never discovered into the SQLite map. Service account can **load** SAM/SIN/GBO but cannot **list** projects (403).
+- Host write: mapped `GBO`/`SAM`/`SIN`/`SINLITA` → UGP keys GBO/SAM/SIN/SIN in `/opt/cc-portal/backend/cc_auth.db`.
+- Code (local, not pushed): `canonical_site_code` / `resolve_site_project` so a display name loads the site code; Discover uses `live_all_site_abbrev`; `/sites` folds `Sinlita` into `SIN`.
+
+### Side effects
+- Production `cc_auth.db` rows for GBO, SAM, SIN, SINLITA (21 Sep 2026). No API restart required.
+
+### What Next Session Should Know
+- Retry the wizard now on the BN lane; pick SINLITA or SAM. Prefer site code **SIN** if it appears.
+- Push the CC code change if we want the fallback without another manual SQLite insert.
+- UGP Discover stays broken until `whatsapp-cc` can `view_plans`.
+
+---
+
 ## Session 2026-09-17 [202609172149] — BN last-hour gate (track Koios)
 
 ### What Was Done

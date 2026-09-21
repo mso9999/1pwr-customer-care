@@ -1502,6 +1502,58 @@ def _load_project_for_site(client: UGPClient, project_name: str) -> str:
     return client.load_project(project_name)
 
 
+def _site_name_index() -> Dict[str, str]:
+    """Uppercased display name / code → canonical site code (static + country_sites)."""
+    try:
+        from country_config import live_all_site_abbrev
+        abbrev = live_all_site_abbrev()
+    except Exception:
+        from country_config import ALL_SITE_ABBREV
+        abbrev = ALL_SITE_ABBREV
+    index: Dict[str, str] = {}
+    for code, name in abbrev.items():
+        key = str(code or "").strip().upper()
+        if not key:
+            continue
+        index[key] = key
+        label = str(name or "").strip().upper()
+        if label:
+            index[label] = key
+    return index
+
+
+def canonical_site_code(site: str) -> str:
+    """Resolve SINLITA / Sinlita / sin → SIN; leave unknown tokens uppercased."""
+    raw = (site or "").strip().upper()
+    if not raw:
+        return raw
+    return _site_name_index().get(raw, raw)
+
+
+def resolve_site_project(site: str) -> tuple[str, str]:
+    """Return (canonical site code, UGP registry key) for connections/sync.
+
+    ``cc_site_projects`` is the preferred mapping (LS sites were discovered
+    into it). BN country_sites such as SIN (SINLITA) were never written
+    there, and the wizard 404'd. If no row exists, use the canonical site
+    code — ``load_project`` already tries ``CODE`` and ``CODE_minigrid``.
+    Do not call GET /projects here: the service account cannot list plans.
+    """
+    canonical = canonical_site_code(site)
+    raw = (site or "").strip().upper()
+    with get_auth_db() as conn:
+        for candidate in dict.fromkeys([canonical, raw]):
+            if not candidate:
+                continue
+            row = conn.execute(
+                "SELECT project_id FROM cc_site_projects WHERE site_code = ?",
+                (candidate,),
+            ).fetchone()
+            if row and row["project_id"]:
+                return canonical, str(row["project_id"]).strip()
+    return canonical, canonical
+
+
 @router.get("/sites")
 def list_site_projects(user: CurrentUser = Depends(require_employee)):
     """List all configured site-to-project mappings."""
@@ -1622,7 +1674,9 @@ def discover_projects(user: CurrentUser = Depends(require_employee)):
     Any employee can discover (non-destructive, creates mappings only).
     """
 
-    from om_report import SITE_ABBREV
+    from country_config import live_all_site_abbrev
+
+    SITE_ABBREV = live_all_site_abbrev()
 
     try:
         client = _get_ugp_client()
@@ -1699,20 +1753,8 @@ def list_connections(
     Used by the New Customer wizard to pick an existing connection and
     auto-fill Survey ID, GPS, and customer type.
     """
-    with get_auth_db() as conn:
-        row = conn.execute(
-            "SELECT project_id FROM cc_site_projects WHERE site_code = ?",
-            (site.upper(),),
-        ).fetchone()
-
-    if not row:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No uGridPLAN project configured for site '{site}'.",
-        )
-
-    project_name = row["project_id"]
-    loaded_registry_key = str(project_name).strip()
+    site_code, loaded_registry_key = resolve_site_project(site)
+    project_name = loaded_registry_key
 
     try:
         client = _get_ugp_client()
@@ -1721,8 +1763,12 @@ def list_connections(
     except RuntimeError as first_err:
         # Recover from bad cc_site_projects rows (e.g. discover substring bug:
         # uGrid code "sin" was stored for TOS because "sin" ⊂ "tosing").
-        alt = site.upper()
-        if alt and alt != loaded_registry_key.upper():
+        # Also retry the canonical code when the stored key was a display name
+        # (SINLITA) that cannot be listed by the service account.
+        alts = [c for c in (site_code, site.strip().upper()) if c and c != loaded_registry_key.upper()]
+        recovered = False
+        last_err = first_err
+        for alt in alts:
             try:
                 client = _get_ugp_client()
                 session_id = _load_project_for_site(client, alt)
@@ -1731,27 +1777,25 @@ def list_connections(
                 logger.warning(
                     "uGridPLAN connections: site %s stored project_id %r failed (%s); "
                     "loaded registry key %r instead",
-                    site.upper(),
+                    site_code,
                     project_name,
                     first_err,
                     alt,
                 )
+                recovered = True
+                break
             except Exception as second_err:
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"uGridPLAN fetch failed: {first_err}",
-                ) from second_err
-        else:
+                last_err = second_err
+        if not recovered:
             raise HTTPException(
                 status_code=502,
                 detail=f"uGridPLAN fetch failed: {first_err}",
-            ) from first_err
+            ) from last_err
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"uGridPLAN fetch failed: {e}")
 
     # Load existing survey_id bindings for this site
     from customer_api import get_connection as get_pg_connection
-    site_code = site.upper()
     bound_accounts: Dict[str, str] = {}
     try:
         with get_pg_connection() as pg_conn:
@@ -1809,7 +1853,7 @@ def list_connections(
         connections.append(conn_obj)
 
     return {
-        "site": site.upper(),
+        "site": site_code,
         "ugp_registry_key": loaded_registry_key,
         "count": len(connections),
         "connections": connections,

@@ -37,6 +37,22 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW_FOLIO: WhatsNewEntry[] = [
   {
+    id: 'site-registry-pr-refresh',
+    date: '2026-09-21',
+    title: 'Site Registry follows the PR / Nexus master list',
+    blurb: 'Sites created in PR or uGridPLAN now update Customer Care, including the uGridPlan connection picker. Refresh from PR / Nexus if a site is missing.',
+    pages: [
+      {
+        heading: 'One master site list',
+        body:
+          'Open Admin → Site Registry. New 3-letter sites from PR (or from uGridPLAN via PR) appear here automatically, staged inactive until you activate them at commissioning.\n\n' +
+          '- The uGridPlan connection picker uses the same list, so SIN / SAM / GBO no longer need a manual Discover\n' +
+          '- If a site is missing, tap Refresh from PR / Nexus on this lane\n' +
+          '- Still create sites in PR first — the local Create button is emergency-only',
+      },
+    ],
+  },
+  {
     id: 'fleet-live-multi-meter',
     date: '2026-09-14',
     title: 'Fleet live lists every meter on a gateway',

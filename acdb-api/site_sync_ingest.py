@@ -26,20 +26,46 @@ import json
 import logging
 import os
 import re
+from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException
+import requests
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
+
+from middleware import require_action
+from models import CCRole, CurrentUser
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/site-sync", tags=["site-sync"])
 
 SITE_CODE_RE = re.compile(r"^[A-Z]{3}$")
+REGISTRY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{1,40}$")
+
+RECONCILE_GATE = require_action(
+    "manage_site_registry",
+    system="cc",
+    action="reconcile canonical sites from the PR / Nexus master list",
+    required_level="C",
+    fallback_roles=(CCRole.superadmin, CCRole.engineering),
+)
+
+DEFAULT_PR_CATALOG_SITES_URL = (
+    "https://us-central1-pr-system-4ea55.cloudfunctions.net/prCatalogApi/api/sites"
+)
 
 # PR emits ISO-3 from its org map; CC lanes are keyed by the internal
 # ISO-2-ish codes used in country_config (BN for Benin, not BJ).
-ISO3_TO_LANE = {"LSO": "LS", "ZMB": "ZM", "BEN": "BN"}
+ISO3_TO_LANE = {
+    "LSO": "LS",
+    "LS": "LS",
+    "ZMB": "ZM",
+    "ZM": "ZM",
+    "BEN": "BN",
+    "BN": "BN",
+    "BJ": "BN",
+}
 
 
 class UgpProjectLinkIn(BaseModel):
@@ -87,11 +113,53 @@ def _ignored(reason: str, event: SiteEventIn) -> dict:
     return {"ok": True, "applied": False, "reason": reason}
 
 
-@router.post("/ingest")
-def ingest_site_event(event: SiteEventIn, x_api_key: Optional[str] = Header(None)):
-    if not _authorized(x_api_key):
-        raise HTTPException(status_code=401, detail="Unauthorized")
+def ugp_registry_key(site: SitePayloadIn, code: str) -> str:
+    """Key ``load_project`` accepts: CODE, CODE_minigrid, or a named design.
 
+    Prefer the PR canonical / project code when it looks like a uGrid registry
+    key. Fall back to the 3-letter site code (SIN loads SIN / SIN_minigrid).
+    """
+    candidates = []
+    if site.canonicalUgpProjectId:
+        candidates.append(site.canonicalUgpProjectId.strip())
+    for link in site.ugpProjects:
+        if link.ugpProjectCode:
+            candidates.append(link.ugpProjectCode.strip())
+        if link.ugpProjectId:
+            candidates.append(link.ugpProjectId.strip())
+    candidates.append(code)
+    for raw in candidates:
+        if raw and REGISTRY_KEY_RE.match(raw):
+            return raw
+    return code
+
+
+def upsert_cc_site_project(code: str, name: str, registry_key: str) -> None:
+    """Keep the New Customer / Sync picker in step with the PR master list."""
+    if not code or not registry_key:
+        return
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+    alias = (name or "").strip().upper().replace(" ", "")
+    from db_auth import get_auth_db
+
+    rows = [(code, registry_key, name or code, now)]
+    if alias and alias != code and alias.isalnum() and 3 <= len(alias) <= 16:
+        rows.append((alias, registry_key, name or code, now))
+    with get_auth_db() as conn:
+        for site_code, project_id, site_name, updated_at in rows:
+            conn.execute(
+                """INSERT INTO cc_site_projects (site_code, project_id, site_name, updated_at)
+                   VALUES (?, ?, ?, ?)
+                   ON CONFLICT(site_code) DO UPDATE SET
+                     project_id = excluded.project_id,
+                     site_name = excluded.site_name,
+                     updated_at = excluded.updated_at""",
+                (site_code, project_id, site_name, updated_at),
+            )
+
+
+def apply_site_event(event: SiteEventIn) -> dict:
+    """Apply a canonical PR/uGP site event to this lane. Used by push and pull."""
     from country_config import COUNTRY, reset_live_site_cache
 
     site = event.site
@@ -103,6 +171,12 @@ def ingest_site_event(event: SiteEventIn, x_api_key: Optional[str] = Header(None
     if not SITE_CODE_RE.match(code):
         return _ignored("code_not_three_letters", event)
     lane = ISO3_TO_LANE.get(site.countryCode.strip().upper(), "")
+    if not lane:
+        lane = {
+            "1pwr_lesotho": "LS",
+            "1pwr_benin": "BN",
+            "1pwr_zambia": "ZM",
+        }.get(org, "")
     if lane != COUNTRY.code:
         return _ignored("other_lane", event)
 
@@ -112,6 +186,8 @@ def ingest_site_event(event: SiteEventIn, x_api_key: Optional[str] = Header(None
     canonical_ugp = (site.canonicalUgpProjectId or "").strip() or None
     name = site.name.strip()
     district = (site.district or "").strip() or None
+    registry_key = ugp_registry_key(site, code)
+
 
     with get_connection() as conn:
         cur = conn.cursor()
@@ -168,6 +244,104 @@ def ingest_site_event(event: SiteEventIn, x_api_key: Optional[str] = Header(None
             action = "staged"
         conn.commit()
 
+    try:
+        upsert_cc_site_project(code, name, registry_key)
+    except Exception:
+        logger.exception("site-sync cc_site_projects upsert failed for %s:%s", COUNTRY.code, code)
+
     reset_live_site_cache()
-    logger.info("site-sync %s %s:%s (ugp=%s)", action, COUNTRY.code, code, canonical_ugp or ugp_ids)
+    logger.info("site-sync %s %s:%s (ugp=%s)", action, COUNTRY.code, code, registry_key)
     return {"ok": True, "applied": True, "action": action}
+
+
+@router.post("/ingest")
+def ingest_site_event(event: SiteEventIn, x_api_key: Optional[str] = Header(None)):
+    if not _authorized(x_api_key):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return apply_site_event(event)
+
+
+def _pr_catalog_sites() -> list[dict]:
+    url = os.environ.get("PR_CATALOG_SITES_URL", DEFAULT_PR_CATALOG_SITES_URL).strip()
+    key = (
+        os.environ.get("PR_CATALOG_API_KEY", "").strip()
+        or os.environ.get("CC_SITE_SYNC_API_KEY", "").strip()
+    )
+    if not key:
+        raise HTTPException(
+            status_code=503,
+            detail="PR_CATALOG_API_KEY is not set; cannot pull the Nexus / PR master site list.",
+        )
+    resp = requests.get(url, headers={"X-API-Key": key}, timeout=45)
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=502,
+            detail=f"PR catalog sites failed ({resp.status_code}): {resp.text[:200]}",
+        )
+    data = resp.json()
+    rows = data.get("sites") if isinstance(data, dict) else data
+    if not isinstance(rows, list):
+        raise HTTPException(status_code=502, detail="PR catalog sites payload was not a list")
+    return rows
+
+
+@router.post("/reconcile")
+def reconcile_from_pr(user: CurrentUser = Depends(RECONCILE_GATE)):
+    """Pull the PR / Nexus master site list and apply it to this lane.
+
+    Push from ``fanoutSiteChanges`` is still the live path. This catch-up
+    covers sites created in PR or uGP that never reached CC (missing
+    coordinates on the fanout gate, empty CC endpoint list, or a missed
+    delivery).
+    """
+    rows = _pr_catalog_sites()
+    applied = []
+    ignored = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        org = str(row.get("organizationId") or "").strip()
+        code = str(row.get("code") or "").strip().upper()
+        name = str(row.get("name") or "").strip()
+        country = str(row.get("countryCode") or "").strip().upper()
+        active = row.get("active") is not False
+        canonical = (row.get("canonicalUgpProjectId") or "") or None
+        if isinstance(canonical, str):
+            canonical = canonical.strip() or None
+        event = SiteEventIn(
+            source="pr_admin",
+            eventType="site.created" if active else "site.deactivated",
+            site=SitePayloadIn(
+                organizationId=org or "unknown",
+                countryCode=country,
+                code=code or "XXX",
+                name=name or code or "unknown",
+                active=active,
+                canonicalUgpProjectId=canonical,
+                ugpProjects=(
+                    [UgpProjectLinkIn(ugpProjectId=canonical)] if canonical else []
+                ),
+                createdBy="pr-catalog-reconcile",
+            ),
+            idempotencyKey="",
+        )
+        result = apply_site_event(event)
+        entry = {"code": code, "name": name, **result}
+        if result.get("applied"):
+            applied.append(entry)
+        else:
+            ignored.append(entry)
+    logger.info(
+        "site-sync reconcile by %s: %d applied, %d ignored of %d catalog rows",
+        getattr(user, "email", None) or user.user_id,
+        len(applied),
+        len(ignored),
+        len(rows),
+    )
+    return {
+        "ok": True,
+        "catalog": len(rows),
+        "applied": applied,
+        "applied_count": len(applied),
+        "ignored_count": len(ignored),
+    }
