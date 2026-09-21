@@ -1,3 +1,12 @@
+## 2026-09-21 — Cursor — Assign Meter gateway dropdown empty (Nils)
+- Nils: Assign Meter → 1Meter platform → gateway dropdown only shows “Legacy/manual”, nothing selectable. Screenshot matches `AssignMeterPage.tsx`.
+- Cause: dropdown required `ota_status === SUCCEEDED` plus site + meter_serial + no account. USB 1.1.68 field hops never get SUCCEEDED (that is CC OTA only). Submit also requires a gateway when platform is 1Meter, so Legacy/manual cannot complete the assign.
+- BN `meter_provisioning` at last check: no GBO rows; SAM-GW-0001 is the only unassigned SUCCEEDED+serial unit; SIN-1 has serial but no OTA; SIN-3 already account 0001SIN.
+- Fix: drop the SUCCEEDED gate; list unassigned gateways that have reported a serial; empty-state explains wrong site / no serial / already assigned.
+- Side effects: push CC `main` deploys the frontend via GitHub Actions. Nils should hard-refresh Assign Meter after the deploy finishes.
+- Key files: `acdb-api/frontend/src/pages/AssignMeterPage.tsx`
+- Follow-ups: tell Nils pick site matching Thing (SIN/SAM/KOT, not GBO unless provisioned as GBO); run Reconcile if serial missing.
+
 ## 2026-09-17 — Cursor — BN kWh discrepancy: live writer confirmed + 1PDB fix
 - Host `import_hourly_bn.py` matches 1PDB: `DO NOTHING`, skip days before `MAX(reading_hour)`, window `$WEEK_AGO`→today. Not reactive energy.
 - 1PDB `fix/bn-hourly-completeness`: completeness gate, `DO UPDATE`, 45d→yesterday. Push to 1PDB `main` deploys `/opt/1pdb/services`.

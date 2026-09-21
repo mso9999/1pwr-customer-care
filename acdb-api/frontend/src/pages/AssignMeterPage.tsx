@@ -247,6 +247,17 @@ export default function AssignMeterPage() {
 
   const assignedRole = activate1MeterBilling || !existingPrimaryMeter ? 'primary' : 'secondary';
 
+  // USB 1.1.68 field hops never write ota_status=SUCCEEDED (that is CC OTA only).
+  // Assignable = this site, reported a meter serial, not already on an account.
+  const siteGateways = provisionedGateways.filter(
+    (row) => community && String(row.site || '').toUpperCase() === community.toUpperCase(),
+  );
+  const eligibleGateways = siteGateways.filter(
+    (row) => Boolean(row.meter_serial) && !row.account_number,
+  );
+  const assignedOnSite = siteGateways.filter((row) => Boolean(row.account_number)).length;
+  const awaitingSerial = siteGateways.filter((row) => !row.meter_serial).length;
+
   // Submit
   const handleSubmit = async () => {
     if (!customerId.trim()) { setError(t('assignMeter:validation.customerIdRequired')); return; }
@@ -437,23 +448,34 @@ export default function AssignMeterPage() {
               className="w-full px-4 py-3 border border-blue-200 rounded-xl text-base bg-white focus:ring-2 focus:ring-blue-400 outline-none"
             >
               <option value="">
-                {!community ? 'Select the site first' : gatewaysLoading ? 'Loading gateways…' : 'Legacy/manual meter assignment'}
+                {!community
+                  ? 'Select the site first'
+                  : gatewaysLoading
+                    ? 'Loading gateways…'
+                    : eligibleGateways.length
+                      ? 'Select a provisioned gateway…'
+                      : 'No assignable gateways for this site'}
               </option>
-              {provisionedGateways
-                .filter((row) =>
-                  String(row.site || '').toUpperCase() === community.toUpperCase()
-                  && Boolean(row.meter_serial)
-                  && !row.account_number
-                  && String(row.ota_status || '').toUpperCase() === 'SUCCEEDED')
-                .map((row) => (
-                  <option key={row.thing_name} value={row.thing_name}>
-                    {row.thing_name} — meter {row.meter_serial} — FW {row.fw_version || row.ota_target_version || 'verified'}
-                  </option>
-                ))}
+              {eligibleGateways.map((row) => (
+                <option key={row.thing_name} value={row.thing_name}>
+                  {row.thing_name} — meter {row.meter_serial} — FW {row.fw_version || row.ota_target_version || 'reported'}
+                </option>
+              ))}
             </select>
             <p className="text-xs text-blue-700 mt-2">
-              Only gateways that reported a meter serial and completed full-firmware OTA are shown. Selecting one locks the assignment to the serial reported by the device.
+              Unassigned gateways that have reported a meter serial. USB-flashed 1.1.68 units appear after Reconcile — they do not need a CC OTA SUCCEEDED. Selecting one locks the serial from the device.
             </p>
+            {community && !gatewaysLoading && eligibleGateways.length === 0 && (
+              <p className="text-xs text-amber-800 mt-2">
+                {siteGateways.length === 0
+                  ? `No provisioned gateways for ${community}. Pick the site that matches the Thing name (SIN / SAM / KOT / GBO), or provision the unit first.`
+                  : awaitingSerial > 0
+                    ? `${awaitingSerial} gateway(s) on ${community} have not reported a meter serial yet. Power the unit on the destination Wi-Fi, then run Reconcile on Provisioning.`
+                    : assignedOnSite > 0
+                      ? `All ${assignedOnSite} gateway(s) on ${community} are already assigned to an account.`
+                      : `No assignable gateways for ${community}.`}
+              </p>
+            )}
           </div>
           {thingName && (
             <label className="flex gap-3 items-start p-3 rounded-lg border border-blue-200 bg-white cursor-pointer">
