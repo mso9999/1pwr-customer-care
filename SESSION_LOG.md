@@ -11,12 +11,12 @@
 - New PR sites stay staged inactive until Site Registry activation.
 
 ### What Next Session Should Know
-- Not pushed. CC `main` auto-deploys the ingest/reconcile/UI. PR functions must deploy via `scripts/deploy-functions.sh --functions=fanoutSiteChanges,prCatalogApi` (never bare `firebase deploy`).
+- CC `main` push auto-deploys ingest/reconcile/UI. PR functions still need `scripts/deploy-functions.sh --functions=fanoutSiteChanges,prCatalogApi` (never bare `firebase deploy`).
 - Confirm Firebase `SITE_SYNC_CC_ENDPOINTS` includes `/api/site-sync/ingest`, `/api/bn/site-sync/ingest`, `/api/zm/site-sync/ingest`.
-- After deploy, tap Refresh on the BN lane to pull existing PR sites.
+- After both are live, tap Refresh on the BN lane to pull existing PR sites.
 
 ### Side effects
-- none yet (no deploy)
+- CC `main` deploy to cc.1pwrafrica.com (this push)
 
 ---
 
