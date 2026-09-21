@@ -4,11 +4,13 @@ import { useTranslation } from 'react-i18next';
 import {
   assignMeter,
   getCommissionData,
+  getFleetLive,
   getMetersForAccount,
   getProvisionedMeters,
   getRecord,
   listSites,
   previewNextAccount,
+  type FleetLiveUnit,
   type ProvisionedMeter,
 } from '../lib/api';
 
@@ -98,6 +100,7 @@ export default function AssignMeterPage() {
   const [thingName, setThingName] = useState('');
   const [platform, setPlatform] = useState<'sparkmeter' | 'prototype'>('sparkmeter');
   const [provisionedGateways, setProvisionedGateways] = useState<ProvisionedMeter[]>([]);
+  const [fleetUnits, setFleetUnits] = useState<FleetLiveUnit[]>([]);
   const [gatewaysLoading, setGatewaysLoading] = useState(false);
   const [activate1MeterBilling, setActivate1MeterBilling] = useState(false);
   const [community, setCommunity] = useState('');
@@ -141,9 +144,15 @@ export default function AssignMeterPage() {
 
   useEffect(() => {
     setGatewaysLoading(true);
-    getProvisionedMeters()
-      .then((data) => setProvisionedGateways(data.meters || []))
-      .catch(() => setProvisionedGateways([]))
+    Promise.all([getProvisionedMeters(), getFleetLive().catch(() => ({ units: [] as FleetLiveUnit[] }))])
+      .then(([data, fleet]) => {
+        setProvisionedGateways(data.meters || []);
+        setFleetUnits(fleet.units || []);
+      })
+      .catch(() => {
+        setProvisionedGateways([]);
+        setFleetUnits([]);
+      })
       .finally(() => setGatewaysLoading(false));
   }, []);
 
@@ -247,16 +256,43 @@ export default function AssignMeterPage() {
 
   const assignedRole = activate1MeterBilling || !existingPrimaryMeter ? 'primary' : 'secondary';
 
-  // USB 1.1.68 field hops never write ota_status=SUCCEEDED (that is CC OTA only).
-  // Assignable = this site, reported a meter serial, not already on an account.
+  // One option per meter reporting through a gateway on this site.
+  // Accounts bind to meter serials, not to the Thing — a PCB can serve several customers.
   const siteGateways = provisionedGateways.filter(
     (row) => community && String(row.site || '').toUpperCase() === community.toUpperCase(),
   );
-  const eligibleGateways = siteGateways.filter(
-    (row) => Boolean(row.meter_serial) && !row.account_number,
-  );
-  const assignedOnSite = siteGateways.filter((row) => Boolean(row.account_number)).length;
-  const awaitingSerial = siteGateways.filter((row) => !row.meter_serial).length;
+  const fleetByThing = new Map(fleetUnits.map((unit) => [unit.thing_name, unit]));
+  const eligibleMeters = siteGateways.flatMap((gw) => {
+    const live = fleetByThing.get(String(gw.thing_name));
+    const reported = (live?.meters || [])
+      .map((meter) => ({
+        serial: String(meter.meter_id || ''),
+        account: String(meter.account_number || ''),
+        fw: meter.fw || live?.fw,
+      }))
+      .filter((meter) => meter.serial);
+    const serials = reported.length
+      ? reported
+      : gw.meter_serial
+        ? [{ serial: String(gw.meter_serial), account: '', fw: gw.fw_version || gw.ota_target_version }]
+        : [];
+    return serials
+      .filter((meter) => !meter.account)
+      .map((meter) => ({
+        thing_name: String(gw.thing_name),
+        meter_serial: meter.serial,
+        fw: meter.fw || gw.fw_version || gw.ota_target_version || 'reported',
+      }));
+  });
+  const assignedOnSite = siteGateways.reduce((count, gw) => {
+    const live = fleetByThing.get(String(gw.thing_name));
+    const bound = (live?.meters || []).filter((meter) => meter.account_number).length;
+    return count + bound;
+  }, 0);
+  const awaitingSerial = siteGateways.filter((row) => {
+    const live = fleetByThing.get(String(row.thing_name));
+    return !row.meter_serial && !(live?.meters || []).length;
+  }).length;
 
   // Submit
   const handleSubmit = async () => {
@@ -436,14 +472,13 @@ export default function AssignMeterPage() {
               Provisioned 1Meter gateway <span className="font-normal text-blue-600">(recommended for 1Meter)</span>
             </label>
             <select
-              value={thingName}
+              value={thingName && meterid ? `${thingName}\t${meterid}` : ''}
               disabled={!community || gatewaysLoading}
               onChange={(e) => {
-                const selected = e.target.value;
-                setThingName(selected);
-                const gateway = provisionedGateways.find((row) => row.thing_name === selected);
-                if (gateway?.meter_serial) setMeterid(String(gateway.meter_serial));
-                if (!selected) setActivate1MeterBilling(false);
+                const [selectedThing, selectedSerial] = e.target.value.split('\t');
+                setThingName(selectedThing || '');
+                if (selectedSerial) setMeterid(selectedSerial);
+                if (!selectedThing) setActivate1MeterBilling(false);
               }}
               className="w-full px-4 py-3 border border-blue-200 rounded-xl text-base bg-white focus:ring-2 focus:ring-blue-400 outline-none"
             >
@@ -452,28 +487,28 @@ export default function AssignMeterPage() {
                   ? 'Select the site first'
                   : gatewaysLoading
                     ? 'Loading gateways…'
-                    : eligibleGateways.length
-                      ? 'Select a provisioned gateway…'
-                      : 'No assignable gateways for this site'}
+                    : eligibleMeters.length
+                      ? 'Select a meter on a provisioned gateway…'
+                      : 'No unassigned meters for this site'}
               </option>
-              {eligibleGateways.map((row) => (
-                <option key={row.thing_name} value={row.thing_name}>
-                  {row.thing_name} — meter {row.meter_serial} — FW {row.fw_version || row.ota_target_version || 'reported'}
+              {eligibleMeters.map((row) => (
+                <option key={`${row.thing_name}-${row.meter_serial}`} value={`${row.thing_name}\t${row.meter_serial}`}>
+                  {row.thing_name} — meter {row.meter_serial} — FW {row.fw}
                 </option>
               ))}
             </select>
             <p className="text-xs text-blue-700 mt-2">
-              Unassigned gateways that have reported a meter serial. USB-flashed 1.1.68 units appear after Reconcile — they do not need a CC OTA SUCCEEDED. Selecting one locks the serial from the device.
+              Every unassigned meter reporting through a gateway on this site. One PCB can serve several customers — the account binds to the meter serial, not the gateway.
             </p>
-            {community && !gatewaysLoading && eligibleGateways.length === 0 && (
+            {community && !gatewaysLoading && eligibleMeters.length === 0 && (
               <p className="text-xs text-amber-800 mt-2">
                 {siteGateways.length === 0
                   ? `No provisioned gateways for ${community}. Pick the site that matches the Thing name (SIN / SAM / KOT / GBO), or provision the unit first.`
                   : awaitingSerial > 0
-                    ? `${awaitingSerial} gateway(s) on ${community} have not reported a meter serial yet. Power the unit on the destination Wi-Fi, then run Reconcile on Provisioning.`
+                    ? `${awaitingSerial} gateway(s) on ${community} have not reported a meter serial yet. Power the meters on the RS-485 bus, then wait for Fleet live.`
                     : assignedOnSite > 0
-                      ? `All ${assignedOnSite} gateway(s) on ${community} are already assigned to an account.`
-                      : `No assignable gateways for ${community}.`}
+                      ? `${assignedOnSite} meter(s) on ${community} are already assigned to an account. Only unassigned serials appear here.`
+                      : `No unassigned meters for ${community}.`}
               </p>
             )}
           </div>

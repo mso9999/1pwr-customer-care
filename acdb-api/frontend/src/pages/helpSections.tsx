@@ -1639,7 +1639,7 @@ function ProvisioningContent() {
         <li><Bold>OTA SUCCEEDED</Bold> — the signed full firmware is installed and its version is recorded.</li>
         <li><Bold>online</Bold> — reached AWS IoT through the destination Starlink network.</li>
         <li><Bold>serial-acquired</Bold> — telemetry seen; CC auto-binds the gateway to its meter serial.</li>
-        <li><Bold>allocated</Bold> — meter serial and gateway linked to a customer account through <PageLink to="/assign-meter">Assign Meter</PageLink>.</li>
+        <li><Bold>allocated</Bold> — meter serial linked to a customer account through <PageLink to="/assign-meter">Assign Meter</PageLink>. The gateway Thing stays shared; one PCB can serve several customers.</li>
       </Ol>
       <P>Track every unit and its locational assignment in the <Bold>Provisioned meters</Bold> tab. That table is one row per gateway (primary serial). To see every meter reporting through a gateway — including newly wired meters with no load or customer yet — use <Bold>Fleet live</Bold>.</P>
       <Tip>Batch-provision gateways ahead of installation. The customer-account link is the last step (commissioning), not part of provisioning.</Tip>

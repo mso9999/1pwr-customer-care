@@ -1,3 +1,21 @@
+## 2026-09-21 — Cursor — Accounts bind to meters, not gateways
+- Matt: a PCB is shared; only meter serials get customer accounts. The 1:1 Thing→account lock was why SIN-1 showed one row and SIN-3 vanished after 0001SIN.
+- Assign Meter now lists every unassigned Fleet-live serial on the site. Backend accepts any serial reporting through the Thing, rejects only if *that meter* is already on another account, no longer writes `meter_provisioning.account_number`, no longer requires OTA SUCCEEDED.
+- Commission no longer stamps the account on the Thing. Relay resolves the Thing from `meter_last_seen`, not from a gateway account.
+- Tests: `test_meter_assignment_roles` + `test_fleet_live_multi_meter` (16) pass.
+- Side effects: push CC `main` deploys frontend + backend. Nils should hard-refresh Assign Meter; SIN-1 will list 718/750/757 as separate rows.
+- Key files: `meter_lifecycle.py`, `AssignMeterPage.tsx`, `meter_provisioning.py`, `relay_control.py`, `commission.py`
+- Follow-ups: meter `000023021767` on 0001SIN still hidden until that *meter* is decommissioned.
+
+## 2026-09-21 — Cursor — Nils: SIN-1 one meter / SIN-3 missing
+- After dropdown deploy, Nils sees only `SIN-GW-0001 — meter 000023021718`. SIN-3 absent. Matt asked about RS-485 addressing.
+- Live `meter_last_seen` 15:47 UTC: SIN-1 reports **three** serials together (`718`, `750`, `757`) — unique Modbus IDs, addressing OK. SIN-3 connected, reporting `000023021767`.
+- Assign Meter is one row per gateway / primary `meter_provisioning.meter_serial`. Other serials belong on Fleet live, not this dropdown.
+- SIN-3 hidden because already commissioned: account `0001SIN`, meter `000023021767`, opened 2026-09-21 11:30 UTC by `1PWR0501`.
+- Backend assign still requires `ota_status=SUCCEEDED`. SIN-1 is USB 1.1.68 (`ota=None`) — submit would 409.
+- Side effects: none (read-only BN + DDB).
+- Follow-ups: if 0001SIN was a test, clear it so SIN-3 is selectable; expand Assign Meter to one option per Fleet-live serial; drop backend SUCCEEDED gate for USB hops.
+
 ## 2026-09-21 — Cursor — Assign Meter gateway dropdown empty (Nils)
 - Nils: Assign Meter → 1Meter platform → gateway dropdown only shows “Legacy/manual”, nothing selectable. Screenshot matches `AssignMeterPage.tsx`.
 - Cause: dropdown required `ota_status === SUCCEEDED` plus site + meter_serial + no account. USB 1.1.68 field hops never get SUCCEEDED (that is CC OTA only). Submit also requires a gateway when platform is 1Meter, so Legacy/manual cannot complete the assign.

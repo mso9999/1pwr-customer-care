@@ -497,25 +497,19 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
     en_url = build_download_url(result["site_code"], result["en_filename"])
     so_url = build_download_url(result["site_code"], result["so_filename"])
 
-    # ----- Phase 3b: Associate gateway Thing with customer (no renaming) ----- #
+    # ----- Phase 3b: Record the chosen gateway on the install, not the customer ----- #
+    # Accounts bind to meter serials. Writing account_number onto the Thing
+    # made a multi-meter PCB look "taken" after the first customer.
     gateway_associated = False
     if req.gateway_thing_name:
         gw_thing = req.gateway_thing_name.strip()
         try:
-            with _get_connection() as gw_conn:
-                gw_cur = gw_conn.cursor()
-                gw_cur.execute(
-                    "UPDATE meter_provisioning SET account_number = %s, updated_at = NOW() "
-                    "WHERE thing_name = %s AND (account_number IS NULL OR account_number = '')",
-                    (resolved_acct or req.account_number, gw_thing),
+            gateway_associated = bool(gw_thing)
+            if gateway_associated:
+                logger.info(
+                    "Commission named gateway %s for account %s (Thing stays account-free)",
+                    gw_thing, resolved_acct or req.account_number,
                 )
-                gateway_associated = gw_cur.rowcount > 0
-                if gateway_associated:
-                    logger.info(
-                        "Gateway %s associated with account %s during commissioning",
-                        gw_thing, resolved_acct or req.account_number,
-                    )
-                gw_conn.commit()
         except Exception as exc:
             logger.warning("Gateway association failed for %s: %s", gw_thing, exc)
 

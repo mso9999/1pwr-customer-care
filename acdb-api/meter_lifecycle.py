@@ -192,6 +192,36 @@ def _normalise_meter_serial(value: str) -> str:
     return serial.lstrip("0") or serial
 
 
+def _meter_id_lookup_keys(meter_id: str) -> list[str]:
+    raw = str(meter_id or "").strip()
+    if not raw:
+        return []
+    keys = [raw]
+    stripped = _normalise_meter_serial(raw)
+    if stripped and stripped not in keys:
+        keys.append(stripped)
+    padded = stripped.zfill(12) if stripped else ""
+    if padded and padded not in keys:
+        keys.append(padded)
+    return keys
+
+
+def last_seen_thing_for_meter(meter_id: str) -> Optional[str]:
+    """Thing that last published this meter serial in ``meter_last_seen``."""
+    try:
+        from meter_provisioning import _client
+        ddb = _client("dynamodb")
+        table = "meter_last_seen"
+        for key in _meter_id_lookup_keys(meter_id):
+            item = (ddb.get_item(TableName=table, Key={"meterId": {"S": key}}).get("Item") or {})
+            thing = (item.get("thingName") or {}).get("S")
+            if thing:
+                return str(thing)
+    except Exception as exc:  # noqa: BLE001 — assign still has the provisioning primary
+        logger.warning("meter_last_seen lookup failed for %s: %s", meter_id, exc)
+    return None
+
+
 def _lock_provisioned_gateway_for_assignment(
     cursor,
     *,
@@ -200,12 +230,10 @@ def _lock_provisioned_gateway_for_assignment(
     community: str,
     account_number: str,
 ) -> tuple[str, dict[str, Any]]:
-    """Validate and lock CC's discovered gateway/meter binding.
+    """Validate that this meter is reporting through the selected gateway.
 
-    Operators must select a gateway whose serial was learned from live
-    telemetry. This removes manual serial transcription from the 1Meter
-    commissioning path and makes the gateway, meter, site, and account update
-    one database transaction.
+    Accounts bind to meter serials, not to Things. One PCB may carry several
+    meters for several customers. The gateway row is only identity + site.
     """
     cursor.execute(
         """
@@ -223,33 +251,38 @@ def _lock_provisioned_gateway_for_assignment(
 
     columns = [d[0] for d in cursor.description]
     gateway = dict(zip(columns, row))
-    detected_serial = str(gateway.get("meter_serial") or "").strip()
-    if not detected_serial:
-        raise HTTPException(
-            status_code=409,
-            detail="This gateway has not discovered a meter yet. Power the meter and gateway, "
-                   "wait for telemetry, then reconcile provisioning before assignment.",
-        )
-    if _normalise_meter_serial(requested_meter_id) != _normalise_meter_serial(detected_serial):
-        raise HTTPException(
-            status_code=409,
-            detail=f"Meter serial does not match the serial reported by {thing_name}.",
-        )
+    primary_serial = str(gateway.get("meter_serial") or "").strip()
+    requested = str(requested_meter_id or "").strip()
+    if not requested:
+        raise HTTPException(status_code=400, detail="meter_id is required")
+
     if str(gateway.get("site") or "").strip().upper() != community:
         raise HTTPException(
             status_code=409,
             detail=f"Gateway {thing_name} belongs to {gateway.get('site')}, not {community}.",
         )
-    existing_account = str(gateway.get("account_number") or "").strip().upper()
-    if existing_account and existing_account != account_number:
+
+    reporting_thing = last_seen_thing_for_meter(requested)
+    on_primary = (
+        bool(primary_serial)
+        and _normalise_meter_serial(requested) == _normalise_meter_serial(primary_serial)
+    )
+    if reporting_thing and reporting_thing != thing_name:
         raise HTTPException(
             status_code=409,
-            detail=f"Gateway {thing_name} is already commissioned to {existing_account}.",
+            detail=f"Meter {requested} is reporting through {reporting_thing}, not {thing_name}.",
         )
+    if not reporting_thing and not on_primary:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Gateway {thing_name} has not reported meter {requested}. "
+                "Power the meter on this RS-485 bus, wait for telemetry, then retry."
+            ),
+        )
+
     # Live connectivity check: the gateway must actually be reaching the cloud
     # (connected now or within 72h), not merely "observed online at some point".
-    # The registry's last_seen_online can be weeks stale and misleads operators
-    # into assigning meters onto gateways that aren't connecting.
     try:
         from sync_ugridplan import gateway_function_state
         gw_state = gateway_function_state(community, thing_name)
@@ -266,46 +299,42 @@ def _lock_provisioned_gateway_for_assignment(
                 + ". Power it and confirm it connects before assigning a meter to it."
             ),
         )
-    if str(gateway.get("ota_status") or "").upper() != "SUCCEEDED":
-        raise HTTPException(
-            status_code=409,
-            detail=f"Gateway {thing_name} has not completed the required full-firmware OTA.",
-        )
 
+    lookup_keys = _meter_id_lookup_keys(requested)
     cursor.execute(
         """
-        SELECT thing_name
-          FROM meter_provisioning
-         WHERE meter_serial = %s
-           AND thing_name <> %s
+        SELECT meter_id, account_number, status
+          FROM meters
+         WHERE regexp_replace(meter_id, '^0+', '') = ANY(%s)
            AND NULLIF(account_number, '') IS NOT NULL
-           AND status = 'commissioned'
+         ORDER BY CASE WHEN status = 'active' OR status IS NULL THEN 0 ELSE 1 END
          LIMIT 1
         """,
-        (detected_serial, thing_name),
+        ([_normalise_meter_serial(k) for k in lookup_keys],),
     )
-    conflict = cursor.fetchone()
-    if conflict:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Meter {detected_serial} is already commissioned through {conflict[0]}.",
-        )
+    bound = cursor.fetchone()
+    if bound:
+        bound_account = str(bound[1] or "").strip().upper()
+        bound_status = str(bound[2] or "active").strip().lower()
+        if bound_account and bound_account != account_number and bound_status in ("active", ""):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Meter {bound[0]} is already assigned to {bound_account}.",
+            )
 
-    # Reuse the canonical short serial already present in `meters`, if any.
-    stripped = _normalise_meter_serial(detected_serial)
+    # Reuse the canonical serial already present in `meters`, if any.
     cursor.execute(
         """
         SELECT meter_id
           FROM meters
-         WHERE platform = 'prototype'
-           AND meter_id = ANY(%s)
+         WHERE meter_id = ANY(%s)
          ORDER BY CASE WHEN meter_id = %s THEN 0 ELSE 1 END
          LIMIT 1
         """,
-        ([detected_serial, stripped], stripped),
+        (lookup_keys, requested),
     )
     existing_meter = cursor.fetchone()
-    canonical_meter_id = str(existing_meter[0]) if existing_meter else detected_serial
+    canonical_meter_id = str(existing_meter[0]) if existing_meter else requested
     return canonical_meter_id, gateway
 
 
@@ -623,18 +652,8 @@ def assign_meter(
                     ),
                 )
 
-            if gateway is not None:
-                cursor.execute(
-                    """
-                    UPDATE meter_provisioning
-                       SET account_number = %s,
-                           status = 'commissioned',
-                           commissioned_at = COALESCE(commissioned_at, NOW()),
-                           updated_at = NOW()
-                     WHERE thing_name = %s
-                    """,
-                    (account_number, thing_name),
-                )
+            # Gateways stay account-free. The customer binding is meters +
+            # meter_assignments only — one PCB can serve several accounts.
 
             after_state = _snapshot_meter_lifecycle_state(cursor, meter_id, account_number)
             log_mutation(

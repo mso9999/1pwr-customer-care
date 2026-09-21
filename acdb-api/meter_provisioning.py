@@ -3595,6 +3595,7 @@ def _assemble_fleet_live_units(
             )
             meters_out.append({
                 "meter_id": mid,
+                "account_number": None,
                 "last_accepted": m.get("last_accepted"),
                 "last_seen": m.get("last_seen"),
                 "latest_sample": latest,
@@ -3629,6 +3630,49 @@ def _assemble_fleet_live_units(
 
     rows.sort(key=sort_key)
     return rows
+
+
+def _normalise_meter_serial(value: str) -> str:
+    serial = str(value or "").strip()
+    return serial.lstrip("0") or serial
+
+
+def _attach_meter_accounts(rows: list[dict]) -> None:
+    """Stamp each Fleet-live meter with its customer account, if any.
+
+    Bindings live on ``meters``, never on the gateway Thing.
+    """
+    ids = [
+        m.get("meter_id")
+        for row in rows
+        for m in (row.get("meters") or [])
+        if m.get("meter_id")
+    ]
+    if not ids:
+        return
+    from customer_api import get_connection
+    keys = list({_normalise_meter_serial(mid) for mid in ids if mid})
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT meter_id, account_number
+              FROM meters
+             WHERE regexp_replace(meter_id, '^0+', '') = ANY(%s)
+               AND NULLIF(account_number, '') IS NOT NULL
+            """,
+            (keys,),
+        )
+        by_norm = {
+            _normalise_meter_serial(r[0]): str(r[1]).strip().upper()
+            for r in cur.fetchall()
+            if r[0] and r[1]
+        }
+    for row in rows:
+        for meter in row.get("meters") or []:
+            mid = meter.get("meter_id")
+            if mid:
+                meter["account_number"] = by_norm.get(_normalise_meter_serial(mid))
 
 
 def _latest_telemetry_by_meter(ddb, meter_ids: list[str]) -> dict:
@@ -3731,6 +3775,10 @@ def fleet_live(_user: CurrentUser = Depends(CC_OPERATE_GATE)):
     ]
     telemetry = _latest_telemetry_by_meter(ddb, meter_ids)
     rows = _assemble_fleet_live_units(connected, meters_by_thing, telemetry)
+    try:
+        _attach_meter_accounts(rows)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("fleet-live account attach failed: %s", exc)
 
     operational = sum(1 for r in rows if r["operational"])
     connected_count = sum(1 for r in rows if r["connected"])

@@ -4584,6 +4584,7 @@ export async function reconcileProvisioning(): Promise<{
 
 export interface FleetLiveMeter {
   meter_id?: string;
+  account_number?: string | null;
   last_accepted?: string;
   last_seen?: string;
   latest_sample?: string;

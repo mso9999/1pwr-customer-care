@@ -133,5 +133,75 @@ class TestEditAssignment(unittest.TestCase):
         conn.commit.assert_called_once()
 
 
+class TestLockGatewayForAssignment(unittest.TestCase):
+    def _gateway_cursor(self, fetch_rows):
+        cursor = MagicMock()
+        cursor.fetchone.side_effect = fetch_rows
+        cursor.description = [
+            ("thing_name",), ("meter_serial",), ("site",), ("account_number",),
+            ("status",), ("last_seen_online",), ("ota_status",), ("fw_version",),
+            ("ota_target_version",),
+        ]
+        return cursor
+
+    def test_second_meter_on_same_gateway_can_go_to_another_account(self):
+        cursor = self._gateway_cursor([
+            ("SIN-GW-0001", "000023021718", "SIN", "0001SIN", "commissioned", None, None, None, None),
+            None,
+            None,
+        ])
+        with (
+            patch.object(lifecycle, "last_seen_thing_for_meter", return_value="SIN-GW-0001"),
+            patch("sync_ugridplan.gateway_function_state", return_value={"state": "online"}),
+        ):
+            meter_id, _gw = lifecycle._lock_provisioned_gateway_for_assignment(
+                cursor,
+                thing_name="SIN-GW-0001",
+                requested_meter_id="000023021750",
+                community="SIN",
+                account_number="0002SIN",
+            )
+        self.assertEqual(meter_id, "000023021750")
+
+    def test_rejects_meter_already_bound_to_another_account(self):
+        cursor = self._gateway_cursor([
+            ("SIN-GW-0003", "000023021767", "SIN", "0001SIN", "commissioned", None, "SUCCEEDED", "1.1.69", None),
+            ("000023021767", "0001SIN", "active"),
+        ])
+        with (
+            patch.object(lifecycle, "last_seen_thing_for_meter", return_value="SIN-GW-0003"),
+            patch("sync_ugridplan.gateway_function_state", return_value={"state": "online"}),
+        ):
+            with self.assertRaises(HTTPException) as ctx:
+                lifecycle._lock_provisioned_gateway_for_assignment(
+                    cursor,
+                    thing_name="SIN-GW-0003",
+                    requested_meter_id="000023021767",
+                    community="SIN",
+                    account_number="0002SIN",
+                )
+        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertIn("0001SIN", ctx.exception.detail)
+
+    def test_usb_hop_without_ota_succeeded_is_allowed(self):
+        cursor = self._gateway_cursor([
+            ("SIN-GW-0001", "000023021718", "SIN", None, None, None, None, None, None),
+            None,
+            None,
+        ])
+        with (
+            patch.object(lifecycle, "last_seen_thing_for_meter", return_value="SIN-GW-0001"),
+            patch("sync_ugridplan.gateway_function_state", return_value={"state": "online"}),
+        ):
+            meter_id, _gw = lifecycle._lock_provisioned_gateway_for_assignment(
+                cursor,
+                thing_name="SIN-GW-0001",
+                requested_meter_id="000023021718",
+                community="SIN",
+                account_number="0003SIN",
+            )
+        self.assertEqual(meter_id, "000023021718")
+
+
 if __name__ == "__main__":
     unittest.main()

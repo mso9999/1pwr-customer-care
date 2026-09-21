@@ -223,19 +223,29 @@ def _account_for_thing(cur, thing_name: str) -> tuple[Optional[str], Optional[st
 
 
 def _thing_for_meter(cur, meter_id: str, account_number: str) -> Optional[str]:
-    """Resolve the permanent provisioned Thing for a physical meter."""
+    """Resolve the PCB Thing that is reporting this physical meter.
+
+    Account bindings live on ``meters``. The gateway Thing is shared, so do
+    not require ``meter_provisioning.account_number``.
+    """
+    try:
+        from meter_lifecycle import last_seen_thing_for_meter
+        live = last_seen_thing_for_meter(meter_id)
+        if live:
+            return live
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("last_seen thing lookup failed for meter %s: %s", meter_id, exc)
+
     cur.execute(
         """
         SELECT thing_name
           FROM meter_provisioning
          WHERE regexp_replace(meter_serial, '^0+', '') =
                regexp_replace(%s, '^0+', '')
-           AND account_number = %s
-           AND status = 'commissioned'
          ORDER BY updated_at DESC
          LIMIT 2
         """,
-        (meter_id, account_number),
+        (meter_id,),
     )
     rows = cur.fetchall()
     if not rows:
