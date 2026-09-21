@@ -3,7 +3,7 @@
 - Assign Meter now lists every unassigned Fleet-live serial on the site. Backend accepts any serial reporting through the Thing, rejects only if *that meter* is already on another account, no longer writes `meter_provisioning.account_number`, no longer requires OTA SUCCEEDED.
 - Commission no longer stamps the account on the Thing. Relay resolves the Thing from `meter_last_seen`, not from a gateway account.
 - Tests: `test_meter_assignment_roles` + `test_fleet_live_multi_meter` (16) pass.
-- Side effects: push CC `main` deploys frontend + backend. Nils should hard-refresh Assign Meter; SIN-1 will list 718/750/757 as separate rows.
+- Side effects: pushed `a10f7b1` to `main` at 16:03 UTC. Deploy CC Portal [35623071663](https://github.com/mso9999/1pwr-customer-care/actions/runs/35623071663) succeeded (frontend 50s, backend 2m18s, LS/BN/ZM health OK). Nils should hard-refresh Assign Meter; SIN-1 will list 718/750/757 as separate rows.
 - Key files: `meter_lifecycle.py`, `AssignMeterPage.tsx`, `meter_provisioning.py`, `relay_control.py`, `commission.py`
 - Follow-ups: meter `000023021767` on 0001SIN still hidden until that *meter* is decommissioned.
 
