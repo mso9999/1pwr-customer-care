@@ -1,3 +1,14 @@
+## Session 2026-09-22 [202609221037] — Deploy analytics + meter map
+
+### What Was Done
+- Pushed `main` `58ed610` → `9099cf0` at 2026-09-22 08:37 UTC. Auto-deploy to cc.1pwrafrica.com.
+- Includes Analytics popular kWh-by-category and the meter map install/offline/firmware popup with Status, Firmware, Installed, and Hybrid color modes.
+
+### Side effects
+- Production deploy of frontend and backend via GitHub Actions on push to `main`.
+
+---
+
 ## Session 2026-09-22 [202609221031] — Fleet map install, offline, firmware
 
 ### What Was Done
