@@ -1,6 +1,12 @@
 {
   "title": "Analytics Explorer",
-  "subtitle": "Build custom tables and time-series charts from customer, financial, and consumption data.",
+  "subtitle": "Pick metrics to compare, choose a time period, and view them aggregated or split by site or customer type.",
+  "popular": {
+    "label": "Popular analyses",
+    "hint": "Uses the country, sites, and customer types in the filters, for the last six complete months. Customers with use are accounts whose meter readings sum above zero. HH1, HH2, and HH3 are grouped as HH.",
+    "kwhByCategory": "Average kWh per month by customer category",
+    "kwhAggregate": "Average kWh per month, all customers"
+  },
   "basis": {
     "label": "I want to see data...",
     "site": "By Site",
@@ -37,7 +43,15 @@
   "loading": "Running query...",
   "benchmark": {
     "title": "Average Consumption by Customer Type",
-    "help": "Compares average consumption across customer types by day/week/month/year. Denominator includes all connected customers in scope, including zero-use customers.",
+    "help": "Average kWh per customer over the selected period. Split by customer category or keep one aggregated series. Customers with use excludes zero-use accounts. All connected includes them.",
+    "breakdown": "Split",
+    "aggregated": "Aggregated",
+    "byCategory": "By customer category",
+    "denominator": "Average over",
+    "metered": "Customers with use",
+    "connected": "All connected customers",
+    "meteredCustomers": "Customers with use",
+    "allCustomers": "All customers",
     "run": "Run Benchmark",
     "failed": "Benchmark query failed.",
     "results": "Benchmark Results",

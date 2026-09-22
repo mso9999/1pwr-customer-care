@@ -28,7 +28,7 @@ import meter_provisioning as mp
 COLS = [
     "meter_id", "account_number", "community", "village_name",
     "latitude", "longitude", "status", "platform", "linked", "prov_thing",
-    "link_thing", "link_pole",
+    "link_thing", "link_pole", "installed_at", "prov_fw", "reported_fw",
 ]
 
 
@@ -105,28 +105,35 @@ class TestFleetMapLinkedFlagSql(unittest.TestCase):
             CREATE TABLE meters (
                 meter_id TEXT, meter_number TEXT, account_number TEXT,
                 community TEXT, village_name TEXT,
-                latitude REAL, longitude REAL, status TEXT, platform TEXT);
-            CREATE TABLE meter_provisioning (meter_serial TEXT, thing_name TEXT);
+                latitude REAL, longitude REAL, status TEXT, platform TEXT,
+                customer_connect_date TEXT);
+            CREATE TABLE meter_provisioning (
+                meter_serial TEXT, thing_name TEXT, fw_version TEXT);
             CREATE TABLE meter_gateway_link (
                 meter_serial TEXT, gateway_thing TEXT, pole_id TEXT);
+            CREATE TABLE prototype_meter_state (
+                meter_id TEXT, firmware_version TEXT);
             """
         )
         # 0068MAK's meter: linked via PTB with gateway_thing NULL (never reported).
         db.execute(
-            "INSERT INTO meters VALUES (?, NULL, ?, 'MAK', 'Ha Makebe', -29.1, 27.5, 'installed', 'prototype')",
+            "INSERT INTO meters VALUES (?, NULL, ?, 'MAK', 'Ha Makebe', -29.1, 27.5, 'installed', 'prototype', '2026-03-12')",
             (METER_ID, ACCOUNT),
         )
         db.execute("INSERT INTO meter_gateway_link VALUES (?, NULL, NULL)", (METER_ID,))
         # Control 1: gateway-linked via provisioning (primary meter of a gateway).
         db.execute(
-            "INSERT INTO meters VALUES ('23022628', NULL, '0005MAK', 'MAK', 'Ha Makebe', -29.1, 27.5, 'installed', 'prototype')"
+            "INSERT INTO meters VALUES ('23022628', NULL, '0005MAK', 'MAK', 'Ha Makebe', -29.1, 27.5, 'installed', 'prototype', NULL)"
         )
         db.execute(
-            "INSERT INTO meter_provisioning VALUES ('23022628', 'MAK-GW-0001')"
+            "INSERT INTO meter_provisioning VALUES ('23022628', 'MAK-GW-0001', '1.1.40')"
+        )
+        db.execute(
+            "INSERT INTO prototype_meter_state VALUES ('23022628', '1.1.57')"
         )
         # Control 2: plain SparkMeter, no link anywhere.
         db.execute(
-            "INSERT INTO meters VALUES ('58431', NULL, '0025MAK', 'MAK', 'Ha Makebe', -29.1, 27.5, 'installed', 'sparkmeter')"
+            "INSERT INTO meters VALUES ('58431', NULL, '0025MAK', 'MAK', 'Ha Makebe', -29.1, 27.5, 'installed', 'sparkmeter', NULL)"
         )
         rows = db.execute(sql).fetchall()
         db.close()
@@ -138,6 +145,8 @@ class TestFleetMapLinkedFlagSql(unittest.TestCase):
         # presence, not the (nullable) gateway name.
         self.assertIn("gl.meter_serial IS NOT NULL", sql)
         self.assertNotIn("gl.gateway_thing IS NOT NULL) AS linked", sql)
+        self.assertIn("customer_connect_date", sql)
+        self.assertIn("prototype_meter_state", sql)
 
         rows = self._sqlite_rows(sql)
         self.assertTrue(rows[METER_ID][8], "NULL-gateway link row must read as linked")
@@ -153,7 +162,8 @@ class TestFleetMapNeverReportedMeter(unittest.TestCase):
     def test_linked_meter_without_last_seen_renders_linked_and_offline(self):
         # Row as the fixed SQL returns it: linked=True, prov_thing/link_thing=None.
         rows = [(METER_ID, ACCOUNT, "MAK", "Ha Makebe", -29.1, 27.5,
-                 "installed", "prototype", True, None, None, None)]
+                 "installed", "prototype", True, None, None, None,
+                 "2026-03-12", None, None)]
         result, _sql = _run_fleet_map(rows=rows, ddb_items=[])  # never reported
 
         self.assertEqual(result["total"], 1)
@@ -164,12 +174,16 @@ class TestFleetMapNeverReportedMeter(unittest.TestCase):
         self.assertFalse(m["online"])
         self.assertIsNone(m["thing_name"])
         self.assertIsNone(m["last_seen"])
+        self.assertEqual(m["installed_at"], "2026-03-12")
+        self.assertIsNone(m["offline_since"])
+        self.assertIsNone(m["fw_version"])
         self.assertEqual(result["online"], 0)
         self.assertEqual(result["offline"], 1)
 
     def test_reporting_meter_gets_thing_name_and_online(self):
         rows = [(METER_ID, ACCOUNT, "MAK", "Ha Makebe", -29.1, 27.5,
-                 "installed", "prototype", True, None, None, None)]
+                 "installed", "prototype", True, None, None, None,
+                 "2026-03-12", "1.1.40", "1.1.57")]
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         items = [{
             "meterId": {"S": METER_ID},
@@ -183,7 +197,24 @@ class TestFleetMapNeverReportedMeter(unittest.TestCase):
         self.assertTrue(m["online"])
         self.assertEqual(m["thing_name"], "MAK-GW-0010")
         self.assertEqual(m["last_seen"], ts)
+        self.assertIsNone(m["offline_since"])
+        self.assertEqual(m["fw_version"], "1.1.57")
         self.assertEqual(result["online"], 1)
+
+    def test_stale_meter_is_offline_since_last_seen_and_falls_back_to_prov_fw(self):
+        rows = [(METER_ID, ACCOUNT, "MAK", "Ha Makebe", -29.1, 27.5,
+                 "installed", "prototype", True, None, None, None,
+                 "2026-03-12", "1.1.40", None)]
+        items = [{
+            "meterId": {"S": METER_ID},
+            "thingName": {"S": "MAK-GW-0010"},
+            "last_seen": {"S": "2026-01-01T00:00:00Z"},
+        }]
+        result, _sql = _run_fleet_map(rows=rows, ddb_items=items)
+        m = result["meters"][0]
+        self.assertFalse(m["online"])
+        self.assertEqual(m["offline_since"], "2026-01-01T00:00:00Z")
+        self.assertEqual(m["fw_version"], "1.1.40")
 
 
 if __name__ == "__main__":

@@ -2810,6 +2810,16 @@ def list_provisioned_meters(
     return {"count": len(rows), "meters": rows}
 
 
+def _iso_stamp(value):
+    """JSON-safe install/connect stamp. Dates stay as calendar days."""
+    if value is None:
+        return None
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    text = str(value).strip()
+    return text or None
+
+
 @router.get("/fleet-map")
 def fleet_map(
     site: Optional[str] = None,
@@ -2844,7 +2854,10 @@ def fleet_map(
                    BOOL_OR(p.thing_name IS NOT NULL OR gl.meter_serial IS NOT NULL) AS linked,
                    MAX(p.thing_name) AS prov_thing,
                    MAX(gl.gateway_thing) AS link_thing,
-                   MAX(gl.pole_id) AS link_pole
+                   MAX(gl.pole_id) AS link_pole,
+                   MAX(m.customer_connect_date) AS installed_at,
+                   MAX(p.fw_version) AS prov_fw,
+                   MAX(s.firmware_version) AS reported_fw
             FROM meters m
             LEFT JOIN meter_provisioning p
               ON p.meter_serial = m.meter_id
@@ -2853,6 +2866,8 @@ def fleet_map(
             LEFT JOIN meter_gateway_link gl
               ON ltrim(gl.meter_serial, '0') = ltrim(m.meter_id, '0')
               OR ltrim(gl.meter_serial, '0') = ltrim(m.meter_number, '0')
+            LEFT JOIN prototype_meter_state s
+              ON ltrim(s.meter_id, '0') = ltrim(m.meter_id, '0')
             WHERE m.latitude IS NOT NULL AND m.longitude IS NOT NULL
         """
         params: list = []
@@ -2926,6 +2941,8 @@ def fleet_map(
         seen_dt = parse_seen(last_seen)
         online = bool(seen_dt and seen_dt >= cutoff)
         resolved_thing = thing or m.get("prov_thing") or m.get("link_thing")
+        reported_fw = str(m.get("reported_fw") or "").strip() or None
+        prov_fw = str(m.get("prov_fw") or "").strip() or None
         out.append({
             "meter_id": mid,
             "account_number": m.get("account_number"),
@@ -2943,6 +2960,11 @@ def fleet_map(
             "gateway_pending": bool(m.get("linked")) and not resolved_thing,
             "last_seen": last_seen,
             "online": online,
+            "installed_at": _iso_stamp(m.get("installed_at")),
+            # Offline since the last sample. Never-reported meters have no stamp.
+            "offline_since": None if online else last_seen,
+            # Device-reported firmware wins; provisioning record is the fallback.
+            "fw_version": reported_fw or prov_fw,
         })
 
     online_n = sum(1 for r in out if r["online"])

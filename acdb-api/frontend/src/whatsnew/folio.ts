@@ -37,6 +37,43 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW_FOLIO: WhatsNewEntry[] = [
   {
+    id: 'fleet-map-install-offline-firmware',
+    date: '2026-09-22',
+    title: 'Meter map shows install date, offline since, and firmware',
+    blurb: 'Click a meter on the map for install date, offline since, and firmware. Recolor the map by firmware, by install date, or with a status fill and an install-date border.',
+    pages: [
+      {
+        heading: 'More on each meter dot',
+        body:
+          'Open Meters and switch to the map. Click a dot.\n\n' +
+          '- Installed: the connection date on the meter\n' +
+          '- Offline since: the last report, or “never reported” if it has not checked in\n' +
+          '- FW: the firmware the meter last reported, or the version stored at provisioning\n\n' +
+          'The map still opens green for online and red for installed-but-offline. The legend switches the coloring:\n\n' +
+          '- Firmware: one color per version\n' +
+          '- Installed: heat map from oldest (blue) to newest (red)\n' +
+          '- Hybrid: green or red fill for online or offline, and the border is the install-date heat',
+      },
+    ],
+  },
+  {
+    id: 'analytics-kwh-by-category',
+    date: '2026-09-21',
+    title: 'Average kWh per month by customer category',
+    blurb: 'Analytics now opens with popular comparisons, including average monthly kWh by customer category or for all customers together.',
+    pages: [
+      {
+        heading: 'Popular analyses',
+        body:
+          'Open Analytics. Two shortcuts sit at the top and use the last six complete months, plus the country, sites, and customer types in the filters.\n\n' +
+          '- Average kWh per month by customer category\n' +
+          '- Average kWh per month, all customers\n\n' +
+          'HH1, HH2, and HH3 are grouped as HH. Switch Split between Aggregated and By customer category, and Average over between customers with use and all connected customers, then run again.\n\n' +
+          'Other comparisons still use the metric picker below. The date range now applies to every view.',
+      },
+    ],
+  },
+  {
     id: 'site-registry-pr-refresh',
     date: '2026-09-21',
     title: 'Site Registry follows the PR / Nexus master list',

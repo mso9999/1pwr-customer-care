@@ -62,6 +62,23 @@ function fmtValue(val: any, format: string): string {
 /** Which group_by values indicate a time-series capable metric */
 const TIME_GROUP_BYS = new Set(['month', 'quarter', 'year']);
 
+function isoDate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Last N complete calendar months, ending the month before today. */
+function completeMonthRange(months: number): { from: string; to: string } {
+  const now = new Date();
+  const end = new Date(now.getFullYear(), now.getMonth(), 0);
+  const start = new Date(end.getFullYear(), end.getMonth() - (months - 1), 1);
+  return { from: isoDate(start), to: isoDate(end) };
+}
+
+const DEFAULT_RANGE = completeMonthRange(12);
+
 function metricFitsBasis(metric: { group_by_options: string[] }, basis: string): boolean {
   const opts = metric.group_by_options;
   switch (basis) {
@@ -192,15 +209,15 @@ export default function AnalyticsPage() {
   const [filterSites, setFilterSites] = useState<string[]>([]);
   const [filterCustomerTypes, setFilterCustomerTypes] = useState<string[]>([]);
   const [countrySites, setCountrySites] = useState<Record<string, Record<string, string>>>({});
-  const [filterDateFrom, setFilterDateFrom] = useState('2020-01-01');
-  const [filterDateTo, setFilterDateTo] = useState(
-    new Date().toISOString().slice(0, 10),
-  );
+  const [filterDateFrom, setFilterDateFrom] = useState(DEFAULT_RANGE.from);
+  const [filterDateTo, setFilterDateTo] = useState(DEFAULT_RANGE.to);
 
   // Basis + time granularity
   const [basis, setBasis] = useState('site');
   const [timeGranularity, setTimeGranularity] = useState('month');
   const [benchmarkPeriod, setBenchmarkPeriod] = useState<'day' | 'week' | 'month' | 'year'>('month');
+  const [benchmarkBreakdown, setBenchmarkBreakdown] = useState<'none' | 'customer_type'>('customer_type');
+  const [benchmarkDenominator, setBenchmarkDenominator] = useState<'connected' | 'metered'>('metered');
   const [benchmarkScope, setBenchmarkScope] = useState<'country' | 'portfolio' | 'all'>('country');
   const [txnGranularity, setTxnGranularity] = useState<'24h' | 'day' | 'week' | 'month'>('day');
   const [txnBreakdown, setTxnBreakdown] = useState<
@@ -322,10 +339,8 @@ export default function AnalyticsPage() {
           country: filterCountry || undefined,
           sites: filterSites.length > 0 ? filterSites : undefined,
           customer_types: filterCustomerTypes.length > 0 ? filterCustomerTypes : undefined,
-          ...(basis === 'time' ? {
-            date_from: filterDateFrom,
-            date_to: filterDateTo,
-          } : {}),
+          date_from: filterDateFrom,
+          date_to: filterDateTo,
         },
         group_by: groupBy,
         time_series: true,
@@ -354,19 +369,32 @@ export default function AnalyticsPage() {
     }
   }, [selectedMetrics, filterCountry, filterSites, filterCustomerTypes, filterDateFrom, filterDateTo, groupBy, basis]);
 
-  const runBenchmark = useCallback(async () => {
+  const runBenchmark = useCallback(async (overrides?: {
+    period?: 'day' | 'week' | 'month' | 'year';
+    breakdown?: 'none' | 'customer_type';
+    denominator?: 'connected' | 'metered';
+    from?: string;
+    to?: string;
+  }) => {
+    const period = overrides?.period ?? benchmarkPeriod;
+    const breakdown = overrides?.breakdown ?? benchmarkBreakdown;
+    const denominator = overrides?.denominator ?? benchmarkDenominator;
+    const from = overrides?.from ?? filterDateFrom;
+    const to = overrides?.to ?? filterDateTo;
     setLoading(true);
     setError('');
     try {
       const payload = {
-        period: benchmarkPeriod,
+        period,
+        breakdown,
+        denominator,
         country: benchmarkScope === 'country' ? filterCountry : undefined,
         sites: filterSites.length > 0 ? filterSites : undefined,
         portfolio_id: benchmarkScope === 'portfolio' ? (portfolio?.id || undefined) : undefined,
         all_datasets: benchmarkScope === 'all',
         customer_types: filterCustomerTypes.length > 0 ? filterCustomerTypes : undefined,
-        from: filterDateFrom,
-        to: filterDateTo,
+        from,
+        to,
       };
       const res = await runConsumptionBenchmark(payload);
       setBenchmarkResult(res);
@@ -379,6 +407,8 @@ export default function AnalyticsPage() {
     }
   }, [
     benchmarkPeriod,
+    benchmarkBreakdown,
+    benchmarkDenominator,
     benchmarkScope,
     filterCountry,
     filterSites,
@@ -388,6 +418,23 @@ export default function AnalyticsPage() {
     portfolio?.id,
     t,
   ]);
+
+  const runPopularKwh = (breakdown: 'none' | 'customer_type') => {
+    const range = completeMonthRange(6);
+    setBasis('benchmark');
+    setBenchmarkPeriod('month');
+    setBenchmarkBreakdown(breakdown);
+    setBenchmarkDenominator('metered');
+    setFilterDateFrom(range.from);
+    setFilterDateTo(range.to);
+    void runBenchmark({
+      period: 'month',
+      breakdown,
+      denominator: 'metered',
+      from: range.from,
+      to: range.to,
+    });
+  };
 
   const runTransactions = useCallback(async () => {
     setLoading(true);
@@ -529,6 +576,29 @@ export default function AnalyticsPage() {
         <p className="text-sm text-gray-500 mt-1">{t('subtitle')}</p>
       </div>
 
+      <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
+        <div className="text-sm font-medium text-gray-600 mb-1">{t('popular.label')}</div>
+        <p className="text-xs text-gray-500 mb-3">{t('popular.hint')}</p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => runPopularKwh('customer_type')}
+            disabled={loading}
+            className="px-3 py-1.5 text-sm rounded-full border border-blue-300 bg-blue-50 text-blue-800 hover:bg-blue-100 disabled:opacity-40"
+          >
+            {t('popular.kwhByCategory')}
+          </button>
+          <button
+            type="button"
+            onClick={() => runPopularKwh('none')}
+            disabled={loading}
+            className="px-3 py-1.5 text-sm rounded-full border border-gray-300 bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-40"
+          >
+            {t('popular.kwhAggregate')}
+          </button>
+        </div>
+      </div>
+
       {/* ── Basis selector ── */}
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
         <div className="flex flex-wrap items-center gap-3">
@@ -575,6 +645,28 @@ export default function AnalyticsPage() {
                 <option value="week">{t('benchmark.week')}</option>
                 <option value="month">{t('benchmark.month')}</option>
                 <option value="year">{t('benchmark.year')}</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500">{t('benchmark.breakdown')}</span>
+              <select
+                className="rounded border-gray-300 text-sm"
+                value={benchmarkBreakdown}
+                onChange={(e) => setBenchmarkBreakdown(e.target.value as 'none' | 'customer_type')}
+              >
+                <option value="none">{t('benchmark.aggregated')}</option>
+                <option value="customer_type">{t('benchmark.byCategory')}</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500">{t('benchmark.denominator')}</span>
+              <select
+                className="rounded border-gray-300 text-sm"
+                value={benchmarkDenominator}
+                onChange={(e) => setBenchmarkDenominator(e.target.value as 'connected' | 'metered')}
+              >
+                <option value="metered">{t('benchmark.metered')}</option>
+                <option value="connected">{t('benchmark.connected')}</option>
               </select>
             </div>
             <div className="flex items-center gap-2">
@@ -682,28 +774,24 @@ export default function AnalyticsPage() {
             onChange={setFilterCustomerTypes}
             allLabel={t('allCustomerTypes')}
           />
-          {(basis === 'time' || basis === 'benchmark' || basis === 'transactions') && (
-            <>
-              <label className="block">
-                <span className="text-xs text-gray-500">{t('dateFrom')}</span>
-                <input
-                  type="date"
-                  className="mt-1 block w-full rounded border-gray-300 text-sm"
-                  value={filterDateFrom}
-                  onChange={(e) => setFilterDateFrom(e.target.value)}
-                />
-              </label>
-              <label className="block">
-                <span className="text-xs text-gray-500">{t('dateTo')}</span>
-                <input
-                  type="date"
-                  className="mt-1 block w-full rounded border-gray-300 text-sm"
-                  value={filterDateTo}
-                  onChange={(e) => setFilterDateTo(e.target.value)}
-                />
-              </label>
-            </>
-          )}
+          <label className="block">
+            <span className="text-xs text-gray-500">{t('dateFrom')}</span>
+            <input
+              type="date"
+              className="mt-1 block w-full rounded border-gray-300 text-sm"
+              value={filterDateFrom}
+              onChange={(e) => setFilterDateFrom(e.target.value)}
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs text-gray-500">{t('dateTo')}</span>
+            <input
+              type="date"
+              className="mt-1 block w-full rounded border-gray-300 text-sm"
+              value={filterDateTo}
+              onChange={(e) => setFilterDateTo(e.target.value)}
+            />
+          </label>
         </div>
       </div>
 
@@ -809,7 +897,7 @@ export default function AnalyticsPage() {
           <h2 className="text-sm font-medium text-gray-600 mb-1">{t('benchmark.title')}</h2>
           <p className="text-xs text-gray-500 mb-3">{t('benchmark.help')}</p>
           <button
-            onClick={runBenchmark}
+            onClick={() => { void runBenchmark(); }}
             disabled={loading || (benchmarkScope === 'portfolio' && !portfolio?.id)}
             className="px-5 py-2 bg-blue-600 text-white text-sm font-medium rounded hover:bg-blue-700 disabled:opacity-40 transition-colors"
           >
@@ -848,7 +936,9 @@ export default function AnalyticsPage() {
                 <tr>
                   <th className="px-4 py-2 font-medium">{t('benchmark.period')}</th>
                   <th className="px-4 py-2 font-medium">{t('benchmark.customerType')}</th>
-                  <th className="px-4 py-2 font-medium text-right">{t('benchmark.connectedCustomers')}</th>
+                  <th className="px-4 py-2 font-medium text-right">
+                    {benchmarkDenominator === 'metered' ? t('benchmark.meteredCustomers') : t('benchmark.connectedCustomers')}
+                  </th>
                   <th className="px-4 py-2 font-medium text-right">{t('benchmark.totalKwh')}</th>
                   <th className="px-4 py-2 font-medium text-right">{t('benchmark.avgKwhPerCustomer')}</th>
                 </tr>
@@ -857,7 +947,9 @@ export default function AnalyticsPage() {
                 {benchmarkTableRows.map((row, i) => (
                   <tr key={`${row.period}-${row.customer_type}-${i}`} className="hover:bg-gray-50">
                     <td className="px-4 py-2 font-medium text-gray-800 whitespace-nowrap">{row.period}</td>
-                    <td className="px-4 py-2 text-gray-700">{row.customer_type}</td>
+                    <td className="px-4 py-2 text-gray-700">
+                      {row.customer_type === 'ALL' ? t('benchmark.allCustomers') : row.customer_type}
+                    </td>
                     <td className="px-4 py-2 text-right font-mono tabular-nums">{row.connected_customers.toLocaleString()}</td>
                     <td className="px-4 py-2 text-right font-mono tabular-nums">{fmtValue(row.total_kwh, 'decimal2')}</td>
                     <td className="px-4 py-2 text-right font-mono tabular-nums">{fmtValue(row.avg_kwh_per_customer, 'decimal2')}</td>
@@ -871,7 +963,8 @@ export default function AnalyticsPage() {
 
       {basis === 'benchmark' && benchmarkChartData.length > 0 && (
         <div className="bg-white rounded-lg border border-gray-200 shadow-sm p-4">
-          <h2 className="text-sm font-medium text-gray-600 mb-3">{t('benchmark.chart')}</h2>
+          <h2 className="text-sm font-medium text-gray-600">{t('benchmark.chart')}</h2>
+          <p className="text-xs text-gray-500 mb-3">{t('benchmark.avgKwhPerCustomer')} · {filterDateFrom} – {filterDateTo}</p>
           <ResponsiveContainer width="100%" height={400}>
             <LineChart data={benchmarkChartData} margin={{ top: 5, right: 20, left: 0, bottom: 40 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
@@ -887,7 +980,7 @@ export default function AnalyticsPage() {
                   stroke={COLORS[i % COLORS.length]}
                   strokeWidth={2}
                   dot={{ r: 3 }}
-                  name={ct}
+                  name={ct === 'ALL' ? t('benchmark.allCustomers') : ct}
                 />
               ))}
             </LineChart>

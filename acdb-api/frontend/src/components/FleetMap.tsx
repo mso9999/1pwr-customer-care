@@ -5,6 +5,54 @@ import 'leaflet/dist/leaflet.css';
 import { getFleetMap, type FleetMapMeter, type FleetMapResult } from '../lib/api';
 import { formatLastSeen } from '../lib/datetime';
 
+type MapColorMode = 'status' | 'firmware' | 'installed' | 'hybrid';
+
+const FW_PALETTE = [
+  '#2563eb', '#7c3aed', '#0891b2', '#ca8a04', '#db2777',
+  '#0f766e', '#c2410c', '#4f46e5', '#65a30d', '#9333ea',
+];
+const FW_UNKNOWN = '#9ca3af';
+const STATUS_ONLINE = '#16a34a';
+const STATUS_OFFLINE = '#ef4444';
+const INSTALL_UNKNOWN = '#9ca3af';
+
+function installEpoch(raw: string | null | undefined): number | null {
+  if (!raw) return null;
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw.trim());
+  if (dateOnly) return Date.UTC(+dateOnly[1], +dateOnly[2] - 1, +dateOnly[3]);
+  const d = new Date(raw);
+  return Number.isNaN(d.getTime()) ? null : d.getTime();
+}
+
+/** Oldest installs are cool blue, newest are hot red. */
+function heatColor(t: number): string {
+  const stops = [
+    { t: 0, r: 191, g: 219, b: 254 },
+    { t: 0.55, r: 251, g: 191, b: 36 },
+    { t: 1, r: 185, g: 28, b: 28 },
+  ];
+  const x = Math.min(1, Math.max(0, t));
+  const upper = stops.find((s) => s.t >= x) || stops[stops.length - 1];
+  const lower = [...stops].reverse().find((s) => s.t <= x) || stops[0];
+  const span = upper.t - lower.t || 1;
+  const f = (x - lower.t) / span;
+  const ch = (a: number, b: number) => Math.round(a + (b - a) * f);
+  return `rgb(${ch(lower.r, upper.r)}, ${ch(lower.g, upper.g)}, ${ch(lower.b, upper.b)})`;
+}
+
+function formatInstalled(raw: string | null | undefined): string {
+  if (!raw) return '—';
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw.trim());
+  if (!dateOnly) return formatLastSeen(raw);
+  const d = new Date(Date.UTC(+dateOnly[1], +dateOnly[2] - 1, +dateOnly[3]));
+  return d.toLocaleDateString('en-GB', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
 function FitBounds({ points }: { points: [number, number][] }) {
   const map = useMap();
   useEffect(() => {
@@ -50,6 +98,7 @@ export default function FleetMap({ site, sites, onSiteChange, focusMeterId }: Fl
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [linkedOnly, setLinkedOnly] = useState(false);
+  const [colorMode, setColorMode] = useState<MapColorMode>('status');
   const [query, setQuery] = useState('');
   const [focus, setFocus] = useState<FleetMapMeter | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -99,6 +148,49 @@ export default function FleetMap({ site, sites, onSiteChange, focusMeterId }: Fl
     return base;
   }, [data, linkedOnly, focus]);
 
+  const fwLegend = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const m of visibleMeters) {
+      const key = (m.fw_version || '').trim() || 'no firmware';
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+    const versions = Array.from(counts.keys()).sort((a, b) => {
+      if (a === 'no firmware') return 1;
+      if (b === 'no firmware') return -1;
+      return a.localeCompare(b, undefined, { numeric: true });
+    });
+    return versions.map((version, i) => ({
+      version,
+      n: counts.get(version) || 0,
+      color: version === 'no firmware' ? FW_UNKNOWN : FW_PALETTE[i % FW_PALETTE.length],
+    }));
+  }, [visibleMeters]);
+
+  const fwColor = useMemo(() => {
+    const map = new Map(fwLegend.map((row) => [row.version, row.color]));
+    return (version: string | null | undefined) => map.get((version || '').trim() || 'no firmware') || FW_UNKNOWN;
+  }, [fwLegend]);
+
+  const installScale = useMemo(() => {
+    const times = visibleMeters
+      .map((m) => installEpoch(m.installed_at))
+      .filter((t): t is number => t != null);
+    const min = times.length ? Math.min(...times) : null;
+    const max = times.length ? Math.max(...times) : null;
+    const unknown = visibleMeters.filter((m) => installEpoch(m.installed_at) == null).length;
+    return {
+      min,
+      max,
+      unknown,
+      color: (raw: string | null | undefined) => {
+        const t = installEpoch(raw);
+        if (t == null || min == null || max == null) return INSTALL_UNKNOWN;
+        if (max === min) return heatColor(1);
+        return heatColor((t - min) / (max - min));
+      },
+    };
+  }, [visibleMeters]);
+
   const points = useMemo(
     () => visibleMeters.map((m) => [m.lat, m.lng] as [number, number]),
     [visibleMeters]
@@ -117,9 +209,76 @@ export default function FleetMap({ site, sites, onSiteChange, focusMeterId }: Fl
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
       <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-100 flex-wrap">
-        <div className="flex items-center gap-4 text-xs text-gray-600">
-          <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-full bg-green-600" /> online / reporting ({data?.online ?? 0})</span>
-          <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-full bg-red-500" /> installed, offline ({data?.offline ?? 0})</span>
+        <div className="flex items-center gap-4 text-xs text-gray-600 flex-wrap">
+          <div className="flex rounded-lg border border-gray-200 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setColorMode('status')}
+              className={`px-2 py-1 ${colorMode === 'status' ? 'bg-gray-800 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+            >
+              Status
+            </button>
+            <button
+              type="button"
+              onClick={() => setColorMode('firmware')}
+              className={`px-2 py-1 ${colorMode === 'firmware' ? 'bg-gray-800 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+            >
+              Firmware
+            </button>
+            <button
+              type="button"
+              onClick={() => setColorMode('installed')}
+              className={`px-2 py-1 ${colorMode === 'installed' ? 'bg-gray-800 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+            >
+              Installed
+            </button>
+            <button
+              type="button"
+              onClick={() => setColorMode('hybrid')}
+              className={`px-2 py-1 ${colorMode === 'hybrid' ? 'bg-gray-800 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+              title="Fill is online or offline. Border is install-date heat."
+            >
+              Hybrid
+            </button>
+          </div>
+          {colorMode === 'status' && (
+            <>
+              <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-full bg-green-600" /> online / reporting ({data?.online ?? 0})</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-full bg-red-500" /> installed, offline ({data?.offline ?? 0})</span>
+            </>
+          )}
+          {colorMode === 'firmware' && fwLegend.map((row) => (
+            <span key={row.version} className="flex items-center gap-1.5">
+              <span className="inline-block w-3 h-3 rounded-full" style={{ background: row.color }} />
+              {row.version} ({row.n})
+            </span>
+          ))}
+          {(colorMode === 'installed' || colorMode === 'hybrid') && (
+            <>
+              {colorMode === 'hybrid' && (
+                <>
+                  <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-full bg-green-600" /> fill online</span>
+                  <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-full bg-red-500" /> fill offline</span>
+                </>
+              )}
+              <span className="flex items-center gap-1.5">
+                <span
+                  className="inline-block h-3 w-16 rounded"
+                  style={{ background: 'linear-gradient(to right, rgb(191, 219, 254), rgb(251, 191, 36), rgb(185, 28, 28))' }}
+                />
+                {colorMode === 'hybrid' ? 'border' : 'install date'}{' '}
+                {installScale.min != null ? formatInstalled(new Date(installScale.min).toISOString()) : '—'}
+                {' → '}
+                {installScale.max != null ? formatInstalled(new Date(installScale.max).toISOString()) : '—'}
+              </span>
+              {installScale.unknown > 0 && (
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-block w-3 h-3 rounded-full" style={{ background: INSTALL_UNKNOWN }} />
+                  no install date ({installScale.unknown})
+                </span>
+              )}
+            </>
+          )}
           {(data?.no_gps ?? 0) > 0 && <span className="text-gray-400">+{data?.no_gps} with no GPS</span>}
         </div>
         <div className="flex items-center gap-3 flex-wrap">
@@ -183,23 +342,34 @@ export default function FleetMap({ site, sites, onSiteChange, focusMeterId }: Fl
             />
             {visibleMeters.map((m) => {
               const isFocus = focus?.meter_id === m.meter_id;
+              const statusFill = m.online ? STATUS_ONLINE : STATUS_OFFLINE;
+              const heat = installScale.color(m.installed_at);
+              const fill = colorMode === 'firmware'
+                ? fwColor(m.fw_version)
+                : colorMode === 'installed'
+                  ? heat
+                  : statusFill;
+              const stroke = colorMode === 'hybrid'
+                ? heat
+                : colorMode === 'installed'
+                  ? heat
+                  : colorMode === 'firmware'
+                    ? fill
+                    : statusFill;
+              const weight = colorMode === 'hybrid'
+                ? (isFocus ? 6 : 4)
+                : (isFocus ? 4 : (m.linked ? 3.5 : 1.5));
               return (
                 <CircleMarker
-                  key={m.meter_id}
+                  key={`${m.meter_id}-${colorMode}-${fill}-${stroke}`}
                   ref={(r) => { markerRefs.current[m.meter_id] = r; }}
                   center={[m.lat, m.lng]}
                   radius={isFocus ? 11 : 7}
-                  pathOptions={isFocus ? {
-                    color: '#2563eb',
-                    fillColor: '#2563eb',
-                    fillOpacity: 0.9,
-                    weight: 4,
-                  } : {
-                    color: m.online ? '#16a34a' : '#ef4444',
-                    fillColor: m.online ? '#16a34a' : '#ef4444',
-                    fillOpacity: 0.75,
-                    // Linked 1Meters get a thicker border so they stand out
-                    weight: m.linked ? 3.5 : 1.5,
+                  pathOptions={{
+                    color: isFocus && colorMode !== 'hybrid' && colorMode !== 'installed' ? '#2563eb' : stroke,
+                    fillColor: fill,
+                    fillOpacity: 0.85,
+                    weight,
                   }}
                 >
                   <Popup>
@@ -215,6 +385,13 @@ export default function FleetMap({ site, sites, onSiteChange, focusMeterId }: Fl
                         </div>
                       )}
                       <div className="text-xs mt-1">{m.online ? 'online / reporting' : 'installed, offline'}</div>
+                      <div className="text-xs text-gray-600">installed {formatInstalled(m.installed_at)}</div>
+                      {!m.online && (
+                        <div className="text-xs text-gray-600">
+                          offline since {m.offline_since ? formatLastSeen(m.offline_since) : 'never reported'}
+                        </div>
+                      )}
+                      <div className="text-xs text-gray-600">FW {m.fw_version || '—'}</div>
                       {m.last_seen && <div className="text-xs text-gray-400">last seen {formatLastSeen(m.last_seen)}</div>}
                     </div>
                   </Popup>

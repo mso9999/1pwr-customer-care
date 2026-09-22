@@ -7,6 +7,8 @@ import sys
 import types
 import unittest
 
+os.environ["CC_JWT_SECRET"] = os.environ.get("CC_JWT_SECRET") or "unit-test-secret"
+
 # Make ``acdb-api`` importable when tests are run from repo root.
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
@@ -99,6 +101,22 @@ class TestBenchmarkSqlBuilder(unittest.TestCase):
         )
         self.assertIn("date_trunc('week'", sql)
         self.assertIn("interval '1 week'", sql)
+
+    def test_aggregate_metered_sql_shape(self):
+        sql, params = analytics._build_consumption_benchmark_sql(
+            period="month",
+            resolved_sites=["MAK"],
+            customer_types=["HH"],
+            date_from=analytics.date(2026, 3, 1),
+            date_to=analytics.date(2026, 8, 31),
+            breakdown="none",
+            denominator="metered",
+        )
+        self.assertEqual(sql.count("%s"), len(params))
+        self.assertIn("'ALL' AS customer_type", sql)
+        self.assertIn("hourly_dedup", sql)
+        self.assertIn("metered_customers", sql)
+        self.assertIn("MAX(kwh)", sql)
 
 
 if __name__ == "__main__":

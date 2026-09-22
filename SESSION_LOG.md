@@ -1,3 +1,78 @@
+## Session 2026-09-22 [202609221031] — Fleet map install, offline, firmware
+
+### What Was Done
+- Meter map popup now shows installed date (`meters.customer_connect_date`), offline since last report (or never reported), and firmware (reported `prototype_meter_state.firmware_version`, else `meter_provisioning.fw_version`).
+- Legend toggle: Status (green online / red installed offline, the default) or Firmware (stable color per version, gray when unknown).
+- What's New folio `fleet-map-install-offline-firmware`.
+
+### Side effects
+- none until pushed to main
+
+### Key files
+- `acdb-api/meter_provisioning.py`, `acdb-api/frontend/src/components/FleetMap.tsx`, `acdb-api/tests/test_fleet_map_linked_meters.py`
+
+---
+
+## Session 2026-09-21 [202609212353] — Analytics popular kWh by category
+
+### What Was Done
+- Analytics page: popular shortcuts for average kWh/month by customer category and for all customers (last six complete months, metered accounts). Consumption benchmark can aggregate or split by type, and can divide by customers with use or all connected customers. Hourly readings are deduped per account-hour. Date range is on every analytics view and is sent with metric queries.
+- What's New folio entry `analytics-kwh-by-category`.
+
+### Side effects
+- none until this is pushed to main (auto-deploys cc.1pwrafrica.com)
+
+### Key files
+- `acdb-api/analytics.py`, `acdb-api/frontend/src/pages/AnalyticsPage.tsx`, `acdb-api/frontend/src/i18n/{en,fr}/analytics.json`, `acdb-api/frontend/src/whatsnew/folio.ts`
+
+### Follow-ups
+- Not committed. Push to main to deploy.
+
+---
+
+## Session 2026-09-21 [202609212339] — BJ/LS kWh by customer category
+
+### What Was Done
+- Confirmed `customers.customer_type` is populated in both 1PDB lanes. BJ: 176/193 typed (SME 52, HH1/2/3 116, CHU 8, blank 17). No SCH or HC in Benin. LS: HH1 1813, SME 245, SCH 10, HC 12, blank 27.
+- Average kWh/month from deduped `hourly_consumption`, Jun–Aug 2026, accounts with kWh > 0. Commercial = SME. BJ commercial 18.8, HH 15.7. LS commercial 25.9, HH 11.9, school 30.7. LS clinic mean 667 is four accounts (0001MAN/MET/NKU, 0173KET) near 900–1,200 kWh.
+- `monthly_consumption` still ends in a thin 2026-06 and would have understated use. Hourly runs through 20–21 Sep 2026.
+
+### Key Decisions
+- Reporting column is `customers.customer_type`. Commission writes `customer_position`. Assign-meter writes `meters.customer_type`. New Customer wizard is the path that sets the reporting field, and the UI blocks advance without it. The API does not reject a null type. The tutorial does not teach how to set it.
+
+### Side effects
+- none (read-only queries)
+
+### Follow-ups
+- Blank BJ types (15 commissioned, mostly 2026-05-01 GBO/SAM) have no staff edit that updates `customers.customer_type`.
+- LS clinic 0001* accounts need a look before anyone quotes the clinic mean.
+
+---
+
+## Session 2026-09-21 [202609211638] — LS SCADA outage ranking
+
+### What Was Done
+- Ranked LS sites currently without power from live gensite SCADA (CC host, snapshot 2026-09-21 14:41 UTC).
+- Ten instrumented sites are serving AC load. Two Sinosoar plants return empty live and 24h energy: Ketane (102) and Tosing+Sebapala (104). Login/verify OK; poller logs `OK, 0 reading(s)` every cycle; `inverter_readings` never written since equipment create 2026-05-11 21:37 UTC (3,185 h).
+- Ranking by commissioned customers × hours dark: KET 152 → 484,129; TOS 41 → 130,587; SEB 0 (same plant 104). Combined TOS+SEB is one outage.
+- LSB/LEB/RIB have no `site_credentials`. MAS+SHG share Sinosoar 99 (duplicate telemetry).
+
+### Key Decisions
+- Denominator: `customer_commissioned` on `customers.community` = site code (project measure).
+- Duration: telemetry-dark since CC enrollment, not a proven first trip time.
+
+### Side effects
+- none (read-only host queries + Sinosoar live peek with cached token)
+
+### Key files/paths
+- Canvas: `/Users/mattmso/.cursor/projects/Users-mattmso-Dropbox-AI-Projects-1PWR-CC/canvases/ls-scada-outage-ranking.canvas.tsx`
+
+### Follow-ups
+- Confirm with Operations whether Ketane / Tosing+Sebapala are plant-down vs PCS not publishing.
+- SMA customer import for BOB/MAN/MET/NKU if those villages should enter customer-hour rankings.
+
+---
+
 ## Session 2026-09-21 [202609211415] — Live PR/Nexus site list → CC
 
 ### What Was Done

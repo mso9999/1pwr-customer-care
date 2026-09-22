@@ -1384,6 +1384,9 @@ export interface FleetMapMeter {
   gateway_pending?: boolean;
   last_seen?: string;
   online: boolean;
+  installed_at?: string | null;
+  offline_since?: string | null;
+  fw_version?: string | null;
 }
 
 export interface FleetMapResult {
@@ -3795,6 +3798,8 @@ export interface AnalyticsQueryRequest {
 
 export interface ConsumptionBenchmarkRequest {
   period: 'day' | 'week' | 'month' | 'year';
+  breakdown?: 'none' | 'customer_type';
+  denominator?: 'connected' | 'metered';
   country?: string;
   sites?: string[];
   portfolio_id?: string;
@@ -3824,6 +3829,8 @@ export interface ConsumptionBenchmarkResponse {
     customer_types: string[];
     date_from: string;
     date_to: string;
+    breakdown?: 'none' | 'customer_type';
+    denominator?: 'connected' | 'metered';
   };
 }
 

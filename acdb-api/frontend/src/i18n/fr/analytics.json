@@ -1,6 +1,12 @@
 {
   "title": "Explorateur Analytique",
-  "subtitle": "Créez des tableaux et des graphiques temporels personnalisés à partir des données clients, financières et de consommation.",
+  "subtitle": "Choisissez les indicateurs à comparer, une période, puis une vue agrégée ou ventilée par site ou type de client.",
+  "popular": {
+    "label": "Analyses fréquentes",
+    "hint": "Utilise le pays, les sites et les types de client des filtres, sur les six derniers mois complets. « Clients avec consommation » = comptes dont les relevés sont supérieurs à zéro. HH1, HH2 et HH3 sont regroupés en HH.",
+    "kwhByCategory": "kWh moyens par mois, par catégorie de client",
+    "kwhAggregate": "kWh moyens par mois, tous les clients"
+  },
   "basis": {
     "label": "Je veux voir les données...",
     "site": "Par Site",
@@ -37,7 +43,15 @@
   "loading": "Requête en cours...",
   "benchmark": {
     "title": "Consommation moyenne par type de client",
-    "help": "Compare la consommation moyenne des types de clients par jour/semaine/mois/année. Le dénominateur inclut tous les clients connectés du périmètre, y compris ceux sans consommation.",
+    "help": "kWh moyens par client sur la période choisie. Ventilez par catégorie ou gardez une seule série agrégée. « Clients avec consommation » exclut les comptes à zéro. « Tous les clients connectés » les inclut.",
+    "breakdown": "Ventilation",
+    "aggregated": "Agrégé",
+    "byCategory": "Par catégorie de client",
+    "denominator": "Moyenne sur",
+    "metered": "Clients avec consommation",
+    "connected": "Tous les clients connectés",
+    "meteredCustomers": "Clients avec consommation",
+    "allCustomers": "Tous les clients",
     "run": "Lancer la référence",
     "failed": "Échec de la requête de référence.",
     "results": "Résultats de référence",

@@ -727,6 +727,8 @@ class AnalyticsQueryRequest(BaseModel):
 
 class ConsumptionBenchmarkRequest(BaseModel):
     period: Literal["day", "week", "month", "year"] = "month"
+    breakdown: Literal["none", "customer_type"] = "customer_type"
+    denominator: Literal["connected", "metered"] = "connected"
     country: Optional[str] = None
     sites: Optional[List[str]] = None
     portfolio_id: Optional[str] = None
@@ -787,6 +789,8 @@ def _build_consumption_benchmark_sql(
     customer_types: List[str],
     date_from: date,
     date_to: date,
+    breakdown: str = "customer_type",
+    denominator: str = "connected",
 ) -> Tuple[str, tuple]:
     _, period_step, period_label_format = _benchmark_period_meta(period)
     site_placeholders = ",".join(["%s"] * len(resolved_sites))
@@ -797,11 +801,27 @@ def _build_consumption_benchmark_sql(
         type_clause = f"AND {_NORMALIZED_TYPE_SQL} IN ({ph})"
         type_params.extend(customer_types)
 
+    if breakdown not in ("none", "customer_type"):
+        breakdown = "customer_type"
+    if denominator not in ("connected", "metered"):
+        denominator = "connected"
+    type_expr = "'ALL'" if breakdown == "none" else _NORMALIZED_TYPE_SQL
+    customers_expr = (
+        "COALESCE(u.metered_customers, 0)"
+        if denominator == "metered"
+        else "d.connected_customers"
+    )
+    kwh_expr = (
+        "COALESCE(u.metered_kwh, 0)"
+        if denominator == "metered"
+        else "COALESCE(u.total_kwh, 0)"
+    )
+
     sql = f"""
         WITH scoped_accounts AS (
             SELECT DISTINCT
                    a.account_number,
-                   {_NORMALIZED_TYPE_SQL} AS customer_type,
+                   {type_expr} AS customer_type,
                    c.date_service_connected AS connected_on,
                    c.date_service_terminated AS terminated_on
               FROM accounts a
@@ -836,23 +856,38 @@ def _build_consumption_benchmark_sql(
                     )
              GROUP BY p.period_start, td.customer_type
         ),
-        usage_by_period AS (
+        hourly_dedup AS (
+            SELECT account_number, reading_hour, MAX(kwh) AS kwh
+              FROM hourly_consumption
+             WHERE reading_hour >= %s::timestamp
+               AND reading_hour < (%s::timestamp + interval '1 day')
+             GROUP BY account_number, reading_hour
+        ),
+        usage_accounts AS (
             SELECT date_trunc('{period}', h.reading_hour)::date AS period_start,
                    sa.customer_type,
-                   ROUND(COALESCE(SUM(h.kwh), 0)::numeric, 4) AS total_kwh
-              FROM hourly_consumption h
+                   h.account_number,
+                   SUM(h.kwh) AS kwh
+              FROM hourly_dedup h
               JOIN scoped_accounts sa ON sa.account_number = h.account_number
-             WHERE h.reading_hour >= %s::timestamp
-               AND h.reading_hour < (%s::timestamp + interval '1 day')
-             GROUP BY date_trunc('{period}', h.reading_hour)::date, sa.customer_type
+             GROUP BY 1, sa.customer_type, h.account_number
+        ),
+        usage_by_period AS (
+            SELECT period_start,
+                   customer_type,
+                   ROUND(COALESCE(SUM(kwh), 0)::numeric, 4) AS total_kwh,
+                   ROUND(COALESCE(SUM(kwh) FILTER (WHERE kwh > 0), 0)::numeric, 4) AS metered_kwh,
+                   COUNT(*) FILTER (WHERE kwh > 0) AS metered_customers
+              FROM usage_accounts
+             GROUP BY period_start, customer_type
         )
         SELECT to_char(d.period_start, '{period_label_format}') AS period_key,
                d.period_start,
                d.customer_type,
-               ROUND(COALESCE(u.total_kwh, 0)::numeric, 4) AS total_kwh,
-               d.connected_customers,
-               CASE WHEN d.connected_customers > 0
-                    THEN ROUND((COALESCE(u.total_kwh, 0) / d.connected_customers)::numeric, 4)
+               ROUND({kwh_expr}::numeric, 4) AS total_kwh,
+               {customers_expr} AS connected_customers,
+               CASE WHEN {customers_expr} > 0
+                    THEN ROUND(({kwh_expr} / {customers_expr})::numeric, 4)
                     ELSE 0 END AS avg_kwh_per_customer
           FROM denominator_by_period d
           LEFT JOIN usage_by_period u
@@ -1035,9 +1070,12 @@ def run_consumption_benchmark(
     req: ConsumptionBenchmarkRequest,
     user: CurrentUser = Depends(require_employee),
 ):
-    """Average consumption by customer type and period.
+    """Average consumption by period, aggregated or split by customer type.
 
-    Denominator is all connected customers in scope (including zero-use accounts).
+    ``denominator=connected`` divides by every account with a service-connected
+    date in that period, including zero use. ``denominator=metered`` divides by
+    accounts whose deduped hourly readings sum above zero. ``breakdown=none``
+    returns a single ALL series.
     """
     today = datetime.now(timezone.utc).date()
     date_to = req.date_to or today
@@ -1068,6 +1106,8 @@ def run_consumption_benchmark(
         customer_types=customer_types,
         date_from=date_from,
         date_to=date_to,
+        breakdown=req.breakdown,
+        denominator=req.denominator,
     )
 
     rows: List[ConsumptionBenchmarkRow] = []
@@ -1095,6 +1135,8 @@ def run_consumption_benchmark(
             "customer_types": customer_types,
             "date_from": str(date_from),
             "date_to": str(date_to),
+            "breakdown": req.breakdown,
+            "denominator": req.denominator,
         },
     }
 
