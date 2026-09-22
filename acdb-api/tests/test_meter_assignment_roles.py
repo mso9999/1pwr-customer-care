@@ -133,6 +133,28 @@ class TestEditAssignment(unittest.TestCase):
         conn.commit.assert_called_once()
 
 
+class TestDecommissionReleasesAccount(unittest.TestCase):
+    def test_decommission_clears_meter_account_and_account_pointer(self):
+        context, conn, cursor = connection_context([("0001SIN", "SIN")])
+        with (
+            patch.object(lifecycle, "_get_connection", return_value=context),
+            patch.object(lifecycle, "_snapshot_meter_lifecycle_state", return_value={}),
+            patch.object(lifecycle, "log_mutation"),
+        ):
+            result = lifecycle.decommission_meter(
+                "000023021767",
+                lifecycle.DecommissionRequest(reason="test", notes="unbind test account"),
+                employee(),
+            )
+
+        self.assertIsNone(result["account_number"])
+        self.assertEqual(result["released_account"], "0001SIN")
+        sql = " ".join(call.args[0] for call in cursor.execute.call_args_list)
+        self.assertIn("account_number = NULL", sql)
+        self.assertIn("UPDATE accounts SET meter_id = NULL", sql)
+        conn.commit.assert_called_once()
+
+
 class TestLockGatewayForAssignment(unittest.TestCase):
     def _gateway_cursor(self, fetch_rows):
         cursor = MagicMock()

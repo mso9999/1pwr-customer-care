@@ -231,6 +231,7 @@ export default function MetersPage() {
     setDecommNotes('');
     fetchData();
     if (failed) alert(t('meters:updateFailed', { failed, total: ids.length, count: ids.length }));
+    else alert(t('meters:decommissionedOk', { count: ids.length }));
   };
 
   const openHistory = async (meterId: string) => {

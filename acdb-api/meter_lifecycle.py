@@ -889,16 +889,19 @@ def decommission_meter(
             db_status = REASON_TO_ENUM.get(reason_lower, "decommissioned")
             notes_combined = f"[{reason_lower}] {req.notes}" if req.notes else f"[{reason_lower}]"
 
+            # The customer binding lives on the meter. Leaving account_number set
+            # keeps the serial on the old account and hides it from Assign Meter.
             cursor.execute(
                 "UPDATE meters SET status = %s, status_date = %s, status_set_by = %s, "
-                "special_notes = %s WHERE meter_id = %s",
+                "special_notes = %s, account_number = NULL WHERE meter_id = %s",
                 (db_status, now, user.user_id, notes_combined, meter_id),
             )
 
             result = {
                 "message": f"Meter {meter_id} marked as {req.reason}",
                 "meter_id": meter_id,
-                "account_number": account_number,
+                "account_number": None,
+                "released_account": account_number,
             }
 
             # If a replacement is specified, create the new assignment
@@ -925,7 +928,17 @@ def decommission_meter(
                      user.user_id, f"Replaced {meter_id} ({req.reason})"),
                 )
                 result["replacement_meter_id"] = req.replacement_meter_id
+                result["account_number"] = account_number
                 result["message"] += f", replaced by {req.replacement_meter_id}"
+                cursor.execute(
+                    "UPDATE accounts SET meter_id = %s WHERE account_number = %s AND meter_id = %s",
+                    (req.replacement_meter_id, account_number, meter_id),
+                )
+            elif account_number:
+                cursor.execute(
+                    "UPDATE accounts SET meter_id = NULL WHERE account_number = %s AND meter_id = %s",
+                    (account_number, meter_id),
+                )
 
             after_state = _snapshot_meter_lifecycle_state(
                 cursor,

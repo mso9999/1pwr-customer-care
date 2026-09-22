@@ -1,3 +1,15 @@
+## Session 2026-09-22 [202609221043] — Login 502 during deploy restart
+
+### What Was Done
+- Login 502s were the API restart window, not a bad build. `1pdb-api` ignored SIGTERM and stayed in `stop-sigterm` until systemd SIGKILL at 08:43:40 UTC (90s `TimeoutStopUSec`). Nothing listened on port 8100 during that window, so Caddy returned 502 for `/health`, `/api/auth/sso`, `/api/config`.
+- Service came back at 08:43:43 UTC (`uvicorn` pid 1056688). Public checks after that: `/api/health` 200, `POST /api/auth/sso` 422 on an empty body, `/api/config` 200. LS, BN, ZM, and sandbox units active.
+- Cancelled the queued docs-only deploy (`35705837839`) after its backend job had already started the second restart. Did not push again.
+
+### Side effects
+- Two production restarts of `1pdb-api` on cc.1pwrafrica.com (deploy runs `35705785663` success, then `35705837839`). No code rollback.
+
+---
+
 ## Session 2026-09-22 [202609221037] — Deploy analytics + meter map
 
 ### What Was Done

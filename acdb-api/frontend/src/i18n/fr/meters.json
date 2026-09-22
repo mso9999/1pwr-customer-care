@@ -31,6 +31,8 @@
   "consumptionPreserved": "L'historique de consommation est conservé et se poursuivra sous le compteur de remplacement.",
   "decommissionCount_one": "Mettre hors service {{count}}",
   "decommissionCount_other": "Mettre hors service {{count}}",
+  "decommissionedOk_one": "Compteur détaché de son compte. Il peut être réassigné.",
+  "decommissionedOk_other": "{{count}} compteurs détachés de leur compte. Ils peuvent être réassignés.",
   "assignmentHistory": "Historique d'affectation",
   "noHistory": "Aucun historique d'affectation trouvé",
   "assigned": "Assigné",

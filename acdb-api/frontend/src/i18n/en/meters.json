@@ -31,6 +31,8 @@
   "consumptionPreserved": "Consumption history is preserved and will continue under the replacement meter.",
   "decommissionCount_one": "Decommission {{count}}",
   "decommissionCount_other": "Decommission {{count}}",
+  "decommissionedOk_one": "Meter released from its account. It can be assigned again.",
+  "decommissionedOk_other": "{{count}} meters released from their accounts. They can be assigned again.",
   "assignmentHistory": "Assignment History",
   "noHistory": "No assignment history found",
   "assigned": "Assigned",
