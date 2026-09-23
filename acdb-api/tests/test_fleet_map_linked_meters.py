@@ -135,6 +135,12 @@ class TestFleetMapLinkedFlagSql(unittest.TestCase):
         db.execute(
             "INSERT INTO meters VALUES ('58431', NULL, '0025MAK', 'MAK', 'Ha Makebe', -29.1, 27.5, 'installed', 'sparkmeter', NULL)"
         )
+        db.execute(
+            "INSERT INTO meters VALUES ('23029999', NULL, '0005MAK', 'MAK', 'Ha Makebe', -29.1, 27.5, 'decommissioned', 'prototype', NULL)"
+        )
+        db.execute(
+            "INSERT INTO meter_gateway_link VALUES ('23029999', 'MAK-GW-0191', 'MAK_01_AA5')"
+        )
         rows = db.execute(sql).fetchall()
         db.close()
         return {r[0]: r for r in rows}
@@ -147,6 +153,7 @@ class TestFleetMapLinkedFlagSql(unittest.TestCase):
         self.assertNotIn("gl.gateway_thing IS NOT NULL) AS linked", sql)
         self.assertIn("customer_connect_date", sql)
         self.assertIn("prototype_meter_state", sql)
+        self.assertIn("m.status <> 'decommissioned'", sql)
 
         rows = self._sqlite_rows(sql)
         self.assertTrue(rows[METER_ID][8], "NULL-gateway link row must read as linked")
@@ -154,6 +161,7 @@ class TestFleetMapLinkedFlagSql(unittest.TestCase):
         self.assertTrue(rows["23022628"][8], "provisioned gateway meter stays linked")
         self.assertEqual(rows["23022628"][9], "MAK-GW-0001")
         self.assertFalse(rows["58431"][8], "unlinked SparkMeter stays unlinked")
+        self.assertNotIn("23029999", rows)
 
 
 class TestFleetMapNeverReportedMeter(unittest.TestCase):

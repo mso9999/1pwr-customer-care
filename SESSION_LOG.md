@@ -1,3 +1,60 @@
+## Session 2026-09-23 [202609230951] — Nexus launch skips the CC sign-in chooser
+
+### What Was Done
+- Employees who arrive from Nexus no longer see the customer / employee / committee sign-in page. `/auth/sso` without a token, `?from=nexus`, and a Nexus referrer go to Nexus `/sso/authorize` and return as staff. Opening Customer Care directly, signing out, or `/login?direct=1` still shows that page.
+- A stale `/api/auth/me` 401 no longer clears a newer SSO token that landed while the request was in flight.
+- Nexus lobby: if the browser blocks the post-PIN popup, the minted SSO URL opens in the same tab. Not deployed.
+
+### Side effects
+- No deploy. Production still shows the chooser until CC `main` is pushed (deploys cc.1pwrafrica.com). The Nexus popup fallback needs a Nexus hosting deploy.
+
+### Key files
+- `acdb-api/frontend/src/lib/nexusEntry.ts`, `LoginPage.tsx`, `SsoReceiverPage.tsx`, `ProtectedRoute.tsx`, `App.tsx`, `AuthContext.tsx`, `whatsnew/folio.ts`
+- `1PWR Nexus/nexus-portal/src/lib/sso.ts`
+
+### Follow-ups
+- Push CC `main` to ship. Deploy Nexus hosting for the popup fallback.
+
+---
+
+## Session 2026-09-24 [202609240005] — Decommissioned meters leave the active pole
+
+### What Was Done
+- Motlatsi: pole `MAK_01_AA5` kept showing decommissioned meter `23022628` (MAK-GW-0191, FW 1.1.53, never reported) instead of replacement `23022616`.
+- The meters row is kept on purpose. `meter_gateway_link` still had `23022628` on that pole, and the fleet map draws every meter with GPS, including `status = decommissioned`.
+- Fleet map now skips decommissioned meters. Decommission deletes that serial's `meter_gateway_link` row and clears it from `meter_provisioning.meter_serial`. Assignment history and the meters row stay.
+- LS `onepower_cc` write ~22:05 UTC 23 Sep: deleted the `23022628` link. Pole `MAK_01_AA5` still has active `23022616` on `MAK-GW-0191` and `23021868` on `MAK-GW-0155`.
+
+### Side effects
+- Shipped on `main` with this commit.
+- One LS `meter_gateway_link` delete.
+
+---
+
+## Session 2026-09-23 [202609231535] — Restore test customer 624 from cold storage
+
+### What Was Done
+- Nils commissioned `0001SIN` with the logged override, then found customer 624 (`test 1 1meter`, Sinlita) in cold storage with 29 days left. He cannot restore.
+- Cause: `soft_deletes` row for customers id `13831`, deleted 2026-09-21 11:54 UTC by `1PWR0501`. The customer row was never removed. Commission does not check cold storage.
+- BN `onepower_bj` write ~13:35 UTC: deleted that `soft_deletes` row. Customer 13831 remains.
+
+### Side effects
+- One BN cold-storage restore. No deploy.
+
+---
+
+## Session 2026-09-23 [202609231045] — 0001SIN commission blocked on village name
+
+### What Was Done
+- Nils: commission of test account `0001SIN` says `SIN-GW-0003` has never contacted the cloud. Field Install greys out SIN-3 and has no Troubleshoot button.
+- `SIN-GW-0001/2/3` are all MQTT-connected. Customer community is `Sinlita` (legacy id 624). The commission form sends that as `site_code`, so gateway health searches `thingName:SINLITA-GW*` and returns state `never` (age null, so the dialog says "Noneh").
+- Pole install is not what the gate checks. Troubleshoot is only on an installation row still awaiting contact. SIN-3 is disabled because `meter_provisioning` for `SIN-GW-0003` already has `account_number` `0001SIN`.
+
+### Side effects
+- None. No deploy, no data write.
+
+---
+
 ## Session 2026-09-23 [202609230857] — Meter 23022628 decommission and delete 404
 
 ### What Was Done

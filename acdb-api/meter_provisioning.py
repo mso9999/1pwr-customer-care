@@ -2869,6 +2869,7 @@ def fleet_map(
             LEFT JOIN prototype_meter_state s
               ON ltrim(s.meter_id, '0') = ltrim(m.meter_id, '0')
             WHERE m.latitude IS NOT NULL AND m.longitude IS NOT NULL
+              AND (m.status IS NULL OR m.status <> 'decommissioned')
         """
         params: list = []
         if site_code:

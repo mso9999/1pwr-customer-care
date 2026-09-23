@@ -152,6 +152,7 @@ class TestDecommissionReleasesAccount(unittest.TestCase):
         sql = " ".join(call.args[0] for call in cursor.execute.call_args_list)
         self.assertIn("account_number = NULL", sql)
         self.assertIn("UPDATE accounts SET meter_id = NULL", sql)
+        self.assertIn("DELETE FROM meter_gateway_link", sql)
         conn.commit.assert_called_once()
 
 

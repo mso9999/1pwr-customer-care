@@ -909,6 +909,19 @@ def decommission_meter(
                 "special_notes = %s, account_number = NULL WHERE meter_id = %s",
                 (db_status, now, user.user_id, notes_combined, meter_id),
             )
+            # Current pole/gateway bindings only. The meters row and the closed
+            # assignment stay, so a retired serial is not what the map or a pole
+            # lookup treats as installed.
+            cursor.execute(
+                "DELETE FROM meter_gateway_link "
+                "WHERE ltrim(meter_serial, '0') = ltrim(%s, '0')",
+                (meter_id,),
+            )
+            cursor.execute(
+                "UPDATE meter_provisioning SET meter_serial = NULL "
+                "WHERE ltrim(COALESCE(meter_serial, ''), '0') = ltrim(%s, '0')",
+                (meter_id,),
+            )
 
             result = {
                 "message": f"Meter {meter_id} marked as {req.reason}",
