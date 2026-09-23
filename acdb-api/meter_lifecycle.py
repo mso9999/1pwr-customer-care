@@ -864,12 +864,25 @@ def decommission_meter(
         cursor = conn.cursor()
         now = datetime.now(timezone.utc).isoformat()
         try:
-            cursor.execute("SELECT account_number, community FROM meters WHERE meter_id = %s", (meter_id,))
+            lookup_keys = _meter_id_lookup_keys(meter_id) or [meter_id]
+            cursor.execute(
+                "SELECT account_number, community, meter_id FROM meters "
+                "WHERE meter_id = ANY(%s) "
+                "ORDER BY CASE WHEN meter_id = %s THEN 0 ELSE 1 END "
+                "LIMIT 1",
+                (lookup_keys, meter_id),
+            )
             meter_row = cursor.fetchone()
             if not meter_row:
+                logger.warning(
+                    "decommission: meter %s not found (tried %s)",
+                    meter_id,
+                    lookup_keys,
+                )
                 raise HTTPException(status_code=404, detail=f"Meter {meter_id} not found")
 
             account_number, community = meter_row[0], meter_row[1]
+            meter_id = meter_row[2] or meter_id
             before_state = _snapshot_meter_lifecycle_state(
                 cursor,
                 meter_id,
@@ -911,6 +924,11 @@ def decommission_meter(
                     (req.replacement_meter_id,),
                 )
                 if not cursor.fetchone():
+                    logger.warning(
+                        "decommission: replacement meter %s not found for %s",
+                        req.replacement_meter_id,
+                        meter_id,
+                    )
                     raise HTTPException(
                         status_code=404,
                         detail=f"Replacement meter {req.replacement_meter_id} not found",

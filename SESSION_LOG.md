@@ -1,3 +1,72 @@
+## Session 2026-09-23 [202609230857] — Meter 23022628 decommission and delete 404
+
+### What Was Done
+- Production `POST /api/meters/23022628/decommission` returned 404 at 2026-09-23 06:54:12 UTC (pid 72866, no traceback). Two minutes later `DELETE /api/tables/meters/23022628` also 404'd. The list search for that serial returned 200 both times.
+- LS `onepower_cc` has one row: `meters.id` 16452, `meter_id` `23022628`, account `0005MAK`, site MAK, platform `prototype` (UI: 1Meter), role `check` (UI: Secondary), status active. `accounts.meter_id` for `0005MAK` is `SMRSD-03-0002E040`, the primary, not this secondary serial.
+- Delete 404 cause: `_resolve_lookup_column` treated any digit string as the integer primary key. Serial 23022628 was looked up as `id = 23022628`. That id does not exist.
+- Decommission looks up `meter_id` directly. That SELECT finds the row now, so a retry with no replacement should succeed on the current API. The page discarded `detail`, so the 404 did not say whether the serial or a typed replacement was missing. Did not call live decommission.
+- Lookup by serial is kept for edit. Delete is not: see the following entry. The live swap of `23022628` is in the entry below that.
+
+### Side effects
+- Investigation only in this entry. The production swap and the Delete removal are logged separately.
+
+### Key files
+- `acdb-api/crud.py`, `acdb-api/meter_lifecycle.py`, `acdb-api/frontend/src/pages/MetersPage.tsx`, `acdb-api/tests/test_meter_record_lookup.py`
+
+---
+
+## Session 2026-09-23 [202609230945] — Remove meter Delete
+
+### What Was Done
+- Meters page Delete 404s because a numeric serial is looked up as `meters.id`, and a working Delete would remove the row. Decommission already releases the account and keeps readings, so Delete has no use case.
+- Removed the Delete button and confirm dialog from `MetersPage`. `DELETE /api/tables/meters/{id}` now returns 409 and does not delete.
+
+### Side effects
+- Shipped on `main` with this commit. Deploy restarts `1pdb-api` on cc.1pwrafrica.com.
+
+---
+
+## Session 2026-09-23 [202609230920] — Decommission 23022628, attach 23022616
+
+### What Was Done
+- Motlatsi: replaced unreadable meter `23022628` with `23022616` on `0005MAK`. Delete returned 404. Decommission returned 404.
+- Delete 404: deployed CRUD treats a numeric serial as `meters.id`. The row's id is `16452`, so `WHERE id = 23022628` misses. Local uncommitted fix in `crud.py` is not deployed. Do not ship it just to make Delete succeed — a swap must not delete the row.
+- Decommission 404: `23022616` was not a `meters` row. It is reporting as `000023022616` on `MAK-GW-0191`. The old serial is a check meter; account billing stays the SparkMeter.
+- Live LS `onepower_cc` write ~07:20 UTC: `23022628` status decommissioned, account cleared, assignment closed reason faulty, replaced_by `23022616`. Inserted `23022616` as active check meter on `0005MAK` plus an open assignment. `accounts.meter_id` still `SMRSD-03-0002E040`, `billing_meter_priority` still `sm`. No readings deleted.
+
+### Side effects
+- LS production write on meters `23022628` and `23022616`, and `meter_assignments`. No deploy.
+
+---
+
+## Session 2026-09-22 [202609221755] — 767 commission was blocked on stale SAM serial
+
+### What Was Done
+- Nils commissioning test account `0001SIN` (survey UEF 0624 HH) got "Gateway is not live" for `SAM-GW-0001` (state never, "Noneh ago"). Meter `23021767` is physically on SIN-3. `meter_last_seen` thingName is `SIN-GW-0003`. Both Things are MQTT-connected.
+- Cause: `meter_provisioning` had serial `000023021767` on both `SAM-GW-0001` (Comfort's old attempt) and `SIN-GW-0003`. Commission's unordered `LIMIT 1` returned SAM. The health check only searches `{site}-GW*`, so SAM looked up under SIN is "never" even when the Thing is online.
+- Live BN write: `SAM-GW-0001.meter_serial` set NULL. SIN-3 row left as `000023021767` / account `0001SIN`. Readings and assignment history untouched.
+- Code (not deployed): commission prefers `meter_last_seen` over the provisioning row; gateway health falls back to a direct Thing lookup; the message no longer prints "Noneh".
+
+### Side effects
+- BN `onepower_bj` write at ~15:55 UTC: `meter_provisioning` SAM-GW-0001 meter_serial NULL (was `000023021767`).
+- No deploy. Retry on current production should resolve SIN-GW-0003.
+
+---
+
+## Session 2026-09-22 [202609221620] — Decommission releases the meter account
+
+### What Was Done
+- Nils: Decommission on `000023021767` looked like a no-op. It still showed on `0001SIN` and stayed out of Assign Meter.
+- Cause: decommission closed the assignment and set status, but left `meters.account_number`. Assign Meter hides any serial that still has an account.
+- Fix: decommission now clears `meters.account_number` and, when `accounts.meter_id` is that serial, clears it (or points it at the replacement). Success message tells the operator the meter can be assigned again.
+- Live BN row for `767` / `0001SIN` cleared so it shows in the SIN dropdown without another click.
+
+### Side effects
+- Push to `main` deploys cc.1pwrafrica.com (frontend + all API lanes).
+- BN `onepower_bj` write: meter `000023021767` account unbound from `0001SIN`.
+
+---
+
 ## Session 2026-09-22 [202609221043] — Login 502 during deploy restart
 
 ### What Was Done

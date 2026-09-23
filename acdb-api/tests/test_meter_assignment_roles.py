@@ -135,7 +135,7 @@ class TestEditAssignment(unittest.TestCase):
 
 class TestDecommissionReleasesAccount(unittest.TestCase):
     def test_decommission_clears_meter_account_and_account_pointer(self):
-        context, conn, cursor = connection_context([("0001SIN", "SIN")])
+        context, conn, cursor = connection_context([("0001SIN", "SIN", "000023021767")])
         with (
             patch.object(lifecycle, "_get_connection", return_value=context),
             patch.object(lifecycle, "_snapshot_meter_lifecycle_state", return_value={}),

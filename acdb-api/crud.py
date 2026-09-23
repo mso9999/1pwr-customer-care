@@ -201,11 +201,25 @@ def _get_primary_key(conn, table_name: str) -> Optional[str]:
 def _resolve_lookup_column(conn, table_name: str, pk: str, record_id: str) -> str:
     """Return the best column to look up *record_id*.
 
-    If *record_id* is compatible with the PK type, return the PK.
-    Otherwise probe unique columns for a match so the frontend can
-    pass natural keys (e.g. account_number) instead of integer PKs.
+    The meters page addresses rows by serial (``meter_id``). Those serials
+    are numeric, and ``meters.id`` is a different integer, so a digit string
+    is the primary key only when a row with that id actually exists.
+    Otherwise probe unique columns so natural keys (account numbers, meter
+    serials) still resolve.
     """
     cursor = conn.cursor()
+
+    if table_name == "meters":
+        try:
+            cursor.execute(
+                "SELECT 1 FROM meters WHERE meter_id = %s LIMIT 1",
+                (record_id,),
+            )
+            if cursor.fetchone():
+                return "meter_id"
+        except Exception:
+            conn.rollback()
+
     cursor.execute(
         "SELECT format_type(a.atttypid, a.atttypmod) "
         "FROM pg_attribute a "
@@ -218,9 +232,18 @@ def _resolve_lookup_column(conn, table_name: str, pk: str, record_id: str) -> st
     if "int" in pk_type:
         try:
             int(record_id)
-            return pk
         except (ValueError, TypeError):
             pass
+        else:
+            try:
+                cursor.execute(
+                    f"SELECT 1 FROM {table_name} WHERE {pk} = %s LIMIT 1",
+                    (record_id,),
+                )
+                if cursor.fetchone():
+                    return pk
+            except Exception:
+                conn.rollback()
     else:
         return pk
 
@@ -1166,10 +1189,20 @@ def delete_record(
     """Delete a record by primary key. Requires superadmin or onm_team role.
 
     For soft-delete tables (customers), records are moved to cold storage
-    for 30 days before permanent purge.
+    for 30 days before permanent purge. Meter rows are refused: decommission
+    releases the account and keeps readings.
     """
     if not set(effective_roles(user)).intersection({CCRole.superadmin.value, CCRole.onm_team.value}):
         raise_privilege_denied(user, [CCRole.superadmin, CCRole.onm_team], f"delete a record from the {table_name} table")
+
+    if table_name.lower() == "meters":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Meter records are not deleted. Decommission the meter to release it "
+                "from the account. Readings and assignment history stay."
+            ),
+        )
 
     with _get_connection() as conn:
         pk = _get_primary_key(conn, table_name)

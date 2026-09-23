@@ -3,7 +3,6 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   listRows,
-  deleteRecord,
   decommissionMeter,
   getMeterHistory,
   setMeterSafetyOverride,
@@ -22,7 +21,7 @@ import FleetMap from '../components/FleetMap';
 import { UGPConnectionPicker } from './CommissionCustomerPage';
 import UGPPolePicker from '../components/UGPPolePicker';
 
-type ModalKind = 'delete' | 'decommission' | 'history' | 'override' | 'edit' | null;
+type ModalKind = 'decommission' | 'history' | 'override' | 'edit' | null;
 interface Site { concession: string; country?: string | null }
 
 export default function MetersPage() {
@@ -196,25 +195,12 @@ export default function MetersPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data]);
 
-  const handleDelete = async () => {
-    setModal(null);
-    setBusy(true);
-    const ids = [...selected];
-    let failed = 0;
-    for (const id of ids) {
-      try { await deleteRecord('meters', id); } catch { failed++; }
-    }
-    setSelected(new Set());
-    setBusy(false);
-    fetchData();
-    if (failed) alert(t('meters:deleteFailed', { failed, total: ids.length, count: ids.length }));
-  };
-
   const handleDecommission = async () => {
     setModal(null);
     setBusy(true);
     const ids = [...selected];
     let failed = 0;
+    let lastError = '';
     for (const id of ids) {
       try {
         await decommissionMeter(id, {
@@ -222,7 +208,10 @@ export default function MetersPage() {
           replacement_meter_id: decommReplacement || undefined,
           notes: decommNotes || undefined,
         });
-      } catch { failed++; }
+      } catch (err) {
+        failed++;
+        lastError = err instanceof Error ? err.message : String(err);
+      }
     }
     setSelected(new Set());
     setBusy(false);
@@ -230,7 +219,10 @@ export default function MetersPage() {
     setDecommReplacement('');
     setDecommNotes('');
     fetchData();
-    if (failed) alert(t('meters:updateFailed', { failed, total: ids.length, count: ids.length }));
+    if (failed) {
+      const base = t('meters:updateFailed', { failed, total: ids.length, count: ids.length });
+      alert(lastError ? `${base}\n${lastError}` : base);
+    }
     else alert(t('meters:decommissionedOk', { count: ids.length }));
   };
 
@@ -476,38 +468,6 @@ export default function MetersPage() {
               </svg>
               {t('meters:decommission')}
             </button>
-            <button
-              onClick={() => setModal('delete')}
-              disabled={busy}
-              className="px-3 py-1.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 transition flex items-center gap-1.5"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-              </svg>
-              {t('meters:delete')}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {modal === 'delete' && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setModal(null)}>
-          <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full mx-4 p-6" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
-                <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-              </div>
-              <h3 className="text-lg font-semibold text-gray-800">{t('meters:deleteMeters')}</h3>
-            </div>
-            <p className="text-sm text-gray-600 mb-6">
-              {t('meters:deleteConfirm', { count: selected.size })}
-            </p>
-            <div className="flex gap-3">
-              <button onClick={() => setModal(null)} className="flex-1 py-2.5 bg-gray-100 text-gray-700 rounded-xl text-sm font-medium hover:bg-gray-200 transition">{t('meters:cancel')}</button>
-              <button onClick={handleDelete} className="flex-1 py-2.5 bg-red-600 text-white rounded-xl text-sm font-semibold hover:bg-red-700 transition">{t('meters:deleteCount', { count: selected.size })}</button>
-            </div>
           </div>
         </div>
       )}
