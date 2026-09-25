@@ -13,6 +13,7 @@ export default function PtbGapWarning({ site, account }: { site: string; account
   const [gaps, setGaps] = useState<PtbGap[]>([]);
   const [busy, setBusy] = useState('');
   const [message, setMessage] = useState('');
+  const [showAll, setShowAll] = useState(false);
 
   const load = useCallback(() => {
     if (!site) return;
@@ -65,7 +66,7 @@ export default function PtbGapWarning({ site, account }: { site: string; account
       {gaps.length > 0 && (
         <>
           <div className="font-semibold text-amber-950">
-            {L(`${site}: meter(s) in service with no PTB in uGridPlan`, `${site} : compteur(s) en service sans PTB dans uGridPlan`)}
+            {L(`${site}: ${gaps.length} meter(s) in service with no PTB in uGridPlan`, `${site} : ${gaps.length} compteur(s) en service sans PTB dans uGridPlan`)}
           </div>
           <p className="text-xs text-amber-900 mt-1">
             {L(
@@ -74,7 +75,7 @@ export default function PtbGapWarning({ site, account }: { site: string; account
             )}
           </p>
           <ul className="mt-2 space-y-1.5 text-sm">
-            {gaps.map((g) => (
+            {(showAll ? gaps : gaps.slice(0, 8)).map((g) => (
               <li key={g.meter_id} className="flex flex-wrap items-center justify-between gap-2">
                 <span>
                   <span className="font-mono">{g.meter_id}</span> · {g.account_number}
@@ -91,6 +92,11 @@ export default function PtbGapWarning({ site, account }: { site: string; account
               </li>
             ))}
           </ul>
+          {gaps.length > 8 && (
+            <button type="button" onClick={() => setShowAll((v) => !v)} className="mt-2 text-xs font-semibold text-amber-900 underline">
+              {showAll ? L('Show fewer', 'Afficher moins') : L(`Show all ${gaps.length}`, `Afficher les ${gaps.length}`)}
+            </button>
+          )}
         </>
       )}
       {message && <div className="text-xs text-gray-800 mt-2">{message}</div>}
