@@ -1554,6 +1554,15 @@ def resolve_site_project(site: str) -> tuple[str, str]:
     return canonical, canonical
 
 
+def _site_project_key(site: str) -> str:
+    """uGridPLAN registry key for a CC site code or display name.
+
+    Sites created in the CC Site Registry (e.g. BN KOT) have no
+    ``cc_site_projects`` row; ``load_project`` resolves the bare code.
+    """
+    return resolve_site_project(site)[1]
+
+
 @router.get("/sites")
 def list_site_projects(user: CurrentUser = Depends(require_employee)):
     """List all configured site-to-project mappings."""
@@ -1941,14 +1950,9 @@ def sync_meter_gps_from_ugp(site_code: str, account_number: str, survey_id: str,
         return False
     try:
         if conns is None:
-            with get_auth_db() as conn:
-                row = conn.execute(
-                    "SELECT project_id FROM cc_site_projects WHERE site_code = ?", (site,)
-                ).fetchone()
-            if not row:
-                return False
+            project_key = _site_project_key(site)
             client = _get_ugp_client()
-            session_id = _load_project_for_site(client, row["project_id"])
+            session_id = _load_project_for_site(client, project_key)
             conns = client.get_connections(session_id)
         gps = _connection_gps(conns, sid)
         if not gps:
@@ -2016,15 +2020,7 @@ def list_poles(
     the physical pole a unit is mounted on; the assign step then finds-or-creates
     the PTB on that pole.
     """
-    with get_auth_db() as conn:
-        row = conn.execute(
-            "SELECT project_id FROM cc_site_projects WHERE site_code = ?",
-            (site.upper(),),
-        ).fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail=f"No uGridPLAN project configured for site '{site}'.")
-
-    project_name = row["project_id"]
+    project_name = _site_project_key(site.upper())
     try:
         client = _get_ugp_client()
         session_id = _load_project_for_site(client, project_name)
@@ -2117,16 +2113,10 @@ def ptb_backfill_report(
         units = [dict(zip(cols, r)) for r in cur.fetchall()]
 
     # uGP: connections (survey_id -> Pole_ID), lines (connection -> pole), ptbs (pole -> ptb)
-    with get_auth_db() as conn:
-        row = conn.execute(
-            "SELECT project_id FROM cc_site_projects WHERE site_code = ?",
-            (site_code,),
-        ).fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail=f"No uGridPLAN project for site '{site_code}'.")
+    project_key = _site_project_key(site_code)
     try:
         client = _get_ugp_client()
-        session_id = _load_project_for_site(client, row["project_id"])
+        session_id = _load_project_for_site(client, project_key)
         conns = client.get_connections(session_id)
         lines = client.get_lines(session_id)
         ptbs = client.get_ptbs(session_id)
@@ -2215,16 +2205,10 @@ def pole_for_connection(
     """
     site_code = site.strip().upper()
     sid_in = survey_id.strip()
-    with get_auth_db() as conn:
-        row = conn.execute(
-            "SELECT project_id FROM cc_site_projects WHERE site_code = ?",
-            (site_code,),
-        ).fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail=f"No uGridPLAN project for site '{site_code}'.")
+    project_key = _site_project_key(site_code)
     try:
         client = _get_ugp_client()
-        session_id = _load_project_for_site(client, row["project_id"])
+        session_id = _load_project_for_site(client, project_key)
         lines = client.get_lines(session_id)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"uGridPLAN fetch failed: {e}")
@@ -2274,14 +2258,7 @@ def assign_ptb(
     if not gateway_thing and meter_serial:
         gateway_thing = _gateway_for_meter_serial(meter_serial)
 
-    with get_auth_db() as conn:
-        row = conn.execute(
-            "SELECT project_id FROM cc_site_projects WHERE site_code = ?",
-            (site_code,),
-        ).fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail=f"No uGridPLAN project configured for site '{site_code}'.")
-    project_name = row["project_id"]
+    project_name = _site_project_key(site_code)
 
     try:
         client = _get_ugp_client()
@@ -2631,14 +2608,7 @@ def _auto_link_plan(site_code: str, max_pole_distance_m: float):
     except Exception as e:
         logger.warning("auto-link: telemetry scan failed: %s", e)
 
-    with get_auth_db() as conn:
-        row = conn.execute(
-            "SELECT project_id FROM cc_site_projects WHERE site_code = ?",
-            (site_code,),
-        ).fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail=f"No uGridPLAN project configured for site '{site_code}'.")
-    project_name = row["project_id"]
+    project_name = _site_project_key(site_code)
     try:
         client = _get_ugp_client()
         session_id = _load_project_for_site(client, project_name)
@@ -3048,16 +3018,10 @@ def install_gateway(
             )
 
     # 3. uGP: find-or-create the PTB on the pole, set its serial to the gateway.
-    with get_auth_db() as conn:
-        row = conn.execute(
-            "SELECT project_id FROM cc_site_projects WHERE site_code = ?",
-            (site_code,),
-        ).fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail=f"No uGridPLAN project configured for site '{site_code}'.")
+    project_key = _site_project_key(site_code)
     try:
         client = _get_ugp_client()
-        session_id = _load_project_for_site(client, row["project_id"])
+        session_id = _load_project_for_site(client, project_key)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"uGridPLAN unreachable: {e}")
 
@@ -3297,15 +3261,7 @@ def split_connection(
     site_code = req.site.upper()
 
     # --- Resolve project ---
-    with get_auth_db() as conn:
-        row = conn.execute(
-            "SELECT project_id FROM cc_site_projects WHERE site_code = ?",
-            (site_code,),
-        ).fetchone()
-    if not row:
-        raise HTTPException(status_code=404, detail=f"No project for site '{site_code}'")
-
-    project_name = row["project_id"]
+    project_name = _site_project_key(site_code)
 
     try:
         client = _get_ugp_client()
@@ -3444,19 +3400,7 @@ def sync_preview(
     Fetches connections from uGridPLAN and matches to customers.
     """
     # Look up project name
-    with get_auth_db() as conn:
-        row = conn.execute(
-            "SELECT project_id FROM cc_site_projects WHERE site_code = ?",
-            (site.upper(),),
-        ).fetchone()
-
-    if not row:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No project configured for site '{site}'. Use the Discover button or add manually.",
-        )
-
-    project_name = row["project_id"]  # stored as project name
+    project_name = _site_project_key(site.upper())
 
     # Load project to get session UUID, then fetch connections
     try:
@@ -3524,16 +3468,7 @@ def sync_execute(
     - Writes uGridPLAN GPS back to customers that have empty gps_lat/gps_lon
     - Computes Load_A from consumption history and pushes to uGridPLAN
     """
-    with get_auth_db() as conn:
-        row = conn.execute(
-            "SELECT project_id FROM cc_site_projects WHERE site_code = ?",
-            (req.site.upper(),),
-        ).fetchone()
-
-    if not row:
-        raise HTTPException(status_code=404, detail=f"No project configured for site '{req.site}'")
-
-    project_name = row["project_id"]  # stored as project name
+    project_name = _site_project_key(req.site.upper())
 
     try:
         client = _get_ugp_client()

@@ -3124,17 +3124,11 @@ def customer_meter_linkage(
     if not pole_id and cust and cust.get("plot_number") and site:
         try:
             import sync_ugridplan as sug
-            with sug.get_auth_db() as aconn:
-                prow = aconn.execute(
-                    "SELECT project_id FROM cc_site_projects WHERE site_code = ?",
-                    (site.upper(),),
-                ).fetchone()
-            if prow:
-                client = sug._get_ugp_client()
-                session_id = sug._load_project_for_site(client, prow["project_id"])
-                lines = client.get_lines(session_id)
-                # plot_number is the connection Survey_ID in the common case
-                pole_id = sug._pole_for_connection(lines, str(cust["plot_number"]).strip())
+            client = sug._get_ugp_client()
+            session_id = sug._load_project_for_site(client, sug._site_project_key(site.upper()))
+            lines = client.get_lines(session_id)
+            # plot_number is the connection Survey_ID in the common case
+            pole_id = sug._pole_for_connection(lines, str(cust["plot_number"]).strip())
         except Exception as exc:
             logger.info("customer-linkage pole lookup failed (best-effort): %s", exc)
 
