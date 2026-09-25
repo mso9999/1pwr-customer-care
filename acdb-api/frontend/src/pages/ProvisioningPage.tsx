@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   updateDeviceConfig,
   getFactoryOtaReadiness,
@@ -23,6 +24,8 @@ import {
   createSiteOtaRelease,
   retireTestUnit,
   getGatewayStability,
+  getInstallationStatus,
+  type SiteInstallationStatus,
   type UpdateConfigResult,
   type OtaReadiness,
   type OtaPromotionStatus,
@@ -38,7 +41,8 @@ import { formatLastSeen } from '../lib/datetime';
 import FieldInstall from '../components/FieldInstall';
 import { useAuth } from '../contexts/AuthContext';
 
-type Mode = 'walkthrough' | 'readiness' | 'guide' | 'canary' | 'batch-test' | 'config' | 'meters' | 'fleet-live' | 'field-install' | 'registry';
+const MODES = ['walkthrough', 'readiness', 'guide', 'canary', 'batch-test', 'config', 'meters', 'fleet-live', 'field-install', 'registry'] as const;
+type Mode = typeof MODES[number];
 type ValidationNetworkMode = 'site' | 'mirror';
 type GuideCheckKey =
   | 'sealed'
@@ -148,8 +152,15 @@ function SiteAdditionGuide({
 
 export default function ProvisioningPage() {
   const { hasPrivilegeAction } = useAuth();
-  const [mode, setMode] = useState<Mode>('walkthrough');
+  const { i18n } = useTranslation();
+  const fr = Boolean(i18n.language?.startsWith('fr'));
+  const L = (en: string, frText: string) => (fr ? frText : en);
+  const [mode, setMode] = useState<Mode>(() => {
+    const tab = new URLSearchParams(window.location.search).get('tab');
+    return tab && (MODES as readonly string[]).includes(tab) ? (tab as Mode) : 'walkthrough';
+  });
   const [countryReadiness, setCountryReadiness] = useState<CountryProvisioningReadiness | null>(null);
+  const [installStatus, setInstallStatus] = useState<SiteInstallationStatus[]>([]);
   const [countryReadinessLoading, setCountryReadinessLoading] = useState(false);
   const [otaReadiness, setOtaReadiness] = useState<OtaReadiness | null>(null);
   const [otaReadinessError, setOtaReadinessError] = useState('');
@@ -235,8 +246,10 @@ export default function ProvisioningPage() {
 
   const loadCountryReadiness = () => {
     setCountryReadinessLoading(true);
-    getCountryProvisioningReadiness()
-      .then(setCountryReadiness)
+    Promise.all([
+      getCountryProvisioningReadiness().then(setCountryReadiness),
+      getInstallationStatus().then((r) => setInstallStatus(r.sites)),
+    ])
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setCountryReadinessLoading(false));
   };
@@ -315,6 +328,8 @@ export default function ProvisioningPage() {
     getProvisioningSiteCodes()
       .then((sites) => {
         setGuideSites(sites);
+        const linked = new URLSearchParams(window.location.search).get('site')?.toUpperCase();
+        if (linked && sites.some((s) => s.code === linked)) setGuideSite((current) => current || linked);
         if (sites.length === 1) setGuideSite((current) => current || sites[0].code);
       })
       .catch((e) => setError(e instanceof Error ? e.message : String(e)));
@@ -632,6 +647,7 @@ export default function ProvisioningPage() {
     .every((gate) => gate.ready));
   const operatorStep = (key: string) => selectedSiteProgress?.operator_steps?.[key];
   const physicalValidationPassed = (selectedSiteProgress?.passed_validations || 0) > 0;
+  const selectedInstall = installStatus.find((s) => s.site === guideSite);
   const walkthroughSteps: Array<{
     key: string;
     title: string;
@@ -650,121 +666,195 @@ export default function ProvisioningPage() {
   }> = [
     {
       key: 'country-foundations',
-      title: 'Activate the country foundations',
-      owner: 'Country lead, Finance, O&M, Engineering',
+      title: L('Activate the country foundations', 'Activer les fondations du pays'),
+      owner: L('Country lead, Finance, O&M, Engineering', 'Responsable pays, Finance, O&M, Ingénierie'),
       done: foundationsReady,
-      description: 'Approve the site roster and tariff, then configure metering, payment ingestion, and meter credit. CC keeps provisioning fail-closed until these gates are ready.',
-      actionLabel: 'Review country gates',
+      description: L(
+        'Approve the site roster and tariff, then configure metering, payment ingestion, and meter credit. CC keeps provisioning fail-closed until these gates are ready.',
+        'Approuver la liste des sites et le tarif, puis configurer le comptage, la réception des paiements et le crédit compteur. CC bloque le provisionnement tant que ces conditions ne sont pas remplies.',
+      ),
+      actionLabel: L('Review country gates', 'Voir les conditions pays'),
       mode: 'readiness' as Mode,
     },
     {
       key: 'site-release',
-      title: 'Select the deployment site and OTA candidate',
-      owner: 'Firmware / Engineering',
+      title: L('Select the deployment site and OTA candidate', 'Choisir le site de déploiement et le candidat OTA'),
+      owner: L('Firmware / Engineering', 'Firmware / Ingénierie'),
       done: Boolean(selectedSiteProgress?.ota_candidate_ready),
-      description: 'Choose the real destination site. CC must find an immutable signed full-firmware candidate for that exact site.',
-      actionLabel: 'Review site release',
+      description: L(
+        'Choose the real destination site. CC must find an immutable signed full-firmware candidate for that exact site.',
+        'Choisissez le vrai site de destination. CC doit trouver un firmware complet signé et immuable pour ce site précis.',
+      ),
+      actionLabel: L('Review site release', 'Voir la version du site'),
       mode: 'readiness' as Mode,
     },
     {
       key: 'deployment_wifi_ready',
-      title: 'Prepare the site Starlink credentials',
-      owner: 'Country O&M',
+      title: L('Prepare the site Starlink credentials', 'Préparer les identifiants Starlink du site'),
+      owner: L('Country O&M', 'O&M pays'),
       done: Boolean(operatorStep('deployment_wifi_ready')?.completed),
-      description: 'Have the exact site SSID/password available. Optionally create a controlled 2.4 GHz HQ mirror with identical credentials and test its internet access. Never paste the password into CC notes.',
-      actionLabel: 'Open network preparation',
+      description: L(
+        'Have the exact site SSID/password available. Optionally create a controlled 2.4 GHz HQ mirror with identical credentials and test its internet access. Never paste the password into CC notes.',
+        'Ayez le SSID et le mot de passe exacts du site. Vous pouvez créer au siège un réseau miroir 2,4 GHz avec les mêmes identifiants et tester son accès internet. Ne collez jamais le mot de passe dans les notes CC.',
+      ),
+      actionLabel: L('Open network preparation', 'Ouvrir la préparation réseau'),
       mode: 'guide' as Mode,
       manualKey: 'deployment_wifi_ready',
       evidenceRequired: false,
-      evidenceHint: 'Optional reference only—never enter the Wi-Fi password',
+      evidenceHint: L('Optional reference only—never enter the Wi-Fi password', 'Référence facultative — ne saisissez jamais le mot de passe Wi-Fi'),
     },
     {
       key: 'first-gateway',
-      title: 'Allocate one factory gateway as the canary',
-      owner: 'Country O&M',
+      title: L('Allocate one factory gateway as the canary', 'Attribuer une passerelle d’usine comme canari'),
+      owner: L('Country O&M', 'O&M pays'),
       done: (selectedSiteProgress?.test_gateways || 0) > 0,
-      description: 'Download the station, select the country and site, scan the provisioning LAN, match the printed unit, and allocate exactly one factory v1.1.56 gateway.',
-      actionLabel: 'Start gateway guide',
+      description: L(
+        'Download the station, select the country and site, scan the provisioning LAN, match the printed unit, and allocate exactly one factory v1.1.56 gateway.',
+        'Téléchargez la station, choisissez le pays et le site, scannez le réseau de provisionnement, identifiez l’unité étiquetée et attribuez une seule passerelle d’usine v1.1.56.',
+      ),
+      actionLabel: L('Start gateway guide', 'Ouvrir le guide passerelle'),
       mode: 'guide' as Mode,
     },
     {
       key: 'ota-canary',
-      title: 'Complete and verify the v1.1.57 OTA canary',
-      owner: 'Country O&M + Firmware',
+      title: L('Complete and verify the v1.1.57 OTA canary', 'Terminer et vérifier le canari OTA v1.1.57'),
+      owner: L('Country O&M + Firmware', 'O&M pays + Firmware'),
       done: (selectedSiteProgress?.ota_succeeded || 0) > 0,
-      description: 'Keep the gateway online while CC displays queued, in-progress, succeeded, or failed. Confirm the installed firmware telemetry reports the target version after reboot.',
-      actionLabel: 'Open OTA monitor',
+      description: L(
+        'Keep the gateway online while CC displays queued, in-progress, succeeded, or failed. Confirm the installed firmware telemetry reports the target version after reboot.',
+        'Gardez la passerelle en ligne pendant que CC affiche en file, en cours, réussi ou échoué. Vérifiez qu’après redémarrage la télémétrie indique la version cible.',
+      ),
+      actionLabel: L('Open OTA monitor', 'Ouvrir le suivi OTA'),
       mode: 'canary' as Mode,
     },
     {
       key: 'meter_string_ready',
-      title: 'Address meters and connect the protected test load',
-      owner: 'Country O&M',
+      title: L('Address meters and connect the protected test load', 'Adresser les compteurs et brancher la charge de test protégée'),
+      owner: L('Country O&M', 'O&M pays'),
       done: Boolean(operatorStep('meter_string_ready')?.completed),
-      description: 'Download the addressing kit, address and label meters one at a time, verify the sorted RS485 string, power down, then connect the string and a protected dummy load.',
-      actionLabel: 'Open addressing and validation',
+      description: L(
+        'Download the addressing kit, address and label meters one at a time, verify the sorted RS485 string, power down, then connect the string and a protected dummy load.',
+        'Téléchargez le kit d’adressage, adressez et étiquetez les compteurs un par un, vérifiez la chaîne RS485 triée, coupez l’alimentation, puis branchez la chaîne et une charge fictive protégée.',
+      ),
+      actionLabel: L('Open addressing and validation', 'Ouvrir adressage et validation'),
       mode: 'batch-test' as Mode,
       manualKey: 'meter_string_ready',
       evidenceRequired: true,
-      evidenceHint: 'Meter serials, batch label, or bench/photo reference',
+      evidenceHint: L('Meter serials, batch label, or bench/photo reference', 'Numéros de compteur, étiquette du lot ou référence banc/photo'),
     },
     {
       key: 'physical-validation',
-      title: 'Prove consumption, zero-balance shutoff, and payment restart',
-      owner: 'Country O&M',
+      title: L('Prove consumption, zero-balance shutoff, and payment restart', 'Prouver consommation, coupure à solde nul et remise en service après paiement'),
+      owner: L('Country O&M', 'O&M pays'),
       done: physicalValidationPassed || Boolean(selectedSiteProgress?.ota_batch_approved),
-      description: 'Run the isolated dummy-customer test: observe positive load, consume the synthetic balance, verify relay open, apply synthetic payment, verify relay close, and confirm the load restarts.',
-      actionLabel: 'Run batch validation',
+      description: L(
+        'Run the isolated dummy-customer test: observe positive load, consume the synthetic balance, verify relay open, apply synthetic payment, verify relay close, and confirm the load restarts.',
+        'Faites le test isolé du client fictif : charge positive observée, solde synthétique consommé, relais ouvert, paiement synthétique appliqué, relais fermé, et redémarrage de la charge.',
+      ),
+      actionLabel: L('Run batch validation', 'Lancer la validation du lot'),
       mode: 'batch-test' as Mode,
       note: !physicalValidationPassed && selectedSiteProgress?.ota_batch_approved
-        ? 'Physical validation was waived during release approval; the waiver remains in the audit trail.'
+        ? L(
+          'Physical validation was waived during release approval; the waiver remains in the audit trail.',
+          'La validation physique a été levée lors de l’approbation ; la dérogation reste dans l’historique.',
+        )
         : undefined,
     },
     {
       key: 'release-approval',
-      title: 'Approve the immutable release for controlled batches',
-      owner: 'Engineering / Superadmin',
+      title: L('Approve the immutable release for controlled batches', 'Approuver la version immuable pour les lots contrôlés'),
+      owner: L('Engineering / Superadmin', 'Ingénierie / Superadmin'),
       done: Boolean(selectedSiteProgress?.ota_batch_approved),
-      description: 'Review the successful canary and validation session. Approval is bound to the exact artifact version and target firmware.',
-      actionLabel: 'Review and approve release',
+      description: L(
+        'Review the successful canary and validation session. Approval is bound to the exact artifact version and target firmware.',
+        'Vérifiez le canari réussi et la session de validation. L’approbation est liée à la version exacte de l’artefact et du firmware cible.',
+      ),
+      actionLabel: L('Review and approve release', 'Vérifier et approuver'),
       mode: 'canary' as Mode,
     },
     {
       key: 'controlled-batch',
-      title: 'Provision the controlled gateway batch',
-      owner: 'Country O&M',
+      title: L('Provision the controlled gateway batch', 'Provisionner le lot de passerelles contrôlé'),
+      owner: L('Country O&M', 'O&M pays'),
       done: (selectedSiteProgress?.production_gateways || 0) > 0,
-      description: 'Return to the station, provision a controlled batch, and do not move forward until every gateway reports a successful OTA and the expected site/SSID.',
-      actionLabel: 'Open batch provisioning guide',
+      description: L(
+        'Return to the station, provision a controlled batch, and do not move forward until every gateway reports a successful OTA and the expected site/SSID.',
+        'Revenez à la station, provisionnez un lot contrôlé et n’avancez pas tant que chaque passerelle n’a pas un OTA réussi et le bon site/SSID.',
+      ),
+      actionLabel: L('Open batch provisioning guide', 'Ouvrir le guide de provisionnement'),
       mode: 'guide' as Mode,
     },
     {
       key: 'test_customer_assigned',
-      title: 'Onboard the test customer and assign the meter',
-      owner: 'Country O&M',
+      title: L('Onboard the test customer and assign the meter', 'Inscrire le client test et attribuer le compteur'),
+      owner: L('Country O&M', 'O&M pays'),
       done: Boolean(operatorStep('test_customer_assigned')?.completed),
-      description: 'Create or identify the approved test customer, reconcile the acquired meter serial, assign the meter/gateway to that account, and record the account reference below.',
-      actionLabel: 'Assign meter',
+      description: L(
+        'Create or identify the approved test customer, reconcile the acquired meter serial, assign the meter/gateway to that account, and record the account reference below.',
+        'Créez ou identifiez le client test approuvé, rapprochez le numéro de compteur détecté, attribuez le compteur à ce compte et notez la référence du compte ci-dessous.',
+      ),
+      actionLabel: L('Assign meter', 'Attribuer le compteur'),
       route: '/assign-meter',
       secondaryRoute: '/customers/new',
-      secondaryLabel: 'Create customer',
+      secondaryLabel: L('Create customer', 'Créer un client'),
       manualKey: 'test_customer_assigned',
       evidenceRequired: true,
-      evidenceHint: 'Test account number and assigned meter serial',
+      evidenceHint: L('Test account number and assigned meter serial', 'Numéro du compte test et numéro du compteur attribué'),
     },
     {
       key: 'site_commissioning_verified',
-      title: 'Verify actual-site Starlink and complete commissioning',
-      owner: 'Country O&M',
+      title: L('Verify actual-site Starlink and complete commissioning', 'Vérifier le Starlink sur site et terminer la mise en service'),
+      owner: L('Country O&M', 'O&M pays'),
       done: Boolean(operatorStep('site_commissioning_verified')?.completed),
-      description: 'At the real site, confirm cloud reconnect, fresh consumption, the correct customer mapping, a test payment, relay behavior, and final commissioning records.',
-      actionLabel: 'Open commissioning',
+      description: L(
+        'At the real site, confirm cloud reconnect, fresh consumption, the correct customer mapping, a test payment, relay behavior, and final commissioning records.',
+        'Sur le vrai site, confirmez la reconnexion au cloud, une consommation récente, le bon rattachement client, un paiement test, le fonctionnement du relais et les fiches de mise en service.',
+      ),
+      actionLabel: L('Open commissioning', 'Ouvrir la mise en service'),
       route: '/commission',
       secondaryRoute: '/record-payment',
-      secondaryLabel: 'Record test payment',
+      secondaryLabel: L('Record test payment', 'Enregistrer un paiement test'),
       manualKey: 'site_commissioning_verified',
       evidenceRequired: true,
-      evidenceHint: 'Commissioning/customer reference and actual-site test result',
+      evidenceHint: L('Commissioning/customer reference and actual-site test result', 'Référence mise en service/client et résultat du test sur site'),
+    },
+    {
+      key: 'rollout-poles',
+      title: L('Record every installed gateway on its pole', 'Enregistrer chaque passerelle installée sur son poteau'),
+      owner: L('Country O&M (field team)', 'O&M pays (équipe terrain)'),
+      done: Boolean(selectedInstall && selectedInstall.gateways_in_field > 0
+        && selectedInstall.gateways_not_on_pole.length === 0),
+      description: L(
+        'The same day a gateway goes up, open Field install, pick the gateway and the pole on the map, and power it. CC marks the install verified on first cloud contact. This is what places the gateway on the site map.',
+        'Le jour même où une passerelle est posée, ouvrez Installation terrain, choisissez la passerelle et le poteau sur la carte, puis mettez-la sous tension. CC valide l’installation au premier contact cloud. C’est ce qui place la passerelle sur la carte du site.',
+      ),
+      note: selectedInstall && selectedInstall.gateways_not_on_pole.length > 0
+        ? L(
+          `Online but not recorded on a pole: ${selectedInstall.gateways_not_on_pole.join(', ')}`,
+          `En ligne mais non enregistrées sur un poteau : ${selectedInstall.gateways_not_on_pole.join(', ')}`,
+        )
+        : undefined,
+      actionLabel: L('Open Field install', 'Ouvrir Installation terrain'),
+      mode: 'field-install' as Mode,
+    },
+    {
+      key: 'rollout-assign',
+      title: L('Assign every installed meter to its customer', 'Attribuer chaque compteur installé à son client'),
+      owner: L('Country O&M (field team)', 'O&M pays (équipe terrain)'),
+      done: Boolean(selectedInstall && selectedInstall.assigned_meters > 0
+        && selectedInstall.unassigned_meters.length === 0),
+      description: L(
+        'After each meter is wired and reporting, open Assign Meter for this site and bind the serial to the customer account and pole. Only then does the meter appear on the Meters page and fleet map. Repeat until no reporting meter is left unassigned.',
+        'Quand chaque compteur est câblé et remonte des données, ouvrez Attribuer un compteur pour ce site et liez le numéro au compte client et au poteau. Le compteur apparaît alors dans la page Compteurs et sur la carte. Répétez jusqu’à ce qu’aucun compteur actif ne reste sans attribution.',
+      ),
+      note: selectedInstall && selectedInstall.unassigned_meters.length > 0
+        ? L(
+          `${selectedInstall.unassigned_meters.length} reporting meter(s) not yet assigned: ${selectedInstall.unassigned_meters.map((m) => m.meter_id).join(', ')}`,
+          `${selectedInstall.unassigned_meters.length} compteur(s) actif(s) non attribué(s) : ${selectedInstall.unassigned_meters.map((m) => m.meter_id).join(', ')}`,
+        )
+        : undefined,
+      actionLabel: L('Assign meters', 'Attribuer les compteurs'),
+      route: guideSite ? `/assign-meter?platform=prototype&site=${encodeURIComponent(guideSite)}` : '/assign-meter?platform=prototype',
     },
   ];
   const walkthroughDone = walkthroughSteps.filter((step) => step.done).length;
@@ -773,26 +863,32 @@ export default function ProvisioningPage() {
   return (
     <div className="max-w-5xl mx-auto p-4 sm:p-6">
       <div className="mb-5">
-        <h1 className="text-xl font-semibold text-gray-900">1Meter Provisioning</h1>
+        <h1 className="text-xl font-semibold text-gray-900">{L('1Meter Provisioning', 'Provisionnement 1Meter')}</h1>
         <p className="text-sm text-gray-500 mt-1">
-          Bring factory-boot gateways onto their recognized provisioning LAN, give them stable
-          <code className="text-gray-700"> &lt;SITE&gt;-GW-####</code> identities, and promote them to
-          approved full firmware over signed OTA. Gateway names never change.
+          {L(
+            'Bring factory-boot gateways onto their recognized provisioning LAN, give them stable',
+            'Connectez les passerelles d’usine à leur réseau de provisionnement, donnez-leur une identité stable',
+          )}
+          <code className="text-gray-700"> &lt;SITE&gt;-GW-####</code>
+          {L(
+            ', and promote them to approved full firmware over signed OTA. Gateway names never change.',
+            ', puis passez-les au firmware complet approuvé par OTA signé. Le nom d’une passerelle ne change jamais.',
+          )}
         </p>
       </div>
 
       <div className="flex gap-1 mb-5 border-b border-gray-200">
         {([
-          ['walkthrough', 'Operator walkthrough'],
-          ['readiness', 'Country readiness'],
-          ['guide', 'Guide & download'],
-          ['canary', 'OTA canary'],
-          ['batch-test', 'Batch validation'],
-          ['config', 'Update Configuration'],
-          ['meters', 'Provisioned meters'],
-          ['fleet-live', 'Fleet live'],
-          ['field-install', 'Field install'],
-          ['registry', 'Registry'],
+          ['walkthrough', L('Operator walkthrough', 'Parcours opérateur')],
+          ['readiness', L('Country readiness', 'Préparation pays')],
+          ['guide', L('Guide & download', 'Guide et téléchargement')],
+          ['canary', L('OTA canary', 'Canari OTA')],
+          ['batch-test', L('Batch validation', 'Validation du lot')],
+          ['config', L('Update Configuration', 'Mise à jour configuration')],
+          ['meters', L('Provisioned meters', 'Compteurs provisionnés')],
+          ['fleet-live', L('Fleet live', 'Parc en direct')],
+          ['field-install', L('Field install', 'Installation terrain')],
+          ['registry', L('Registry', 'Registre')],
         ] as [Mode, string][]).map(([m, label]) => (
           <button
             key={m}
@@ -820,19 +916,23 @@ export default function ProvisioningPage() {
             <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
               <div>
                 <div className="text-xs uppercase tracking-wide font-semibold text-blue-700">
-                  Guided country and site activation
+                  {L('Guided country and site activation', 'Activation guidée du pays et du site')}
                 </div>
                 <h2 className="text-xl font-semibold text-gray-900 mt-1">
-                  {countryReadiness?.country_name || 'Loading country…'} operator walkthrough
+                  {fr
+                    ? `Parcours opérateur — ${countryReadiness?.country_name || 'chargement du pays…'}`
+                    : `${countryReadiness?.country_name || 'Loading country…'} operator walkthrough`}
                 </h2>
                 <p className="text-sm text-gray-700 mt-1 max-w-2xl">
-                  Work from top to bottom. CC completes cloud-observable steps automatically and records
-                  your confirmation only where a physical bench or site check cannot be observed remotely.
+                  {L(
+                    'Work from top to bottom. CC completes cloud-observable steps automatically and records your confirmation only where a physical bench or site check cannot be observed remotely. Pole installation at the site starts at step 11, once the release is approved (step 8) and the controlled batch has passed OTA (step 9); steps 12–13 then cover every further gateway and meter.',
+                    'Travaillez de haut en bas. CC valide automatiquement les étapes visibles depuis le cloud et n’enregistre votre confirmation que pour les contrôles physiques. L’installation sur les poteaux commence à l’étape 11, une fois la version approuvée (étape 8) et l’OTA du lot contrôlé réussi (étape 9) ; les étapes 12–13 couvrent ensuite chaque passerelle et chaque compteur suivants.',
+                  )}
                 </p>
               </div>
               <div className="min-w-48">
                 <div className="flex justify-between text-xs font-semibold text-gray-700 mb-1">
-                  <span>{walkthroughDone} of {walkthroughSteps.length} complete</span>
+                  <span>{fr ? `${walkthroughDone} sur ${walkthroughSteps.length} terminées` : `${walkthroughDone} of ${walkthroughSteps.length} complete`}</span>
                   <span>{walkthroughPercent}%</span>
                 </div>
                 <div className="h-3 bg-white rounded-full overflow-hidden border border-blue-100">
@@ -842,7 +942,7 @@ export default function ProvisioningPage() {
             </div>
             <div className="grid md:grid-cols-[1fr_auto] gap-3 items-end mt-5">
               <div>
-                <label className={labelCls}>Deployment site</label>
+                <label className={labelCls}>{L('Deployment site', 'Site de déploiement')}</label>
                 <select
                   className={inputCls}
                   value={guideSite}
@@ -853,7 +953,7 @@ export default function ProvisioningPage() {
                     setValidationTarget('');
                   }}
                 >
-                  <option value="">Select the site this equipment will serve…</option>
+                  <option value="">{L('Select the site this equipment will serve…', 'Choisissez le site que cet équipement desservira…')}</option>
                   {guideSites.map((site) => (
                     <option key={site.code} value={site.code}>{site.code} — {site.name}</option>
                   ))}
@@ -864,7 +964,7 @@ export default function ProvisioningPage() {
                 disabled={countryReadinessLoading}
                 className="px-4 py-2 rounded-lg border bg-white text-sm font-medium disabled:opacity-50"
               >
-                {countryReadinessLoading ? 'Refreshing…' : 'Refresh evidence'}
+                {countryReadinessLoading ? L('Refreshing…', 'Actualisation…') : L('Refresh evidence', 'Actualiser les preuves')}
               </button>
             </div>
           </div>
@@ -914,17 +1014,21 @@ export default function ProvisioningPage() {
                           <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
                             step.done ? 'bg-green-100 text-green-800' : 'bg-amber-100 text-amber-800'
                           }`}>
-                            {step.done ? 'Complete' : blockedBySite ? 'Select site first' : 'Action required'}
+                            {step.done
+                              ? L('Complete', 'Terminé')
+                              : blockedBySite
+                                ? L('Select site first', 'Choisir d’abord le site')
+                                : L('Action required', 'Action requise')}
                           </span>
                         </div>
-                        <div className="text-xs text-gray-500 mt-1">Owner: {step.owner}</div>
+                        <div className="text-xs text-gray-500 mt-1">{L('Owner', 'Responsable')}: {step.owner}</div>
                         <p className="text-sm text-gray-700 mt-2">{step.description}</p>
                         {step.note && (
                           <div className="text-xs text-amber-800 mt-2">{step.note}</div>
                         )}
                         {manual?.completed && (
                           <div className="text-xs text-green-800 mt-2">
-                            Confirmed by {manual.completed_by || 'operator'}
+                            {L('Confirmed by', 'Confirmé par')} {manual.completed_by || L('operator', 'opérateur')}
                             {manual.completed_at ? ` · ${manual.completed_at}` : ''}
                             {manual.evidence_note ? ` · ${manual.evidence_note}` : ''}
                           </div>
@@ -967,7 +1071,9 @@ export default function ProvisioningPage() {
                   {step.manualKey && !blockedBySite && (
                     <div className="mt-4 ml-0 sm:ml-11 p-3 rounded-lg border bg-white">
                       <label className={labelCls}>
-                        {step.evidenceRequired ? 'Evidence/reference required' : 'Operator reference (optional)'}
+                        {step.evidenceRequired
+                          ? L('Evidence/reference required', 'Preuve/référence requise')
+                          : L('Operator reference (optional)', 'Référence opérateur (facultative)')}
                       </label>
                       <div className="flex flex-col sm:flex-row gap-2">
                         <input
@@ -990,15 +1096,18 @@ export default function ProvisioningPage() {
                           }`}
                         >
                           {activationStepBusy === step.manualKey
-                            ? 'Saving…'
+                            ? L('Saving…', 'Enregistrement…')
                             : step.done
-                              ? 'Reopen step'
-                              : 'Confirm complete'}
+                              ? L('Reopen step', 'Rouvrir l’étape')
+                              : L('Confirm complete', 'Confirmer terminé')}
                         </button>
                       </div>
                       {step.manualKey === 'deployment_wifi_ready' && (
                         <p className="text-xs text-red-700 mt-2">
-                          Do not enter the Starlink password here. It is entered only in the local provisioning station.
+                          {L(
+                            'Do not enter the Starlink password here. It is entered only in the local provisioning station.',
+                            'Ne saisissez pas le mot de passe Starlink ici. Il se saisit uniquement dans la station de provisionnement locale.',
+                          )}
                         </p>
                       )}
                     </div>
@@ -1010,10 +1119,12 @@ export default function ProvisioningPage() {
 
           {walkthroughDone === walkthroughSteps.length && (
             <div className="p-5 rounded-xl border border-green-300 bg-green-50 text-green-950">
-              <div className="font-semibold text-lg">Site activation walkthrough complete</div>
+              <div className="font-semibold text-lg">{L('Site activation walkthrough complete', 'Parcours d’activation du site terminé')}</div>
               <p className="text-sm mt-1">
-                CC has the cloud evidence and operator confirmations for this site. Retain the validation,
-                release, customer, and commissioning references with the deployment record.
+                {L(
+                  'CC has the cloud evidence and operator confirmations for this site. Keep steps 12–13 green as more gateways and meters are installed.',
+                  'CC dispose des preuves cloud et des confirmations opérateur pour ce site. Gardez les étapes 12–13 au vert à chaque nouvelle passerelle ou compteur installé.',
+                )}
               </p>
             </div>
           )}
@@ -2189,7 +2300,7 @@ export default function ProvisioningPage() {
           </div>
         </div>
       ) : mode === 'field-install' ? (
-        <FieldInstall />
+        <FieldInstall initialSite={guideSite} />
       ) : mode === 'registry' ? (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">

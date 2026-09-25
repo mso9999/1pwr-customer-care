@@ -3740,6 +3740,25 @@ def fleet_live(_user: CurrentUser = Depends(CC_OPERATE_GATE)):
 
     A unit is "operational" if it's connected OR has recent telemetry.
     """
+    rows = _fleet_live_rows(with_telemetry=True)
+    operational = sum(1 for r in rows if r["operational"])
+    connected_count = sum(1 for r in rows if r["connected"])
+    total_meters = sum(r.get("meter_count") or 0 for r in rows)
+    return {
+        "total_things": len(rows),
+        "total_meters": total_meters,
+        "operational": operational,
+        "connected": connected_count,
+        "units": rows,
+    }
+
+
+def _fleet_live_rows(with_telemetry: bool) -> list[dict]:
+    """One row per gateway Thing with its reporting meters and account bindings.
+
+    ``with_telemetry`` adds one ``1meter_data`` query per meter; summaries that
+    only need "which serials report through which gateway" skip it.
+    """
     ddb = _client("dynamodb")
     iot = _client("iot")
 
@@ -3796,22 +3815,114 @@ def fleet_live(_user: CurrentUser = Depends(CC_OPERATE_GATE)):
         for m in meters
         if m.get("meter_id")
     ]
-    telemetry = _latest_telemetry_by_meter(ddb, meter_ids)
+    telemetry = _latest_telemetry_by_meter(ddb, meter_ids) if with_telemetry else {}
     rows = _assemble_fleet_live_units(connected, meters_by_thing, telemetry)
     try:
         _attach_meter_accounts(rows)
     except Exception as exc:  # noqa: BLE001
         logger.warning("fleet-live account attach failed: %s", exc)
+    return rows
 
-    operational = sum(1 for r in rows if r["operational"])
-    connected_count = sum(1 for r in rows if r["connected"])
-    total_meters = sum(r.get("meter_count") or 0 for r in rows)
+
+def _site_of_thing(thing_name: str) -> str:
+    return str(thing_name or "").split("-", 1)[0].upper()
+
+
+def _summarize_site_installation(
+    sites: dict[str, str],
+    units: list[dict],
+    provisioned: dict[str, dict],
+    installed_things: set[str],
+    commissioning_verified: set[str],
+    batch_approved: set[str],
+) -> list[dict]:
+    """Per-site rollout state: field gateways, pole records, and unassigned meters.
+
+    A gateway counts as "in the field" once it has ever connected to AWS IoT and
+    is not a registered test unit. A meter is "unassigned" when it has reported
+    through one of the site's gateways but no ``meters`` row binds it to an
+    account.
+    """
+    out = []
+    for site, name in sorted(sites.items()):
+        site_units = [u for u in units if _site_of_thing(u["thing_name"]) == site]
+        field = [
+            u for u in site_units
+            if (u.get("connect_ts") or u.get("meter_count"))
+            and not (provisioned.get(u["thing_name"]) or {}).get("is_test")
+        ]
+        unassigned = []
+        assigned = 0
+        for u in site_units:
+            for m in u.get("meters") or []:
+                if not m.get("meter_id"):
+                    continue
+                if m.get("account_number"):
+                    assigned += 1
+                else:
+                    unassigned.append({
+                        "meter_id": m["meter_id"],
+                        "thing_name": u["thing_name"],
+                        "last_seen": m.get("latest_sample") or m.get("last_seen"),
+                    })
+        not_on_pole = sorted(u["thing_name"] for u in field if u["thing_name"] not in installed_things)
+        release_ok = site in batch_approved
+        commissioned = site in commissioning_verified
+        out.append({
+            "site": site,
+            "name": name,
+            "gateways_provisioned": sum(
+                1 for t in provisioned if _site_of_thing(t) == site
+            ),
+            "gateways_in_field": len(field),
+            "gateways_connected": sum(1 for u in site_units if u.get("connected")),
+            "gateways_on_pole": sum(1 for t in installed_things if _site_of_thing(t) == site),
+            "gateways_not_on_pole": not_on_pole,
+            "release_approved": release_ok,
+            "commissioning_verified": commissioned,
+            "walkthrough_complete": release_ok and commissioned,
+            "assigned_meters": assigned,
+            "unassigned_meters": sorted(unassigned, key=lambda m: (m["thing_name"], m["meter_id"])),
+        })
+    return out
+
+
+@router.get("/installation-status")
+def installation_status(_user: CurrentUser = Depends(CC_OPERATE_GATE)):
+    """Rollout gaps per site: installs ahead of the walkthrough, pole records, assignment.
+
+    Drives the Meters-page warnings and the walkthrough's rollout steps.
+    """
+    sites = dict(_active_site_map())
+    units = _fleet_live_rows(with_telemetry=False)
+    provisioned: dict[str, dict] = {}
+    installed: set[str] = set()
+    commissioning_verified: set[str] = set()
+    from customer_api import get_connection
+    with get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT thing_name, is_test, status FROM meter_provisioning")
+        for thing, is_test, status in cur.fetchall():
+            if thing:
+                provisioned[str(thing)] = {"is_test": bool(is_test), "status": status}
+        cur.execute("SELECT gateway_thing FROM gateway_installation")
+        installed = {str(r[0]) for r in cur.fetchall() if r[0]}
+        cur.execute(
+            """
+            SELECT site_code FROM onemeter_activation_steps
+             WHERE step_key = 'site_commissioning_verified' AND completed
+            """
+        )
+        commissioning_verified = {str(r[0]).upper() for r in cur.fetchall() if r[0]}
+    batch_approved = set()
+    for site in sites:
+        release = _ota_release(site)
+        if not _ota_missing_config(release) and not release.get("canary_only"):
+            batch_approved.add(site)
     return {
-        "total_things": len(rows),
-        "total_meters": total_meters,
-        "operational": operational,
-        "connected": connected_count,
-        "units": rows,
+        "sites": _summarize_site_installation(
+            sites, units, provisioned, installed, commissioning_verified, batch_approved,
+        ),
     }
 
 

@@ -4631,6 +4631,25 @@ export async function getFleetLive(): Promise<FleetLiveResult> {
   return request<FleetLiveResult>('/provisioning/fleet-live');
 }
 
+export interface SiteInstallationStatus {
+  site: string;
+  name: string;
+  gateways_provisioned: number;
+  gateways_in_field: number;
+  gateways_connected: number;
+  gateways_on_pole: number;
+  gateways_not_on_pole: string[];
+  release_approved: boolean;
+  commissioning_verified: boolean;
+  walkthrough_complete: boolean;
+  assigned_meters: number;
+  unassigned_meters: { meter_id: string; thing_name: string; last_seen?: string | null }[];
+}
+
+export async function getInstallationStatus(): Promise<{ sites: SiteInstallationStatus[] }> {
+  return request<{ sites: SiteInstallationStatus[] }>('/provisioning/installation-status');
+}
+
 /** Download the provisioning-station local app (zip) with the auth token. */
 export async function downloadProvisioningStation(): Promise<void> {
   const token = getToken();

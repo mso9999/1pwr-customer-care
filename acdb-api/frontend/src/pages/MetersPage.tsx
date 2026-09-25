@@ -18,6 +18,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import CountryPill from '../components/CountryPill';
 import FleetMap from '../components/FleetMap';
+import RolloutWarnings from '../components/RolloutWarnings';
 import { UGPConnectionPicker } from './CommissionCustomerPage';
 import UGPPolePicker from '../components/UGPPolePicker';
 
@@ -400,6 +401,8 @@ export default function MetersPage() {
           )}
         </div>
       </div>
+
+      <RolloutWarnings />
 
       <div className="space-y-2 sm:space-y-0 sm:flex sm:gap-3 sm:flex-wrap sm:items-center">
         <form onSubmit={handleSearch} className="flex gap-2">

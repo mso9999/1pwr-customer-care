@@ -98,12 +98,14 @@ export default function AssignMeterPage() {
   const [customerId, setCustomerId] = useState(prefilledCustomerId);
   const [meterid, setMeterid] = useState('');
   const [thingName, setThingName] = useState('');
-  const [platform, setPlatform] = useState<'sparkmeter' | 'prototype'>('sparkmeter');
+  const [platform, setPlatform] = useState<'sparkmeter' | 'prototype'>(
+    () => (searchParams.get('platform') === 'prototype' ? 'prototype' : 'sparkmeter'),
+  );
   const [provisionedGateways, setProvisionedGateways] = useState<ProvisionedMeter[]>([]);
   const [fleetUnits, setFleetUnits] = useState<FleetLiveUnit[]>([]);
   const [gatewaysLoading, setGatewaysLoading] = useState(false);
   const [activate1MeterBilling, setActivate1MeterBilling] = useState(false);
-  const [community, setCommunity] = useState('');
+  const [community, setCommunity] = useState(() => (searchParams.get('site') || '').toUpperCase());
   const [customerType, setCustomerType] = useState('');
   const [villageName, setVillageName] = useState('');
   const [latitude, setLatitude] = useState('');
@@ -293,6 +295,7 @@ export default function AssignMeterPage() {
     const live = fleetByThing.get(String(row.thing_name));
     return !row.meter_serial && !(live?.meters || []).length;
   }).length;
+  const offlineOnSite = siteGateways.filter((row) => !fleetByThing.get(String(row.thing_name))?.connected).length;
 
   // Submit
   const handleSubmit = async () => {
@@ -469,7 +472,7 @@ export default function AssignMeterPage() {
         {platform === 'prototype' && <div className="p-4 rounded-xl border border-blue-200 bg-blue-50 space-y-3">
           <div>
             <label className="block text-sm font-medium text-blue-900 mb-2">
-              Provisioned 1Meter gateway <span className="font-normal text-blue-600">(recommended for 1Meter)</span>
+              {t('assignMeter:gateway.label')} <span className="font-normal text-blue-600">{t('assignMeter:gateway.recommended')}</span>
             </label>
             <select
               value={thingName && meterid ? `${thingName}\t${meterid}` : ''}
@@ -484,31 +487,33 @@ export default function AssignMeterPage() {
             >
               <option value="">
                 {!community
-                  ? 'Select the site first'
+                  ? t('assignMeter:gateway.selectSiteFirst')
                   : gatewaysLoading
-                    ? 'Loading gateways…'
+                    ? t('assignMeter:gateway.loading')
                     : eligibleMeters.length
-                      ? 'Select a meter on a provisioned gateway…'
-                      : 'No unassigned meters for this site'}
+                      ? t('assignMeter:gateway.selectMeter')
+                      : t('assignMeter:gateway.noneOption')}
               </option>
               {eligibleMeters.map((row) => (
                 <option key={`${row.thing_name}-${row.meter_serial}`} value={`${row.thing_name}\t${row.meter_serial}`}>
-                  {row.thing_name} — meter {row.meter_serial} — FW {row.fw}
+                  {t('assignMeter:gateway.optionLabel', { thing: row.thing_name, serial: row.meter_serial, fw: row.fw })}
                 </option>
               ))}
             </select>
             <p className="text-xs text-blue-700 mt-2">
-              Every unassigned meter reporting through a gateway on this site. One PCB can serve several customers — the account binds to the meter serial, not the gateway.
+              {t('assignMeter:gateway.explainer')}
             </p>
             {community && !gatewaysLoading && eligibleMeters.length === 0 && (
               <p className="text-xs text-amber-800 mt-2">
                 {siteGateways.length === 0
-                  ? `No provisioned gateways for ${community}. Pick the site that matches the Thing name (SIN / SAM / KOT / GBO), or provision the unit first.`
-                  : awaitingSerial > 0
-                    ? `${awaitingSerial} gateway(s) on ${community} have not reported a meter serial yet. Power the meters on the RS-485 bus, then wait for Fleet live.`
-                    : assignedOnSite > 0
-                      ? `${assignedOnSite} meter(s) on ${community} are already assigned to an account. Only unassigned serials appear here.`
-                      : `No unassigned meters for ${community}.`}
+                  ? t('assignMeter:gateway.noGateways', { site: community })
+                  : offlineOnSite > 0 && awaitingSerial > 0
+                    ? t('assignMeter:gateway.offline', { count: offlineOnSite, site: community })
+                    : awaitingSerial > 0
+                      ? t('assignMeter:gateway.awaitingSerial', { count: awaitingSerial, site: community })
+                      : assignedOnSite > 0
+                        ? t('assignMeter:gateway.allAssigned', { count: assignedOnSite, site: community })
+                        : t('assignMeter:gateway.noneOnSite', { site: community })}
               </p>
             )}
           </div>
@@ -521,7 +526,7 @@ export default function AssignMeterPage() {
                 onChange={(e) => setActivate1MeterBilling(e.target.checked)}
               />
               <span className="text-sm text-gray-700">
-                <b>Use this 1Meter for billing and relay control.</b> This makes it the account’s primary meter and enables zero-balance control once the server safety flag is approved.
+                <b>{t('assignMeter:gateway.billingTitle')}</b> {t('assignMeter:gateway.billingBody')}
               </span>
             </label>
           )}

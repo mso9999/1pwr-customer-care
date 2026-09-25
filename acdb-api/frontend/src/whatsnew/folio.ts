@@ -37,6 +37,32 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW_FOLIO: WhatsNewEntry[] = [
   {
+    id: '1meter-rollout-install-assign',
+    date: '2026-09-25',
+    title: '1Meter rollout: record every pole and assign every meter',
+    blurb: 'The walkthrough now covers pole installs and meter assignment after commissioning, the Meters page flags anything missed, and the 1Meter screens are in French.',
+    pages: [
+      {
+        heading: 'Two new walkthrough steps',
+        body:
+          'Provisioning → Operator walkthrough now ends with:\n' +
+          '- Step 12: record every installed gateway on its pole (Field install).\n' +
+          '- Step 13: assign every reporting meter to its customer (Assign Meter).\n\n' +
+          'Each step lists the gateways or meters still outstanding for the selected site.',
+      },
+      {
+        heading: 'Warnings on the Meters page',
+        body:
+          'A 1Meter only appears on the Meters page and map once it is assigned to a customer. An amber banner now lists, per site, gateways online without a pole record, meters reporting but not assigned, and sites with equipment in the field before the walkthrough is complete. Each line links to the screen that fixes it.',
+      },
+      {
+        heading: 'En français',
+        body:
+          'Le parcours opérateur, Installation terrain, les conseils d’Attribuer un compteur et l’aide Provisionnement sont maintenant en français. Field install lists only your country’s sites instead of defaulting to MAK.',
+      },
+    ],
+  },
+  {
     id: 'fleet-map-install-offline-firmware',
     date: '2026-09-22',
     title: 'Meter map shows install date, offline since, and firmware',

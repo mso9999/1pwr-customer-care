@@ -47,5 +47,22 @@
     "typeRequired": "Le type de client est requis",
     "gatewayRequired": "Sélectionnez une passerelle 1Meter provisionnée"
   },
-  "assignFailed": "Échec de l'affectation"
+  "assignFailed": "Échec de l'affectation",
+  "gateway": {
+    "label": "Passerelle 1Meter provisionnée",
+    "recommended": "(recommandé pour 1Meter)",
+    "selectSiteFirst": "Choisissez d’abord le site",
+    "loading": "Chargement des passerelles…",
+    "selectMeter": "Choisissez un compteur sur une passerelle provisionnée…",
+    "noneOption": "Aucun compteur non attribué pour ce site",
+    "optionLabel": "{{thing}} — compteur {{serial}} — FW {{fw}}",
+    "explainer": "Tous les compteurs non attribués qui remontent des données via une passerelle de ce site. Une carte peut servir plusieurs clients — le compte est lié au numéro du compteur, pas à la passerelle.",
+    "noGateways": "Aucune passerelle provisionnée pour {{site}}. Choisissez le site qui correspond au nom de la passerelle (ex. {{site}}-GW-0001), ou provisionnez d’abord l’unité.",
+    "offline": "{{count}} passerelle(s) de {{site}} sont hors ligne : leurs compteurs ne peuvent pas être listés. Vérifiez que la passerelle est alimentée et connectée au Starlink du site (Provisionnement → Parc en direct), puis actualisez.",
+    "awaitingSerial": "{{count}} passerelle(s) de {{site}} sont en ligne mais n’ont pas encore remonté de numéro de compteur. Vérifiez le câblage RS-485 (A, B et GND), puis appuyez 3 secondes sur le bouton PRG de la passerelle pour relancer la détection.",
+    "allAssigned": "{{count}} compteur(s) de {{site}} sont déjà attribués à un compte. Seuls les numéros non attribués apparaissent ici.",
+    "noneOnSite": "Aucun compteur non attribué pour {{site}}.",
+    "billingTitle": "Utiliser ce 1Meter pour la facturation et la commande du relais.",
+    "billingBody": "Il devient le compteur principal du compte et active la coupure à solde nul dès que l’indicateur de sécurité serveur est approuvé."
+  }
 }

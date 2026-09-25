@@ -1526,6 +1526,126 @@ function AccdbDiffContent() {
 /* ------------------------------------------------------------------ */
 
 function ProvisioningContent() {
+  const fr = useHelpLangIsFr();
+  if (fr) {
+    return (
+      <>
+        <P>
+          La page <PageLink to="/provisioning">Provisionnement</PageLink> fait passer les passerelles 1Meter
+          scellées d’usine par l’identité, l’accès Starlink du site, l’OTA du firmware complet signé et la mise
+          en service. Elle est réservée au <Bold>superadmin</Bold> et à l’<Bold>équipe O&amp;M</Bold>.
+        </P>
+        <SubHead>Commencez par le Parcours opérateur</SubHead>
+        <P>
+          Sélectionnez le bon pays dans l’en-tête CC, ouvrez <Bold>Parcours opérateur</Bold> et choisissez le
+          site de déploiement exact. Le parcours couvre l’activation du pays, la préparation Starlink, l’OTA de la
+          première passerelle, les tests compteur/charge, l’approbation de la version, les lots contrôlés,
+          l’attribution du client test, la mise en service sur site, puis le déploiement (enregistrement des
+          poteaux et attribution de chaque compteur). CC valide automatiquement les étapes visibles depuis le
+          cloud et enregistre le nom de l’opérateur et une référence de preuve pour les étapes physiques.
+          N’utilisez jamais le code site, le tarif, la base ou le comptage d’un autre pays comme contournement.
+        </P>
+        <Warning>Ne saisissez jamais un mot de passe Starlink dans un champ de preuve. Il se saisit uniquement dans la station de provisionnement locale. Une preuve est une référence de lot, compteur, client, photo, ticket ou mise en service.</Warning>
+        <Ul>
+          <li><Bold>Responsable pays + Ingénierie :</Bold> approuvent la liste canonique des sites. Ajouter un code site manquant est un changement contrôlé de configuration pays.</li>
+          <li><Bold>Responsable pays + Finance/O&amp;M :</Bold> approuvent et saisissent le tarif et les frais de raccordement/tableau sur <PageLink to="/tariffs">Tarifs</PageLink>.</li>
+          <li><Bold>Ingénierie :</Bold> configure les identifiants d’organisation/site de comptage et le candidat OTA signé immuable.</li>
+          <li><Bold>Finance + Ingénierie :</Bold> valident de vrais exemples de mobile money et les identifiants avant d’activer la réception automatique.</li>
+          <li><Bold>O&amp;M pays :</Bold> exécute le premier canari OTA et la validation physique du lot recommandée.</li>
+          <li><Bold>Ingénierie/superadmin :</Bold> approuve la version immuable pour les lots contrôlés à partir des preuves enregistrées.</li>
+        </Ul>
+        <SubHead>Nouveau site sans version firmware ?</SubHead>
+        <P>
+          La première étape du parcours reste bloquée sur <Bold>release_configured</Bold> tant que le site n’a
+          pas de version OTA approuvée. Un utilisateur disposant du privilège d’approbation peut la créer sur
+          place : avec le site sélectionné, utilisez le panneau <Bold>Créer une version</Bold> pour copier la
+          version stable actuelle d’un autre site (sans clés S3), notez éventuellement le nom du réseau Wi-Fi du
+          site (non secret) et tapez la phrase de confirmation. Le site provisionne alors une passerelle canari
+          avant de débloquer les lots. Le <Bold>mot de passe</Bold> Wi-Fi n’est jamais saisi dans CC — il va dans
+          la station au moment du provisionnement. L’enregistrement du code site reste une étape contrôlée de
+          configuration pays, et le site doit être activé avant tout provisionnement.
+        </P>
+        <SubHead>« Vierge d’usine » signifie que le firmware de démarrage est déjà installé</SubHead>
+        <Ul>
+          <li><Bold>Unité d’usine scellée :</Bold> ne l’ouvrez pas, ne l’effacez pas, ne la branchez pas en USB. Son firmware de démarrage reconnaît le réseau de provisionnement approuvé.</li>
+          <li><Bold>Démarrage d’usine mais non provisionnée :</Bold> utilisez la station pour écrire l’identité, le certificat TLS, le site de destination et le Wi-Fi Starlink propre à ce site ; CC met ensuite en file l’OTA du firmware complet approuvé.</li>
+          <li><Bold>Porte déjà un nom permanent &lt;SITE&gt;-GW-#### :</Bold> ne la reflashez pas et ne la reprovisionnez pas. Utilisez Mise à jour configuration ou escaladez pour une récupération contrôlée.</li>
+        </Ul>
+        <Warning>La livraison de l’identité n’est pas l’achèvement. Gardez chaque passerelle alimentée sur le réseau Starlink de destination jusqu’à ce que sa tâche OTA AWS IoT indique SUCCEEDED.</Warning>
+        <SubHead>Nommage</SubHead>
+        <Ul>
+          <li><Bold>Pool de passerelles</Bold> (lot, compte inconnu) : <Code>&lt;SITE&gt;-GW-####</Code> (ex. <Code>SIN-GW-0007</Code>) — identité stable, sans compte, attribuée par CC. Ce nom est permanent et ne change jamais.</li>
+        </Ul>
+        <P>Les codes site sont les codes CC canoniques à trois lettres ; le nom de l’objet (Thing) est fixé pour toute la vie de l’appareil et n’est jamais renommé d’après un compte client.</P>
+        <SubHead>Provisionnement par lot avec la station</SubHead>
+        <P>
+          Une passerelle vierge n’a pas de certificat : CC ne peut pas la joindre directement. Téléchargez la
+          <Bold> station de provisionnement</Bold> (onglet Guide et téléchargement) et extrayez tout le ZIP. Pour un
+          lot, utilisez le point d’accès de provisionnement approuvé (actuellement SSID <Code>1Meter</Code>, mot de
+          passe <Code>1Meter00</Code>) ; l’ordinateur et les passerelles doivent être sur ce même réseau, et
+          l’ordinateur doit avoir internet vers CC. La station détecte les passerelles vierges ; vous choisissez
+          le site de destination et saisissez le SSID/mot de passe Starlink exact de ce site. CC émet les objets
+          et certificats, la station livre chaque amorçage, et CC met en file l’OTA approuvé du site. Le routeur
+          Starlink de destination doit être allumé, en ligne et à portée, car la passerelle quitte le réseau de
+          provisionnement après l’amorçage. CC enregistre le SSID et la version de configuration, jamais le mot de passe.
+        </P>
+        <Ol>
+          <li>Dans PowerShell, dans le dossier extrait, lancez <Code>py -3 provisioning_station.py --cc https://cc.1pwrafrica.com</Code> (ou <Code>python</Code> si <Code>py</Code> n’existe pas).</li>
+          <li>Quand le terminal affiche <Code>Open: http://localhost:8787</Code>, laissez-le ouvert. La station tourne ; elle n’est pas figée.</li>
+          <li>Ouvrez <Code>http://localhost:8787</Code> dans Chrome/Edge, choisissez le pays de déploiement et connectez-vous. Le pays détermine la base, les sites, la devise et le catalogue OTA.</li>
+          <li>Vérifiez que le sous-réseau affiché est celui du provisionnement, lancez le scan et ne sélectionnez que des MAC de cartes vierges connues.</li>
+          <li>Choisissez le vrai site de destination, vérifiez sa version firmware approuvée, saisissez les identifiants Starlink exacts, relisez la liste d’unités, puis confirmez.</li>
+          <li><Bold>done (rebooted)</Bold> signifie que l’amorçage a réussi. Attendez que chaque tâche OTA passe à <Bold>SUCCEEDED</Bold>, puis vérifiez la version installée dans Compteurs provisionnés.</li>
+        </Ol>
+        <SubHead>Premier canari et approbation de la version</SubHead>
+        <P>
+          Si le site affiche <Bold>candidate ready</Bold>, sélectionnez une seule passerelle vierge dans la station.
+          CC enregistre cet objet comme unité de test autorisée et met en file le canari signé. Quand sa tâche
+          indique <Bold>SUCCEEDED</Bold>, faites la validation du lot recommandée ou notez explicitement pourquoi
+          elle est levée. Un relecteur Ingénierie/superadmin tape ensuite la phrase d’approbation dans l’onglet
+          <Bold> Canari OTA</Bold>. L’approbation est liée à la version exacte de l’artefact et du firmware cible ;
+          changer l’un ou l’autre exige un nouveau canari.
+        </P>
+        <Warning>N’attribuez jamais une deuxième identité de test simplement parce que l’amorçage ou l’OTA doit être analysé. Conservez et réutilisez l’objet, la MAC, l’identifiant OTA et les preuves enregistrés.</Warning>
+        <SubHead>Adressage des compteurs et validation physique recommandée</SubHead>
+        <P>
+          Téléchargez le kit d’adressage depuis <Bold>Validation du lot</Bold>. Adressez un compteur alimenté à la
+          fois via un adaptateur USB-RS485 branché sur le compteur — pas sur la passerelle — puis scannez la chaîne
+          RS485 complète. Branchez la chaîne triée et la charge fictive protégée hors tension. La validation isolée
+          prouve télémétrie, consommation positive, ouverture du relais à solde nul, paiement synthétique,
+          fermeture du relais et redémarrage de la charge, sans créer de revenu ni de transaction client.
+          Conservez l’identifiant de session affiché comme preuve pour l’approbation.
+        </P>
+        <Warning>Si CC attribue un objet mais que la livraison échoue, ne reprovisionnez pas immédiatement. Consultez Compteurs provisionnés et conservez la MAC, l’objet attribué, la sortie du terminal et le résultat avant de réessayer ou d’escalader.</Warning>
+        <SubHead>Mise à jour de la configuration Wi-Fi</SubHead>
+        <P>
+          Après provisionnement, l’onglet <Bold>Mise à jour configuration</Bold> envoie de nouveaux paramètres
+          Wi-Fi/SoftAP à une passerelle déjà provisionnée (message MQTT <Code>cfg/network</Code>). Il ne change
+          <Bold> pas</Bold> le nom, les certificats ni l’identité. Utilisez-le pour corriger des identifiants Wi-Fi mal saisis.
+        </P>
+        <SubHead>Déployer un site : installer, enregistrer, attribuer (chaque passerelle et chaque compteur)</SubHead>
+        <Ol>
+          <li>N’installez sur les poteaux qu’une fois les étapes 8 (version approuvée) et 9 (OTA du lot contrôlé en SUCCEEDED) du parcours au vert.</li>
+          <li><Bold>Le jour même de la pose :</Bold> Provisionnement → <Bold>Installation terrain</Bold> — choisissez le site, la passerelle et le poteau sur la carte, puis <Bold>Installer et vérifier</Bold>. Mettez la passerelle sous tension ; CC la marque vérifiée au premier contact cloud. Si elle ne se connecte pas, lancez le dépannage guidé.</li>
+          <li>Câblez les compteurs (A, B <Bold>et GND</Bold>). Dans <Bold>Parc en direct</Bold>, vérifiez que chaque numéro de compteur remonte ; sinon appuyez 3 secondes sur le bouton PRG de la passerelle.</li>
+          <li>Pour chaque compteur : <PageLink to="/assign-meter">Attribuer un compteur</PageLink> — site, plateforme 1Meter, passerelle + numéro, compte client, poteau. Le compteur apparaît alors dans la page Compteurs et sur la carte.</li>
+          <li>Terminez la <PageLink to="/commission">mise en service du client</PageLink>.</li>
+          <li>En fin de journée, ouvrez la page <PageLink to="/meters">Compteurs</PageLink> : le bandeau orange liste par site ce qui reste à faire. Les étapes 12–13 du parcours restent ouvertes tant qu’une passerelle en ligne n’est pas sur un poteau ou qu’un compteur actif n’est pas attribué.</li>
+        </Ol>
+        <Warning>Un compteur qui remonte des données mais n’est pas attribué est invisible dans la page Compteurs et sur la carte, et ne peut pas être facturé.</Warning>
+        <SubHead>Cycle de vie</SubHead>
+        <Ol>
+          <li><Bold>identity-delivered</Bold> — identité, certificat et paramètres Starlink écrits ; pas encore le firmware complet.</li>
+          <li><Bold>OTA SUCCEEDED</Bold> — le firmware complet signé est installé et sa version enregistrée.</li>
+          <li><Bold>online</Bold> — connectée à AWS IoT via le Starlink de destination.</li>
+          <li><Bold>serial-acquired</Bold> — télémétrie reçue ; CC lie automatiquement la passerelle à son numéro de compteur.</li>
+          <li><Bold>allocated</Bold> — numéro de compteur lié à un compte client via <PageLink to="/assign-meter">Attribuer un compteur</PageLink>. La passerelle reste partagée ; une carte peut servir plusieurs clients.</li>
+        </Ol>
+        <P>Suivez chaque unité dans l’onglet <Bold>Compteurs provisionnés</Bold> (une ligne par passerelle). Pour voir chaque compteur qui remonte via une passerelle — y compris ceux sans charge ni client — utilisez <Bold>Parc en direct</Bold>.</P>
+        <Warning>N’utilisez jamais d’identifiants <Code>TestSite*</Code> / <Code>HQTEST*</Code> / improvisés sur le terrain — provisionnez toujours via la station pour qu’un objet et un certificat soient créés et enregistrés.</Warning>
+      </>
+    );
+  }
   return (
     <>
       <P>
@@ -1633,6 +1753,16 @@ function ProvisioningContent() {
         <PageLink to="/commission">customer commissioning</PageLink> wizard. The Thing is linked in
         <Code>meter_provisioning</Code> without being renamed.
       </P>
+      <SubHead>Rolling out a site: install, record, assign (every gateway and meter)</SubHead>
+      <Ol>
+        <li>Install on poles only once walkthrough steps 8 (release approved) and 9 (controlled batch OTA SUCCEEDED) are green.</li>
+        <li><Bold>The same day it goes up:</Bold> Provisioning → <Bold>Field install</Bold> — choose the site, the gateway, and the pole on the map, then <Bold>Install &amp; verify</Bold>. Power the gateway; CC marks it verified on first cloud contact. If it never connects, run the guided troubleshooting.</li>
+        <li>Wire the meters (A, B, <Bold>and GND</Bold>). In <Bold>Fleet live</Bold>, confirm every meter serial is reporting; if one is missing, long-press the gateway&apos;s PRG button for 3 seconds.</li>
+        <li>For each meter: <PageLink to="/assign-meter">Assign Meter</PageLink> — site, 1Meter platform, gateway + serial, customer account, pole. The meter now appears on the Meters page and fleet map.</li>
+        <li>Finish <PageLink to="/commission">customer commissioning</PageLink>.</li>
+        <li>At the end of the day, open <PageLink to="/meters">Meters</PageLink>: the amber banner lists what is still missing per site. Walkthrough steps 12–13 stay open until every online gateway is on a pole and every reporting meter is assigned.</li>
+      </Ol>
+      <Warning>A meter that reports telemetry but is not assigned is invisible on the Meters page and fleet map, and cannot be billed.</Warning>
       <SubHead>Lifecycle</SubHead>
       <Ol>
         <li><Bold>identity-delivered</Bold> — identity + cert + deployment Starlink settings written; this is not yet full-firmware completion.</li>

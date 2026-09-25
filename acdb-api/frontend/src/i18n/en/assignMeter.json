@@ -47,5 +47,22 @@
     "typeRequired": "Customer type is required",
     "gatewayRequired": "Select a provisioned 1Meter gateway"
   },
-  "assignFailed": "Assignment failed"
+  "assignFailed": "Assignment failed",
+  "gateway": {
+    "label": "Provisioned 1Meter gateway",
+    "recommended": "(recommended for 1Meter)",
+    "selectSiteFirst": "Select the site first",
+    "loading": "Loading gateways…",
+    "selectMeter": "Select a meter on a provisioned gateway…",
+    "noneOption": "No unassigned meters for this site",
+    "optionLabel": "{{thing}} — meter {{serial}} — FW {{fw}}",
+    "explainer": "Every unassigned meter reporting through a gateway on this site. One PCB can serve several customers — the account binds to the meter serial, not the gateway.",
+    "noGateways": "No provisioned gateways for {{site}}. Pick the site that matches the gateway name (e.g. {{site}}-GW-0001), or provision the unit first.",
+    "offline": "{{count}} gateway(s) on {{site}} are offline, so their meters cannot be listed. Check the gateway is powered and on the site Starlink (Provisioning → Fleet live), then refresh.",
+    "awaitingSerial": "{{count}} gateway(s) on {{site}} are online but have not reported a meter serial yet. Check the RS-485 wiring (A, B and GND), then long-press the gateway's PRG button for 3 seconds to re-scan meters.",
+    "allAssigned": "{{count}} meter(s) on {{site}} are already assigned to an account. Only unassigned serials appear here.",
+    "noneOnSite": "No unassigned meters for {{site}}.",
+    "billingTitle": "Use this 1Meter for billing and relay control.",
+    "billingBody": "This makes it the account’s primary meter and enables zero-balance control once the server safety flag is approved."
+  }
 }

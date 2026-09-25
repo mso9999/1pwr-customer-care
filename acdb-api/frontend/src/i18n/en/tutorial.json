@@ -63,7 +63,8 @@
         "Keep every unit powered while CC shows live OTA progress (queued, in progress, succeeded, failed) for each gateway. Continue only when every Job is SUCCEEDED.",
         "Download the meter-addressing kit. Address and label each meter individually, scan the combined RS485 string, then connect the sorted string to the gateway with power off.",
         "Recommended for every batch: use Provisioning → Batch validation with a protected dummy load. Prove telemetry, consumption, zero-balance relay opening, synthetic payment, relay closing, and load restart; retain the evidence session ID.",
-        "Continue in the same Operator walkthrough after release approval: provision the controlled batch, reconcile telemetry, create or identify the test customer, use Assign Meter, run the payment/relay checks, and complete actual-site commissioning. Enter evidence references when requested; never enter a Wi-Fi password. The gateway name never changes."
+        "Continue in the same Operator walkthrough after release approval: provision the controlled batch, reconcile telemetry, create or identify the test customer, use Assign Meter, run the payment/relay checks, and complete actual-site commissioning. Enter evidence references when requested; never enter a Wi-Fi password. The gateway name never changes.",
+        "Rollout, for every gateway and meter after site commissioning: the same day a gateway goes up, record it on its pole in Provisioning → Field install; wire the meters and confirm each serial in Fleet live; then use Assign Meter for each meter. Check the Meters page banner at the end of the day — a reporting meter that is not assigned is invisible and cannot be billed."
       ]
     },
     "payments": {
