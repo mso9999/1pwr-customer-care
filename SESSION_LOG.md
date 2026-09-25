@@ -23,8 +23,12 @@
 - Live check, meter 23024485: 1.1.56 on MAK-GW-0047 (29 Jul – 22 Sep, first seen), then 1.1.70 on MAK-GW-0183 (22 Sep, serial, new gateway), then 1.1.71 OTA `1m1171-MAK-GW-0183-20260925160053` at 16:16 UTC. About 6 s for ~3.5k readings; it loads only when the section is opened.
 - `FleetMap.tsx` popup: a collapsed "Firmware history" section (linked meters). The meter serial links to `/meters?meter=<serial>`, and the account links to `/customers/<account>`.
 - `MetersPage.tsx` handles `?meter=`: switches to the list, clears the site/linked/platform/status filters, searches that serial, and opens its assignment history.
-- Tests: `tests/test_firmware_history.py` (5) and installation-status (5) pass. `tsc -b` is clean. The 3 existing eslint errors in MetersPage are untouched.
-- Side effects: deploy via push to main.
+- Tests: `tests/test_firmware_history.py` (6) and installation-status (5) pass. `tsc -b` is clean. The 3 existing eslint errors in MetersPage are untouched.
+- After the first deploy (`4145582`), the server's own credentials showed every change as "serial": the CC host role `cc-postgres-backup-role` could not call `iot:ListJobExecutionsForThing`.
+  - **IAM change 17:06 UTC:** added `iot:ListJobExecutionsForThing` (read-only) to the `OneMeterOtaControlPlane` statement of inline policy `cc-1meter-provisioning`. Backup of the prior policy: `.secrets/cc-1meter-provisioning.bak-20260925.json`.
+  - Verified on the host: meter 23024485 shows 1.1.71 as OTA `1m1171-MAK-GW-0183-…`.
+  - Code follow-up: if the job lookup fails for a gateway, its runs show "OTA status unknown" instead of a guessed "serial".
+- Side effects: two deploys via push to main, and the IAM inline-policy change above.
 
 ---
 

@@ -86,6 +86,63 @@ def _parse_meter_timestamp(iso: Optional[str], compact: Optional[str]) -> dateti
     raise ValueError("no timestamp")
 
 
+def _live_gateway_firmware(meter_id: str, thing: str) -> Optional[str]:
+    """FirmwareVersion on the meter's newest ``1meter_data`` reading through ``thing``."""
+    try:
+        resp = _ddb().query(
+            TableName="1meter_data",
+            KeyConditionExpression="device_id = :m",
+            ExpressionAttributeValues={":m": {"S": meter_id}},
+            ProjectionExpression="FirmwareVersion, thingName",
+            ScanIndexForward=False,
+            Limit=5,
+        )
+    except Exception:  # noqa: BLE001 - fall back to the OTA record
+        return None
+    for item in resp.get("Items") or []:
+        if (item.get("thingName") or {}).get("S") == thing:
+            return ((item.get("FirmwareVersion") or {}).get("S") or "").strip() or None
+    return None
+
+
+def _require_release_firmware(
+    thing: str,
+    meter_id: str,
+    site: Optional[str],
+    ota_status: Optional[str],
+    fw_version: Optional[str],
+    ota_target: Optional[str],
+) -> None:
+    """The test gateway must run the site's release firmware, however it got there.
+
+    A USB reflash leaves the provisioning row describing an older OTA, so live
+    telemetry is the evidence. Release approval separately requires its own
+    SUCCEEDED canary OTA to the release version.
+    """
+    from meter_provisioning import _ota_release
+
+    norm = lambda v: str(v or "").strip().lstrip("v")  # noqa: E731
+    target = norm(_ota_release(site).get("target_firmware_version"))
+    live = norm(_live_gateway_firmware(meter_id, thing))
+    if live:
+        if target and live != target:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"{thing} reports firmware {live}, but the {site} release is {target}. "
+                    f"Flash or OTA it to {target} first."
+                ),
+            )
+        return
+    if str(ota_status or "").upper() != "SUCCEEDED":
+        raise HTTPException(status_code=409, detail="Full-firmware OTA must succeed before batch validation.")
+    if not ota_target or norm(fw_version) != norm(ota_target):
+        raise HTTPException(
+            status_code=409,
+            detail="Gateway firmware telemetry does not confirm the completed OTA target version.",
+        )
+
+
 def _read_meter_state(meter_id: str) -> dict[str, Any]:
     response = _ddb().get_item(
         TableName=METER_LAST_SEEN_TABLE,
@@ -249,13 +306,7 @@ def start_validation(
             )
         if not meter_id:
             raise HTTPException(status_code=409, detail="The test gateway has not discovered a meter.")
-        if str(ota_status or "").upper() != "SUCCEEDED":
-            raise HTTPException(status_code=409, detail="Full-firmware OTA must succeed before batch validation.")
-        if not ota_target or str(fw_version or "").lstrip("v") != str(ota_target).lstrip("v"):
-            raise HTTPException(
-                status_code=409,
-                detail="Gateway firmware telemetry does not confirm the completed OTA target version.",
-            )
+        _require_release_firmware(thing, str(meter_id), site, ota_status, fw_version, ota_target)
         telemetry = _read_meter_state(str(meter_id))
         if telemetry.get("thing_name") != thing:
             raise HTTPException(status_code=409, detail="Live telemetry Thing does not match the selected gateway.")
