@@ -127,7 +127,7 @@ export default function MeterDetailPage() {
           <Fact label="Pole">{detail.gateway?.pole_id || '—'}</Fact>
           <Fact label="Firmware">{live?.fw_version || detail.state?.firmware_version || '—'}</Fact>
           <Fact label="RS485 (Modbus) address">
-            {detail.modbus_id ?? <span className="text-gray-500">not reported by gateway firmware</span>}
+            {detail.modbus_id ?? <span className="text-gray-500">not reported (gateway firmware older than 1.1.72)</span>}
           </Fact>
           <FirmwareHistory meterId={detail.meter_id} />
         </div>

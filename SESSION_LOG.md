@@ -1,3 +1,11 @@
+## Session 2026-09-25 [202609252030] — PTB-gap warning collapsed; meter page shows RS485 address
+- `PtbGapWarning.tsx`: "<SITE>: N meter(s) in service with no PTB in uGridPlan" is now a `<details>` header, collapsed by default; explanation, meter list, Create PTB buttons and "Show all" sit inside.
+- Meter page RS485: `_reading_row` parses `ModbusID` from `1meter_data`; `/api/meters/{id}/detail` returns the newest reading's value as `modbus_id`. Firmware 1.1.72 (onepwr-aws-mesh `bb17174`, not yet built) adds the field; until then the page says "not reported (gateway firmware older than 1.1.72)".
+- Tests: `tests/test_meter_detail.py` covers `ModbusID`; tsc/eslint clean on touched files.
+- Side effects: deploy via push to main.
+
+---
+
 ## Session 2026-09-25 [202609251415] — Station SoftAP fallback is visible
 
 ### What Was Done

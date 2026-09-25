@@ -64,10 +64,11 @@ export default function PtbGapWarning({ site, account }: { site: string; account
   return (
     <div className="rounded-xl border border-amber-300 bg-amber-50 p-4">
       {gaps.length > 0 && (
-        <>
-          <div className="font-semibold text-amber-950">
+        <details className="group">
+          <summary className="flex cursor-pointer list-none items-center gap-2 font-semibold text-amber-950 [&::-webkit-details-marker]:hidden">
+            <span className="text-amber-700 transition-transform group-open:rotate-90">▶</span>
             {L(`${site}: ${gaps.length} meter(s) in service with no PTB in uGridPlan`, `${site} : ${gaps.length} compteur(s) en service sans PTB dans uGridPlan`)}
-          </div>
+          </summary>
           <p className="text-xs text-amber-900 mt-1">
             {L(
               'These 1Meters serve customers with recent transactions or consumption, so they are almost certainly installed inside a pole box. Create the PTB unless this is a bench test.',
@@ -97,7 +98,7 @@ export default function PtbGapWarning({ site, account }: { site: string; account
               {showAll ? L('Show fewer', 'Afficher moins') : L(`Show all ${gaps.length}`, `Afficher les ${gaps.length}`)}
             </button>
           )}
-        </>
+        </details>
       )}
       {message && <div className="text-xs text-gray-800 mt-2">{message}</div>}
     </div>

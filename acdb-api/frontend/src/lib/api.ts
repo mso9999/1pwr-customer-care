@@ -460,6 +460,8 @@ export interface MeterReading {
   relay: string | null;
   fw_version: string | null;
   thing_name: string | null;
+  /** DDS8888 RS485 address; reported from firmware 1.1.72. */
+  modbus_id: number | null;
   last_seen?: string | null;
 }
 
@@ -491,7 +493,7 @@ export interface MeterDetail {
     firmware_version: string | null;
   } | null;
   live: MeterReading | null;
-  /** DDS8888 Modbus (RS485) ID; not reported by gateway firmware yet. */
+  /** DDS8888 Modbus (RS485) ID from the newest reading; null before firmware 1.1.72. */
   modbus_id: number | null;
 }
 

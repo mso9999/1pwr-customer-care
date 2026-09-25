@@ -1024,6 +1024,7 @@ def _reading_row(item: dict) -> dict:
         "relay": _ddb_str(item, "Relay"),
         "fw_version": _ddb_str(item, "FirmwareVersion"),
         "thing_name": _ddb_str(item, "thingName"),
+        "modbus_id": int(_num(_ddb_str(item, "ModbusID"))) if _ddb_str(item, "ModbusID") else None,
     }
 
 
@@ -1150,8 +1151,8 @@ def meter_detail(meter_id: str, user: CurrentUser = Depends(require_employee)):
     except Exception as exc:  # noqa: BLE001
         logger.warning("live 1Meter state for %s failed: %s", padded, exc)
     out["live"] = live
-    # The DDS8888 Modbus ID lives only in the gateway's RAM today; readings do not carry it.
-    out["modbus_id"] = None
+    # Readings carry the DDS8888 Modbus ID from firmware 1.1.72; older gateways leave it unset.
+    out["modbus_id"] = (live or {}).get("modbus_id")
     if out["meter"] is None and live is None:
         raise HTTPException(status_code=404, detail=f"Meter {short} is not known to CC or 1Meter telemetry.")
     return out
