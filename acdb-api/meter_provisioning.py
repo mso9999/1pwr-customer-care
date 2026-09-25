@@ -3841,11 +3841,16 @@ def _summarize_site_installation(
     A gateway counts as "in the field" once it has ever connected to AWS IoT and
     is not a registered test unit. A meter is "unassigned" when it has reported
     through one of the site's gateways but no ``meters`` row binds it to an
-    account.
+    account. The IoT fleet index is shared by every country and site codes can
+    repeat across countries, so only gateways provisioned in this country's
+    database are counted.
     """
     out = []
     for site, name in sorted(sites.items()):
-        site_units = [u for u in units if _site_of_thing(u["thing_name"]) == site]
+        site_units = [
+            u for u in units
+            if _site_of_thing(u["thing_name"]) == site and u["thing_name"] in provisioned
+        ]
         field = [
             u for u in site_units
             if (u.get("connect_ts") or u.get("meter_count"))
@@ -3905,7 +3910,14 @@ def installation_status(_user: CurrentUser = Depends(CC_OPERATE_GATE)):
         for thing, is_test, status in cur.fetchall():
             if thing:
                 provisioned[str(thing)] = {"is_test": bool(is_test), "status": status}
-        cur.execute("SELECT gateway_thing FROM gateway_installation")
+        cur.execute(
+            """
+            SELECT gateway_thing FROM gateway_installation
+            UNION
+            SELECT gateway_thing FROM meter_gateway_link
+             WHERE NULLIF(pole_id, '') IS NOT NULL
+            """
+        )
         installed = {str(r[0]) for r in cur.fetchall() if r[0]}
         cur.execute(
             """

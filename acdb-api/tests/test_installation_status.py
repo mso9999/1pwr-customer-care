@@ -73,6 +73,14 @@ class SummarizeSiteInstallationTests(unittest.TestCase):
         self.assertEqual(rows["KOT"]["gateways_not_on_pole"], [])
         self.assertEqual(rows["KOT"]["gateways_connected"], 1)
 
+    def test_other_countrys_gateway_with_same_site_code_is_ignored(self):
+        rows = self.summarize(
+            [unit("SIN-GW-0009", 1790185440248, meters=[("000023029999", None)])],
+            {},
+        )
+        self.assertEqual(rows["SIN"]["gateways_in_field"], 0)
+        self.assertEqual(rows["SIN"]["unassigned_meters"], [])
+
     def test_walkthrough_complete_needs_release_and_site_commissioning(self):
         rows = self.summarize([], {}, commissioned={"KOT"}, approved={"KOT", "SIN"})
         self.assertTrue(rows["KOT"]["walkthrough_complete"])

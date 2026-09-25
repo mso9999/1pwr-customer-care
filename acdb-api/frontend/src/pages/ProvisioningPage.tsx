@@ -830,8 +830,8 @@ export default function ProvisioningPage() {
       ),
       note: selectedInstall && selectedInstall.gateways_not_on_pole.length > 0
         ? L(
-          `Online but not recorded on a pole: ${selectedInstall.gateways_not_on_pole.join(', ')}`,
-          `En ligne mais non enregistrées sur un poteau : ${selectedInstall.gateways_not_on_pole.join(', ')}`,
+          `${selectedInstall.gateways_not_on_pole.length} online but not recorded on a pole: ${selectedInstall.gateways_not_on_pole.slice(0, 8).join(', ')}${selectedInstall.gateways_not_on_pole.length > 8 ? ', …' : ''}`,
+          `${selectedInstall.gateways_not_on_pole.length} en ligne mais non enregistrée(s) sur un poteau : ${selectedInstall.gateways_not_on_pole.slice(0, 8).join(', ')}${selectedInstall.gateways_not_on_pole.length > 8 ? ', …' : ''}`,
         )
         : undefined,
       actionLabel: L('Open Field install', 'Ouvrir Installation terrain'),
@@ -849,8 +849,8 @@ export default function ProvisioningPage() {
       ),
       note: selectedInstall && selectedInstall.unassigned_meters.length > 0
         ? L(
-          `${selectedInstall.unassigned_meters.length} reporting meter(s) not yet assigned: ${selectedInstall.unassigned_meters.map((m) => m.meter_id).join(', ')}`,
-          `${selectedInstall.unassigned_meters.length} compteur(s) actif(s) non attribué(s) : ${selectedInstall.unassigned_meters.map((m) => m.meter_id).join(', ')}`,
+          `${selectedInstall.unassigned_meters.length} reporting meter(s) not yet assigned: ${selectedInstall.unassigned_meters.slice(0, 8).map((m) => m.meter_id).join(', ')}${selectedInstall.unassigned_meters.length > 8 ? ', …' : ''}`,
+          `${selectedInstall.unassigned_meters.length} compteur(s) actif(s) non attribué(s) : ${selectedInstall.unassigned_meters.slice(0, 8).map((m) => m.meter_id).join(', ')}${selectedInstall.unassigned_meters.length > 8 ? ', …' : ''}`,
         )
         : undefined,
       actionLabel: L('Assign meters', 'Attribuer les compteurs'),

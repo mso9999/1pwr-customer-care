@@ -9,6 +9,11 @@ import { getInstallationStatus, type SiteInstallationStatus } from '../lib/api';
  * report telemetry but are not assigned (so they are absent from this page).
  * Hidden for users without provisioning access (the endpoint returns 403).
  */
+function shortList(items: string[], more: (n: number) => string, max = 8): string {
+  if (items.length <= max) return items.join(', ');
+  return `${items.slice(0, max).join(', ')} ${more(items.length - max)}`;
+}
+
 export default function RolloutWarnings() {
   const { i18n } = useTranslation();
   const L = (en: string, fr: string) => (i18n.language?.startsWith('fr') ? fr : en);
@@ -27,6 +32,7 @@ export default function RolloutWarnings() {
   );
   if (!flagged.length) return null;
 
+  const more = (n: number) => L(`and ${n} more`, `et ${n} autres`);
   const linkCls = 'px-2.5 py-1 rounded-lg bg-white border border-amber-300 text-xs font-semibold text-amber-900 hover:bg-amber-100';
 
   return (
@@ -64,7 +70,7 @@ export default function RolloutWarnings() {
                   <li className="flex flex-wrap items-center justify-between gap-2">
                     <span>
                       {L('Online but not recorded on a pole:', 'En ligne mais non enregistrées sur un poteau :')}{' '}
-                      <span className="font-mono text-xs">{s.gateways_not_on_pole.join(', ')}</span>
+                      <span className="font-mono text-xs">{shortList(s.gateways_not_on_pole, more)}</span>
                     </span>
                     <Link to={`/provisioning?tab=field-install&site=${site}`} className={linkCls}>
                       {L('Record on pole', 'Enregistrer le poteau')}
@@ -78,7 +84,7 @@ export default function RolloutWarnings() {
                         `${s.unassigned_meters.length} meter(s) reporting but not assigned to a customer:`,
                         `${s.unassigned_meters.length} compteur(s) actif(s) non attribué(s) à un client :`,
                       )}{' '}
-                      <span className="font-mono text-xs">{s.unassigned_meters.map((m) => m.meter_id).join(', ')}</span>
+                      <span className="font-mono text-xs">{shortList(s.unassigned_meters.map((m) => m.meter_id), more)}</span>
                     </span>
                     <Link to={`/assign-meter?platform=prototype&site=${site}`} className={linkCls}>
                       {L('Assign meters', 'Attribuer les compteurs')}
