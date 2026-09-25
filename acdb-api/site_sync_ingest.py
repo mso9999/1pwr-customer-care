@@ -113,11 +113,12 @@ def _ignored(reason: str, event: SiteEventIn) -> dict:
     return {"ok": True, "applied": False, "reason": reason}
 
 
-def ugp_registry_key(site: SitePayloadIn, code: str) -> str:
+def ugp_registry_key(site: SitePayloadIn, code: str) -> tuple[str, bool]:
     """Key ``load_project`` accepts: CODE, CODE_minigrid, or a named design.
 
-    Prefer the PR canonical / project code when it looks like a uGrid registry
-    key. Fall back to the 3-letter site code (SIN loads SIN / SIN_minigrid).
+    Returns ``(key, explicit)``. ``explicit`` is True when PR supplied a
+    canonical / linked uGrid key; otherwise the 3-letter site code is a
+    fallback (SIN loads SIN / SIN_minigrid).
     """
     candidates = []
     if site.canonicalUgpProjectId:
@@ -127,15 +128,19 @@ def ugp_registry_key(site: SitePayloadIn, code: str) -> str:
             candidates.append(link.ugpProjectCode.strip())
         if link.ugpProjectId:
             candidates.append(link.ugpProjectId.strip())
-    candidates.append(code)
     for raw in candidates:
         if raw and REGISTRY_KEY_RE.match(raw):
-            return raw
-    return code
+            return raw, True
+    return code, False
 
 
-def upsert_cc_site_project(code: str, name: str, registry_key: str) -> None:
-    """Keep the New Customer / Sync picker in step with the PR master list."""
+def upsert_cc_site_project(code: str, name: str, registry_key: str, explicit: bool = True) -> None:
+    """Keep the New Customer / Sync picker in step with the PR master list.
+
+    Only an explicit PR uGrid link may replace an existing mapping. The
+    bare-code fallback fills gaps but never overwrites curated keys such as
+    LS NKU → NKA or LSB → Lesobeng (PR sites carry no uGP link yet).
+    """
     if not code or not registry_key:
         return
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
@@ -145,15 +150,20 @@ def upsert_cc_site_project(code: str, name: str, registry_key: str) -> None:
     rows = [(code, registry_key, name or code, now)]
     if alias and alias != code and alias.isalnum() and 3 <= len(alias) <= 16:
         rows.append((alias, registry_key, name or code, now))
+    on_conflict = (
+        """DO UPDATE SET
+             project_id = excluded.project_id,
+             site_name = excluded.site_name,
+             updated_at = excluded.updated_at"""
+        if explicit
+        else "DO NOTHING"
+    )
     with get_auth_db() as conn:
         for site_code, project_id, site_name, updated_at in rows:
             conn.execute(
-                """INSERT INTO cc_site_projects (site_code, project_id, site_name, updated_at)
+                f"""INSERT INTO cc_site_projects (site_code, project_id, site_name, updated_at)
                    VALUES (?, ?, ?, ?)
-                   ON CONFLICT(site_code) DO UPDATE SET
-                     project_id = excluded.project_id,
-                     site_name = excluded.site_name,
-                     updated_at = excluded.updated_at""",
+                   ON CONFLICT(site_code) {on_conflict}""",
                 (site_code, project_id, site_name, updated_at),
             )
 
@@ -186,7 +196,7 @@ def apply_site_event(event: SiteEventIn) -> dict:
     canonical_ugp = (site.canonicalUgpProjectId or "").strip() or None
     name = site.name.strip()
     district = (site.district or "").strip() or None
-    registry_key = ugp_registry_key(site, code)
+    registry_key, explicit_ugp = ugp_registry_key(site, code)
 
 
     with get_connection() as conn:
@@ -245,7 +255,7 @@ def apply_site_event(event: SiteEventIn) -> dict:
         conn.commit()
 
     try:
-        upsert_cc_site_project(code, name, registry_key)
+        upsert_cc_site_project(code, name, registry_key, explicit_ugp)
     except Exception:
         logger.exception("site-sync cc_site_projects upsert failed for %s:%s", COUNTRY.code, code)
 

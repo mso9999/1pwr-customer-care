@@ -247,16 +247,55 @@ class TestSiteSyncIngest(unittest.TestCase):
 class TestUgpRegistryKey(unittest.TestCase):
     def test_prefers_canonical_minigrid_key(self):
         ev = _event()
-        key = site_sync_ingest.ugp_registry_key(ev.site, "CHI")
-        self.assertEqual(key, "CHI_minigrid")
+        self.assertEqual(site_sync_ingest.ugp_registry_key(ev.site, "CHI"), ("CHI_minigrid", True))
 
     def test_falls_back_to_site_code(self):
         ev = _event(canonicalUgpProjectId=None, ugpProjects=[])
-        self.assertEqual(site_sync_ingest.ugp_registry_key(ev.site, "SIN"), "SIN")
+        self.assertEqual(site_sync_ingest.ugp_registry_key(ev.site, "SIN"), ("SIN", False))
 
     def test_rejects_garbage_canonical(self):
         ev = _event(canonicalUgpProjectId="not a key!!!", ugpProjects=[])
-        self.assertEqual(site_sync_ingest.ugp_registry_key(ev.site, "SIN"), "SIN")
+        self.assertEqual(site_sync_ingest.ugp_registry_key(ev.site, "SIN"), ("SIN", False))
+
+
+class TestUpsertCcSiteProject(unittest.TestCase):
+    """PR sites carry no uGP link yet; the code fallback must not clobber curated keys."""
+
+    def setUp(self):
+        import sqlite3
+        from contextlib import contextmanager
+
+        self.db = sqlite3.connect(":memory:")
+        self.db.execute(
+            "CREATE TABLE cc_site_projects (site_code TEXT PRIMARY KEY, project_id TEXT, "
+            "site_name TEXT, updated_at TEXT)"
+        )
+        self.db.execute("INSERT INTO cc_site_projects VALUES ('NKU', 'NKA', 'Ha Nkau', 'x')")
+
+        @contextmanager
+        def get_auth_db():
+            yield self.db
+
+        self._patch = patch("db_auth.get_auth_db", get_auth_db)
+        self._patch.start()
+
+    def tearDown(self):
+        self._patch.stop()
+
+    def key(self, code):
+        row = self.db.execute("SELECT project_id FROM cc_site_projects WHERE site_code = ?", (code,)).fetchone()
+        return row[0] if row else None
+
+    def test_fallback_keeps_existing_mapping_and_fills_gaps(self):
+        site_sync_ingest.upsert_cc_site_project("NKU", "Nkau", "NKU", explicit=False)
+        site_sync_ingest.upsert_cc_site_project("KOT", "Kotokpa", "KOT", explicit=False)
+        self.assertEqual(self.key("NKU"), "NKA")
+        self.assertEqual(self.key("KOT"), "KOT")
+        self.assertEqual(self.key("KOTOKPA"), "KOT")
+
+    def test_explicit_link_replaces_mapping(self):
+        site_sync_ingest.upsert_cc_site_project("NKU", "Nkau", "NKU_minigrid", explicit=True)
+        self.assertEqual(self.key("NKU"), "NKU_minigrid")
 
 
 if __name__ == "__main__":
