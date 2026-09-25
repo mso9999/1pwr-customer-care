@@ -58,6 +58,14 @@ class FirmwareHistoryTests(unittest.TestCase):
         out = mp._classify_firmware_spans(spans, [job("MAK-GW-0010", "legacy", "202605020750", "1")])
         self.assertEqual(out[1]["method"], "ota")
 
+    def test_unreadable_jobs_are_unknown_not_serial(self):
+        spans = mp._firmware_spans([
+            ("202609221616", "1.1.70", "MAK-GW-0183"),
+            ("202609251816", "1.1.71", "MAK-GW-0183"),
+        ])
+        out = mp._classify_firmware_spans(spans, [], {"MAK-GW-0183"})
+        self.assertEqual([h["method"] for h in out], ["unknown", "unknown"])
+
     def test_ota_for_other_version_does_not_match(self):
         spans = mp._firmware_spans([
             ("202609010800", "1.1.61", "KOT-GW-0004"),

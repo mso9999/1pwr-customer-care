@@ -64,6 +64,7 @@ const METHOD_LABEL: Record<FirmwareHistoryEntry['method'], { text: string; cls: 
   ota: { text: 'OTA', cls: 'bg-blue-50 text-blue-700' },
   serial: { text: 'serial', cls: 'bg-amber-50 text-amber-800' },
   initial: { text: 'first seen', cls: 'bg-gray-100 text-gray-600' },
+  unknown: { text: 'OTA status unknown', cls: 'bg-gray-100 text-gray-600' },
 };
 
 /** Collapsed firmware timeline from the meter's readings; loads on first open. */

@@ -3762,7 +3762,11 @@ def _firmware_spans(readings: list[tuple[str, str, str]]) -> list[dict]:
     return spans
 
 
-def _classify_firmware_spans(spans: list[dict], ota_jobs: list[dict]) -> list[dict]:
+def _classify_firmware_spans(
+    spans: list[dict],
+    ota_jobs: list[dict],
+    unknown_things: frozenset[str] | set[str] = frozenset(),
+) -> list[dict]:
     """Say how each firmware run arrived: OTA job, serial (USB) flash, or first seen.
 
     A run on a different gateway than the one before it (hardware swap) is
@@ -3791,6 +3795,8 @@ def _classify_firmware_spans(spans: list[dict], ota_jobs: list[dict]) -> list[di
         match = max(exact or loose, key=lambda j: j["completed_epoch"], default=None)
         if match is not None:
             method = "ota"
+        elif span["thing_name"] in unknown_things:
+            method = "unknown"
         elif prev is None:
             method = "initial"
         else:
@@ -3824,7 +3830,8 @@ def _ota_file_version(iot, ota_update_id: str) -> Optional[str]:
     return version
 
 
-def _succeeded_ota_jobs(iot, thing_name: str) -> list[dict]:
+def _succeeded_ota_jobs(iot, thing_name: str) -> Optional[list[dict]]:
+    """SUCCEEDED OTA jobs on a Thing, or None when AWS could not be asked."""
     jobs: list[dict] = []
     token = None
     try:
@@ -3851,6 +3858,7 @@ def _succeeded_ota_jobs(iot, thing_name: str) -> list[dict]:
                 break
     except Exception as exc:  # noqa: BLE001
         logger.warning("job executions for %s failed: %s", thing_name, exc)
+        return None
     return jobs
 
 
@@ -3896,9 +3904,14 @@ def firmware_history(meter_id: str, _user: CurrentUser = Depends(require_employe
     spans = _firmware_spans(readings)
     iot = _client("iot")
     ota_jobs: list[dict] = []
+    unknown_things: set[str] = set()
     for thing in sorted({s["thing_name"] for s in spans if s["thing_name"]}):
-        ota_jobs.extend(_succeeded_ota_jobs(iot, thing))
-    history = _classify_firmware_spans(spans, ota_jobs)
+        jobs = _succeeded_ota_jobs(iot, thing)
+        if jobs is None:
+            unknown_things.add(thing)
+        else:
+            ota_jobs.extend(jobs)
+    history = _classify_firmware_spans(spans, ota_jobs, unknown_things)
     history.reverse()
     return {"meter_id": mid, "readings": len(readings), "history": history}
 

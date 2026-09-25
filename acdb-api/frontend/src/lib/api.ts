@@ -1426,8 +1426,9 @@ export interface FirmwareHistoryEntry {
   from: string | null;
   to: string | null;
   readings: number;
-  /** ota = AWS OTA job succeeded; serial = USB flash; initial = first firmware seen. */
-  method: 'ota' | 'serial' | 'initial';
+  /** ota = AWS OTA job succeeded; serial = USB flash; initial = first firmware seen;
+   *  unknown = the gateway's OTA jobs could not be read. */
+  method: 'ota' | 'serial' | 'initial' | 'unknown';
   gateway_changed: boolean;
   ota_update_id: string | null;
   ota_completed_at: string | null;
