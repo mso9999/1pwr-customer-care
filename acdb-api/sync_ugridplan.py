@@ -2072,6 +2072,101 @@ def list_poles(
     return {"site": site.upper(), "count": len(out), "poles": out}
 
 
+def _ptb_channel_serials(ptbs: List[Dict[str, Any]]) -> set:
+    """Normalised meter serials that sit in any PTB channel."""
+    import json as _json
+    out = set()
+    for p in ptbs:
+        serials = p.get("channelSerials") or p.get("channel_serials") or []
+        if isinstance(serials, str):
+            try:
+                serials = _json.loads(serials)
+            except Exception:
+                serials = [serials]
+        for s in serials or []:
+            norm = str(s or "").strip().lstrip("0")
+            if norm:
+                out.add(norm)
+    return out
+
+
+def meters_missing_ptb(meters: List[Dict[str, Any]], ptbs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Active 1Meters (customer + recent activity) whose serial is in no PTB."""
+    boxed = _ptb_channel_serials(ptbs)
+    return [
+        m for m in meters
+        if str(m.get("meter_id") or "").strip().lstrip("0") not in boxed
+    ]
+
+
+@router.get("/ptb-gaps")
+def ptb_gaps(
+    site: str = Query(..., description="Site code (e.g. MAK)"),
+    account: Optional[str] = Query(None, description="Limit to one customer account"),
+    user: CurrentUser = Depends(require_employee),
+):
+    """1Meters that serve a customer with recent transactions or consumption but
+    are in no uGridPLAN PTB. A gateway or 1Meter in service is inside a PTB, so
+    these are almost always installs whose PTB was never recorded.
+    """
+    from customer_api import get_connection as get_pg_connection
+
+    site_code = site.strip().upper()
+    params: List[Any] = [site_code]
+    account_clause = ""
+    if account:
+        account_clause = "AND m.account_number = %s"
+        params.append(account.strip().upper())
+    with get_pg_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            f"""
+            SELECT m.meter_id, m.account_number, a.survey_id,
+                   (SELECT MAX(t.transaction_date) FROM transactions t
+                     WHERE t.account_number = m.account_number) AS last_transaction
+              FROM meters m
+              LEFT JOIN accounts a ON a.account_number = m.account_number
+             WHERE m.platform = 'prototype'
+               AND m.community = %s
+               AND NULLIF(m.account_number, '') IS NOT NULL
+               {account_clause}
+               AND (
+                 EXISTS (SELECT 1 FROM transactions t
+                          WHERE t.account_number = m.account_number
+                            AND t.transaction_date > NOW() - INTERVAL '90 days')
+                 OR EXISTS (SELECT 1 FROM hourly_consumption h
+                             WHERE h.account_number = m.account_number
+                               AND h.reading_hour > NOW() - INTERVAL '30 days')
+               )
+            """,
+            params,
+        )
+        cols = [d[0] for d in cur.description]
+        meters = [dict(zip(cols, r)) for r in cur.fetchall()]
+    if not meters:
+        return {"site": site_code, "count": 0, "meters": []}
+
+    try:
+        client = _get_ugp_client()
+        session_id = _load_project_for_site(client, _site_project_key(site_code))
+        ptbs = client.get_ptbs(session_id)
+        lines = client.get_lines(session_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"uGridPLAN fetch failed: {e}")
+
+    out = []
+    for m in meters_missing_ptb(meters, ptbs):
+        survey_id = str(m.get("survey_id") or "").strip()
+        out.append({
+            "meter_id": m["meter_id"],
+            "account_number": m["account_number"],
+            "survey_id": survey_id or None,
+            "pole_id": _pole_for_connection(lines, survey_id) if survey_id else None,
+            "last_transaction": str(m["last_transaction"]) if m.get("last_transaction") else None,
+        })
+    return {"site": site_code, "count": len(out), "meters": out}
+
+
 @router.get("/ptb-backfill")
 def ptb_backfill_report(
     site: str = Query(..., description="Site code (e.g. MAK)"),
@@ -2216,6 +2311,19 @@ def pole_for_connection(
     return {"site": site_code, "survey_id": sid_in, "pole_id": pole}
 
 
+def _account_survey_id(account_number: str) -> Optional[str]:
+    """The customer's uGP connection (Survey_ID) recorded on the account, if any."""
+    from customer_api import get_connection as get_pg_connection
+    with get_pg_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT NULLIF(survey_id, '') FROM accounts WHERE account_number = %s",
+            (account_number,),
+        )
+        row = cur.fetchone()
+    return str(row[0]).strip() if row and row[0] else None
+
+
 class AssignPtbRequest(BaseModel):
     site: str = Field(..., description="Site code (e.g. MAK)")
     account_number: str = Field(..., min_length=1, description="Customer account this meter serves")
@@ -2224,6 +2332,11 @@ class AssignPtbRequest(BaseModel):
     gateway_thing_name: Optional[str] = Field(default=None, description="Gateway (e.g. MAK-GW-0007) that reads this meter; auto-derived from telemetry/provisioning if omitted")
     survey_id: Optional[str] = Field(default=None, description="Customer connection; also used to derive the pole when pole_id is omitted")
     ptb_serial: Optional[str] = Field(default=None, description="PTB box serial (optional, on create)")
+    create_ptb: bool = Field(
+        default=True,
+        description="Create the PTB when the pole has none. False binds the meter without a box "
+                    "(bench test / not installed yet).",
+    )
 
 
 @router.post("/assign-ptb")
@@ -2253,6 +2366,8 @@ def assign_ptb(
     meter_serial = (req.meter_serial or "").strip()
     gateway_thing = (req.gateway_thing_name or "").strip()
     survey_id_in = (req.survey_id or "").strip() or None
+    if not survey_id_in and not (req.pole_id or "").strip():
+        survey_id_in = _account_survey_id(account_number)
 
     # Resolve the gateway that serves this meter (PTB contains the gateway).
     if not gateway_thing and meter_serial:
@@ -2272,6 +2387,7 @@ def assign_ptb(
         gateway_thing=gateway_thing, survey_id_in=survey_id_in,
         pole_id_in=(req.pole_id or "").strip(),
         ptb_serial=req.ptb_serial, operator_id=user.user_id,
+        create_ptb=req.create_ptb,
     )
 
 
@@ -2289,6 +2405,7 @@ def _assign_ptb_core(
     operator_id: str,
     conns: Optional[List[Dict[str, Any]]] = None,
     persist: bool = True,
+    create_ptb: bool = True,
 ) -> Dict[str, Any]:
     """Shared write path for /assign-ptb (single unit) and /auto-link (bulk
     backfill): find-or-create the PTB on the pole, associate gateway + meter,
@@ -2331,7 +2448,7 @@ def _assign_ptb_core(
 
     ptb = client.get_ptb_for_pole(session_id, pole_id)
     ptb_created = False
-    if ptb is None:
+    if ptb is None and create_ptb:
         try:
             client.create_ptb(
                 session_id, pole_id,
@@ -2356,7 +2473,7 @@ def _assign_ptb_core(
             gateway_thing = ptb_gw
             logger.info("assign-ptb: inherited gateway %s from existing PTB on %s", gateway_thing, pole_id)
 
-    ptb_id = str(ptb.get("ptbId") or ptb.get("ptb_id") or "")
+    ptb_id = str((ptb or {}).get("ptbId") or (ptb or {}).get("ptb_id") or "")
 
     # 2. Associate gateway ↔ PTB (serial_number) and meter ↔ gateway (channel).
     ptb_updated = False
@@ -2952,6 +3069,11 @@ class InstallGatewayRequest(BaseModel):
     gateway_thing: str = Field(..., min_length=1, description="Provisioned gateway Thing (e.g. MAK-GW-0042)")
     pole_id: str = Field(..., min_length=1, description="Pole the PTB/gateway is mounted on")
     ptb_serial: Optional[str] = Field(default=None, description="PTB box serial (optional, on create)")
+    create_ptb: bool = Field(
+        default=True,
+        description="Create the PTB when the pole has none. False records the binding only "
+                    "(unit not physically installed yet).",
+    )
 
 
 @router.post("/install-gateway")
@@ -3035,7 +3157,7 @@ def install_gateway(
 
     ptb = client.get_ptb_for_pole(session_id, pole_id)
     ptb_created = False
-    if ptb is None:
+    if ptb is None and req.create_ptb:
         try:
             client.create_ptb(
                 session_id, pole_id,
@@ -3050,7 +3172,7 @@ def install_gateway(
         if ptb is None:
             raise HTTPException(status_code=502, detail="PTB created but not readable back from uGridPLAN")
 
-    ptb_id = str(ptb.get("ptbId") or ptb.get("ptb_id") or "")
+    ptb_id = str((ptb or {}).get("ptbId") or (ptb or {}).get("ptb_id") or "")
     # Ensure the PTB carries the gateway identity + Installed status.
     if ptb_id:
         try:

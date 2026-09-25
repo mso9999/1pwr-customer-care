@@ -64,5 +64,12 @@
     "noneOnSite": "Aucun compteur non attribué pour {{site}}.",
     "billingTitle": "Utiliser ce 1Meter pour la facturation et la commande du relais.",
     "billingBody": "Il devient le compteur principal du compte et active la coupure à solde nul dès que l’indicateur de sécurité serveur est approuvé."
+  },
+  "ptb": {
+    "prompt": "Le compteur {{meter}} est lié à {{account}} et en ligne : il est donc installé — et un 1Meter installé est dans un boîtier (PTB).\n\nOK : l’enregistrer dans son PTB dans uGridPlan maintenant (le PTB est créé si le poteau du client n’en a pas).\nAnnuler : test sur banc uniquement, pas de PTB.",
+    "created": "PTB {{ptb}} créé sur le poteau {{pole}}.",
+    "linked": "Enregistré dans le PTB {{ptb}} sur le poteau {{pole}}.",
+    "skipped": "Aucun PTB enregistré (test sur banc). La page client vous le rappellera quand le compteur sera en service.",
+    "failed": "Compteur attribué, mais le PTB n’a pas été enregistré : {{error}}. Ouvrez le compteur dans la page Compteurs et choisissez son poteau."
   }
 }

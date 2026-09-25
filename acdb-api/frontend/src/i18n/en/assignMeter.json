@@ -64,5 +64,12 @@
     "noneOnSite": "No unassigned meters for {{site}}.",
     "billingTitle": "Use this 1Meter for billing and relay control.",
     "billingBody": "This makes it the account’s primary meter and enables zero-balance control once the server safety flag is approved."
+  },
+  "ptb": {
+    "prompt": "Meter {{meter}} is bound to {{account}} and online, so it is installed — and installed 1Meters sit inside a pole box (PTB).\n\nOK: record it in its PTB in uGridPlan now (the PTB is created if the customer's pole has none).\nCancel: bench test only, no PTB.",
+    "created": "PTB {{ptb}} created on pole {{pole}}.",
+    "linked": "Recorded in PTB {{ptb}} on pole {{pole}}.",
+    "skipped": "No PTB recorded (bench test). The customer page will remind you once the meter is in service.",
+    "failed": "Meter assigned, but the PTB was not recorded: {{error}}. Open the meter on the Meters page and pick its pole."
   }
 }

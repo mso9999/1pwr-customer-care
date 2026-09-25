@@ -1292,6 +1292,7 @@ export interface AssignPtbRequest {
   gateway_thing_name?: string;  // auto-derived from telemetry if omitted
   survey_id?: string;
   ptb_serial?: string;
+  create_ptb?: boolean;  // false = bind without a PTB (bench test / not installed)
 }
 
 export interface AssignPtbResult {
@@ -1334,11 +1335,26 @@ export async function installGateway(data: {
   site: string;
   gateway_thing: string;
   pole_id: string;
+  create_ptb?: boolean;  // false = record the binding only (not physically installed yet)
 }): Promise<InstallGatewayResult> {
   return request<InstallGatewayResult>('/sync/install-gateway', {
     method: 'POST',
     body: JSON.stringify(data),
   });
+}
+
+export interface PtbGap {
+  meter_id: string;
+  account_number: string;
+  survey_id?: string | null;
+  pole_id?: string | null;
+  last_transaction?: string | null;
+}
+
+/** 1Meters serving customers with recent transactions/consumption but in no uGridPLAN PTB. */
+export async function getPtbGaps(site: string, account?: string): Promise<{ site: string; count: number; meters: PtbGap[] }> {
+  const qs = new URLSearchParams({ site, ...(account ? { account } : {}) });
+  return request(`/sync/ptb-gaps?${qs}`);
 }
 
 export interface GatewayInstallation {

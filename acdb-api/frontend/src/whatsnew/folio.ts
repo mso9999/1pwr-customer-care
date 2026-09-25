@@ -37,6 +37,21 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW_FOLIO: WhatsNewEntry[] = [
   {
+    id: 'ptb-on-install-and-assign',
+    date: '2026-09-25',
+    title: 'Pole boxes (PTBs) are confirmed, not assumed',
+    blurb: 'Field install and Assign Meter ask before creating a PTB, and in-service 1Meters with no PTB get a warning.',
+    pages: [
+      {
+        heading: 'You decide when the PTB is created',
+        body:
+          '- Field install: if the pole has no PTB, CC asks whether to create it now. Cancel records the binding only, for units not installed yet.\n' +
+          '- Assign Meter: when an online 1Meter is bound to a customer, CC asks to record it in its PTB (created if needed). Cancel only for a bench test.\n' +
+          '- Meters page and customer page: a 1Meter serving a customer with recent transactions or consumption but no PTB in uGridPlan shows a warning with a Create PTB button.',
+      },
+    ],
+  },
+  {
     id: 'sites-only-from-pr',
     date: '2026-09-25',
     title: 'New sites come only from PR',

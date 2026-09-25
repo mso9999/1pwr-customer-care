@@ -34,6 +34,8 @@ export default function FieldInstall({ initialSite = '' }: { initialSite?: strin
   const [summary, setSummary] = useState<{ total: number; verified: number; awaiting_contact: number; connected_now: number } | null>(null);
   const [gateway, setGateway] = useState('');
   const [poleId, setPoleId] = useState('');
+  // true/false once picked on the map; null when typed (unknown).
+  const [poleHasPtb, setPoleHasPtb] = useState<boolean | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<InstallGatewayResult | null>(null);
@@ -150,8 +152,18 @@ export default function FieldInstall({ initialSite = '' }: { initialSite?: strin
     setBusy(true);
     setError('');
     setResult(null);
+    // Installed gateways and 1Meters always sit in a PTB, but a binding made
+    // ahead of installation has none yet — let the operator decide.
+    const createPtb = poleHasPtb === true || window.confirm(L(
+      `Pole ${poleId.trim()} has no PTB in uGridPlan${poleHasPtb === null ? ' (or it was not picked on the map)' : ''}.\n\n` +
+        'Gateways and 1Meters are always inside a PTB once installed.\n\n' +
+        'OK: create the PTB now (installing now).\nCancel: record the binding only (not installed yet).',
+      `Le poteau ${poleId.trim()} n’a pas de boîtier (PTB) dans uGridPlan${poleHasPtb === null ? ' (ou il n’a pas été choisi sur la carte)' : ''}.\n\n` +
+        'Les passerelles et les 1Meter sont toujours dans un PTB une fois installés.\n\n' +
+        'OK : créer le PTB maintenant (installation en cours).\nAnnuler : enregistrer seulement le rattachement (pas encore installé).',
+    ));
     try {
-      const res = await installGateway({ site, gateway_thing: gateway, pole_id: poleId.trim() });
+      const res = await installGateway({ site, gateway_thing: gateway, pole_id: poleId.trim(), create_ptb: createPtb });
       setResult(res);
       refreshInstalls(site);
     } catch (e) {
@@ -251,7 +263,7 @@ export default function FieldInstall({ initialSite = '' }: { initialSite?: strin
           <div className="flex gap-2">
             <input
               value={poleId}
-              onChange={(e) => setPoleId(e.target.value)}
+              onChange={(e) => { setPoleId(e.target.value); setPoleHasPtb(null); }}
               placeholder={site ? `${L('e.g.', 'ex.')} ${site}_01_DA12` : ''}
               className="flex-1 px-3 py-2.5 border rounded-lg text-sm bg-white font-mono"
             />
@@ -284,7 +296,11 @@ export default function FieldInstall({ initialSite = '' }: { initialSite?: strin
             <dl className="text-sm mt-2 space-y-1">
               <div className="flex justify-between"><dt className="text-gray-500">Gateway</dt><dd className="font-mono">{result.gateway_thing}</dd></div>
               <div className="flex justify-between"><dt className="text-gray-500">Pole</dt><dd className="font-mono">{result.pole_id}</dd></div>
-              <div className="flex justify-between"><dt className="text-gray-500">PTB</dt><dd className="font-mono">{result.ptb_id}{result.ptb_created ? ' (created)' : ' (existing)'}</dd></div>
+              <div className="flex justify-between"><dt className="text-gray-500">PTB</dt><dd className="font-mono">
+                {result.ptb_id
+                  ? `${result.ptb_id}${result.ptb_created ? L(' (created)', ' (créé)') : L(' (existing)', ' (existant)')}`
+                  : L('none yet — binding only', 'pas encore — rattachement seul')}
+              </dd></div>
               {(result.meters_linked ?? 0) > 0 && (
                 <div className="flex justify-between"><dt className="text-gray-500">Meters linked</dt><dd className="font-medium text-green-700">{result.meters_linked} on this pole completed</dd></div>
               )}
@@ -356,7 +372,7 @@ export default function FieldInstall({ initialSite = '' }: { initialSite?: strin
       {pickerOpen && (
         <UGPPolePicker
           site={site}
-          onSelect={(p) => { setPoleId(p.pole_id); setPickerOpen(false); }}
+          onSelect={(p) => { setPoleId(p.pole_id); setPoleHasPtb(Boolean(p.has_ptb)); setPickerOpen(false); }}
           onClose={() => setPickerOpen(false)}
         />
       )}

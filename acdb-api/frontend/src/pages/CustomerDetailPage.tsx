@@ -1,6 +1,7 @@
 import { useEffect, useState, type ChangeEvent } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import PtbGapWarning from '../components/PtbGapWarning';
 import {
   getRecord, updateRecord, deleteRecord, getCustomerContracts, decommissionCustomer,
   getFinancingProducts, createFinancingAgreement,
@@ -628,6 +629,9 @@ export default function CustomerDetailPage() {
           )}
         </div>
       </div>
+      {siteCode && (accountNumbers[0] || accountNumber) && (
+        <PtbGapWarning site={siteCode} account={accountNumbers[0] || accountNumber} />
+      )}
 
       {error && <p className="text-red-600 text-sm bg-red-50 p-2 rounded">{error}</p>}
 

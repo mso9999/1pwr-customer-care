@@ -122,7 +122,7 @@ export default function UGPPolePicker({ site, onSelect, onClose }: Props) {
                       <div className="font-semibold">{p.pole_id}</div>
                       <div className="text-xs text-gray-600">{p.subnetwork}</div>
                       <div className="text-xs mt-1">
-                        {p.has_ptb ? `PTB: ${p.ptb_id} (status ${p.ptb_status || 'P'})` : 'No PTB yet — will be created'}
+                        {p.has_ptb ? `PTB: ${p.ptb_id} (status ${p.ptb_status || 'P'})` : 'No PTB yet — you will be asked whether to create it'}
                       </div>
                       <div className="text-xs text-gray-500">{p.drop_count} drop(s)</div>
                       <button

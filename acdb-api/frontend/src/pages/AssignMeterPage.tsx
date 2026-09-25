@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   assignMeter,
+  assignPtb,
   getCommissionData,
   getFleetLive,
   getMetersForAccount,
@@ -298,6 +299,16 @@ export default function AssignMeterPage() {
   const offlineOnSite = siteGateways.filter((row) => !fleetByThing.get(String(row.thing_name))?.connected).length;
 
   // Submit
+  const meterIsOnline = (thing: string, serial: string) => {
+    const unit = fleetByThing.get(thing);
+    const norm = (v: string) => String(v || '').replace(/^0+/, '');
+    const meter = (unit?.meters || []).find((m) => norm(String(m.meter_id)) === norm(serial));
+    if (!unit || !meter) return false;
+    if (unit.connected) return true;
+    const seen = Date.parse(String(meter.last_seen || ''));
+    return Number.isFinite(seen) && Date.now() - seen < 24 * 3600 * 1000;
+  };
+
   const handleSubmit = async () => {
     if (!customerId.trim()) { setError(t('assignMeter:validation.customerIdRequired')); return; }
     if (!meterid.trim()) { setError(t('assignMeter:validation.meterRequired')); return; }
@@ -332,6 +343,28 @@ export default function AssignMeterPage() {
       if (result.customer_id_legacy != null) setCustomerId(String(result.customer_id_legacy));
       setAccountNumber(result.account_number);
       setSuccess(result.message);
+
+      // A 1Meter bound to a customer and online implies installation, and
+      // installed 1Meters sit inside a PTB. Default to recording it; decline
+      // only for a bench test.
+      if (platform === 'prototype' && thingName && meterIsOnline(thingName, meterid)) {
+        if (window.confirm(t('assignMeter:ptb.prompt', { meter: meterid, account: result.account_number }))) {
+          try {
+            const ptb = await assignPtb({
+              site: community.toUpperCase(),
+              account_number: result.account_number,
+              meter_serial: meterid.trim(),
+              gateway_thing_name: thingName,
+              create_ptb: true,
+            });
+            setSuccess(`${result.message} ${t(ptb.ptb_created ? 'assignMeter:ptb.created' : 'assignMeter:ptb.linked', { ptb: ptb.ptb_id, pole: ptb.pole_id })}`);
+          } catch (ptbErr: any) {
+            setError(t('assignMeter:ptb.failed', { error: ptbErr?.message || String(ptbErr) }));
+          }
+        } else {
+          setSuccess(`${result.message} ${t('assignMeter:ptb.skipped')}`);
+        }
+      }
 
     } catch (e: any) {
       setError(e.message || t('assignMeter:assignFailed'));
