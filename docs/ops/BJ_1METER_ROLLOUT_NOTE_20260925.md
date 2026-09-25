@@ -52,7 +52,7 @@ provisionnement avec la station, canari OTA, adressage et validation du lot, app
 
 ## Ce que nous faisons de notre côté
 
-- KOT n’a pas encore de projet uGridPlan relié dans CC : **Installation terrain ne fonctionnera pas pour KOT** tant que l’Ingénierie ne l’a pas relié. Nous vous prévenons dès que c’est fait. Pour SIN et SAM, c’est prêt.
+- Installation terrain est prête pour KOT, SIN et SAM (les poteaux du plan uGridPlan s’affichent sur la carte).
 - L’Ingénierie traitera l’approbation de la version pour vos sites dès que le canari et la validation seront enregistrés.
 
 Aide complète : CC → Aide → Provisionnement (section « Déployer un site »).
@@ -113,7 +113,7 @@ station provisioning, OTA canary, meter addressing and batch validation, release
 
 ## What we are doing on our side
 
-- KOT does not yet have a uGridPlan project linked in CC, so **Field install will not work for KOT** until Engineering links it. We will tell you when it is done. SIN and SAM are ready.
+- Field install is ready for KOT, SIN and SAM (the uGridPlan poles show on the map).
 - Engineering will handle release approval for your sites once the canary and validation are recorded.
 
 Full help: CC → Help → Provisioning ("Rolling out a site" section).
