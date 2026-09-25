@@ -3822,6 +3822,81 @@ def _site_of_thing(thing_name: str) -> str:
     return str(thing_name or "").split("-", 1)[0].upper()
 
 
+def _iso(value) -> Optional[str]:
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return str(value)
+
+
+def _gateway_since(prov: Optional[dict]) -> Optional[str]:
+    """When a gateway entered the field: first MQTT connect, else provisioning."""
+    prov = prov or {}
+    return _iso(prov.get("first_seen_online") or prov.get("provisioned_at"))
+
+
+def _earliest(values) -> Optional[str]:
+    vals = sorted(v for v in values if v)
+    return vals[0] if vals else None
+
+
+def _rollout_warnings(
+    site: str,
+    field: list[dict],
+    not_on_pole: list[str],
+    unassigned: list[dict],
+    walkthrough_complete: bool,
+    release_ok: bool,
+    provisioned: dict[str, dict],
+) -> list[dict]:
+    """Stable per-site warning ids (``RW-<SITE>-<KIND>``) with the date each gap opened.
+
+    ``since`` is when the oldest item in the warning entered the field: a
+    gateway's first MQTT connect (or provisioning time), and for a meter the
+    same date for the gateway it reports through.
+    """
+    warnings = []
+    if field and not walkthrough_complete:
+        warnings.append({
+            "id": f"RW-{site}-WALK",
+            "kind": "walkthrough",
+            "reason": "release_not_approved" if not release_ok else "commissioning_not_confirmed",
+            "since": _earliest(_gateway_since(provisioned.get(u["thing_name"])) for u in field),
+            "items": [
+                {"id": u["thing_name"], "since": _gateway_since(provisioned.get(u["thing_name"]))}
+                for u in sorted(field, key=lambda u: u["thing_name"])
+            ],
+        })
+    if not_on_pole:
+        items = [{"id": t, "since": _gateway_since(provisioned.get(t))} for t in not_on_pole]
+        warnings.append({
+            "id": f"RW-{site}-POLE",
+            "kind": "not_on_pole",
+            "since": _earliest(i["since"] for i in items),
+            "items": items,
+        })
+    if unassigned:
+        items = [
+            {
+                "id": m["meter_id"],
+                "thing_name": m["thing_name"],
+                "since": _gateway_since(provisioned.get(m["thing_name"])),
+                "last_seen": m.get("last_seen"),
+            }
+            for m in unassigned
+        ]
+        warnings.append({
+            "id": f"RW-{site}-ASSIGN",
+            "kind": "unassigned_meters",
+            "since": _earliest(i["since"] for i in items),
+            "items": items,
+        })
+    return warnings
+
+
 def _summarize_site_installation(
     sites: dict[str, str],
     units: list[dict],
@@ -3864,6 +3939,7 @@ def _summarize_site_installation(
                         "thing_name": u["thing_name"],
                         "last_seen": m.get("latest_sample") or m.get("last_seen"),
                     })
+        unassigned.sort(key=lambda m: (m["thing_name"], m["meter_id"]))
         not_on_pole = sorted(u["thing_name"] for u in field if u["thing_name"] not in installed_things)
         release_ok = site in batch_approved
         commissioned = site in commissioning_verified
@@ -3881,7 +3957,11 @@ def _summarize_site_installation(
             "commissioning_verified": commissioned,
             "walkthrough_complete": release_ok and commissioned,
             "assigned_meters": assigned,
-            "unassigned_meters": sorted(unassigned, key=lambda m: (m["thing_name"], m["meter_id"])),
+            "unassigned_meters": unassigned,
+            "warnings": _rollout_warnings(
+                site, field, not_on_pole, unassigned,
+                release_ok and commissioned, release_ok, provisioned,
+            ),
         })
     return out
 
@@ -3900,10 +3980,17 @@ def installation_status(_user: CurrentUser = Depends(CC_OPERATE_GATE)):
     from customer_api import get_connection
     with get_connection() as conn:
         cur = conn.cursor()
-        cur.execute("SELECT thing_name, is_test, status FROM meter_provisioning")
-        for thing, is_test, status in cur.fetchall():
+        cur.execute(
+            "SELECT thing_name, is_test, status, first_seen_online, provisioned_at FROM meter_provisioning"
+        )
+        for thing, is_test, status, first_seen, prov_at in cur.fetchall():
             if thing:
-                provisioned[str(thing)] = {"is_test": bool(is_test), "status": status}
+                provisioned[str(thing)] = {
+                    "is_test": bool(is_test),
+                    "status": status,
+                    "first_seen_online": first_seen,
+                    "provisioned_at": prov_at,
+                }
         cur.execute(
             """
             SELECT gateway_thing FROM gateway_installation

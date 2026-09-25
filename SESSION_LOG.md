@@ -1,3 +1,58 @@
+## Session 2026-09-25 [202609251415] — Station SoftAP fallback is visible
+
+### What Was Done
+- The downloaded station hid the gateway-hotspot fallback. Detect now shows it on the scan card: join `1Meter_` + last 6 of the MAC, password `1Meter00`, choose SoftAP, probe `192.168.5.1`. An empty scan repeats that line. Probe default was `192.168.4.1`; current firmware serves `192.168.5.1`.
+- Same change in `onepwr-aws-mesh/tools/provisioning-station`. Not deployed.
+
+### Side effects
+- None. Field laptops keep the old zip until CC `main` is pushed and they download the station again.
+
+### Key files
+- `acdb-api/provisioning_station_dist/static/index.html`
+
+### Follow-ups
+- Push CC `main` when asked so Kotokpa can download the new station.
+
+---
+
+## Session 2026-09-25 [202609251650] — Rollout warnings collapsed, with ids and dates
+- The Meters-page banner "1Meter installs not yet complete in CC" is now a `<details>` element, collapsed by default. The summary line shows the warning count and the sites.
+- `GET /api/provisioning/installation-status` adds `warnings[]` per site. Each warning has a stable id `RW-<SITE>-WALK|POLE|ASSIGN`, a `since` date (the oldest item's gateway `first_seen_online`, else `provisioned_at`) and dated items. Each unassigned meter also shows its last reading.
+- The existing fields are unchanged, so the walkthrough tab is not affected.
+- Files: `acdb-api/meter_provisioning.py`, `frontend/src/components/RolloutWarnings.tsx`, `frontend/src/lib/api.ts`, `tests/test_installation_status.py` (5 pass). `tsc -b` is clean.
+- Side effects: deploy via push to main.
+
+---
+
+## Session 2026-09-25 [202609251633] — Factory OTA target is 1.1.71
+- The single-Thing canary on MAK-GW-0183 succeeded. Two meter readings came in on 1.1.71, with no reboot past the 15 min watchdog and healthy heap.
+- At 16:33 UTC, `onemeter_ota_site_releases` changed on LS, BN and ZM: all 6 sites per lane moved from 1.1.70 (VersionId `sa0ziZ1C…`) to **1.1.71** (`firmware-releases/v1.1.71/Fleet1171/FeaturedFreeRTOSIoTIntegration.bin`, VersionId `zZGlAPhqyejrYbPgeK8vGvnvntlXzL23`). canary_only and the rate limit are unchanged. created_by `cursor-20260925-1171-canary-ok`.
+- `acdb-api/ota_releases.json` fallback updated to match. Not committed.
+- Side effects: production DB writes on 3 lanes. No Approve.
+
+---
+
+## Session 2026-09-25 [202609251345] — Factory OTA target is 1.1.70
+
+### What Was Done
+- Stopped Customer Care offering 1.1.61 (and 1.1.62 / 1.1.69) as the canary image. KOT had no DB row, so the canary used `ota_releases.json` and installed 1.1.61 on KOT-GW-0004.
+- Live `onemeter_ota_site_releases` on LS, BN, and ZM: AGL, GBO, KOT, MAK, SAM, SIN now target `firmware-releases/v1.1.70/Fleet1170/FeaturedFreeRTOSIoTIntegration.bin` version `sa0ziZ1C8P1rVHiq3kSZMp3_P3Qyxr9.`, fileVersion 1.1.70. `canary_only` stays true. No Approve, no new OTA job.
+- Repo `ota_releases.json` updated to the same artifact. Not committed. DB rows win over the file, so the running resolver already returns 1.1.70.
+
+### Side effects
+- Production DB writes ~13:45 UTC on `onepower_cc`, `onepower_bj`, and the ZM database. Previous targets: file 1.1.61 (KOT and sites with no row), DB 1.1.62 (MAK/SAM), DB 1.1.69 (SIN).
+- KOT-GW-0004 already completed `AFR_OTA-1m-factory-1-1-61-20260925114244-e8886d78`. It cannot OTA off 1.1.61. USB 1.1.70 only.
+
+### Key files
+- `acdb-api/ota_releases.json`
+- Table `onemeter_ota_site_releases`
+
+### Follow-ups
+- USB-reflash KOT-GW-0004 to 1.1.70. Do not run another 1.1.61 canary.
+- Commit `ota_releases.json` when asked so a wiped DB row cannot fall back to 1.1.61.
+
+---
+
 ## Session 2026-09-23 [202609230951] — Nexus launch skips the CC sign-in chooser
 
 ### What Was Done

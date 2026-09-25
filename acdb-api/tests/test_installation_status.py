@@ -81,6 +81,40 @@ class SummarizeSiteInstallationTests(unittest.TestCase):
         self.assertEqual(rows["SIN"]["gateways_in_field"], 0)
         self.assertEqual(rows["SIN"]["unassigned_meters"], [])
 
+    def test_warnings_have_stable_ids_and_since_dates(self):
+        from datetime import datetime, timezone
+        rows = self.summarize(
+            [
+                unit("SIN-GW-0001", 1790185440248, meters=[("000023021718", None)]),
+                unit("SIN-GW-0002", 1790185440248),
+            ],
+            {
+                "SIN-GW-0001": {
+                    "is_test": False,
+                    "first_seen_online": datetime(2026, 9, 15, 15, 9, tzinfo=timezone.utc),
+                    "provisioned_at": datetime(2026, 9, 3, 18, 32, tzinfo=timezone.utc),
+                },
+                "SIN-GW-0002": {
+                    "is_test": False,
+                    "provisioned_at": datetime(2026, 9, 10, 10, 42, tzinfo=timezone.utc),
+                },
+            },
+        )
+        warnings = {w["id"]: w for w in rows["SIN"]["warnings"]}
+        self.assertEqual(set(warnings), {"RW-SIN-WALK", "RW-SIN-POLE", "RW-SIN-ASSIGN"})
+        self.assertEqual(warnings["RW-SIN-WALK"]["reason"], "release_not_approved")
+        # first_seen_online wins; provisioned_at is the fallback; earliest item dates the warning.
+        self.assertEqual(warnings["RW-SIN-POLE"]["since"], "2026-09-10T10:42:00Z")
+        self.assertEqual(
+            {i["id"]: i["since"] for i in warnings["RW-SIN-POLE"]["items"]},
+            {"SIN-GW-0001": "2026-09-15T15:09:00Z", "SIN-GW-0002": "2026-09-10T10:42:00Z"},
+        )
+        assign = warnings["RW-SIN-ASSIGN"]["items"][0]
+        self.assertEqual(assign["id"], "000023021718")
+        self.assertEqual(assign["since"], "2026-09-15T15:09:00Z")
+        self.assertEqual(assign["last_seen"], "2026-09-23T17:38:54Z")
+        self.assertEqual(rows["KOT"]["warnings"], [])
+
     def test_walkthrough_complete_needs_release_and_site_commissioning(self):
         rows = self.summarize([], {}, commissioned={"KOT"}, approved={"KOT", "SIN"})
         self.assertTrue(rows["KOT"]["walkthrough_complete"])

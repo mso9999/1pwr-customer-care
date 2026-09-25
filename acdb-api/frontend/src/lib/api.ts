@@ -4633,6 +4633,17 @@ export interface SiteInstallationStatus {
   walkthrough_complete: boolean;
   assigned_meters: number;
   unassigned_meters: { meter_id: string; thing_name: string; last_seen?: string | null }[];
+  warnings?: RolloutWarning[];
+}
+
+export interface RolloutWarning {
+  /** Stable id, e.g. RW-SIN-POLE. */
+  id: string;
+  kind: 'walkthrough' | 'not_on_pole' | 'unassigned_meters';
+  reason?: 'release_not_approved' | 'commissioning_not_confirmed';
+  /** When the oldest item entered the field (ISO UTC). */
+  since?: string | null;
+  items: { id: string; since?: string | null; thing_name?: string; last_seen?: string | null }[];
 }
 
 export async function getInstallationStatus(): Promise<{ sites: SiteInstallationStatus[] }> {
