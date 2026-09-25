@@ -1,8 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { getFleetMap, type FleetMapMeter, type FleetMapResult } from '../lib/api';
+import {
+  getFirmwareHistory,
+  getFleetMap,
+  type FirmwareHistoryEntry,
+  type FleetMapMeter,
+  type FleetMapResult,
+} from '../lib/api';
 import { formatLastSeen } from '../lib/datetime';
 
 type MapColorMode = 'status' | 'firmware' | 'installed' | 'hybrid';
@@ -51,6 +58,61 @@ function formatInstalled(raw: string | null | undefined): string {
     year: 'numeric',
     timeZone: 'UTC',
   });
+}
+
+const METHOD_LABEL: Record<FirmwareHistoryEntry['method'], { text: string; cls: string }> = {
+  ota: { text: 'OTA', cls: 'bg-blue-50 text-blue-700' },
+  serial: { text: 'serial', cls: 'bg-amber-50 text-amber-800' },
+  initial: { text: 'first seen', cls: 'bg-gray-100 text-gray-600' },
+};
+
+/** Collapsed firmware timeline from the meter's readings; loads on first open. */
+function FirmwareHistory({ meterId }: { meterId: string }) {
+  const [rows, setRows] = useState<FirmwareHistoryEntry[] | null>(null);
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const onToggle = (e: React.SyntheticEvent<HTMLDetailsElement>) => {
+    if (!e.currentTarget.open || rows || loading) return;
+    setLoading(true);
+    setError('');
+    getFirmwareHistory(meterId)
+      .then((r) => setRows(r.history))
+      .catch((err) => setError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setLoading(false));
+  };
+
+  return (
+    <details className="mt-1.5 text-xs" onToggle={onToggle}>
+      <summary className="cursor-pointer text-gray-500 hover:text-gray-700">Firmware history</summary>
+      {loading && <div className="mt-1 text-gray-400">Loading…</div>}
+      {error && <div className="mt-1 text-red-600">{error}</div>}
+      {rows && !rows.length && <div className="mt-1 text-gray-400">No readings yet.</div>}
+      {rows && rows.length > 0 && (
+        <ul className="mt-1 space-y-1 max-h-48 overflow-y-auto pr-1">
+          {rows.map((h) => {
+            const label = METHOD_LABEL[h.method];
+            return (
+              <li key={`${h.fw_version}-${h.thing_name}-${h.from}`} className="border-l-2 border-gray-200 pl-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-mono font-semibold text-gray-800">{h.fw_version}</span>
+                  <span className={`rounded px-1 py-px text-[10px] font-medium ${label.cls}`}>{label.text}</span>
+                  {h.gateway_changed && <span className="rounded bg-purple-50 px-1 py-px text-[10px] font-medium text-purple-700">new gateway</span>}
+                </div>
+                <div className="text-gray-500">
+                  {h.from ? formatLastSeen(h.from) : '—'} → {h.to ? formatLastSeen(h.to) : '—'}
+                </div>
+                <div className="text-gray-400">
+                  {h.thing_name || 'unknown gateway'} · {h.readings} reading{h.readings === 1 ? '' : 's'}
+                  {h.ota_update_id ? ` · ${h.ota_update_id}` : ''}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </details>
+  );
 }
 
 function FitBounds({ points }: { points: [number, number][] }) {
@@ -375,7 +437,20 @@ export default function FleetMap({ site, sites, onSiteChange, focusMeterId }: Fl
                   <Popup>
                     <div className="text-sm">
                       <div className="font-semibold">{m.thing_name || m.meter_id}</div>
-                      <div className="text-xs text-gray-600">meter {m.meter_id}{m.account_number ? ` · ${m.account_number}` : ''}</div>
+                      <div className="text-xs text-gray-600">
+                        meter{' '}
+                        <Link to={`/meters?meter=${encodeURIComponent(m.meter_id)}`} className="text-blue-600 hover:underline" title="Open this meter on the Meters page">
+                          {m.meter_id}
+                        </Link>
+                        {m.account_number && (
+                          <>
+                            {' · '}
+                            <Link to={`/customers/${encodeURIComponent(m.account_number)}`} className="text-blue-600 hover:underline" title="Open this customer">
+                              {m.account_number}
+                            </Link>
+                          </>
+                        )}
+                      </div>
                       {m.village && <div className="text-xs text-gray-500">{m.village}</div>}
                       {m.linked && (
                         <div className="text-xs text-blue-600 font-medium">
@@ -393,6 +468,7 @@ export default function FleetMap({ site, sites, onSiteChange, focusMeterId }: Fl
                       )}
                       <div className="text-xs text-gray-600">FW {m.fw_version || '—'}</div>
                       {m.last_seen && <div className="text-xs text-gray-400">last seen {formatLastSeen(m.last_seen)}</div>}
+                      {m.linked && <FirmwareHistory meterId={m.meter_id} />}
                     </div>
                   </Popup>
                 </CircleMarker>

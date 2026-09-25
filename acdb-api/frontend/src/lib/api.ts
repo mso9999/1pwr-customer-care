@@ -1419,6 +1419,24 @@ export async function getFleetMap(site?: string): Promise<FleetMapResult> {
   return request<FleetMapResult>(`/provisioning/fleet-map${qs}`);
 }
 
+export interface FirmwareHistoryEntry {
+  fw_version: string;
+  thing_name: string;
+  /** First and last reading on this firmware (ISO UTC). */
+  from: string | null;
+  to: string | null;
+  readings: number;
+  /** ota = AWS OTA job succeeded; serial = USB flash; initial = first firmware seen. */
+  method: 'ota' | 'serial' | 'initial';
+  gateway_changed: boolean;
+  ota_update_id: string | null;
+  ota_completed_at: string | null;
+}
+
+export async function getFirmwareHistory(meterId: string): Promise<{ meter_id: string; readings: number; history: FirmwareHistoryEntry[] }> {
+  return request(`/provisioning/fleet-map/firmware-history?meter_id=${encodeURIComponent(meterId)}`);
+}
+
 export interface CustomerLinkage {
   account_number: string;
   linked: boolean;

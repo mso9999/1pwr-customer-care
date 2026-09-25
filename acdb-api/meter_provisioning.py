@@ -3721,6 +3721,188 @@ def _latest_telemetry_by_meter(ddb, meter_ids: list[str]) -> dict:
     return telemetry
 
 
+# Ingestion stamps ``sample_time`` as a UTC+2 wall clock on every lane.
+_SAMPLE_TZ_OFFSET_S = 2 * 3600
+_OTA_MATCH_SLACK_S = 3600
+_ota_file_version_cache: dict[str, Optional[str]] = {}
+
+
+def _sample_epoch(sample_time: str) -> Optional[int]:
+    try:
+        dt = datetime.strptime(sample_time.strip(), "%Y%m%d%H%M").replace(tzinfo=timezone.utc)
+    except (ValueError, AttributeError):
+        return None
+    return int(dt.timestamp()) - _SAMPLE_TZ_OFFSET_S
+
+
+def _epoch_iso(epoch: Optional[float]) -> Optional[str]:
+    if epoch is None:
+        return None
+    return datetime.fromtimestamp(epoch, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _firmware_spans(readings: list[tuple[str, str, str]]) -> list[dict]:
+    """Collapse ``(sample_time, fw, thing)`` rows (oldest first) into runs."""
+    spans: list[dict] = []
+    for sample_time, fw, thing in readings:
+        epoch = _sample_epoch(sample_time)
+        if epoch is None:
+            continue
+        if spans and spans[-1]["fw_version"] == fw and spans[-1]["thing_name"] == thing:
+            spans[-1]["to_epoch"] = epoch
+            spans[-1]["readings"] += 1
+            continue
+        spans.append({
+            "fw_version": fw,
+            "thing_name": thing,
+            "from_epoch": epoch,
+            "to_epoch": epoch,
+            "readings": 1,
+        })
+    return spans
+
+
+def _classify_firmware_spans(spans: list[dict], ota_jobs: list[dict]) -> list[dict]:
+    """Say how each firmware run arrived: OTA job, serial (USB) flash, or first seen.
+
+    A run on a different gateway than the one before it (hardware swap) is
+    flagged ``gateway_changed``; with no OTA job it was flashed by serial.
+
+    A run counts as OTA when a SUCCEEDED AWS OTA job for that Thing finished
+    between the previous run on the same Thing and the first reading of this
+    run (an hour of slack each side). The job's fileVersion must match when it
+    is a real version; some old jobs carried fileVersion "1".
+    """
+    out = []
+    for i, span in enumerate(spans):
+        prev = spans[i - 1] if i else None
+        same_thing = prev is not None and prev["thing_name"] == span["thing_name"]
+        lower = prev["to_epoch"] - _OTA_MATCH_SLACK_S if same_thing else None
+        upper = span["from_epoch"] + _OTA_MATCH_SLACK_S
+        candidates = [
+            j for j in ota_jobs
+            if j["thing_name"] == span["thing_name"]
+            and j["completed_epoch"] is not None
+            and j["completed_epoch"] <= upper
+            and (lower is None or j["completed_epoch"] >= lower)
+        ]
+        exact = [j for j in candidates if j.get("file_version") == span["fw_version"]]
+        loose = [j for j in candidates if not re.fullmatch(r"\d+\.\d+\.\d+", j.get("file_version") or "")]
+        match = max(exact or loose, key=lambda j: j["completed_epoch"], default=None)
+        if match is not None:
+            method = "ota"
+        elif prev is None:
+            method = "initial"
+        else:
+            method = "serial"
+        out.append({
+            "fw_version": span["fw_version"],
+            "thing_name": span["thing_name"],
+            "from": _epoch_iso(span["from_epoch"]),
+            "to": _epoch_iso(span["to_epoch"]),
+            "readings": span["readings"],
+            "method": method,
+            "gateway_changed": prev is not None and not same_thing,
+            "ota_update_id": match["ota_update_id"] if match else None,
+            "ota_completed_at": _epoch_iso(match["completed_epoch"]) if match else None,
+        })
+    return out
+
+
+def _ota_file_version(iot, ota_update_id: str) -> Optional[str]:
+    if ota_update_id in _ota_file_version_cache:
+        return _ota_file_version_cache[ota_update_id]
+    version = None
+    try:
+        info = iot.get_ota_update(otaUpdateId=ota_update_id).get("otaUpdateInfo", {})
+        files = info.get("otaUpdateFiles") or []
+        version = (files[0].get("fileVersion") if files else None) or None
+    except Exception as exc:  # noqa: BLE001
+        logger.info("get_ota_update %s failed: %s", ota_update_id, exc)
+        return None
+    _ota_file_version_cache[ota_update_id] = version
+    return version
+
+
+def _succeeded_ota_jobs(iot, thing_name: str) -> list[dict]:
+    jobs: list[dict] = []
+    token = None
+    try:
+        while True:
+            kw = {"thingName": thing_name, "status": "SUCCEEDED", "maxResults": 100}
+            if token:
+                kw["nextToken"] = token
+            resp = iot.list_job_executions_for_thing(**kw)
+            for ex in resp.get("executionSummaries") or []:
+                job_id = ex.get("jobId") or ""
+                if not job_id.startswith("AFR_OTA-"):
+                    continue
+                summ = ex.get("jobExecutionSummary") or {}
+                done = summ.get("lastUpdatedAt")
+                ota_id = job_id[len("AFR_OTA-"):]
+                jobs.append({
+                    "thing_name": thing_name,
+                    "ota_update_id": ota_id,
+                    "completed_epoch": done.timestamp() if isinstance(done, datetime) else None,
+                    "file_version": _ota_file_version(iot, ota_id),
+                })
+            token = resp.get("nextToken")
+            if not token:
+                break
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("job executions for %s failed: %s", thing_name, exc)
+    return jobs
+
+
+@router.get("/fleet-map/firmware-history")
+def firmware_history(meter_id: str, _user: CurrentUser = Depends(require_employee)):
+    """Firmware runs seen in a meter's readings, newest first, with how each arrived.
+
+    Built from ``1meter_data`` (FirmwareVersion + thingName per reading) and the
+    AWS IoT OTA job executions of each gateway the meter reported through.
+    """
+    mid = str(meter_id or "").strip()
+    if not re.fullmatch(r"\d{1,12}", mid):
+        raise HTTPException(status_code=400, detail="meter_id must be the numeric meter serial")
+    mid = mid.zfill(12)
+
+    ddb = _client("dynamodb")
+    readings: list[tuple[str, str, str]] = []
+    start = None
+    try:
+        while True:
+            kw = {
+                "TableName": "1meter_data",
+                "KeyConditionExpression": "device_id = :m AND sample_time >= :from",
+                "ExpressionAttributeValues": {":m": {"S": mid}, ":from": {"S": "2020"}},
+                "ProjectionExpression": "sample_time, FirmwareVersion, thingName",
+                "ScanIndexForward": True,
+            }
+            if start:
+                kw["ExclusiveStartKey"] = start
+            resp = ddb.query(**kw)
+            for it in resp.get("Items") or []:
+                readings.append((
+                    _ddb_scalar(it, "sample_time") or "",
+                    _ddb_scalar(it, "FirmwareVersion") or "unknown",
+                    _ddb_scalar(it, "thingName") or "",
+                ))
+            start = resp.get("LastEvaluatedKey")
+            if not start:
+                break
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"1meter_data query failed: {exc}") from exc
+
+    spans = _firmware_spans(readings)
+    iot = _client("iot")
+    ota_jobs: list[dict] = []
+    for thing in sorted({s["thing_name"] for s in spans if s["thing_name"]}):
+        ota_jobs.extend(_succeeded_ota_jobs(iot, thing))
+    history = _classify_firmware_spans(spans, ota_jobs)
+    history.reverse()
+    return {"meter_id": mid, "readings": len(readings), "history": history}
+
+
 @router.get("/fleet-live")
 def fleet_live(_user: CurrentUser = Depends(CC_OPERATE_GATE)):
     """Live fleet status: which units are connected and/or providing telemetry.

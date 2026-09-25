@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   listRows,
@@ -29,6 +29,7 @@ interface Site { concession: string; country?: string | null }
 export default function MetersPage() {
   const { t } = useTranslation(['meters', 'common']);
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [data, setData] = useState<PaginatedResponse | null>(null);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -242,6 +243,22 @@ export default function MetersPage() {
       setHistoryLoading(false);
     }
   };
+
+  // Deep link from the fleet-map popup: /meters?meter=<serial> shows that meter
+  // in the list and opens its assignment history.
+  const deepLinkMeter = searchParams.get('meter') || '';
+  useEffect(() => {
+    if (!deepLinkMeter) return;
+    setViewMode('list');
+    setFilterSite('');
+    setFilterLinked(false);
+    setFilterPlatform('');
+    setFilterStatus('');
+    setSearchInput(deepLinkMeter);
+    setSearch(deepLinkMeter);
+    setPage(1);
+    openHistory(deepLinkMeter);
+  }, [deepLinkMeter]);
 
   const openEdit = (row: Record<string, unknown>) => {
     const currentPlatform = String(row['platform'] || '').toLowerCase();

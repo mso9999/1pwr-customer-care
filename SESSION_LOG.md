@@ -15,6 +15,19 @@
 
 ---
 
+## Session 2026-09-25 [202609251715] — Gateway popup: firmware history + meter/customer links
+- New `GET /api/provisioning/fleet-map/firmware-history?meter_id=` (employee-readable). It collapses the meter's `1meter_data` readings into firmware runs (version + gateway, first and last reading, count).
+  - A run is marked **OTA** when a SUCCEEDED `AFR_OTA-*` job on that Thing finished between the previous run on the same Thing and the run's first reading (1 h slack). The job's fileVersion must match, except legacy jobs with fileVersion "1".
+  - Otherwise a run is **serial**, and the first run is **first seen**. A change of Thing is flagged `gateway_changed` (hardware swap).
+  - `sample_time` is parsed as UTC+2 (ingestion wall clock on every lane).
+- Live check, meter 23024485: 1.1.56 on MAK-GW-0047 (29 Jul – 22 Sep, first seen), then 1.1.70 on MAK-GW-0183 (22 Sep, serial, new gateway), then 1.1.71 OTA `1m1171-MAK-GW-0183-20260925160053` at 16:16 UTC. About 6 s for ~3.5k readings; it loads only when the section is opened.
+- `FleetMap.tsx` popup: a collapsed "Firmware history" section (linked meters). The meter serial links to `/meters?meter=<serial>`, and the account links to `/customers/<account>`.
+- `MetersPage.tsx` handles `?meter=`: switches to the list, clears the site/linked/platform/status filters, searches that serial, and opens its assignment history.
+- Tests: `tests/test_firmware_history.py` (5) and installation-status (5) pass. `tsc -b` is clean. The 3 existing eslint errors in MetersPage are untouched.
+- Side effects: deploy via push to main.
+
+---
+
 ## Session 2026-09-25 [202609251650] — Rollout warnings collapsed, with ids and dates
 - The Meters-page banner "1Meter installs not yet complete in CC" is now a `<details>` element, collapsed by default. The summary line shows the warning count and the sites.
 - `GET /api/provisioning/installation-status` adds `warnings[]` per site. Each warning has a stable id `RW-<SITE>-WALK|POLE|ASSIGN`, a `since` date (the oldest item's gateway `first_seen_online`, else `provisioned_at`) and dated items. Each unassigned meter also shows its last reading.
