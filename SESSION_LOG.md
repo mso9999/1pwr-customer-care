@@ -8705,3 +8705,29 @@ KET `meters` table: 172 of 173 rows have `ACCT-`placeholder meter_ids (no physic
 ### Protocol Feedback
 - The advances/fee-debt patterns in CONTEXT.md made the design straightforward; the "Why advances are NOT in financing_agreements" note directly informed keeping service fees out of both ledgers.
 - The AskQuestion-first flow worked well: three business decisions settled before any code was written.
+
+
+## 2026-09-25 — Cursor — Benin 1Meters invisible on /meters: RCA + rollout guidance (walkthrough, warnings, French)
+
+### What Was Done
+- RCA for "BJ installing GW + 1MTRs, only LS meters on /meters": (1) /meters reads the country selected in the sidebar (separate DBs); (2) a 1Meter only gets a `meters` row via Assign Meter — provisioning and telemetry never create one. BN had 1 assigned 1Meter (000023021767→0001SIN) while 000023021718/21750/21757 reported unassigned. No `gateway_installation` rows in BN. BN walkthrough only at "Starlink credentials" (SIN, SAM); no release approvals in any country.
+- Correction to an early statement: KOT gateways DO report. `meter_last_seen` is per-meter (keeps only the latest gateway), so it hides gateways with no current meters. AWS IoT index: KOT-GW-0002/0003 connected until 23 Sep 17:43 UTC, KOT-GW-0004 (is_test) until 25 Sep 12:38 UTC, KOT-GW-0001 never connected. Five BN gateways dropped within one minute on 23 Sep 17:43–17:44 UTC (18:43 WAT) → shared cause at one location. The same three meters appeared via KOT-GW-0002, KOT-GW-0003 and SIN-GW-0001 → bench swapping.
+- New `GET /api/provisioning/installation-status` (`meter_provisioning.py`): per site, gateways in field, online without pole record (`gateway_installation` ∪ `meter_gateway_link` pole), reporting-but-unassigned meters, walkthrough completion. Only gateways provisioned in the country's own DB are counted, because the IoT index is global and site codes repeat (SAM exists in LS and BN). `fleet_live` refactored onto `_fleet_live_rows()`.
+- Operator walkthrough: new steps 12 (record every gateway on its pole → Field install) and 13 (assign every reporting meter → Assign Meter); walkthrough tab bilingual EN/FR; `?tab=` / `?site=` deep links.
+- Meters page: `RolloutWarnings` amber banner (hidden on 403) with deep links.
+- Field install: site dropdown from country site codes (was free text defaulting to MAK); gateways with an auto-bound meter serial are no longer disabled (backend never required that).
+- Assign Meter: `?site=` / `?platform=prototype` prefill; offline-gateway hint; gateway block moved to i18n (EN/FR).
+- Help → Provisioning: full French version plus "Rolling out a site" sequence (EN/FR); tutorial step; What's New `1meter-rollout-install-assign`.
+- Note to BJ team (FR + EN): `docs/ops/BJ_1METER_ROLLOUT_NOTE_20260925.md`.
+
+### Side effects
+- Deploys to cc.1pwrafrica.com: `be5b2f5` (feature) then `2f07b6e` (country filter, meter-link pole count, list caps). Running backend/frontend moved from `572a2a4` to `2f07b6e`. /api/health and /api/bn/health 200. No DB writes, no infra or credential changes.
+
+### What Next Session Should Know
+- KOT has no `cc_site_projects` uGridPlan mapping (shared `/opt/cc-portal/backend/cc_auth.db`; BN service uses it too). Field install for KOT fails until Engineering maps a uGP project. SIN, SAM and GBO are mapped.
+- The LS Meters page now warns for MAK: 143 field gateways without a pole record, 17 reporting meters unassigned, walkthrough not recorded (MAK predates the walkthrough). This is real legacy data; decide whether to backfill or suppress.
+- Only the walkthrough tab, Field install, the Assign Meter gateway block and Help → Provisioning are French. The other Provisioning tabs and the Field validation help are still English.
+- Observed failed units on the host (not touched): `1pdb-bn-audit`, `1pdb-import-bn`, `cc-ls-balance-audit`.
+
+### Senescence Notes
+- Long session; early "KOT not reporting" claim came from checking one table only. Verify against IoT index + `1meter_data` before stating a gateway never reported.
