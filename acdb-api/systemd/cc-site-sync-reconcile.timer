@@ -1,0 +1,9 @@
+[Unit]
+Description=Nightly PR / Nexus site list catch-up for CC
+
+[Timer]
+OnCalendar=*-*-* 01:15:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

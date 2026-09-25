@@ -1,29 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   getCountrySites,
-  createCountrySite,
   updateCountrySite,
   reconcileSitesFromPr,
   type CountrySite,
 } from '../lib/api';
-import { useAuth } from '../contexts/AuthContext';
-
-const CODE_RE = /^[A-Z]{3}$/;
 
 export default function SiteRegistryPage() {
-  const { user } = useAuth();
-  const roles = user?.roles || user?.cc_roles || (user?.role ? [user.role] : []);
-  const isSuperadmin = roles.includes('superadmin');
-
   const [countryCode, setCountryCode] = useState('');
   const [sites, setSites] = useState<CountrySite[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
-  const [code, setCode] = useState('');
-  const [name, setName] = useState('');
-  const [district, setDistrict] = useState('');
   const [busy, setBusy] = useState(false);
 
   const reload = useCallback(async () => {
@@ -57,37 +46,6 @@ export default function SiteRegistryPage() {
       flash(
         `Pulled ${result.catalog} sites from PR / Nexus: ${result.applied_count} applied to this lane, ${result.ignored_count} skipped (other country or invalid).`
       );
-      await reload();
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const handleCreate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    const normalized = code.trim().toUpperCase();
-    if (!CODE_RE.test(normalized)) {
-      setError('Site code must be exactly three uppercase letters (e.g. CHI).');
-      return;
-    }
-    if (name.trim().length < 2) {
-      setError('Enter the official display name for the site.');
-      return;
-    }
-    setBusy(true);
-    try {
-      await createCountrySite({
-        code: normalized,
-        name: name.trim(),
-        district: district.trim() || undefined,
-      });
-      flash(`Site ${normalized} created (emergency local path). Prefer creating sites in PR so the full lifecycle is tracked.`);
-      setCode('');
-      setName('');
-      setDistrict('');
       await reload();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
@@ -135,9 +93,6 @@ export default function SiteRegistryPage() {
     }
   };
 
-  const inputCls =
-    'w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500';
-
   return (
     <div className="max-w-4xl mx-auto p-4 sm:p-6">
       <div className="mb-5">
@@ -170,59 +125,14 @@ export default function SiteRegistryPage() {
         </div>
       )}
 
-      {isSuperadmin ? (
-        <form onSubmit={handleCreate} className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4">
-          <h2 className="text-sm font-semibold text-gray-900 mb-1">Emergency local creation</h2>
-          <p className="text-xs text-amber-800 mb-3">
-            Superadmin break-glass only. The normal path is PR → Admin → Reference Data → Sites;
-            sites created there sync here automatically.
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-[120px_1fr_1fr_auto] gap-3 items-end">
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Code</label>
-              <input
-                className={`${inputCls} uppercase font-mono`}
-                value={code}
-                onChange={(e) => setCode(e.target.value.toUpperCase().replace(/[^A-Z]/g, '').slice(0, 3))}
-                placeholder="CHI"
-                maxLength={3}
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Official name</label>
-              <input
-                className={inputCls}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Chinsali"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">District / Province</label>
-              <input
-                className={inputCls}
-                value={district}
-                onChange={(e) => setDistrict(e.target.value)}
-                placeholder="Muchinga"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={busy}
-              className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
-            >
-              {busy ? 'Saving…' : 'Create site'}
-            </button>
-          </div>
-        </form>
-      ) : (
-        <div className="mb-6 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-900">
-          New sites are created in <strong>PR</strong> (Admin → Reference Data → Sites) at the
-          pre-survey stage and appear here automatically, staged inactive until commissioning.
-        </div>
-      )}
+      <div className="mb-6 rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-900">
+        New sites are created only in <strong>PR</strong> (Admin → Reference Data → Sites), opened from{' '}
+        <a href="https://nexus.1pwrafrica.com" target="_blank" rel="noreferrer" className="font-semibold underline">
+          Nexus
+        </a>
+        . They arrive here within minutes, and at the latest after the nightly refresh, staged inactive until
+        commissioning. CC cannot create site codes.
+      </div>
 
       <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
         <table className="min-w-full divide-y divide-gray-200 text-sm">

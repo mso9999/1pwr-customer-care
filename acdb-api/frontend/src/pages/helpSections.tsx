@@ -299,9 +299,9 @@ function SitesContent() {
         <Ol>
           <li>Le responsable pays approuve le nom officiel, un code unique de trois lettres majuscules, la province/le district, les coordonnées GPS si disponibles, le responsable du déploiement, la date de mise en service et les tarifs/frais.</li>
           <li>L&apos;Ingénierie confirme l&apos;organisation et l&apos;ID du site de comptage, l&apos;ID du projet uGridPLAN si utilisé, le périmètre de paiement et la version OTA signée.</li>
-          <li>L&apos;Ingénierie ajoute le site à la configuration canonique du pays et la déploie. C&apos;est cette étape qui fait apparaître le site dans CC.</li>
-          <li>Après déploiement, sélectionnez de nouveau le pays dans CC, ouvrez Provisionnement → Parcours opérateur et actualisez les preuves.</li>
-          <li>Une fois le code visible seulement, ajoutez la correspondance uGridPLAN, mettez en service les équipements/identifiants, saisissez le tarif et les IDs de comptage, puis enregistrez le candidat OTA du site.</li>
+          <li>Les Achats enregistrent le site dans <Bold>PR</Bold> (Admin → Reference Data → Sites), ouvert depuis Nexus. Il arrive automatiquement dans CC pour son pays (au plus tard après la synchronisation de nuit), à l&apos;état inactif. CC ne peut pas créer de code site.</li>
+          <li>À la mise en service, l&apos;Ingénierie/IS&amp;T l&apos;active dans <PageLink to="/admin/sites">Registre des sites</PageLink>, puis sélectionnez de nouveau le pays, ouvrez Provisionnement → Parcours opérateur et actualisez les preuves.</li>
+          <li>Ensuite, mettez en service les équipements/identifiants, saisissez le tarif et les IDs de comptage, puis enregistrez le candidat OTA du site. uGridPLAN charge le projet du site par son code : aucune correspondance manuelle n&apos;est nécessaire.</li>
         </Ol>
         <Tip>Les pages Synchronisation uGridPLAN et Mise en service du site de production sont des étapes en aval. Elles ne créent pas le code canonique du pays.</Tip>
         <Warning>N&apos;utilisez jamais le code d&apos;un autre pays et ne placez aucun mot de passe Starlink, fournisseur ou API dans un chat ou une note de preuve.</Warning>
@@ -322,9 +322,9 @@ function SitesContent() {
       <Ol>
         <li>The country lead approves the official display name, unique three-letter uppercase code, province/district, GPS coordinates if known, deployment lead, expected go-live date, and approved tariff/fees.</li>
         <li>Engineering confirms the metering organisation/site ID, uGridPLAN project ID if used, payment scope, and signed OTA release assignment.</li>
-        <li>Engineering adds the site to the canonical country configuration and deploys it. This is the step that makes the site appear in CC.</li>
-        <li>After deployment, reselect the country in CC, open Provisioning → Operator walkthrough, and refresh the evidence.</li>
-        <li>Only after the code appears: add the uGridPLAN mapping, commission equipment/credentials, enter the tariff and metering IDs, and register the site-specific OTA candidate.</li>
+        <li>Procurement registers the site in <Bold>PR</Bold> (Admin → Reference Data → Sites), opened from Nexus. It reaches CC for its country automatically (at the latest after the nightly sync), staged inactive. CC cannot create site codes.</li>
+        <li>At commissioning, Engineering/IS&amp;T activates it in the <PageLink to="/admin/sites">Site Registry</PageLink>; then reselect the country, open Provisioning → Operator walkthrough, and refresh the evidence.</li>
+        <li>Then commission equipment/credentials, enter the tariff and metering IDs, and register the site-specific OTA candidate. uGridPLAN loads the site&apos;s project by its code; no manual mapping is needed.</li>
       </Ol>
       <Tip>The uGridPLAN Sync and generation-site commissioning pages are downstream steps. They do not create the canonical country code.</Tip>
       <Warning>Never borrow another country&apos;s code or put Starlink, provider, or API passwords in chat or evidence notes.</Warning>

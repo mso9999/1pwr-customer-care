@@ -79,66 +79,11 @@ class TestSiteRegistryApi(unittest.TestCase):
     def _user(self, role=CCRole.superadmin):
         return SimpleNamespace(email="eng@1pwrafrica.com", user_id="1PWR999", role=role)
 
-    def test_create_requires_superadmin(self):
-        with self.assertRaises(Exception) as ctx:
-            site_registry.create_country_site(
-                site_registry.SiteCreate(code="CHI", name="Chinsali"),
-                self._user(role=CCRole.engineering),
-            )
-        assert getattr(ctx.exception, "status_code", None) == 403
-
-    def test_create_rejects_malformed_code(self):
-        with self.assertRaises(Exception) as ctx:
-            site_registry.create_country_site(
-                site_registry.SiteCreate(code="AB1", name="Bad"), self._user()
-            )
-        assert getattr(ctx.exception, "status_code", None) == 400
-
-    def test_create_rejects_config_defined_code(self):
-        with patch.object(country_config, "COUNTRY", country_config.ZAMBIA):
-            with self.assertRaises(Exception) as ctx:
-                site_registry.create_country_site(
-                    site_registry.SiteCreate(code="MAK", name="Shadow"), self._user()
-                )
-            assert getattr(ctx.exception, "status_code", None) == 409
-
-    def test_create_rejects_globally_duplicate_code(self):
-        def rows(sql, params):
-            if "from country_sites where code" in sql:
-                return [("ZM", True)]
-            return []
-
-        with (
-            patch.object(country_config, "COUNTRY", country_config.ZAMBIA),
-            patch("customer_api.get_connection", return_value=_fake_conn(rows)),
-            self.assertRaises(Exception) as ctx,
-        ):
-            site_registry.create_country_site(
-                site_registry.SiteCreate(code="CHI", name="Chinsali"), self._user()
-            )
-        assert getattr(ctx.exception, "status_code", None) == 409
-
-    def test_create_inserts_and_resets_cache(self):
-        inserted = {}
-
-        def rows(sql, params):
-            if sql.startswith("insert into country_sites"):
-                inserted["params"] = params
-                return []
-            return []
-
-        with (
-            patch.object(country_config, "COUNTRY", country_config.ZAMBIA),
-            patch("customer_api.get_connection", return_value=_fake_conn(rows)),
-            patch("site_registry.try_log_mutation", return_value=None),
-        ):
-            out = site_registry.create_country_site(
-                site_registry.SiteCreate(code="CHI", name="Chinsali", district="Muchinga"),
-                self._user(),
-            )
-        assert out["ok"] is True
-        assert out["code"] == "CHI"
-        assert inserted["params"][:4] == ("ZM", "CHI", "Chinsali", "Muchinga")
+    def test_cc_cannot_create_sites(self):
+        """Sites come only from the PR / Nexus master list."""
+        assert not hasattr(site_registry, "create_country_site")
+        methods = {m for r in site_registry.router.routes for m in getattr(r, "methods", set())}
+        assert "POST" not in methods
 
     def test_list_merges_config_and_db_with_config_winning(self):
         def rows(sql, params):

@@ -37,6 +37,22 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW_FOLIO: WhatsNewEntry[] = [
   {
+    id: 'sites-only-from-pr',
+    date: '2026-09-25',
+    title: 'New sites come only from PR',
+    blurb: 'Site codes are created in PR and reach Customer Care automatically; the Site Registry now only activates and retires sites.',
+    pages: [
+      {
+        heading: 'One master site list',
+        body:
+          'Create new sites in PR (Admin → Reference Data → Sites), opened from Nexus. They reach Customer Care for their country automatically, and a nightly refresh catches anything missed.\n\n' +
+          '- New sites arrive inactive. Engineering/IS&T activates them in Site Registry at commissioning.\n' +
+          '- Customer Care can no longer create site codes itself.\n' +
+          '- uGridPlan maps each site by its code, so there is no manual mapping step.',
+      },
+    ],
+  },
+  {
     id: '1meter-rollout-install-assign',
     date: '2026-09-25',
     title: '1Meter rollout: record every pole and assign every meter',

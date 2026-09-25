@@ -243,7 +243,7 @@ def apply_site_event(event: SiteEventIn) -> dict:
             # activation state (PR does not decide when CC commissions).
             cur.execute(
                 "UPDATE country_sites SET name = %s, district = %s, ugp_project_ids = %s, "
-                "canonical_ugp_project_id = %s, updated_at = now() "
+                "canonical_ugp_project_id = %s, source = 'pr', updated_at = now() "
                 "WHERE country_code = %s AND code = %s",
                 (name, district, json.dumps(ugp_ids), canonical_ugp, COUNTRY.code, code),
             )
@@ -309,8 +309,12 @@ def reconcile_from_pr(user: CurrentUser = Depends(RECONCILE_GATE)):
     Push from ``fanoutSiteChanges`` is still the live path. This catch-up
     covers sites created in PR or uGP that never reached CC (missing
     coordinates on the fanout gate, empty CC endpoint list, or a missed
-    delivery).
+    delivery). ``cc-site-sync-reconcile.timer`` runs the same pull nightly.
     """
+    return reconcile_lane(getattr(user, "email", None) or user.user_id)
+
+
+def reconcile_lane(actor: str) -> dict:
     rows = _pr_catalog_sites()
     applied = []
     ignored = []
@@ -350,7 +354,7 @@ def reconcile_from_pr(user: CurrentUser = Depends(RECONCILE_GATE)):
             ignored.append(entry)
     logger.info(
         "site-sync reconcile by %s: %d applied, %d ignored of %d catalog rows",
-        getattr(user, "email", None) or user.user_id,
+        actor,
         len(applied),
         len(ignored),
         len(rows),

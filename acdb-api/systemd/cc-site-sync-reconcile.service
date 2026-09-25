@@ -1,0 +1,18 @@
+[Unit]
+Description=Pull the PR / Nexus master site list into each CC lane
+Documentation=file:///opt/cc-portal/backend/scripts/ops/site_sync_reconcile.py
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=cc_api
+Group=cc_api
+WorkingDirectory=/opt/cc-portal/backend
+Environment=PYTHONPATH=/opt/cc-portal/backend
+ExecStart=-/bin/bash -c 'set -a; . /opt/1pdb/.env; set +a; exec /opt/cc-portal/backend/venv/bin/python scripts/ops/site_sync_reconcile.py'
+ExecStart=-/bin/bash -c 'set -a; . /opt/1pdb-bn/.env; set +a; exec /opt/cc-portal/backend/venv/bin/python scripts/ops/site_sync_reconcile.py'
+ExecStart=-/bin/bash -c '[ -r /opt/1pdb-zm/.env ] || exit 0; set -a; . /opt/1pdb-zm/.env; set +a; exec /opt/cc-portal/backend/venv/bin/python scripts/ops/site_sync_reconcile.py'
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cc-site-sync-reconcile

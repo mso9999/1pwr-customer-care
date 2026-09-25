@@ -3317,17 +3317,6 @@ export async function getCountrySites(): Promise<{ country_code: string; sites: 
   return request('/admin/country-sites');
 }
 
-export async function createCountrySite(payload: {
-  code: string;
-  name: string;
-  district?: string;
-}): Promise<{ ok: boolean; code: string }> {
-  return request('/admin/country-sites', {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
-}
-
 export async function updateCountrySite(
   code: string,
   payload: { name?: string; district?: string; active?: boolean; confirm_missing_ugp_link?: boolean }
