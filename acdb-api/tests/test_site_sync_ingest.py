@@ -290,6 +290,7 @@ class TestUpsertCcSiteProject(unittest.TestCase):
         site_sync_ingest.upsert_cc_site_project("NKU", "Nkau", "NKU", explicit=False)
         site_sync_ingest.upsert_cc_site_project("KOT", "Kotokpa", "KOT", explicit=False)
         self.assertEqual(self.key("NKU"), "NKA")
+        self.assertEqual(self.key("NKAU"), "NKA")
         self.assertEqual(self.key("KOT"), "KOT")
         self.assertEqual(self.key("KOTOKPA"), "KOT")
 

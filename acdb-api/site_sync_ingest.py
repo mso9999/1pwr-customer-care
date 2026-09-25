@@ -147,6 +147,13 @@ def upsert_cc_site_project(code: str, name: str, registry_key: str, explicit: bo
     alias = (name or "").strip().upper().replace(" ", "")
     from db_auth import get_auth_db
 
+    if not explicit:
+        with get_auth_db() as conn:
+            existing = conn.execute(
+                "SELECT project_id FROM cc_site_projects WHERE site_code = ?", (code,)
+            ).fetchone()
+        if existing and existing[0]:
+            registry_key = existing[0]
     rows = [(code, registry_key, name or code, now)]
     if alias and alias != code and alias.isalnum() and 3 <= len(alias) <= 16:
         rows.append((alias, registry_key, name or code, now))
