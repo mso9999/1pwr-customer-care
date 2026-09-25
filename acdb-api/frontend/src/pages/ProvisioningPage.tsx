@@ -14,6 +14,8 @@ import {
   downloadMeterValidationKit,
   startFactoryOtaCanary,
   startMeterValidation,
+  getValidationGatewayMeters,
+  abandonMeterValidation,
   getMeterValidation,
   observeMeterValidationLoad,
   applyMeterValidationPayment,
@@ -34,6 +36,7 @@ import {
   type ProvisionedMeter,
   type FleetLiveResult,
   type MeterValidationStatus,
+  type ValidationGatewayMeter,
   type CountryProvisioningReadiness,
   type GatewayStability,
 } from '../lib/api';
@@ -212,6 +215,8 @@ export default function ProvisioningPage() {
   const [approvalBusy, setApprovalBusy] = useState(false);
   const [approvalSuccess, setApprovalSuccess] = useState('');
   const [validationTarget, setValidationTarget] = useState('');
+  const [validationMeters, setValidationMeters] = useState<ValidationGatewayMeter[]>([]);
+  const [validationMeter, setValidationMeter] = useState('');
   const [batchReference, setBatchReference] = useState('');
   const [startingCredit, setStartingCredit] = useState(0.01);
   const [validationRun, setValidationRun] = useState<MeterValidationStatus | null>(null);
@@ -410,6 +415,23 @@ export default function ProvisioningPage() {
       window.clearInterval(timer);
     };
   }, [trackedOtaId]);
+
+  useEffect(() => {
+    if (!validationTarget) return;
+    let cancelled = false;
+    getValidationGatewayMeters(validationTarget)
+      .then((r) => {
+        if (cancelled) return;
+        setValidationMeters(r.meters);
+        setValidationMeter(r.meters[0]?.meter_id ?? '');
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setValidationMeters([]);
+        setValidationMeter('');
+      });
+    return () => { cancelled = true; };
+  }, [validationTarget]);
 
   useEffect(() => {
     const sessionId = validationRun?.session.id;
@@ -1254,11 +1276,42 @@ export default function ProvisioningPage() {
             </div>
             <div>
               <label className={labelCls}>Authorized physical test gateway</label>
-              <select className={inputCls} value={validationTarget} onChange={(e) => setValidationTarget(e.target.value)}>
+              <select className={inputCls} value={validationTarget} onChange={(e) => {
+                setValidationTarget(e.target.value);
+                setValidationMeters([]);
+                setValidationMeter('');
+              }}>
                 <option value="">Select one gateway…</option>
                 {(otaReadiness?.canary_things || []).map((name) => <option key={name} value={name}>{name}</option>)}
               </select>
             </div>
+            {validationTarget && (
+              <div>
+                <label className={labelCls}>Meter with the test load attached</label>
+                {validationMeters.length ? (
+                  <div className="space-y-1.5">
+                    {validationMeters.map((m) => (
+                      <label key={m.meter_id} className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer ${
+                        validationMeter === m.meter_id ? 'border-blue-500 bg-blue-50' : 'border-gray-200'
+                      } ${m.fresh ? '' : 'opacity-60'}`}>
+                        <span className="flex items-center gap-2">
+                          <input type="radio" name="validation-meter" checked={validationMeter === m.meter_id}
+                            onChange={() => setValidationMeter(m.meter_id)} />
+                          <span className="font-mono">{m.meter_id}</span>
+                        </span>
+                        <span className="text-xs text-gray-600">
+                          {m.power_w != null ? `${m.power_w.toFixed(1)} W` : '— W'} · relay {m.relay ?? '?'}
+                          {m.fresh ? '' : ' · stale'}
+                        </span>
+                      </label>
+                    ))}
+                    <p className="text-xs text-gray-500">Pick the meter drawing power from the dummy load. Highest live power is preselected.</p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-500">No meters are reporting through {validationTarget} yet; the provisioned meter will be used.</p>
+                )}
+              </div>
+            )}
             <div>
               <label className={labelCls}>Batch or shipment reference</label>
               <input className={inputCls} value={batchReference} onChange={(e) => setBatchReference(e.target.value)} placeholder="Example: Benin batch 2026-07" />
@@ -1273,6 +1326,7 @@ export default function ProvisioningPage() {
               disabled={validationBusy || !validationTarget || !batchReference || Boolean(validationRun)}
               onClick={() => runValidationAction(() => startMeterValidation({
                 thing_name: validationTarget,
+                meter_id: validationMeter || undefined,
                 batch_reference: batchReference,
                 starting_credit_kwh: startingCredit,
               }))}
@@ -1346,6 +1400,27 @@ export default function ProvisioningPage() {
                 >
                   Complete and record passing validation
                 </button>
+                {validationRun.session.status !== 'passed' && (
+                  <button
+                    disabled={validationBusy}
+                    onClick={async () => {
+                      if (!window.confirm(`Abandon session ${validationRun.session.id} on meter ${validationRun.session.meter_id}? It is recorded as failed; if validation turned the relay off, it is switched back on.`)) return;
+                      setError('');
+                      setValidationBusy(true);
+                      try {
+                        await abandonMeterValidation(validationRun.session.id);
+                        setValidationRun(null);
+                      } catch (e) {
+                        setError(e instanceof Error ? e.message : String(e));
+                      } finally {
+                        setValidationBusy(false);
+                      }
+                    }}
+                    className="w-full px-4 py-2 rounded-lg border border-gray-300 text-gray-700 text-sm font-semibold disabled:opacity-40"
+                  >
+                    Abandon session (wrong meter / start over)
+                  </button>
+                )}
                 {validationRun.session.status === 'passed' && (
                   <div className="p-4 rounded-lg border border-green-300 bg-green-50 text-green-900 font-semibold">
                     Batch validation passed and evidence was recorded. Use session

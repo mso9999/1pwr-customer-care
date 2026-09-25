@@ -4819,8 +4819,29 @@ export interface MeterValidationStatus {
   reconnect_command?: MeterValidationCommand | null;
 }
 
+export interface ValidationGatewayMeter {
+  meter_id: string;
+  power_w: number | null;
+  energy_kwh: number;
+  relay: string | null;
+  last_seen: string | null;
+  /** Reported within the last 30 minutes (required to start). */
+  fresh: boolean;
+}
+
+/** Meters whose newest reading came through the gateway; fresh and highest power first. */
+export async function getValidationGatewayMeters(thingName: string): Promise<{ thing_name: string; meters: ValidationGatewayMeter[] }> {
+  return request(`/provisioning/validation/meters?thing_name=${encodeURIComponent(thingName)}`);
+}
+
+export async function abandonMeterValidation(sessionId: string): Promise<{ session_id: string; status: string; reconnect_cmd_id: string | null }> {
+  return request(`/provisioning/validation/sessions/${encodeURIComponent(sessionId)}/abandon`, { method: 'POST' });
+}
+
 export async function startMeterValidation(body: {
   thing_name: string;
+  /** Meter carrying the test load; defaults to the gateway's provisioned meter. */
+  meter_id?: string;
   batch_reference: string;
   dummy_customer_label?: string;
   starting_credit_kwh?: number;

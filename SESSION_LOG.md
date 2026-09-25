@@ -1,3 +1,16 @@
+## Session 2026-09-25 [202609252040] — Batch validation: pick the loaded meter; abandon a session
+- Nils (KOT-GW-0004, 3 meters): validation always used `meter_provisioning.meter_serial` (000023021769, 0 W) with no way to choose the meter carrying the dummy load (000023021727, 18.5 W).
+- `onemeter_validation.py`:
+  - `GET /api/provisioning/validation/meters?thing_name=` → meters whose `meter_last_seen.thingName` is the gateway, with latest `1meter_data` Power, relay, fresh (≤30 min); fresh + highest power first.
+  - `StartValidation.meter_id` (optional) overrides the provisioned meter; the existing live-telemetry-Thing match check still applies.
+  - `POST /sessions/{id}/abandon` → status `failed`, notes "abandoned by operator", event `abandoned`; if validation opened the relay and never reconnected, queues a `close` so the meter is not left off.
+- `ProvisioningPage.tsx` (batch test): radio list "Meter with the test load attached" (W, relay, stale), highest power preselected; "Abandon session (wrong meter / start over)" button.
+- IAM: `cc-1meter-telemetry-read` already allows Scan on `meter_last_seen` — no change.
+- Tests: `tests/test_validation_gateway_meters.py`; 7 validation/meter tests pass; tsc/eslint clean.
+- Side effects: deploy via push to main. Nils's in-flight session 9edd4d9d… (meter 000023021769, status started, no relay command) left as is — he can abandon it from the UI or just reload.
+
+---
+
 ## Session 2026-09-25 [202609252030] — PTB-gap warning collapsed; meter page shows RS485 address
 - `PtbGapWarning.tsx`: "<SITE>: N meter(s) in service with no PTB in uGridPlan" is now a `<details>` header, collapsed by default; explanation, meter list, Create PTB buttons and "Show all" sit inside.
 - Meter page RS485: `_reading_row` parses `ModbusID` from `1meter_data`; `/api/meters/{id}/detail` returns the newest reading's value as `modbus_id`. Firmware 1.1.72 (onepwr-aws-mesh `bb17174`, not yet built) adds the field; until then the page says "not reported (gateway firmware older than 1.1.72)".
