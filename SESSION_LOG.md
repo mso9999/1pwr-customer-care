@@ -15,6 +15,39 @@
 
 ---
 
+## Session 2026-09-25 [202609251745] — Meter detail page `/meters/:id`
+- Matt: no meter detail page existed; asked for readings, cumulative kWh, RS485 address, and customer links.
+- New page `MeterDetailPage.tsx` (route `meters/:id`, employee).
+  - Facts: customer name and legacy # linked to `/customers/<id>`; account linked to Customer Data; site, role, status.
+  - Latest reading: cumulative kWh from the DDS8888 register, power, voltage, current, relay, last seen.
+  - Gateway, pole, firmware, firmware history (shared `components/FirmwareHistory.tsx`), assignment history.
+  - A paged table of 1Meter readings from `1meter_data`, 100 per page, with "Load older".
+- Backend `meter_lifecycle.py`:
+  - `GET /api/meters/{id}/detail` joins meters, accounts → customers, meter_gateway_link, prototype_meter_state and the latest `1meter_data` / `meter_last_seen`.
+  - `GET /api/meters/{id}/readings?before=&limit=` reads DynamoDB and pads the serial to 12 digits.
+  - `/{id}/history` now returns `customer_id_legacy` and `customer_name`.
+- Links: the fleet-map popup meter, the Meters list meter cells, and the assignment-history modal header open the detail page. The modal also links the customer (#legacy id).
+- RS485: the DDS8888 Modbus ID (2–10; the firmware assigns the next free ID to a factory-ID-1 meter, or the bench `set_meter_address.py` sets it) is only in gateway RAM. Readings do not carry it, so the page says "not reported by gateway firmware". Adding it needs a firmware payload change.
+- "Customer 6653" in assignment notes is `customers.customer_id_legacy` (legacy ACCDB customer number). Account `0232MAK` comes from `registration.generate_account_number` → PG `next_account_number(site)` (`NNNN` + site).
+- Checked against production data (read-only) for meter 23024464: 0232MAK, Lenka Mpopo #6653, MAK-GW-0184, pole MAK_01_AB12, 0.0 kWh, FW 1.1.70.
+- `App.tsx`: only the import and route were staged. Another session's uncommitted Nexus-entry edits in the same file were left unstaged.
+- Tests: `tests/test_meter_detail.py` (2); 17 related pass. `tsc -b` and eslint on the new files are clean.
+- Side effects: deploy via push to main.
+
+---
+
+## Session 2026-09-25 [202609251720] — Batch validation accepts USB-flashed release firmware
+- Nils (BN, KOT-GW-0004, 3 meters live): "Start isolated batch validation" failed with 409 "Gateway firmware telemetry does not confirm the completed OTA target version" (3× at 16:56 UTC on 1pdb-api-bn).
+- Cause: the `meter_provisioning` row still recorded this afternoon's factory OTA (`1m-factory-1-1-61-…`, target 1.1.61, fw_version NULL). The unit was then USB-flashed to 1.1.71, and its meter readings report 1.1.71 via KOT-GW-0004. `fw_version` changes only when an OTA job succeeds, so a USB flash could never pass. The same-version OTA is refused by the firmware.
+- Fix (`onemeter_validation.py`, `_require_release_firmware`): the start check compares the newest `1meter_data` FirmwareVersion through that Thing with the site release target, currently 1.1.71. A mismatch now names both versions. If there is no live firmware, the old OTA-record check applies.
+- Release approval is unchanged: it still requires a SUCCEEDED canary OTA to the release version.
+- Tests: `tests/test_validation_release_firmware.py` (4). A stub for `relay_control` breaks the existing relay_control ↔ customer_api import cycle in the test.
+- Side effects: deploy via push to main. No DB row edits.
+- Verified on the host with the BN env: KOT release resolves to 1.1.71, the live firmware is 1.1.71, and the gate passes.
+- The server fallback `ota_releases.json` still said 1.1.61 for all 6 sites. Committed `9c2d659`: all 6 now 1.1.71 (artifact `v1.1.71/Fleet1171`, VersionId `zZGlAPhq…`). Deployed; confirmed on the host. DB rows still take priority.
+
+---
+
 ## Session 2026-09-25 [202609251715] — Gateway popup: firmware history + meter/customer links
 - New `GET /api/provisioning/fleet-map/firmware-history?meter_id=` (employee-readable). It collapses the meter's `1meter_data` readings into firmware runs (version + gateway, first and last reading, count).
   - A run is marked **OTA** when a SUCCEEDED `AFR_OTA-*` job on that Thing finished between the previous run on the same Thing and the run's first reading (1 h slack). The job's fileVersion must match, except legacy jobs with fileVersion "1".

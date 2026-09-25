@@ -729,7 +729,7 @@ export default function MetersPage() {
             <div className="flex items-center justify-between mb-4">
               <div>
                 <h3 className="text-lg font-semibold text-gray-800">{t('meters:assignmentHistory')}</h3>
-                <p className="text-sm text-gray-500 font-mono">{historyMeterId}</p>
+                <Link to={`/meters/${encodeURIComponent(historyMeterId)}`} className="text-sm text-blue-600 hover:underline font-mono">{historyMeterId}</Link>
               </div>
               <button onClick={() => setModal(null)} className="p-1 text-gray-400 hover:text-gray-600">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -759,6 +759,13 @@ export default function MetersPage() {
                       )}
                     </div>
                     <div className="text-xs text-gray-500 space-y-0.5">
+                      {a.customer_id_legacy != null && (
+                        <p>
+                          <Link to={`/customers/${a.customer_id_legacy}`} className="text-blue-600 hover:underline">
+                            {a.customer_name || 'Customer'} · #{a.customer_id_legacy}
+                          </Link>
+                        </p>
+                      )}
                       <p>{t('meters:assigned')}: {fmtDate(a.assigned_at)}</p>
                       {a.removed_at && <p>{t('meters:removed')}: {fmtDate(a.removed_at)}</p>}
                       {a.replaced_by && <p>{t('meters:replacedBy')}: <span className="font-mono">{a.replaced_by}</span></p>}
@@ -929,7 +936,7 @@ export default function MetersPage() {
                           <input type="checkbox" checked={isSelected} onChange={() => toggleOne(mid)} className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
                         </td>
                       )}
-                      <td className="px-4 py-2 font-mono text-sm font-medium text-gray-800">{mid}</td>
+                      <td className="px-4 py-2 font-mono text-sm font-medium"><Link to={`/meters/${encodeURIComponent(mid)}`} className="text-blue-600 hover:underline">{mid}</Link></td>
                       <td className="px-4 py-2">
                         {acct ? <Link to={`/customer-data?account=${acct}`} className="text-blue-600 hover:underline">{acct}</Link> : <span className="text-gray-400">--</span>}
                       </td>
@@ -1020,7 +1027,7 @@ export default function MetersPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-start justify-between">
                         <div className="min-w-0">
-                          <p className="font-mono text-sm font-medium text-gray-800 truncate">{mid}</p>
+                          <Link to={`/meters/${encodeURIComponent(mid)}`} className="block font-mono text-sm font-medium text-blue-600 hover:underline truncate">{mid}</Link>
                           <div className="flex gap-2 mt-1 flex-wrap">
                             {platformBadge(platform)}
                             {roleBadge(role)}

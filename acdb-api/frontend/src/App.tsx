@@ -12,6 +12,7 @@ import NewCustomerWizard from './pages/NewCustomerWizard';
 import AssignMeterPage from './pages/AssignMeterPage';
 import CustomerDataPage from './pages/CustomerDataPage';
 import MetersPage from './pages/MetersPage';
+import MeterDetailPage from './pages/MeterDetailPage';
 import AccountsPage from './pages/AccountsPage';
 import TransactionsPage from './pages/TransactionsPage';
 import TablesPage from './pages/TablesPage';
@@ -80,6 +81,7 @@ export default function App() {
             <Route path="customers/new" element={<ProtectedRoute requireEmployee requireAction="operate_customer_care" requiredLevel="C" allowRegistrar><NewCustomerWizard /></ProtectedRoute>} />
             <Route path="customers/:id" element={<ProtectedRoute requireEmployee><CustomerDetailPage /></ProtectedRoute>} />
             <Route path="meters" element={<ProtectedRoute requireEmployee><MetersPage /></ProtectedRoute>} />
+            <Route path="meters/:id" element={<ProtectedRoute requireEmployee><MeterDetailPage /></ProtectedRoute>} />
             <Route path="accounts" element={<ProtectedRoute requireEmployee><AccountsPage /></ProtectedRoute>} />
             <Route path="transactions" element={<ProtectedRoute requireEmployee><TransactionsPage /></ProtectedRoute>} />
             <Route path="assign-meter" element={<ProtectedRoute requireEmployee requireAction="operate_customer_care" requiredLevel="C"><AssignMeterPage /></ProtectedRoute>} />

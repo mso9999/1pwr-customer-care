@@ -997,19 +997,184 @@ def decommission_meter(
             raise HTTPException(status_code=400, detail=f"Decommission failed: {e}")
 
 
+def _ddb_meter_id(meter_id: str) -> str:
+    """``1meter_data`` / ``meter_last_seen`` key: 12-digit zero-padded serial."""
+    mid = str(meter_id or "").strip()
+    return mid.zfill(12) if mid.isdigit() else mid
+
+
+def _num(raw: Any) -> Optional[float]:
+    m = re.match(r"\s*([-+]?\d*\.?\d+)", str(raw or ""))
+    return float(m.group(1)) if m else None
+
+
+def _ddb_str(item: dict, key: str) -> Optional[str]:
+    v = item.get(key) or {}
+    return (v.get("S") or v.get("N") or "").strip() or None
+
+
+def _reading_row(item: dict) -> dict:
+    return {
+        "sample_time": _ddb_str(item, "sample_time"),
+        "energy_kwh": _num(_ddb_str(item, "EnergyActive")),
+        "power_w": _num(_ddb_str(item, "Power")),
+        "voltage_v": _num(_ddb_str(item, "Voltage")),
+        "current_ma": _num(_ddb_str(item, "Current")),
+        "frequency_hz": _num(_ddb_str(item, "Frequency")),
+        "relay": _ddb_str(item, "Relay"),
+        "fw_version": _ddb_str(item, "FirmwareVersion"),
+        "thing_name": _ddb_str(item, "thingName"),
+    }
+
+
+@router.get("/{meter_id}/readings")
+def meter_readings(
+    meter_id: str,
+    before: Optional[str] = Query(None, description="sample_time cursor (YYYYMMDDHHMM), exclusive"),
+    limit: int = Query(100, ge=1, le=500),
+    user: CurrentUser = Depends(require_employee),
+):
+    """1Meter readings for a meter, newest first, straight from ``1meter_data``.
+
+    ``sample_time`` is the ingestion wall clock (UTC+2). Page with ``before`` set
+    to the last row's ``sample_time``.
+    """
+    from meter_provisioning import _client
+
+    mid = _ddb_meter_id(meter_id)
+    cond = "device_id = :m AND sample_time BETWEEN :lo AND :hi"
+    values = {":m": {"S": mid}, ":lo": {"S": "2020"}, ":hi": {"S": "9999"}}
+    if before:
+        if not re.fullmatch(r"\d{12}", before):
+            raise HTTPException(status_code=400, detail="before must be YYYYMMDDHHMM")
+        values[":hi"] = {"S": str(int(before) - 1).zfill(12)}
+    try:
+        resp = _client("dynamodb").query(
+            TableName="1meter_data",
+            KeyConditionExpression=cond,
+            ExpressionAttributeValues=values,
+            ScanIndexForward=False,
+            Limit=limit,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"1meter_data query failed: {exc}") from exc
+    rows = [_reading_row(it) for it in resp.get("Items") or []]
+    return {
+        "meter_id": mid,
+        "readings": rows,
+        "next_before": rows[-1]["sample_time"] if len(rows) == limit else None,
+    }
+
+
+@router.get("/{meter_id}/detail")
+def meter_detail(meter_id: str, user: CurrentUser = Depends(require_employee)):
+    """One meter: CC record, customer, gateway link, and live 1Meter state."""
+    from meter_provisioning import _client
+
+    short = str(meter_id or "").strip().lstrip("0") or str(meter_id or "").strip()
+    padded = _ddb_meter_id(meter_id)
+    ids = list({short, padded, str(meter_id).strip()})
+    out: dict[str, Any] = {"meter_id": short, "meter": None, "customer": None, "gateway": None, "state": None}
+
+    with _get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT meter_id, account_number, customer_id_legacy, community, platform, role, status, "
+            "village_name, latitude, longitude, date_installed, customer_connect_date, "
+            "firmware_version, safety_override FROM meters WHERE meter_id = ANY(%s) LIMIT 1",
+            (ids,),
+        )
+        row = cur.fetchone()
+        if row:
+            cols = [d[0] for d in cur.description]
+            out["meter"] = {k: (str(v) if v is not None and not isinstance(v, (str, int, float, bool)) else v)
+                            for k, v in zip(cols, row)}
+        account = (out["meter"] or {}).get("account_number")
+        if account:
+            cur.execute(
+                "SELECT c.id, c.customer_id_legacy, c.first_name, c.last_name "
+                "FROM accounts a JOIN customers c ON c.id = a.customer_id "
+                "WHERE a.account_number = %s LIMIT 1",
+                (account,),
+            )
+            c = cur.fetchone()
+            if c:
+                out["customer"] = {
+                    "id": c[0],
+                    "customer_id_legacy": c[1],
+                    "name": " ".join(p for p in (c[2], c[3]) if p) or None,
+                    "account_number": account,
+                }
+        cur.execute(
+            "SELECT gateway_thing, pole_id, ptb_id, site, linked_at FROM meter_gateway_link "
+            "WHERE meter_serial = ANY(%s) ORDER BY linked_at DESC NULLS LAST LIMIT 1",
+            (ids,),
+        )
+        g = cur.fetchone()
+        if g:
+            out["gateway"] = {
+                "thing_name": g[0], "pole_id": g[1], "ptb_id": g[2], "site": g[3],
+                "linked_at": str(g[4]) if g[4] else None,
+            }
+        cur.execute(
+            "SELECT last_energy_kwh, last_relay_status, last_seen_at, last_sample_time, firmware_version "
+            "FROM prototype_meter_state WHERE meter_id = ANY(%s) LIMIT 1",
+            (ids,),
+        )
+        s = cur.fetchone()
+        if s:
+            out["state"] = {
+                "last_energy_kwh": float(s[0]) if s[0] is not None else None,
+                "last_relay_status": s[1],
+                "last_seen_at": str(s[2]) if s[2] else None,
+                "last_sample_time": s[3],
+                "firmware_version": s[4],
+            }
+
+    live = None
+    try:
+        ddb = _client("dynamodb")
+        resp = ddb.query(
+            TableName="1meter_data",
+            KeyConditionExpression="device_id = :m AND sample_time BETWEEN :lo AND :hi",
+            ExpressionAttributeValues={":m": {"S": padded}, ":lo": {"S": "2020"}, ":hi": {"S": "9999"}},
+            ScanIndexForward=False,
+            Limit=1,
+        )
+        items = resp.get("Items") or []
+        if items:
+            live = _reading_row(items[0])
+        seen = ddb.get_item(TableName="meter_last_seen", Key={"meterId": {"S": padded}}).get("Item") or {}
+        if seen and live is not None:
+            live["last_seen"] = _ddb_str(seen, "last_seen")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("live 1Meter state for %s failed: %s", padded, exc)
+    out["live"] = live
+    # The DDS8888 Modbus ID lives only in the gateway's RAM today; readings do not carry it.
+    out["modbus_id"] = None
+    if out["meter"] is None and live is None:
+        raise HTTPException(status_code=404, detail=f"Meter {short} is not known to CC or 1Meter telemetry.")
+    return out
+
+
 @router.get("/{meter_id}/history")
 def meter_history(
     meter_id: str,
     user: CurrentUser = Depends(require_employee),
 ):
-    """Get the assignment history for a specific meter."""
+    """Get the assignment history for a specific meter, with the account's customer."""
     with _get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT id, meter_id, account_number, community, "
-            "assigned_at, removed_at, removal_reason, replaced_by, notes, created_by "
-            "FROM meter_assignments WHERE meter_id = %s "
-            "ORDER BY assigned_at DESC",
+            "SELECT ma.id, ma.meter_id, ma.account_number, ma.community, "
+            "ma.assigned_at, ma.removed_at, ma.removal_reason, ma.replaced_by, ma.notes, ma.created_by, "
+            "c.customer_id_legacy, "
+            "NULLIF(TRIM(CONCAT_WS(' ', c.first_name, c.last_name)), '') AS customer_name "
+            "FROM meter_assignments ma "
+            "LEFT JOIN accounts a ON a.account_number = ma.account_number "
+            "LEFT JOIN customers c ON c.id = a.customer_id "
+            "WHERE ma.meter_id = %s "
+            "ORDER BY ma.assigned_at DESC",
             (meter_id,),
         )
         cols = [d[0] for d in cursor.description]

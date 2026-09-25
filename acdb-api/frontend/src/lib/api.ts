@@ -444,6 +444,69 @@ export interface MeterAssignment {
   notes: string | null;
   current_status?: string;
   platform?: string;
+  customer_id_legacy?: number | null;
+  customer_name?: string | null;
+}
+
+export interface MeterReading {
+  /** Ingestion wall clock YYYYMMDDHHMM (UTC+2). */
+  sample_time: string | null;
+  /** Cumulative active-energy register. */
+  energy_kwh: number | null;
+  power_w: number | null;
+  voltage_v: number | null;
+  current_ma: number | null;
+  frequency_hz: number | null;
+  relay: string | null;
+  fw_version: string | null;
+  thing_name: string | null;
+  last_seen?: string | null;
+}
+
+export interface MeterDetail {
+  meter_id: string;
+  meter: {
+    meter_id: string;
+    account_number: string | null;
+    customer_id_legacy: number | null;
+    community: string | null;
+    platform: string | null;
+    role: string | null;
+    status: string | null;
+    village_name: string | null;
+    latitude: number | null;
+    longitude: number | null;
+    date_installed: string | null;
+    customer_connect_date: string | null;
+    firmware_version: string | null;
+    safety_override: string | null;
+  } | null;
+  customer: { id: number; customer_id_legacy: number | null; name: string | null; account_number: string } | null;
+  gateway: { thing_name: string; pole_id: string | null; ptb_id: string | null; site: string | null; linked_at: string | null } | null;
+  state: {
+    last_energy_kwh: number | null;
+    last_relay_status: string | null;
+    last_seen_at: string | null;
+    last_sample_time: string | null;
+    firmware_version: string | null;
+  } | null;
+  live: MeterReading | null;
+  /** DDS8888 Modbus (RS485) ID; not reported by gateway firmware yet. */
+  modbus_id: number | null;
+}
+
+export async function getMeterDetail(meterId: string): Promise<MeterDetail> {
+  return request(`/meters/${encodeURIComponent(meterId)}/detail`);
+}
+
+export async function getMeterReadings(
+  meterId: string,
+  before?: string | null,
+  limit = 100,
+): Promise<{ meter_id: string; readings: MeterReading[]; next_before: string | null }> {
+  const qs = new URLSearchParams({ limit: String(limit) });
+  if (before) qs.set('before', before);
+  return request(`/meters/${encodeURIComponent(meterId)}/readings?${qs}`);
 }
 
 export async function decommissionMeter(
