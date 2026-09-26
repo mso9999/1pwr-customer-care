@@ -1,3 +1,10 @@
+## Session 2026-09-26 [202609261310] — Relay minimum raised to 1.1.74 (1.1.73 relay actions inverted)
+- Firmware relay test on MAK-GW-0191 (1.1.73): `close` sent DDS8888 code 0x1A, which **trips** the relay (read-back 0). Customer meter 000023022616 was off 13:03:29–13:06:01Z (two no-op-intended `close` tests; restored with `open`, read-back 1). Test rows in onepower_cc `relay_commands`: `a574eb19…` (close, relay_after 0), `cc94bcd9…` (open/restore, relay_after 1). The first test `3e188492…` had no row (CC 404 on its ack).
+- `RELAY_MIN_FIRMWARE` default 1.1.73 → **1.1.74** (onepwr-aws-mesh fixes the code mapping). Test updated; 8 tests pass.
+- Side effects: deploy via push to main.
+
+---
+
 ## Session 2026-09-26 [202609261300] — Block relay commands to gateways below 1.1.73
 - Nils (KOT-GW-0004, 1.1.71): the zero-balance disconnect `6a8619d7…` was published 11:42:41Z. The gateway froze (firmware ran relay commands inside the MQTT agent callback and deadlocked), AWS redelivered twice with no PUBACK, and the gateway restarted ~11:44:20Z. The relay never moved and there was no ack ("relay ?"). Fixed in firmware 1.1.73 (onepwr-aws-mesh 5d2ad8b).
 - **Prod data write (onepower_bj, 12:49:03Z):** session `d3dd36cf-8232-4207-8e57-91bcc7e20ebd` set `failed` with an engineering note, plus event `abandoned` `{reason: firmware_relay_deadlock, relay_command_sent: false}`. No relay command sent. Relay row `6a8619d7…` left `published` for the TTL sweeper.

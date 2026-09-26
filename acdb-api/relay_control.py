@@ -86,9 +86,9 @@ RELAY_AUTO_TRIGGER_ENABLED = os.environ.get(
 ).strip() in ("1", "true", "True", "yes")
 
 
-# Gateways below this freeze their MQTT agent on any relay command (the
-# firmware handled it inside the agent callback), so the relay never moves.
-RELAY_MIN_FIRMWARE = os.environ.get("RELAY_MIN_FIRMWARE", "1.1.73").strip()
+# Below 1.1.73 gateways freeze on any relay command; 1.1.73 has open/close
+# inverted (a reconnect cuts power).
+RELAY_MIN_FIRMWARE = os.environ.get("RELAY_MIN_FIRMWARE", "1.1.74").strip()
 
 
 def _now_utc() -> datetime:
@@ -132,7 +132,7 @@ def relay_firmware_block(thing_name: str, meter_id: str) -> Optional[str]:
         return None
     return (
         f"{thing_name} runs firmware {firmware or 'unknown'}; relay commands need "
-        f"{RELAY_MIN_FIRMWARE} or newer (older gateways freeze and the relay does not move)."
+        f"{RELAY_MIN_FIRMWARE} or newer (older firmware freezes or switches the relay the wrong way)."
     )
 
 

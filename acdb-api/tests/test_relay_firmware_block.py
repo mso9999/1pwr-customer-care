@@ -23,13 +23,14 @@ class RelayFirmwareBlockTests(unittest.TestCase):
     def test_old_firmware_is_blocked(self):
         self.assertIn("1.1.71", self._block("1.1.71"))
         self.assertIsNotNone(self._block("1.1.72"))
+        self.assertIsNotNone(self._block("1.1.73"))
 
     def test_unknown_firmware_is_blocked(self):
         self.assertIn("unknown", self._block(None))
         self.assertIsNotNone(self._block("garbage"))
 
     def test_fixed_firmware_is_allowed(self):
-        self.assertIsNone(self._block("1.1.73"))
+        self.assertIsNone(self._block("1.1.74"))
         self.assertIsNone(self._block("1.1.100"))
         self.assertIsNone(self._block("1.2.0"))
 
