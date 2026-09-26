@@ -86,8 +86,54 @@ RELAY_AUTO_TRIGGER_ENABLED = os.environ.get(
 ).strip() in ("1", "true", "True", "yes")
 
 
+# Gateways below this freeze their MQTT agent on any relay command (the
+# firmware handled it inside the agent callback), so the relay never moves.
+RELAY_MIN_FIRMWARE = os.environ.get("RELAY_MIN_FIRMWARE", "1.1.73").strip()
+
+
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _version_tuple(version: Optional[str]) -> Optional[tuple[int, ...]]:
+    try:
+        return tuple(int(part) for part in str(version).strip().lstrip("v").split("."))
+    except (TypeError, ValueError):
+        return None
+
+
+def _gateway_firmware(thing_name: str, meter_id: str) -> Optional[str]:
+    """FirmwareVersion on the meter's newest ``1meter_data`` reading through ``thing_name``."""
+    try:
+        import boto3
+
+        resp = boto3.client("dynamodb", region_name=AWS_REGION).query(
+            TableName="1meter_data",
+            KeyConditionExpression="device_id = :m",
+            ExpressionAttributeValues={":m": {"S": str(meter_id)}},
+            ProjectionExpression="FirmwareVersion, thingName",
+            ScanIndexForward=False,
+            Limit=5,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("firmware lookup failed thing=%s meter=%s err=%s", thing_name, meter_id, exc)
+        return None
+    for item in resp.get("Items") or []:
+        if (item.get("thingName") or {}).get("S") == thing_name:
+            return ((item.get("FirmwareVersion") or {}).get("S") or "").strip() or None
+    return None
+
+
+def relay_firmware_block(thing_name: str, meter_id: str) -> Optional[str]:
+    """Reason a relay command must not be sent to this gateway, or None if it is safe."""
+    firmware = _gateway_firmware(thing_name, meter_id)
+    have, need = _version_tuple(firmware), _version_tuple(RELAY_MIN_FIRMWARE)
+    if have is not None and need is not None and have >= need:
+        return None
+    return (
+        f"{thing_name} runs firmware {firmware or 'unknown'}; relay commands need "
+        f"{RELAY_MIN_FIRMWARE} or newer (older gateways freeze and the relay does not move)."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +381,9 @@ def request_relay(
                 status_code=409,
                 detail=f"{thing_name} is not commissioned to one unambiguous meter and account.",
             )
+        blocked = relay_firmware_block(thing_name, meter_id)
+        if blocked:
+            raise HTTPException(status_code=409, detail=blocked)
 
         skipped_safeguards: list[str] = []
 
@@ -556,6 +605,9 @@ def queue_validation_relay(
     """
     if action not in VALID_ACTIONS:
         raise ValueError(f"invalid relay action {action}")
+    blocked = relay_firmware_block(thing_name, meter_id)
+    if blocked:
+        raise RuntimeError(blocked)
     cmd_id = str(uuid.uuid4())
     now = _now_utc()
     request_payload = {
@@ -684,6 +736,10 @@ def maybe_auto_open_relay(conn, account_number: str, *, reason: str = "zero_bala
             return None
         # Online
         if not _device_online(cur, meter_id):
+            return None
+        blocked = relay_firmware_block(thing_name, meter_id)
+        if blocked:
+            logger.warning("auto_open_relay: skipping %s: %s", account_number, blocked)
             return None
 
         cmd_id = str(uuid.uuid4())

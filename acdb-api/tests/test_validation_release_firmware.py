@@ -17,7 +17,10 @@ from fastapi import HTTPException
 # relay_control and customer_api import each other; the app breaks the cycle by
 # loading customer_api first. Stub the relay queue so this module loads alone.
 sys.modules.setdefault(
-    "relay_control", types.SimpleNamespace(queue_validation_relay=lambda *a, **k: None)
+    "relay_control", types.SimpleNamespace(
+        queue_validation_relay=lambda *a, **k: None,
+        relay_firmware_block=lambda *a, **k: None,
+    )
 )
 
 import onemeter_validation as ov  # noqa: E402

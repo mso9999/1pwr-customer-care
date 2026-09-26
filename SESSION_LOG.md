@@ -1,3 +1,13 @@
+## Session 2026-09-26 [202609261300] — Block relay commands to gateways below 1.1.73
+- Nils (KOT-GW-0004, 1.1.71): the zero-balance disconnect `6a8619d7…` was published 11:42:41Z. The gateway froze (firmware ran relay commands inside the MQTT agent callback and deadlocked), AWS redelivered twice with no PUBACK, and the gateway restarted ~11:44:20Z. The relay never moved and there was no ack ("relay ?"). Fixed in firmware 1.1.73 (onepwr-aws-mesh 5d2ad8b).
+- **Prod data write (onepower_bj, 12:49:03Z):** session `d3dd36cf-8232-4207-8e57-91bcc7e20ebd` set `failed` with an engineering note, plus event `abandoned` `{reason: firmware_relay_deadlock, relay_command_sent: false}`. No relay command sent. Relay row `6a8619d7…` left `published` for the TTL sweeper.
+- `relay_control.py`: `relay_firmware_block(thing, meter)` reads FirmwareVersion from the meter's newest `1meter_data` row through that Thing and blocks below `RELAY_MIN_FIRMWARE` (default `1.1.73`) or when unknown. Applied to manual `POST /api/meters/{thing}/relay` (409, not bypassable by `force`), `queue_validation_relay` (RuntimeError), and `maybe_auto_open_relay` (skip + log; auto-trigger is off anyway).
+- `onemeter_validation.py`: observe returns 409 "Zero-balance disconnect not sent: …" instead of publishing; payment returns 409; Abandon closes the session but skips the reconnect and records why.
+- Tests: new `tests/test_relay_firmware_block.py`; relay_control stubs in the two validation tests gained `relay_firmware_block`. 12 relay/validation tests pass.
+- Side effects: deploy via push to main (all three country APIs).
+
+---
+
 ## Session 2026-09-25 [202609252040] — Batch validation: pick the loaded meter; abandon a session
 - Nils (KOT-GW-0004, 3 meters): validation always used `meter_provisioning.meter_serial` (000023021769, 0 W) with no way to choose the meter carrying the dummy load (000023021727, 18.5 W).
 - `onemeter_validation.py`:

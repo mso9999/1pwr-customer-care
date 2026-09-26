@@ -13,7 +13,10 @@ from unittest import mock
 os.environ.setdefault("CC_JWT_SECRET", "unit-test-secret")
 
 sys.modules.setdefault(
-    "relay_control", types.SimpleNamespace(queue_validation_relay=lambda *a, **k: None)
+    "relay_control", types.SimpleNamespace(
+        queue_validation_relay=lambda *a, **k: None,
+        relay_firmware_block=lambda *a, **k: None,
+    )
 )
 
 import onemeter_validation as ov  # noqa: E402

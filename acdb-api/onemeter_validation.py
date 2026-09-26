@@ -21,7 +21,7 @@ from pydantic import BaseModel, Field
 from country_config import COUNTRY
 from middleware import require_action
 from models import CCRole, CurrentUser
-from relay_control import queue_validation_relay
+from relay_control import queue_validation_relay, relay_firmware_block
 
 router = APIRouter(prefix="/api/provisioning/validation", tags=["1meter-validation"])
 
@@ -445,6 +445,9 @@ def observe_load(
         disconnect_cmd_id = session.get("disconnect_cmd_id")
 
         if total_delta > 0 and balance <= 0 and not disconnect_cmd_id:
+            blocked = relay_firmware_block(session["thing_name"], session["meter_id"])
+            if blocked:
+                raise HTTPException(status_code=409, detail=f"Zero-balance disconnect not sent: {blocked}")
             disconnect_cmd_id = queue_validation_relay(
                 thing_name=session["thing_name"],
                 meter_id=session["meter_id"],
@@ -495,6 +498,9 @@ def apply_test_payment(
             )
         if session.get("reconnect_cmd_id"):
             raise HTTPException(status_code=409, detail="A synthetic payment was already applied.")
+        blocked = relay_firmware_block(session["thing_name"], session["meter_id"])
+        if blocked:
+            raise HTTPException(status_code=409, detail=f"Reconnect not sent: {blocked}")
         reconnect_cmd_id = queue_validation_relay(
             thing_name=session["thing_name"],
             meter_id=session["meter_id"],
@@ -534,25 +540,32 @@ def abandon_validation(
         if session["status"] in ("passed", "failed"):
             raise HTTPException(status_code=409, detail="Validation session is already complete.")
         reconnect_cmd_id = session.get("reconnect_cmd_id")
+        note = "abandoned by operator"
+        blocked = None
         if session.get("disconnect_cmd_id") and not reconnect_cmd_id:
-            reconnect_cmd_id = queue_validation_relay(
-                thing_name=session["thing_name"],
-                meter_id=session["meter_id"],
-                action="close",
-                reason=f"batch_validation_abandon:{session_id}",
-                requested_by=f"validation:{user.user_id}",
-            )
+            blocked = relay_firmware_block(session["thing_name"], session["meter_id"])
+            if blocked:
+                note += "; reconnect not sent: " + blocked
+            else:
+                reconnect_cmd_id = queue_validation_relay(
+                    thing_name=session["thing_name"],
+                    meter_id=session["meter_id"],
+                    action="close",
+                    reason=f"batch_validation_abandon:{session_id}",
+                    requested_by=f"validation:{user.user_id}",
+                )
         cur.execute(
             """
             UPDATE onemeter_validation_sessions
                SET status = 'failed', reconnect_cmd_id = %s::uuid,
-                   notes = CONCAT_WS(' | ', notes, 'abandoned by operator'),
+                   notes = CONCAT_WS(' | ', notes, %s),
                    completed_at = NOW(), updated_at = NOW()
              WHERE id = %s::uuid
             """,
-            (reconnect_cmd_id, session_id),
+            (reconnect_cmd_id, note, session_id),
         )
-        _event(cur, session_id, "abandoned", user.user_id, cmd_id=reconnect_cmd_id)
+        _event(cur, session_id, "abandoned", user.user_id, cmd_id=reconnect_cmd_id,
+               details={"relay_blocked": blocked} if blocked else None)
         conn.commit()
     return {"session_id": session_id, "status": "failed", "reconnect_cmd_id": str(reconnect_cmd_id) if reconnect_cmd_id else None}
 
