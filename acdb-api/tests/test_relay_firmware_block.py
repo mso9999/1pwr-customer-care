@@ -5,14 +5,20 @@ deadlocked: KOT-GW-0004 (1.1.71) froze on a validation disconnect and the relay
 never moved.
 """
 
+import importlib
 import os
+import sys
+import types
 import unittest
 from unittest import mock
 
 os.environ.setdefault("CC_JWT_SECRET", "unit-test-secret")
 
+# Other validation tests stub relay_control; load the real module.
+if isinstance(sys.modules.get("relay_control"), types.SimpleNamespace):
+    del sys.modules["relay_control"]
 import customer_api  # noqa: E402,F401  (loads before relay_control, as in the app)
-import relay_control as rc  # noqa: E402
+rc = importlib.import_module("relay_control")
 
 
 class RelayFirmwareBlockTests(unittest.TestCase):

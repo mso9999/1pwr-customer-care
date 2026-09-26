@@ -113,24 +113,29 @@ def _require_release_firmware(
     fw_version: Optional[str],
     ota_target: Optional[str],
 ) -> None:
-    """The test gateway must run the site's release firmware, however it got there.
+    """The test gateway must run the site's release firmware or newer, however it got there.
 
     A USB reflash leaves the provisioning row describing an older OTA, so live
-    telemetry is the evidence. Release approval separately requires its own
-    SUCCEEDED canary OTA to the release version.
+    telemetry is the evidence. Newer is accepted because relay commands need
+    firmware past some site releases. Release approval separately requires its
+    own SUCCEEDED canary OTA to the release version.
     """
-    from meter_provisioning import _ota_release
+    from meter_provisioning import _firmware_version_tuple, _ota_release
 
     norm = lambda v: str(v or "").strip().lstrip("v")  # noqa: E731
     target = norm(_ota_release(site).get("target_firmware_version"))
     live = norm(_live_gateway_firmware(meter_id, thing))
     if live:
-        if target and live != target:
+        try:
+            behind = bool(target) and _firmware_version_tuple(live) < _firmware_version_tuple(target)
+        except (TypeError, ValueError):
+            behind = bool(target)
+        if behind:
             raise HTTPException(
                 status_code=409,
                 detail=(
                     f"{thing} reports firmware {live}, but the {site} release is {target}. "
-                    f"Flash or OTA it to {target} first."
+                    f"Flash or OTA it to {target} or newer first."
                 ),
             )
         return

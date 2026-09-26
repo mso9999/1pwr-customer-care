@@ -36,6 +36,10 @@ class RequireReleaseFirmwareTests(unittest.TestCase):
     def test_usb_flashed_to_release_passes_despite_old_ota_record(self):
         self.check(live="1.1.71")
 
+    def test_newer_than_release_passes(self):
+        self.check(live="1.1.74")
+        self.check(live="1.1.100")
+
     def test_live_firmware_behind_release_names_both_versions(self):
         with self.assertRaises(HTTPException) as ctx:
             self.check(live="1.1.61")

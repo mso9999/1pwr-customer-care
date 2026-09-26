@@ -1,3 +1,11 @@
+## Session 2026-09-26 [202609261640] — Batch validation accepts firmware newer than the site release
+- Nils: KOT-GW-0004 (now 1.1.74) was refused: "reports firmware 1.1.74, but the KOT release is 1.1.71". `_require_release_firmware` required exact equality, while relay steps need ≥1.1.74, so validation could not pass anywhere.
+- `onemeter_validation.py`: live firmware must be **≥** the site release (`meter_provisioning._firmware_version_tuple`); unparsable counts as behind. No release config (`ONEMETER_OTA_RELEASES_JSON`) change: KOT release stays 1.1.71 for provisioning OTA.
+- Tests: newer-than-release case added; `test_relay_firmware_block` now drops the validation tests' `relay_control` stub (order-dependent import). 9 targeted tests pass in either order. The full suite's 2 failures (`provisioning_station_download`, `sync_ugridplan_discover_match`) are pre-existing.
+- Side effects: deploy via push to main.
+
+---
+
 ## Session 2026-09-26 [202609261310] — Relay minimum raised to 1.1.74 (1.1.73 relay actions inverted)
 - Firmware relay test on MAK-GW-0191 (1.1.73): `close` sent DDS8888 code 0x1A, which **trips** the relay (read-back 0). Customer meter 000023022616 was off 13:03:29–13:06:01Z (two no-op-intended `close` tests; restored with `open`, read-back 1). Test rows in onepower_cc `relay_commands`: `a574eb19…` (close, relay_after 0), `cc94bcd9…` (open/restore, relay_after 1). The first test `3e188492…` had no row (CC 404 on its ack).
 - `RELAY_MIN_FIRMWARE` default 1.1.73 → **1.1.74** (onepwr-aws-mesh fixes the code mapping). Test updated; 8 tests pass.
