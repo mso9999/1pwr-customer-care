@@ -1,3 +1,11 @@
+## Session 2026-09-27 [202609272125] — Second meter on a 1Meter gateway blocked commission
+- Nils: GABRIEL APKANON / `0002KOT` created; assign of `000023021758` to KOT-GW-0004 succeeded (18:40Z); commission 409 "No gateway associated with this meter". Screenshot is that gate, not assign.
+- Deployed `_commission_gateway_gate` only looks at `req.gateway_thing_name`, `meter_gateway_link` (empty in BN — assign-ptb 400'd, no pole/survey), then `meter_provisioning` by exact serial. That table holds one serial per Thing (`000023021769` / `0001KOT`). A second RS-485 meter never matches. DynamoDB already had `000023021758` → KOT-GW-0004.
+- Live: wrote `meter_gateway_link` for `23021758`→KOT-GW-0004/`0002KOT` and `23021769`→`0001KOT` at 2026-09-27 ~19:26Z so they can retry commission now (deployed gate reads this table).
+- Code: commission also uses `last_seen_thing_for_meter`; link lookup matches padded or stripped serials. Assign writes `meter_gateway_link` via `record_gateway_link` (does not need a PTB). Test `test_record_gateway_link_strips_serial_and_upserts`.
+- Readings for `0002KOT` will keep 409 until the customer is commissioned (`telemetry_refusal`).
+- Side effects: two `onepower_bj.meter_gateway_link` rows; CC deploy via push.
+
 ## Session 2026-09-27 [202609272010] — 1Meter billing gate follows customer commissioning; ingest alert
 - Durable fix for the 0001KOT refusal. `/api/meters/reading` required the publishing Thing's `meter_provisioning` row (one serial per Thing) to name the account and be `commissioned`. Only migration 059 and, since `b660eea`, Commission set it. Assign, reassign, gateway swap and rotate did not. A multi-meter gateway could never pass for its second meter.
 - New `onemeter_binding.py`: `telemetry_refusal` accepts once the account's customer is `customer_commissioned`, and still refuses if the serial is `commissioned` to a different account. `ensure_1meter_binding` (059 rules plus a commissioned-customer requirement) runs on every accepted reading inside a savepoint, so the provisioning row that Thing-level relay commands read repairs itself whichever workflow changed the chain. Commission calls the same function.

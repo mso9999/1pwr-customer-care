@@ -43,6 +43,42 @@ def telemetry_refusal(cur, meter_id: str, account_number: str) -> Optional[str]:
     return None
 
 
+def record_gateway_link(
+    cur,
+    meter_serial: str,
+    gateway_thing: str,
+    account_number: Optional[str],
+    site: Optional[str],
+    linked_by: str,
+) -> None:
+    """Record which gateway reads this meter in ``meter_gateway_link``.
+
+    Commission's gateway check reads this table. The uGridPLAN PTB step also
+    writes it but needs a pole, which a bench or not-yet-surveyed install lacks.
+    Keeps any pole/PTB already recorded; no write when nothing changed.
+    """
+    serial = (meter_serial or "").lstrip("0") or (meter_serial or "")
+    gw = (gateway_thing or "").strip()
+    if not serial or not gw:
+        return
+    cur.execute(
+        """
+        INSERT INTO meter_gateway_link (meter_serial, gateway_thing, account_number, site, linked_by)
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (meter_serial) DO UPDATE SET
+          gateway_thing = EXCLUDED.gateway_thing,
+          account_number = COALESCE(EXCLUDED.account_number, meter_gateway_link.account_number),
+          site = COALESCE(EXCLUDED.site, meter_gateway_link.site),
+          linked_at = NOW(),
+          linked_by = EXCLUDED.linked_by
+        WHERE meter_gateway_link.gateway_thing IS DISTINCT FROM EXCLUDED.gateway_thing
+           OR meter_gateway_link.account_number IS DISTINCT FROM
+              COALESCE(EXCLUDED.account_number, meter_gateway_link.account_number)
+        """,
+        (serial, gw, account_number or None, site or None, linked_by),
+    )
+
+
 def ensure_1meter_binding(cur, account_number: str, gateway_thing: Optional[str] = None) -> int:
     """Mark the account's gateway provisioning row commissioned.
 

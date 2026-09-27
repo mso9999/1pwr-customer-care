@@ -281,13 +281,23 @@ def _commission_gateway_gate(req: CommissionRequest, resolved_acct: Optional[str
             if platform != "prototype":
                 return  # not a 1Meter — vendor-path meter, no gateway gate
 
-            # Resolve the gateway: operator-selected > link table > provisioning record.
+            # Resolve the gateway: operator-selected > live publisher >
+            # link table > provisioning record. last_seen wins over an
+            # unordered provisioning row so a stale serial on another
+            # gateway cannot block commission.
             gw = (req.gateway_thing_name or "").strip()
+            if not gw and meter_serial:
+                try:
+                    from meter_lifecycle import last_seen_thing_for_meter
+                    gw = (last_seen_thing_for_meter(meter_serial) or "").strip()
+                except Exception:
+                    gw = ""
             if not gw and meter_serial:
                 ms_norm = meter_serial.lstrip("0") or meter_serial
                 cur.execute(
                     "SELECT gateway_thing FROM meter_gateway_link "
-                    "WHERE meter_serial = %s AND gateway_thing IS NOT NULL AND gateway_thing <> '' "
+                    "WHERE ltrim(COALESCE(meter_serial,''),'0') = %s "
+                    "AND gateway_thing IS NOT NULL AND gateway_thing <> '' "
                     "ORDER BY linked_at DESC NULLS LAST LIMIT 1",
                     (ms_norm,),
                 )
@@ -323,10 +333,17 @@ def _commission_gateway_gate(req: CommissionRequest, resolved_acct: Optional[str
                 "gateway_last_contact_h": state.get("age_h"),
                 "meter_serial": meter_serial,
                 "message": (
-                    f"This 1Meter meter reports through gateway {gw}, which last contacted the "
-                    f"cloud {state.get('age_h')}h ago (state: {state.get('state')}). Verify the "
-                    f"gateway is installed and online first (Provisioning → Field install → "
-                    f"Troubleshoot), then commission."
+                    (
+                        f"This 1Meter meter reports through gateway {gw}, which last contacted the "
+                        f"cloud {state.get('age_h')}h ago (state: {state.get('state')}). Verify the "
+                        f"gateway is installed and online first (Provisioning → Field install → "
+                        f"Troubleshoot), then commission."
+                        if state.get("age_h") is not None else
+                        f"This 1Meter meter reports through gateway {gw}, which has no cloud "
+                        f"contact on record (state: {state.get('state')}). Verify the gateway "
+                        f"is installed and online first (Provisioning → Field install → "
+                        f"Troubleshoot), then commission."
+                    )
                     if gw else
                     "This 1Meter meter reports through a 1Meter gateway, but no gateway is "
                     "associated with it yet. Install/identify the gateway first "

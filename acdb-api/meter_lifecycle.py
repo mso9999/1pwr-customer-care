@@ -654,6 +654,12 @@ def assign_meter(
 
             # Gateways stay account-free. The customer binding is meters +
             # meter_assignments only — one PCB can serve several accounts.
+            if thing_name:
+                from onemeter_binding import record_gateway_link
+                record_gateway_link(
+                    cursor, meter_id, thing_name, account_number, community,
+                    f"cc:{user.user_id}",
+                )
 
             after_state = _snapshot_meter_lifecycle_state(cursor, meter_id, account_number)
             log_mutation(

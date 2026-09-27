@@ -14,7 +14,12 @@ os.environ.setdefault("CC_JWT_SECRET", "unit-test-secret")
 
 import customer_api  # noqa: E402,F401  (loads ingest in app order)
 import ingest  # noqa: E402
-from onemeter_binding import ASSIGNMENT_MISMATCH, NOT_COMMISSIONED, telemetry_refusal  # noqa: E402
+from onemeter_binding import (  # noqa: E402
+    ASSIGNMENT_MISMATCH,
+    NOT_COMMISSIONED,
+    record_gateway_link,
+    telemetry_refusal,
+)
 
 
 class FakeCursor:
@@ -89,12 +94,20 @@ def test_second_meter_on_gateway_is_accepted_without_its_own_provisioning_row():
     assert result["status"] == "ok" and result["account"] == "0002KOT"
     assert any("INSERT INTO meter_readings" in s for s in cur.log)
     assert any(s.lstrip().startswith("UPDATE meter_provisioning") for s in cur.log)
+    assert any("INSERT INTO meter_gateway_link" in s for s in cur.log)
 
 
 def test_uncommissioned_customer_is_refused():
     with pytest.raises(HTTPException) as exc:
         _post(FakeCursor(commissioned=False))
     assert exc.value.status_code == 409 and exc.value.detail == NOT_COMMISSIONED
+
+
+def test_record_gateway_link_strips_serial_and_upserts():
+    cur = FakeCursor()
+    record_gateway_link(cur, "000023021758", "KOT-GW-0004", "0002KOT", "KOT", "cc:tester")
+    sql = next(s for s in cur.log if "INSERT INTO meter_gateway_link" in s)
+    assert "ON CONFLICT (meter_serial)" in sql
 
 
 def test_serial_commissioned_to_another_account_is_refused():
