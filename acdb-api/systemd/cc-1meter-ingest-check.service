@@ -1,0 +1,19 @@
+[Unit]
+Description=Alert when commissioned 1Meters publish but CC does not accept their readings (per lane)
+Documentation=file:///opt/cc-portal/backend/scripts/ops/check_1meter_ingest.py
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=cc_api
+Group=cc_api
+WorkingDirectory=/opt/cc-portal/backend
+Environment=PYTHONPATH=/opt/cc-portal/backend
+ExecStart=-/bin/bash -c 'set -a; . /opt/1pdb/.env; set +a; exec /opt/cc-portal/backend/venv/bin/python scripts/ops/check_1meter_ingest.py'
+ExecStart=-/bin/bash -c 'set -a; . /opt/1pdb-bn/.env; set +a; exec /opt/cc-portal/backend/venv/bin/python scripts/ops/check_1meter_ingest.py'
+ExecStart=-/bin/bash -c '[ -r /opt/1pdb-zm/.env ] || exit 0; set -a; . /opt/1pdb-zm/.env; set +a; exec /opt/cc-portal/backend/venv/bin/python scripts/ops/check_1meter_ingest.py'
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cc-1meter-ingest-check
+TimeoutStartSec=300

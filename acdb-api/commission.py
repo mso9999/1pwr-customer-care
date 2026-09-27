@@ -363,48 +363,6 @@ def _commission_gateway_gate(req: CommissionRequest, resolved_acct: Optional[str
 # POST /api/commission/execute
 # ---------------------------------------------------------------------------
 
-def _commission_1meter_binding(conn, account_number: str, gateway_thing: Optional[str]) -> int:
-    """Mark the account's 1Meter gateway binding commissioned.
-
-    Meter-reading ingest refuses telemetry (409) unless the gateway's
-    meter_provisioning row names this account and is ``commissioned``.
-    Same rules as migration 059: the serial must match exactly one
-    provisioning row, which must be unassigned or already on this account.
-    Returns the number of rows promoted.
-    """
-    acct = (account_number or "").strip().upper()
-    if not acct:
-        return 0
-    gw = (gateway_thing or "").strip() or None
-    cur = conn.cursor()
-    cur.execute(
-        """
-        UPDATE meter_provisioning mp
-           SET account_number = %s,
-               status = 'commissioned',
-               commissioned_at = COALESCE(mp.commissioned_at, NOW()),
-               updated_at = NOW()
-          FROM meters m
-         WHERE UPPER(m.account_number) = %s
-           AND m.platform = 'prototype'
-           AND m.status = 'active'
-           AND NULLIF(mp.meter_serial, '') IS NOT NULL
-           AND regexp_replace(mp.meter_serial, '^0+', '') = regexp_replace(m.meter_id, '^0+', '')
-           AND (NULLIF(mp.account_number, '') IS NULL OR UPPER(mp.account_number) = %s)
-           AND mp.status NOT IN ('commissioned', 'rotating')
-           AND (%s::text IS NULL OR mp.thing_name = %s::text)
-           AND NOT EXISTS (
-               SELECT 1 FROM meter_provisioning other
-                WHERE other.id <> mp.id
-                  AND regexp_replace(other.meter_serial, '^0+', '') =
-                      regexp_replace(mp.meter_serial, '^0+', '')
-           )
-        """,
-        (acct, acct, acct, gw, gw),
-    )
-    return cur.rowcount or 0
-
-
 @router.post("/api/commission/execute")
 async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends(CC_COMMISSION_GATE)):
     """Execute customer commissioning:
@@ -557,9 +515,10 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
 
     telemetry_bound = 0
     try:
+        from onemeter_binding import ensure_1meter_binding
         with _get_connection() as conn:
-            telemetry_bound = _commission_1meter_binding(
-                conn, resolved_acct or req.account_number, req.gateway_thing_name,
+            telemetry_bound = ensure_1meter_binding(
+                conn.cursor(), resolved_acct or req.account_number, req.gateway_thing_name,
             )
             conn.commit()
         if telemetry_bound:

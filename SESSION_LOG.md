@@ -1,3 +1,11 @@
+## Session 2026-09-27 [202609272010] — 1Meter billing gate follows customer commissioning; ingest alert
+- Durable fix for the 0001KOT refusal. `/api/meters/reading` required the publishing Thing's `meter_provisioning` row (one serial per Thing) to name the account and be `commissioned`. Only migration 059 and, since `b660eea`, Commission set it. Assign, reassign, gateway swap and rotate did not. A multi-meter gateway could never pass for its second meter.
+- New `onemeter_binding.py`: `telemetry_refusal` accepts once the account's customer is `customer_commissioned`, and still refuses if the serial is `commissioned` to a different account. `ensure_1meter_binding` (059 rules plus a commissioned-customer requirement) runs on every accepted reading inside a savepoint, so the provisioning row that Thing-level relay commands read repairs itself whichever workflow changed the chain. Commission calls the same function.
+- New `scripts/ops/check_1meter_ingest.py` + `cc-1meter-ingest-check` timer (30 min, LS/BN/ZM lanes, installed by deploy). It flags commissioned 1Meters that publish (DynamoDB `meter_last_seen`) but have no CC accept for 45 min+, sends WhatsApp through that country's bridge only, re-alerts every 24 h per meter, and exits 1. Uses `GetItem`: the BN lane runs on instance role `cc-postgres-backup-role`, which lacks `BatchGetItem`. Dry-run on the host: LS 63 commissioned / 0 stuck, BN 2 / 0, ZM 0.
+- Tests: `test_onemeter_binding.py` (a gateway's second meter is accepted; fails on the old gate), `test_check_1meter_ingest.py`. Suite 373 passed; 2 failures also on clean HEAD (`test_provisioning_station_download`, `test_sync_ugridplan_discover_match`).
+- Open: BN has no WhatsApp bridge config (`CC_BRIDGE_NOTIFY_URL_BN`), so BN alerts are journal-only. The old `cc-1meter-monitor` (offline alert) runs from a script deleted from the repo in `f592b3b`.
+- Side effects: CC deploy via push; new systemd timer on the CC host.
+
 ## Session 2026-09-27 [202609271810] — Commissioning did not open the 1Meter billing gate; credit entered via ledger editor
 - Nils: credit added to `0001KOT`, meter records consumption, account shows none.
 - Cause 1: `/api/meters/reading` (ingest.py) requires the gateway's `meter_provisioning` row to name the account and be `commissioned`, else 409. Nothing in the commission flow sets that; only the one-off migration 059 ever did. `KOT-GW-0004` / `000023021769` was `online` with no account, so every reading 409'd. Benin has no DynamoDB→PG `prototype_sync` (LS does), so BN had zero consumption.
@@ -5,7 +13,9 @@
 - Code: `commission.py` `_commission_1meter_binding` promotes the account's 1Meter binding on commission (059 rules, gateway-scoped if chosen, skips duplicate serials and `rotating`). Response gains `telemetry_bound`. Rollback-tested on LS/BN.
 - Cause 2: the 100 XOF at 15:03 (transactions id 144349, by 1PWR0512) was typed into the Customer Data page ledger form (`POST /api/tables/transactions`): raw row, `kwh_value=0`, no meter, no balance/relay logic. Real payments go through Record Payment (`/api/payments/record`). Row left in place.
 - LS: 38 MAK 1Meters assigned to accounts are not `commissioned` in `meter_provisioning`, so their CC posts 409 too. No consumption loss (LS `prototype_sync.py` reads DynamoDB directly), but relay commands also gate on `commissioned`. Not changed; needs a decision.
-- Side effects: one production row update in `onepower_bj`; CC deploy via push.
+- Side effects: one production row update in `onepower_bj`; CC deploy via push (`b660eea`, success).
+- Verified: 16:21 UTC first 200 (baseline 0.38 kWh), 16:37 UTC delta 0.04 kWh into `hourly_consumption`. `RELAY_AUTO_TRIGGER_ENABLED` unset in BN, so the zero balance cannot cut off.
+- Open: firmware timestamps are UTC+2 (liveTime 1755 at 15:55Z), and BN ingest parses them as UTC+1 (`UTC_OFFSET_HOURS`), so BN reading times and hourly buckets are 1 h ahead.
 
 ## Session 2026-09-27 [202609271515] — Financing schema for Benin and Zambia
 - BN customer page (`GET /api/financing/customer/0001KOT`) 500'd: `financing_agreements` does not exist. Only `onepower_cc` had the financing tables (created ad hoc, never in a migration). LS has 0 products and 0 agreements.

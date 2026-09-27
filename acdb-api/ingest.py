@@ -38,6 +38,7 @@ from pydantic import BaseModel
 from country_config import COUNTRY, KOIOS_SITES, UTC_OFFSET_HOURS
 from cc_bridge_notify import notify_cc_bridge
 from customer_api import get_connection
+from onemeter_binding import ensure_1meter_binding, telemetry_refusal
 from momo_bj import parse_momo_bn_sms, resolve_bn_momo_account
 from mpesa_sms import mpesa_receipt_in_use, parse_ls_sms_payment, resolve_sms_account
 from sms_payment_receipt import send_electricity_payment_receipt_sms, send_fee_payment_receipt_sms
@@ -353,27 +354,22 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
                     detail=f"Unknown prototype meter: {reading.meter_id}",
                 )
             if reading.thing_name:
-                cur.execute(
-                    """
-                    SELECT account_number, status
-                      FROM meter_provisioning
-                     WHERE thing_name = %s
-                       AND regexp_replace(meter_serial, '^0+', '') =
-                           regexp_replace(%s, '^0+', '')
-                     LIMIT 1
-                    """,
-                    (reading.thing_name, reading.meter_id),
-                )
-                binding = cur.fetchone()
-                if not binding or str(binding[0] or "") != str(account):
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Gateway, meter serial, and customer assignment do not match.",
-                    )
-                if str(binding[1] or "") != "commissioned":
-                    raise HTTPException(
-                        status_code=409,
-                        detail="Gateway telemetry cannot enter billing until commissioning is complete.",
+                refusal = telemetry_refusal(cur, meter_id, account)
+                if refusal:
+                    raise HTTPException(status_code=409, detail=refusal)
+                cur.execute("SAVEPOINT onemeter_binding")
+                try:
+                    if ensure_1meter_binding(cur, account, reading.thing_name):
+                        logger.info(
+                            "1Meter binding repaired: %s on %s -> %s",
+                            meter_id, reading.thing_name, account,
+                        )
+                    cur.execute("RELEASE SAVEPOINT onemeter_binding")
+                except Exception as exc:  # noqa: BLE001 - never drop telemetry
+                    cur.execute("ROLLBACK TO SAVEPOINT onemeter_binding")
+                    logger.warning(
+                        "1Meter binding repair failed for %s on %s: %s",
+                        meter_id, reading.thing_name, exc,
                     )
 
             cur.execute(
