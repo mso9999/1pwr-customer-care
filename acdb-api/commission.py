@@ -175,9 +175,8 @@ def _resolve_customer_for_commission(cursor, identifier: str):
         try:
             cursor.execute(
                 "SELECT a.account_number FROM accounts a "
-                "JOIN customers c ON a.customer_id = c.id "
-                "WHERE c.customer_id_legacy = %s ORDER BY a.opened_date DESC NULLS LAST LIMIT 1",
-                (legacy_id,),
+                "WHERE a.customer_id = %s ORDER BY a.opened_date DESC NULLS LAST LIMIT 1",
+                (customer["id"],),
             )
             arow = cursor.fetchone()
             if arow:
@@ -389,6 +388,7 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
         if not customer:
             raise HTTPException(status_code=404, detail="Customer not found")
         legacy_id = customer["customer_id_legacy"]
+        customer_pk = customer["id"]
 
         first_name = req.first_name or str(customer.get("first_name") or "")
         last_name = req.last_name or str(customer.get("last_name") or "")
@@ -445,12 +445,12 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
             row_updates["gps_lon"] = req.gps_lng
 
         set_clause = ", ".join(f"{k} = %s" for k in row_updates.keys())
-        values = list(row_updates.values()) + [user.user_id, legacy_id]
+        values = list(row_updates.values()) + [user.user_id, customer_pk]
         with _get_connection() as conn:
             cur = conn.cursor()
             cur.execute(
                 f"UPDATE customers SET {set_clause}, updated_at = NOW(), updated_by = %s "
-                f"WHERE customer_id_legacy = %s",
+                f"WHERE id = %s",
                 values,
             )
             if not cur.rowcount:

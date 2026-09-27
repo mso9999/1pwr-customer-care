@@ -1,3 +1,10 @@
+## Session 2026-09-27 [202609271440] — Commission persists CC-created customers (no legacy id)
+- Nils (BN, 14:27:33Z): "Contracts were generated but the customer record could not be updated… customer row not found after contract generation". `cc-api-bn` log: `legacy_id=None`. Customer was created in CC, so `customers.customer_id_legacy` is NULL; the flags UPDATE keyed on it matched no row. Not a PTB/uGridPlan link issue.
+- `commission.py`: `execute_commission` UPDATE keyed on `customers.id`; account fallback in `_resolve_customer_for_commission` looks up by `accounts.customer_id`. Test `tests/test_commission_no_legacy_id.py` (fails on old code).
+- Not fixed: other `customer_id_legacy`-only paths in `commission.py` (lookup/metadata helpers, `_resolve_ugp_survey_id` strategies 1–2) — they fall through for CC-created customers.
+- Other agents' uncommitted `commission.py` hunks left unstaged.
+- Side effects: CC deploy via push. The failed attempt left generated PDFs only; re-run commissioning.
+
 ## Session 2026-09-27 [202609271630] — Batch validation: live ~2 min telemetry, resume open sessions
 - Nils: ~30 min per meter (validation waited for the 15-min accepted reading), and no way back to meter 000023021727's session after moving to the next meter (relay left off).
 - Lambda `meter_ingestion_gate` (prod, **14:20:33Z**, CodeSha256 `96lDaW7D…` → `6x6bW56y…`; rollback = published version **7**): every reading now refreshes `liveTime/liveSeen/liveEnergyActive/liveRelay/liveThing` on `meter_last_seen` (conditional update, forward-only in sample time; also written on accepted Put). Billing (15-min `lastAcceptedTime`, `1meter_data`, CC forward) unchanged. Verified live fields on KOT and MAK meters; forward 404/409 rates match pre-change baseline.
