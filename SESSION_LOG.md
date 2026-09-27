@@ -1,3 +1,14 @@
+## Session 2026-09-27 [202609271515] — Financing schema for Benin and Zambia
+- BN customer page (`GET /api/financing/customer/0001KOT`) 500'd: `financing_agreements` does not exist. Only `onepower_cc` had the financing tables (created ad hoc, never in a migration). LS has 0 products and 0 agreements.
+- `migrations/071_financing_schema.sql`: `financing_products`, `financing_agreements`, `financing_ledger` matching the LS definitions (columns, checks, FKs, indexes), plus explicit `cc_api` grants on tables and sequences. `IF NOT EXISTS` throughout, so a no-op on LS.
+- Dry-run in a rolled-back transaction on `onepower_cc`, `onepower_bj`, `onepower_zm`: applies cleanly; `cc_api` can select and insert.
+- Behaviour: with no agreements, payment split still sends 100% to electricity; `financing_penalties.py` is not scheduled anywhere. Financing becomes available in BN/ZM once staff create products or agreements.
+- Side effects: production DDL on `onepower_bj` and `onepower_zm` through the deploy's migration step.
+
+## Session 2026-09-27 [202609271505] — Confirmed Benin meter-page 500 is cleared
+- Nils (14:48 UTC): 500 on every meter after commissioning. `1pdb-api-bn` log: `UndefinedColumn: last_sample_time` in `meter_detail`, the same fault as the 16:51 entry below. `onepower_bj` now has the column; no `/detail` 500 after 14:50 UTC. Nothing changed here.
+- Still open: `financing_agreements` is missing in BN, so the customer-page financing panel 500s. Migration `070` is not yet committed, and `cc_schema_migrations` in BN ends at `069`.
+
 ## Session 2026-09-27 [202609271440] — Commission persists CC-created customers (no legacy id)
 - Nils (BN, 14:27:33Z): "Contracts were generated but the customer record could not be updated… customer row not found after contract generation". `cc-api-bn` log: `legacy_id=None`. Customer was created in CC, so `customers.customer_id_legacy` is NULL; the flags UPDATE keyed on it matched no row. Not a PTB/uGridPlan link issue.
 - `commission.py`: `execute_commission` UPDATE keyed on `customers.id`; account fallback in `_resolve_customer_for_commission` looks up by `accounts.customer_id`. Test `tests/test_commission_no_legacy_id.py` (fails on old code).
