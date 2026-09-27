@@ -4853,6 +4853,25 @@ export async function startMeterValidation(body: {
   });
 }
 
+export interface MeterValidationOpenSession {
+  id: string;
+  thing_name: string;
+  meter_id: string;
+  site_code: string;
+  status: string;
+  batch_reference: string;
+  disconnect_cmd_id: string | null;
+  reconnect_cmd_id: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+}
+
+/** Unfinished validation sessions (newest first), optionally for one gateway. */
+export async function listOpenMeterValidations(thingName?: string): Promise<{ sessions: MeterValidationOpenSession[] }> {
+  const q = thingName ? `?thing_name=${encodeURIComponent(thingName)}` : '';
+  return request(`/provisioning/validation/sessions${q}`);
+}
+
 export async function getMeterValidation(sessionId: string): Promise<MeterValidationStatus> {
   return request(`/provisioning/validation/sessions/${encodeURIComponent(sessionId)}`);
 }

@@ -17,6 +17,7 @@ import {
   getValidationGatewayMeters,
   abandonMeterValidation,
   getMeterValidation,
+  listOpenMeterValidations,
   observeMeterValidationLoad,
   applyMeterValidationPayment,
   completeMeterValidation,
@@ -37,6 +38,7 @@ import {
   type FleetLiveResult,
   type MeterValidationStatus,
   type ValidationGatewayMeter,
+  type MeterValidationOpenSession,
   type CountryProvisioningReadiness,
   type GatewayStability,
 } from '../lib/api';
@@ -220,6 +222,7 @@ export default function ProvisioningPage() {
   const [batchReference, setBatchReference] = useState('');
   const [startingCredit, setStartingCredit] = useState(0.01);
   const [validationRun, setValidationRun] = useState<MeterValidationStatus | null>(null);
+  const [openValidations, setOpenValidations] = useState<MeterValidationOpenSession[]>([]);
   const [validationBusy, setValidationBusy] = useState(false);
   const [kitDownloading, setKitDownloading] = useState(false);
   const [activationStepBusy, setActivationStepBusy] = useState('');
@@ -432,6 +435,15 @@ export default function ProvisioningPage() {
       });
     return () => { cancelled = true; };
   }, [validationTarget]);
+
+  useEffect(() => {
+    if (validationRun) return;
+    let cancelled = false;
+    listOpenMeterValidations(validationTarget || undefined)
+      .then((r) => { if (!cancelled) setOpenValidations(r.sessions); })
+      .catch(() => { if (!cancelled) setOpenValidations([]); });
+    return () => { cancelled = true; };
+  }, [validationTarget, validationRun]);
 
   useEffect(() => {
     const sessionId = validationRun?.session.id;
@@ -1345,7 +1357,29 @@ export default function ProvisioningPage() {
           <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-4">
             <h2 className="text-lg font-semibold text-gray-900">Validation evidence</h2>
             {!validationRun ? (
-              <p className="text-sm text-gray-500">Start a session after the addressed meter string and dummy load are safely connected.</p>
+              <div className="space-y-3">
+                <p className="text-sm text-gray-500">Start a session after the addressed meter string and dummy load are safely connected.</p>
+                {openValidations.length > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="text-sm font-semibold text-gray-800">Unfinished sessions — resume to reconnect or finish</div>
+                    {openValidations.map((s) => (
+                      <div key={s.id} className="flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm">
+                        <span>
+                          <span className="font-mono">{s.meter_id}</span> on <span className="font-mono">{s.thing_name}</span>
+                          <span className="text-xs text-gray-600"> · {s.status}{s.disconnect_cmd_id && !s.reconnect_cmd_id ? ' · relay may be off' : ''}</span>
+                        </span>
+                        <button
+                          disabled={validationBusy}
+                          onClick={() => runValidationAction(() => getMeterValidation(s.id))}
+                          className="px-3 py-1 rounded-md bg-amber-600 text-white text-xs font-semibold disabled:opacity-40"
+                        >
+                          Resume
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             ) : (
               <>
                 <div className="grid grid-cols-2 gap-2 text-sm">
@@ -1426,6 +1460,14 @@ export default function ProvisioningPage() {
                     Batch validation passed and evidence was recorded. Use session
                     <span className="font-mono"> {validationRun.session.id}</span> for OTA release approval.
                   </div>
+                )}
+                {validationRun.session.status === 'passed' && (
+                  <button
+                    onClick={() => setValidationRun(null)}
+                    className="w-full px-4 py-2 rounded-lg border border-gray-300 text-gray-700 text-sm font-semibold"
+                  >
+                    Validate another meter
+                  </button>
                 )}
               </>
             )}

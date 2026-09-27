@@ -1,3 +1,12 @@
+## Session 2026-09-27 [202609271630] — Batch validation: live ~2 min telemetry, resume open sessions
+- Nils: ~30 min per meter (validation waited for the 15-min accepted reading), and no way back to meter 000023021727's session after moving to the next meter (relay left off).
+- Lambda `meter_ingestion_gate` (prod, **14:20:33Z**, CodeSha256 `96lDaW7D…` → `6x6bW56y…`; rollback = published version **7**): every reading now refreshes `liveTime/liveSeen/liveEnergyActive/liveRelay/liveThing` on `meter_last_seen` (conditional update, forward-only in sample time; also written on accepted Put). Billing (15-min `lastAcceptedTime`, `1meter_data`, CC forward) unchanged. Verified live fields on KOT and MAK meters; forward 404/409 rates match pre-change baseline.
+- `onemeter_validation.py`: `_read_meter_state` prefers newer live fields; `GET /sessions` lists unfinished sessions (optional `thing_name`); observe no longer rewrites `disconnected`/`reconnected` back to `load_seen`.
+- UI (`ProvisioningPage.tsx`, `api.ts`): "Unfinished sessions" list with **Resume**; "Validate another meter" after a pass.
+- Tests: `tests/test_validation_live_state.py` (4); 13 validation tests pass; `tsc -p tsconfig.app.json` clean.
+- `ingestion_gate` repo: change NOT committed — its working copy also holds someone's uncommitted-but-deployed rename code. Needs a commit of both by the owner.
+- Side effects: Lambda code deploy; CC deploy via push.
+
 ## Session 2026-09-27 [202609271500] — BJ relay acks routed to Lesotho CC; KOT validation unblocked
 - Nils (KOT-GW-0004, session `ce1aa5ae-60cb-4bda-9593-03f5672eb9f3`): zero-balance disconnect tripped the relay (meter 000023021727 readings: Relay 1 / 135.6 W at 14:12 SAST, Relay 0 / 0 W from 14:28) but CC showed `relay ?` and kept "Apply synthetic payment" disabled.
 - Root cause: gateway acked at 12:12:51Z; IoT rule `onemeter_relay_ack_rule` → Lambda `meter_ingestion_gate` routed by Thing prefix with default `ONEPDB_BN_SITE_PREFIXES="GBO,SAM"` (no env set). KOT/SIN went to the Lesotho `/api/meters/relay-ack` → 404 (cmd lives in `onepower_bj`).

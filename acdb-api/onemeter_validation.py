@@ -178,6 +178,22 @@ def _read_meter_state(meter_id: str) -> dict[str, Any]:
             status_code=409,
             detail=f"Meter {meter_id} telemetry has no valid last-seen timestamp.",
         )
+    # The ingestion gate keeps one accepted reading per 15 min for billing but
+    # refreshes live* on every ~2 min report; validation wants the newest.
+    live_iso = value("liveSeen")
+    if live_iso and value("liveEnergyActive"):
+        try:
+            live_seen = _parse_meter_timestamp(live_iso, value("liveTime"))
+        except (TypeError, ValueError):
+            live_seen = None
+        if live_seen and live_seen >= last_seen:
+            state.update(
+                thing_name=value("liveThing") or state["thing_name"],
+                energy_kwh=_number(value("liveEnergyActive")),
+                relay=value("liveRelay"),
+                last_seen=live_iso,
+            )
+            last_seen = live_seen
     age_seconds = (datetime.now(timezone.utc) - last_seen).total_seconds()
     if age_seconds < -300 or age_seconds > 30 * 60:
         raise HTTPException(
@@ -346,6 +362,43 @@ def gateway_meters(
     return {"thing_name": thing_name.strip(), "meters": _gateway_meters(thing_name.strip())}
 
 
+@router.get("/sessions")
+def open_sessions(
+    thing_name: Optional[str] = None,
+    _user: CurrentUser = Depends(CC_VALIDATION_GATE),
+):
+    """Unfinished sessions, newest first, so an operator can resume one (e.g. a
+    meter left disconnected after moving on to the next meter)."""
+    thing = (thing_name or "").strip()
+    with _get_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, thing_name, meter_id, site_code, status, batch_reference,
+                   disconnect_cmd_id, reconnect_cmd_id, created_at, updated_at
+              FROM onemeter_validation_sessions
+             WHERE status NOT IN ('passed', 'failed')
+               AND (%s = '' OR thing_name = %s)
+             ORDER BY created_at DESC
+             LIMIT 20
+            """,
+            (thing, thing),
+        )
+        keys = [
+            "id", "thing_name", "meter_id", "site_code", "status", "batch_reference",
+            "disconnect_cmd_id", "reconnect_cmd_id", "created_at", "updated_at",
+        ]
+        rows = []
+        for row in cur.fetchall():
+            data = dict(zip(keys, row))
+            for key in ("id", "disconnect_cmd_id", "reconnect_cmd_id"):
+                data[key] = str(data[key]) if data[key] else None
+            for key in ("created_at", "updated_at"):
+                data[key] = data[key].isoformat() if data[key] else None
+            rows.append(data)
+    return {"sessions": rows}
+
+
 @router.post("/sessions")
 def start_validation(
     body: StartValidation,
@@ -446,7 +499,9 @@ def observe_load(
         increment = max(0.0, telemetry["energy_kwh"] - previous_energy)
         total_delta = max(0.0, telemetry["energy_kwh"] - float(session["baseline_energy_kwh"]))
         balance = max(0.0, float(session["simulated_balance_kwh"]) - increment)
-        status = "load_seen" if total_delta > 0 else session["status"]
+        status = session["status"]
+        if total_delta > 0 and status in ("started", "load_seen"):
+            status = "load_seen"
         disconnect_cmd_id = session.get("disconnect_cmd_id")
 
         if total_delta > 0 and balance <= 0 and not disconnect_cmd_id:
