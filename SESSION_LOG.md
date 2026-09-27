@@ -1,3 +1,8 @@
+## Session 2026-09-27 [202609272220] — Migration 070 last_sample_time for Zambia
+- Benin meter-page 500 (missing `prototype_meter_state.last_sample_time`) was patched live on `onepower_bj` at 14:54Z. `070_prototype_meter_last_sample_time.sql` was written then but never committed, so Zambia stayed unpatched. `onepower_zm` still lacks the column; LS/BN have it; `cc_schema_migrations` has 071 but not 070.
+- Committing 070 so deploy applies `ADD COLUMN IF NOT EXISTS last_sample_time VARCHAR(20)` to every country DB and records the file. No-op on LS/BN.
+- Side effects: production DDL on `onepower_zm` (and a recorded no-op on LS/BN) via the deploy migration step.
+
 ## Session 2026-09-27 [202609272125] — Second meter on a 1Meter gateway blocked commission
 - Nils: GABRIEL APKANON / `0002KOT` created; assign of `000023021758` to KOT-GW-0004 succeeded (18:40Z); commission 409 "No gateway associated with this meter". Screenshot is that gate, not assign.
 - Deployed `_commission_gateway_gate` only looks at `req.gateway_thing_name`, `meter_gateway_link` (empty in BN — assign-ptb 400'd, no pole/survey), then `meter_provisioning` by exact serial. That table holds one serial per Thing (`000023021769` / `0001KOT`). A second RS-485 meter never matches. DynamoDB already had `000023021758` → KOT-GW-0004.
