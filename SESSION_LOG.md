@@ -1,3 +1,11 @@
+## Session 2026-09-27 [202609271500] — BJ relay acks routed to Lesotho CC; KOT validation unblocked
+- Nils (KOT-GW-0004, session `ce1aa5ae-60cb-4bda-9593-03f5672eb9f3`): zero-balance disconnect tripped the relay (meter 000023021727 readings: Relay 1 / 135.6 W at 14:12 SAST, Relay 0 / 0 W from 14:28) but CC showed `relay ?` and kept "Apply synthetic payment" disabled.
+- Root cause: gateway acked at 12:12:51Z; IoT rule `onemeter_relay_ack_rule` → Lambda `meter_ingestion_gate` routed by Thing prefix with default `ONEPDB_BN_SITE_PREFIXES="GBO,SAM"` (no env set). KOT/SIN went to the Lesotho `/api/meters/relay-ack` → 404 (cmd lives in `onepower_bj`).
+- Fix (prod, 12:59:23Z): Lambda env `ONEPDB_BN_SITE_PREFIXES=GBO,SAM,SIN,KOT` (was unset). Also moves KOT/SIN **reading** forwards from `/api/meters/reading` to `/api/bn/meters/reading`.
+- Replayed the lost ack (12:59:37Z) to `/api/bn/meters/relay-ack` with the firmware payload (`status=acked`, `relay_after=0`): `onepower_bj.relay_commands` id 2 `published` → `completed`, relay_after 0. Payment step is now enabled.
+- Side effects: Lambda config change; one production relay_commands row updated via the ack API. `relay_commands` id 1 (2026-09-26 11:42Z open, never executed — 1.1.71 freeze) left `published`.
+- Follow-ups: put SIN,KOT in the `ingestion_gate` code default (its working copy holds uncommitted-but-deployed rename code; not committed here). Check whether LS CC stored KOT/SIN readings before today.
+
 ## Session 2026-09-26 [202609261640] — Batch validation accepts firmware newer than the site release
 - Nils: KOT-GW-0004 (now 1.1.74) was refused: "reports firmware 1.1.74, but the KOT release is 1.1.71". `_require_release_firmware` required exact equality, while relay steps need ≥1.1.74, so validation could not pass anywhere.
 - `onemeter_validation.py`: live firmware must be **≥** the site release (`meter_provisioning._firmware_version_tuple`); unparsable counts as behind. No release config (`ONEMETER_OTA_RELEASES_JSON`) change: KOT release stays 1.1.71 for provisioning OTA.
