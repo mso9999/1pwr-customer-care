@@ -708,6 +708,7 @@ must not write CC or treat UGP `St_code_3` as commissioned.
 | `docs/admin-guide-country-setup.md` | Admin guide & tutorial: business-side country setup (tariffs, fees, thresholds, roles, verification) |
 | `docs/ops/manual-adjustment-sms-discrepancies.md` | Team instructions: manual Koios + 1PDB corrections after SMS misallocations |
 | `docs/ops/bn-sms-1pdb-gap.md` | Benin: CC API is ready; SMSComms-BN PHP must mirror to `/api/bn/sms/incoming` (not in this repo) |
+| `docs/ops/sms-pass-through-and-formats.md` | Gateways as pass-through; payment / balance-request SMS formats editable on CC (`sms_formats.py`, migration 072, page `/admin/sms-formats`); gateway key, trusted senders, replay; cutover checklist |
 | `docs/ops/sms-gateway-cpanel-deploy.md` | **LS vs BN** manual cPanel deploy, archive-before-overwrite, two hosts |
 | `docs/credentials-and-secrets.md` | **Where credentials live** (GitHub secrets, server `.env`, AWS, related repos)—nothing secret in git |
 | `docs/inter-repo-credentials.md` | **Inter-repo credential map** (same doc copied in 1PDB, SMSComms, uGridPlan, om-portal, ingestion_gate, onepwr-aws-mesh, etc.) |

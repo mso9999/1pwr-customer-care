@@ -19,6 +19,7 @@ the existing SparkMeter (primary).  When a 1Meter graduates to production,
 use PATCH .../role to promote it — the old primary is auto-demoted.
 """
 
+import hmac
 import json
 import logging
 import os
@@ -32,7 +33,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import requests as http_requests
-from fastapi import APIRouter, BackgroundTasks, Header, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from country_config import COUNTRY, KOIOS_SITES, UTC_OFFSET_HOURS
@@ -41,6 +42,15 @@ from customer_api import get_connection
 from onemeter_binding import ensure_1meter_binding, telemetry_refusal
 from momo_bj import parse_momo_bn_sms, resolve_bn_momo_account
 from mpesa_sms import mpesa_receipt_in_use, parse_ls_sms_payment, resolve_sms_account
+from sms_formats import (
+    get_settings as get_sms_format_settings,
+    handle_balance_request,
+    match_balance_request,
+    parse_payment,
+    require_sms_format_editor,
+    sender_check,
+)
+from models import CurrentUser
 from sms_payment_receipt import send_electricity_payment_receipt_sms, send_fee_payment_receipt_sms
 from sm_credit_retry import credit_sm_with_retry
 from advances import (
@@ -86,6 +96,10 @@ def _sanitize_sms_timestamp(ts: datetime, now_utc: datetime | None = None) -> da
 SMS_INGEST_PUSH_SPARKMETER = os.environ.get("SMS_INGEST_PUSH_SPARKMETER", "1").lower() in (
     "1", "true", "yes",
 )
+
+# Shared secret the SMS gateways send as X-Gateway-Key on /api/sms/incoming.
+# off: ignore; warn (default): accept but log missing/wrong keys; enforce: reject.
+SMS_INGEST_GATEWAY_KEY_MODE = os.environ.get("SMS_INGEST_GATEWAY_KEY_MODE", "warn").strip().lower()
 SMS_NOTIFY_CM_ON_PAYMENT = os.environ.get("SMS_NOTIFY_CM_ON_PAYMENT", "1").lower() in (
     "1", "true", "yes",
 )
@@ -716,6 +730,11 @@ def _sms_ingest_credit_sm(
 
 
 def _parse_gateway_payment(content: str, sender: str = ""):
+    """Operator-defined SMS formats first, then the built-in parsers."""
+    return parse_payment(content, sender, _builtin_gateway_payment)
+
+
+def _builtin_gateway_payment(content: str, sender: str = ""):
     """M-Pesa + EcoCash (LS) or MTN MoMo (BN) depending on COUNTRY_CODE."""
     if COUNTRY.code == "BN":
         return parse_momo_bn_sms(content)
@@ -757,10 +776,38 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
     ``SMS_INGEST_PUSH_SPARKMETER=0``) background ``credit_sparkmeter`` — no direct Koios/PHP-only path.
     ``/api/bn/sms/incoming`` is an alias for operators routing ``smsbn.1pwrafrica.com`` behind ``/api/bn``.
     """
+    _check_gateway_key(request)
     raw_body = await request.body()
     return _sms_incoming_process_raw(
         raw_body, background_tasks, contract_fee_gateway=False,
     )
+
+
+def _reply_balance_request(match: dict, sender: str, msg_id: str) -> None:
+    try:
+        outcome = handle_balance_request(match, sender)
+    except Exception as exc:
+        logger.exception("SMS balance request from %s (id=%s) failed", sender, msg_id)
+        outcome = f"balance_failed: {exc}"[:200]
+    logger.info("SMS balance request from %s (id=%s): %s", sender, msg_id, outcome)
+
+
+def _check_gateway_key(request: Request) -> None:
+    """Authenticate the forwarding gateway (see ``SMS_INGEST_GATEWAY_KEY_MODE``)."""
+    if SMS_INGEST_GATEWAY_KEY_MODE == "off":
+        return
+    expected = os.environ.get("SMS_GATEWAY_KEY", "")
+    given = request.headers.get("X-Gateway-Key", "")
+    ok = bool(expected) and bool(given) and hmac.compare_digest(given, expected)
+    if ok:
+        return
+    host = request.headers.get("X-SMS-Gateway-Host", "") or (request.client.host if request.client else "")
+    if SMS_INGEST_GATEWAY_KEY_MODE == "enforce" and expected:
+        logger.warning("SMS incoming rejected: %s X-Gateway-Key from %s",
+                       "wrong" if given else "missing", host)
+        raise HTTPException(status_code=401, detail="Invalid gateway key")
+    logger.warning("SMS incoming accepted without a valid X-Gateway-Key (%s, from %s)",
+                   "wrong key" if given else "no key", host)
 
 
 @router.post("/api/sms/incoming-contract-fees")
@@ -774,6 +821,7 @@ async def sms_incoming_contract_fees(
     fee-debt allocator (50%% cap) then advance repayment on the remainder, then any leftover
     cash against remaining fee debt — never electricity or SparkMeter credit.
     """
+    _check_gateway_key(request)
     raw_body = await request.body()
     return _sms_incoming_process_raw(
         raw_body, background_tasks, contract_fee_gateway=True,
@@ -814,20 +862,31 @@ def _sms_incoming_process_raw(
 
         parsed = _parse_gateway_payment(content, sender)
         if not parsed:
+            balance_hit = None if contract_fee_gateway else match_balance_request(content, sender)
+            outcome = "unparsed"
+            if balance_hit:
+                outcome = "balance_request"
+                try:
+                    with get_connection() as cfg_conn:
+                        replies_on = get_sms_format_settings(cfg_conn)["balance_replies_enabled"]
+                except Exception:
+                    replies_on = False
+                if replies_on:
+                    background_tasks.add_task(_reply_balance_request, balance_hit, sender, msg_id)
+                else:
+                    outcome = "balance_request_ignored"
             try:
                 with get_connection() as log_conn:
-                    _log_sms_inbound(
+                    log_id = _log_sms_inbound(
                         log_conn, gateway_msg_id=msg_id, sender=sender, content=content,
                         parsed=None, account=None, amount=None, receipt_key=None,
                     )
-                    cur_up = log_conn.cursor()
-                    cur_up.execute(
-                        "UPDATE sms_inbound_log SET outcome='unparsed' WHERE gateway_msg_id=%s",
-                        (msg_id,),
-                    )
+                    _update_sms_inbound(log_conn, log_id, outcome)
                     log_conn.commit()
             except Exception:
                 pass
+            if balance_hit:
+                continue
             if COUNTRY.code == "LS":
                 logger.warning(
                     "SMS ingest: unparsed Lesotho message (no M-Pesa/EcoCash match) "
@@ -852,6 +911,21 @@ def _sms_incoming_process_raw(
                     receipt_key=receipt_key,
                 )
                 conn.commit()
+
+                trust = sender_check(conn, sender, parsed)
+                if trust == "reject":
+                    _update_sms_inbound(conn, sms_log_id, "untrusted_sender")
+                    conn.commit()
+                    logger.warning(
+                        "SMS payment from untrusted sender %r rejected (ref %s, %s %s)",
+                        sender, receipt_key, amount, COUNTRY.currency,
+                    )
+                    continue
+                if trust == "warn":
+                    logger.warning(
+                        "SMS payment from sender %r not in the trusted list (ref %s) — accepted",
+                        sender, receipt_key,
+                    )
 
                 if receipt_key and mpesa_receipt_in_use(conn, receipt_key):
                     _update_sms_inbound(conn, sms_log_id, "duplicate")
@@ -1489,6 +1563,7 @@ def get_sms_inbound_log(
     account: str | None = Query(None),
     outcome: str | None = Query(None),
     limit: int = Query(50, ge=1, le=500),
+    user: CurrentUser = Depends(require_sms_format_editor),
 ):
     """Query the SMS inbound audit log. Returns full SMS content for replay/investigation."""
     with get_connection() as conn:
@@ -1523,7 +1598,7 @@ def get_sms_inbound_log(
 
 
 @router.post("/api/sms/reconcile")
-def reconcile_sms(body: dict):
+def reconcile_sms(body: dict, user: CurrentUser = Depends(require_sms_format_editor)):
     """Compare a list of gateway receipt_keys against CC records.
 
     POST body: ``{"receipt_keys": ["07XEP756ESYR", ...]}``

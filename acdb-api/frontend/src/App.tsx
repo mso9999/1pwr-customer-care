@@ -49,6 +49,7 @@ import LpgPage from './pages/LpgPage';
 import LpgSitePage from './pages/LpgSitePage';
 import CommissionSitePage from './pages/CommissionSitePage';
 import SMSLogPage from './pages/SMSLogPage';
+import SmsFormatsPage from './pages/SmsFormatsPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import InvestorAnalyticsPage from './pages/InvestorAnalyticsPage';
 import CustomerCohortPage from './pages/CustomerCohortPage';
@@ -128,6 +129,7 @@ export default function App() {
             <Route path="admin/programs" element={<ProtectedRoute requireEmployee requireAction="administer_cc" requiredLevel="A"><ProgramsPage /></ProtectedRoute>} />
             <Route path="admin/coverage" element={<ProtectedRoute requireEmployee requireAction="administer_cc" requiredLevel="A"><CoverageAuditPage /></ProtectedRoute>} />
             <Route path="admin/sms-log" element={<ProtectedRoute requireEmployee requireAction="administer_cc" requiredLevel="A"><SMSLogPage /></ProtectedRoute>} />
+            <Route path="admin/sms-formats" element={<ProtectedRoute requireEmployee><SmsFormatsPage /></ProtectedRoute>} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

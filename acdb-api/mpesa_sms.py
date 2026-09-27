@@ -115,6 +115,15 @@ def candidate_accounts_from_text(text: str) -> list[str]:
     return out
 
 
+def account_hint_candidates(parsed: dict[str, Any], tokenize=None) -> list[str]:
+    """Candidates from ``account_hint`` (set by operator-defined SMS formats), tried first."""
+    hint = " ".join(str(parsed.get("account_hint") or "").split())
+    if not hint:
+        return []
+    found = (tokenize or candidate_accounts_from_text)(hint)
+    return found or [hint.replace(" ", "").upper()]
+
+
 def parse_mpesa_sms(content: str) -> Optional[dict[str, Any]]:
     """Parse M-Pesa confirmation SMS. Returns dict with txn_id, amount, phone, reference, remark_raw."""
     m = MPESA_PATTERN.search(content)
@@ -343,8 +352,8 @@ def resolve_sms_account(
     """
     remark = (parsed.get("remark_raw") or "").strip() or extract_remark_text(content)
 
-    # 1) Candidates from Remark line only
-    candidates: list[str] = []
+    # 1) Candidates from the format's account group, then the Remark line
+    candidates: list[str] = account_hint_candidates(parsed)
     if remark:
         candidates.extend(candidate_accounts_from_text(remark))
 

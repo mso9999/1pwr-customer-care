@@ -5278,3 +5278,184 @@ export interface MakConnectivityResponse {
 export async function getMakConnectivity(): Promise<MakConnectivityResponse> {
   return request('/mak-connectivity');
 }
+
+// ---------------------------------------------------------------------------
+// SMS formats (payment confirmations + balance requests), /api/admin/sms-formats
+// ---------------------------------------------------------------------------
+
+export type SmsFormatKind = 'payment' | 'balance_request';
+
+export interface SmsFormatSample {
+  text: string;
+  sender?: string;
+  expect_amount?: number | null;
+  expect_account?: string | null;
+  expect_txn_id?: string | null;
+}
+
+export interface SmsFormatInput {
+  kind: SmsFormatKind;
+  provider: string;
+  name: string;
+  pattern_type: 'template' | 'regex';
+  pattern: string;
+  sender_pattern?: string | null;
+  decimal_separator?: '.' | ',' | null;
+  phone_prefix?: string | null;
+  priority: number;
+  enabled: boolean;
+  samples: SmsFormatSample[];
+  notes?: string | null;
+}
+
+export interface SmsParsed {
+  kind?: string;
+  amount?: number;
+  txn_id?: string;
+  phone?: string;
+  account_hint?: string;
+  remark_raw?: string;
+  provider?: string;
+  format_name?: string;
+  format_id?: number | null;
+}
+
+export interface SmsSampleResult {
+  text: string;
+  result: SmsParsed | null;
+  ok: boolean;
+  problems: string[];
+}
+
+export interface SmsFormat extends SmsFormatInput {
+  id: number;
+  country_code: string;
+  created_by?: string;
+  created_at?: string;
+  updated_by?: string;
+  updated_at?: string;
+  sample_results?: SmsSampleResult[];
+  compile_error?: string | null;
+}
+
+export interface SmsFormatSettings {
+  trusted_senders: string[];
+  trusted_senders_mode: 'off' | 'warn' | 'enforce';
+  balance_replies_enabled: boolean;
+  balance_reply_template: string;
+  balance_unregistered_template: string;
+}
+
+export interface SmsFormatsResponse {
+  country_code: string;
+  currency: string;
+  dial_code: string;
+  default_decimal_separator: '.' | ',';
+  formats: SmsFormat[];
+  builtins: Array<{ provider: string; name: string; example: string }>;
+  settings: SmsFormatSettings;
+}
+
+export interface SmsSummary {
+  kind: 'payment' | 'balance_request' | 'unparsed';
+  amount?: number | null;
+  account_hint?: string;
+  txn_id?: string;
+  provider?: string;
+  format_name?: string;
+}
+
+export interface SmsFormatTestResult {
+  draft_result: SmsParsed | null;
+  draft_matched: boolean;
+  pipeline: { kind: string; parsed: SmsParsed | null };
+  resolution: { account: string | null; allocation: string; reason: string } | null;
+  sender_trusted: boolean;
+  sender_mode: string;
+  compiled_regex: string | null;
+}
+
+export interface SmsFormatPreview {
+  days: number;
+  counts: { total: number; unchanged: number; newly_parsed: number; no_longer_parsed: number; changed: number };
+  examples: Array<{
+    log_id: number;
+    received_at: string | null;
+    sender: string;
+    content: string;
+    outcome: string | null;
+    change: string;
+    before: SmsSummary;
+    after: SmsSummary;
+  }>;
+}
+
+export interface SmsUnprocessedRow {
+  log_id: number;
+  received_at: string | null;
+  sender: string;
+  content: string;
+  outcome: string;
+  now: SmsSummary;
+  account: string | null;
+  already_credited: boolean;
+  possible_manual_duplicate: {
+    id: number;
+    transaction_date: string | null;
+    transaction_amount: number | null;
+    source: string | null;
+    payment_reference: string | null;
+  } | null;
+}
+
+export interface SmsObservedSender {
+  sender: string;
+  total: number;
+  parsed: number;
+  last_seen: string | null;
+  trusted: boolean;
+}
+
+type SmsDraft = SmsFormatInput & { id?: number | null };
+
+export async function getSmsFormats(): Promise<SmsFormatsResponse> {
+  return request('/admin/sms-formats');
+}
+
+export async function createSmsFormat(body: SmsFormatInput): Promise<SmsFormat> {
+  return request('/admin/sms-formats', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export async function updateSmsFormat(id: number, body: SmsFormatInput): Promise<SmsFormat> {
+  return request(`/admin/sms-formats/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+}
+
+export async function deleteSmsFormat(id: number): Promise<{ ok: boolean }> {
+  return request(`/admin/sms-formats/${id}`, { method: 'DELETE' });
+}
+
+export async function testSmsFormat(body: { draft?: SmsDraft | null; text: string; sender: string }): Promise<SmsFormatTestResult> {
+  return request('/admin/sms-formats/test', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export async function previewSmsFormat(body: { draft?: SmsDraft | null; delete_id?: number; days?: number }): Promise<SmsFormatPreview> {
+  return request('/admin/sms-formats/preview', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export async function updateSmsFormatSettings(body: Partial<SmsFormatSettings>): Promise<SmsFormatSettings> {
+  return request('/admin/sms-formats/settings', { method: 'PUT', body: JSON.stringify(body) });
+}
+
+export async function getSmsObservedSenders(days = 30): Promise<{ days: number; senders: SmsObservedSender[] }> {
+  return request(`/admin/sms-formats/senders?days=${days}`);
+}
+
+export async function getSmsUnprocessed(days = 30): Promise<{ days: number; rows: SmsUnprocessedRow[] }> {
+  return request(`/admin/sms-formats/unprocessed?days=${days}`);
+}
+
+export async function replaySmsUnprocessed(body: { log_ids: number[]; allow_possible_duplicates: boolean }): Promise<{
+  results: Array<{ log_id: number; status: string; reason?: string; outcome?: string | null; transaction_id?: number | null }>;
+}> {
+  return request('/admin/sms-formats/replay', { method: 'POST', body: JSON.stringify(body) });
+}

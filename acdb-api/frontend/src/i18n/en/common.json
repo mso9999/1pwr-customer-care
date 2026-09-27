@@ -97,6 +97,7 @@
     "programs": "Programs",
     "coverage": "Coverage Audit",
     "smsLog": "SMS Log",
+    "smsFormats": "SMS Formats",
     "analytics": "Analytics Explorer",
     "investorAnalytics": "Investor Analytics",
     "customerCohort": "Customer Cohort",

@@ -11,7 +11,7 @@ from typing import Any, Optional, Tuple
 
 from mpesa_sms import (
     account_exists,
-    candidate_accounts_from_text,
+    account_hint_candidates,
     extract_remark_text,
 )
 
@@ -21,13 +21,17 @@ ACCOUNT_TOKEN_RE = re.compile(
     re.IGNORECASE,
 )
 
-# --- Amount: FCFA / XOF / CFA (strip spaces used as thousands separators) ---
+# --- Amount: FCFA / XOF / CFA / bare F (merchant template "Paiement 10F de ...") ---
+_NUM = r"(\d{1,3}(?:[ \u00a0.,]\d{3})+(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?)"
 _AMT1 = re.compile(
-    r"(?:reçu|recu|received|Montant|montant|Amount)\s*[:]?\s*([\d\s.,]+)\s*(?:FCFA|XOF|CFA)\b",
+    rf"(?:Paiement|Payment|reçu|recu|received|Montant|Amount)\s*(?:de\s+)?[:]?\s*{_NUM}\s*(?:FCFA|XOF|CFA|F)\b",
     re.IGNORECASE,
 )
-_AMT2 = re.compile(
-    r"\b([\d\s.,]+)\s*(?:FCFA|XOF|CFA)\b",
+# Bare "F" only right after a payment keyword (above); elsewhere require the currency.
+_AMT2 = re.compile(rf"\b{_NUM}\s*(?:FCFA|XOF|CFA)\b", re.IGNORECASE)
+# Account balance / fees on the same SMS must never be read as the paid amount.
+_NOT_AMOUNT_BEFORE = re.compile(
+    r"(?:Solde|Balance|Nouveau\s+solde|Frais|Fee|Fees)\s*[:=]?\s*$",
     re.IGNORECASE,
 )
 
@@ -50,15 +54,23 @@ _TXN_PATTERNS = (
 _REMARK_PATTERNS = [
     re.compile(r"Motif\s*[:]?\s*(.+?)(?:\n|$)", re.IGNORECASE | re.DOTALL),
     re.compile(r"Libellé\s*[:]?\s*(.+?)(?:\n|$)", re.IGNORECASE | re.DOTALL),
-    re.compile(r"Message\s*[:]?\s*(.+?)(?:\n|$)", re.IGNORECASE | re.DOTALL),
+    re.compile(
+        r"Message\s*[:]?\s*(.+?)(?=\s+(?:Solde|ID|Frais|Fee)\s*:|\n|$)",
+        re.IGNORECASE | re.DOTALL,
+    ),
     re.compile(r"Remark\s*[:]?\s*(.+?)(?:\n|$)", re.IGNORECASE | re.DOTALL),
 ]
 
 
 def _parse_amount(raw: str) -> Optional[float]:
-    s = raw.replace(" ", "").replace(",", ".").strip()
+    s = (raw or "").strip().replace("\u00a0", " ")
     if not s:
         return None
+    # "10 000", "10.000", "10,000" are thousands groupings in XOF, not decimals.
+    if re.fullmatch(r"\d{1,3}(?:[ .,]\d{3})+", s):
+        s = re.sub(r"[ .,]", "", s)
+    else:
+        s = s.replace(" ", "").replace(",", ".")
     try:
         return float(s)
     except ValueError:
@@ -94,7 +106,8 @@ def _extract_phone(content: str) -> str:
     compact = re.sub(r"\s+", "", content)
     m = _PHONE.search(content)
     if m:
-        return "229" + m.group(1).lstrip("0")
+        # Keep the leading 0: since 2024 Benin numbers are 10 digits (01XXXXXXXX).
+        return "229" + m.group(1)
     m2 = _PHONE_INLINE.search(compact)
     if m2:
         return m2.group(1)
@@ -120,8 +133,9 @@ def _extract_amount(content: str) -> Optional[float]:
         a = _parse_amount(m.group(1))
         if a is not None:
             return a
-    m = _AMT2.search(content)
-    if m:
+    for m in _AMT2.finditer(content):
+        if _NOT_AMOUNT_BEFORE.search(content[max(0, m.start() - 20):m.start()]):
+            continue
         return _parse_amount(m.group(1))
     return None
 
@@ -173,11 +187,17 @@ def parse_momo_bn_sms(content: str) -> Optional[dict[str, Any]]:
 
 
 def phone_to_account_bn(conn, phone_digits: str) -> Optional[str]:
-    """Look up account by customer phone; normalize Benin 229 MSISDN."""
+    """Look up account by customer phone; normalize Benin 229 MSISDN.
+
+    Matches on the last 8 digits so both the pre-2024 8-digit form and the
+    new 10-digit ``01XXXXXXXX`` form stored on customer records resolve.
+    """
     normalized = "".join(c for c in phone_digits if c.isdigit())
     if normalized.startswith("229"):
         normalized = normalized[3:]
-    normalized = normalized.lstrip("0")
+    normalized = normalized[-8:]
+    if len(normalized) < 8:
+        return None
 
     cur = conn.cursor()
     cur.execute(
@@ -207,7 +227,7 @@ def resolve_bn_momo_account(
     """
     remark = (parsed.get("remark_raw") or "").strip() or extract_remark_bn(content)
 
-    candidates: list[str] = []
+    candidates: list[str] = account_hint_candidates(parsed, candidate_accounts_bn)
     if remark:
         candidates.extend(candidate_accounts_bn(remark))
     if not candidates:
