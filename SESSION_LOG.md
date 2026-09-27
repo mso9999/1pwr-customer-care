@@ -1,3 +1,12 @@
+## Session 2026-09-27 [202609271810] — Commissioning did not open the 1Meter billing gate; credit entered via ledger editor
+- Nils: credit added to `0001KOT`, meter records consumption, account shows none.
+- Cause 1: `/api/meters/reading` (ingest.py) requires the gateway's `meter_provisioning` row to name the account and be `commissioned`, else 409. Nothing in the commission flow sets that; only the one-off migration 059 ever did. `KOT-GW-0004` / `000023021769` was `online` with no account, so every reading 409'd. Benin has no DynamoDB→PG `prototype_sync` (LS does), so BN had zero consumption.
+- Live fix (prod, `onepower_bj`, 16:05:08 UTC): `meter_provisioning` id 8 → `account_number=0001KOT`, `status=commissioned` (was `online`, NULL).
+- Code: `commission.py` `_commission_1meter_binding` promotes the account's 1Meter binding on commission (059 rules, gateway-scoped if chosen, skips duplicate serials and `rotating`). Response gains `telemetry_bound`. Rollback-tested on LS/BN.
+- Cause 2: the 100 XOF at 15:03 (transactions id 144349, by 1PWR0512) was typed into the Customer Data page ledger form (`POST /api/tables/transactions`): raw row, `kwh_value=0`, no meter, no balance/relay logic. Real payments go through Record Payment (`/api/payments/record`). Row left in place.
+- LS: 38 MAK 1Meters assigned to accounts are not `commissioned` in `meter_provisioning`, so their CC posts 409 too. No consumption loss (LS `prototype_sync.py` reads DynamoDB directly), but relay commands also gate on `commissioned`. Not changed; needs a decision.
+- Side effects: one production row update in `onepower_bj`; CC deploy via push.
+
 ## Session 2026-09-27 [202609271515] — Financing schema for Benin and Zambia
 - BN customer page (`GET /api/financing/customer/0001KOT`) 500'd: `financing_agreements` does not exist. Only `onepower_cc` had the financing tables (created ad hoc, never in a migration). LS has 0 products and 0 agreements.
 - `migrations/071_financing_schema.sql`: `financing_products`, `financing_agreements`, `financing_ledger` matching the LS definitions (columns, checks, FKs, indexes), plus explicit `cc_api` grants on tables and sequences. `IF NOT EXISTS` throughout, so a no-op on LS.

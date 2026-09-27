@@ -83,3 +83,5 @@ def test_commission_updates_by_primary_key_when_legacy_id_missing():
     updates = [(s, p) for s, p in log if s.lstrip().startswith("UPDATE customers")]
     assert updates and "WHERE id = %s" in updates[0][0] and updates[0][1][-1] == 42
     assert result["status"] == "ok"
+    bindings = [p for s, p in log if s.lstrip().startswith("UPDATE meter_provisioning")]
+    assert bindings and bindings[0][0] == "0001KOT"
