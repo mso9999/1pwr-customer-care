@@ -64,8 +64,8 @@ export const TUTORIAL_WORKFLOWS: TutorialWorkflowDef[] = [
     id: 'payments',
     i18nKey: 'workflows.payments',
     rolesKey: 'roles.financeAll',
-    links: ['/record-payment', '/payment-verification', '/transactions', '/customer-data', '/sms-inbox', '/customer-data', '/billing-priority'],
-    helpSectionIds: ['payments', 'payments', 'data-browsers', 'customers', 'payments', 'customers', 'meters'],
+    links: ['/record-payment', '/payment-verification', '/transactions', '/customer-data', '/sms-inbox', '/customer-data', '/billing-priority', '/billing-priority'],
+    helpSectionIds: ['payments', 'payments', 'data-browsers', 'customers', 'payments', 'customers', 'meters', 'meters'],
   },
   {
     id: 'advances',

@@ -671,6 +671,9 @@ export interface CustomerDashboard {
   balance_currency?: number;
   energy_debt_kwh?: number;
   energy_debt_currency?: number;
+  electricity_billing_held?: boolean;
+  held_electricity_currency?: number;
+  free_supply_kwh?: number;
   currency_code?: string;
   last_payment: DashboardPayment | null;
   avg_kwh_per_day: number;
@@ -3414,6 +3417,61 @@ export async function setRelayAutoTrigger(enabled: boolean): Promise<RelayAutoTr
   return request('/relay-auto-trigger', {
     method: 'PUT',
     body: JSON.stringify({ enabled }),
+  });
+}
+
+export interface SiteBillingMeter {
+  meter_id: string;
+  account_number: string;
+  started_at: string | null;
+}
+
+export interface SiteBillingHoldSite {
+  code: string;
+  name: string;
+  held: boolean;
+  started_at: string | null;
+  reason: string | null;
+  billing_meters: SiteBillingMeter[];
+}
+
+export interface SiteBillingHolds {
+  country: string;
+  can_edit: boolean;
+  sites: SiteBillingHoldSite[];
+}
+
+export async function getSiteBillingHolds(): Promise<SiteBillingHolds> {
+  return request('/site-billing-holds');
+}
+
+export async function startSiteBillingHold(siteCode: string, confirmation: string, reason: string) {
+  return request(`/site-billing-holds/${encodeURIComponent(siteCode)}/hold`, {
+    method: 'POST',
+    body: JSON.stringify({ confirmation, reason }),
+  });
+}
+
+export async function clearSiteBillingHold(siteCode: string, confirmation: string, reason: string): Promise<{
+  status: string;
+  released_payments: number;
+  released_kwh: number;
+}> {
+  return request(`/site-billing-holds/${encodeURIComponent(siteCode)}/bill`, {
+    method: 'POST',
+    body: JSON.stringify({ confirmation, reason }),
+  });
+}
+
+export async function setMeterElectricityBilling(
+  meterId: string,
+  mode: 'bill' | 'inherit',
+  confirmation: string,
+  reason: string,
+) {
+  return request(`/site-billing-holds/meters/${encodeURIComponent(meterId)}`, {
+    method: 'POST',
+    body: JSON.stringify({ mode, confirmation, reason }),
   });
 }
 

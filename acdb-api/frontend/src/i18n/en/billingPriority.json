@@ -17,5 +17,27 @@
     "noop": "Already set that way. Nothing was recorded.",
     "failed": "Could not save: {{message}}",
     "loading": "Loading…"
+  },
+  "siteHold": {
+    "title": "Electricity billing hold",
+    "intro": "Hold a site until the regulator allows electricity sales. Meters stay on and keep reporting. That use is free. Connection and readyboard fees still collect. Money sent for electricity is saved and becomes units when you clear the site, at the tariff from the day it was paid. To test billing on one meter while the site is still held, set that meter to Bill.",
+    "stateHeld": "Free supply since {{date}}",
+    "stateBilling": "Billing",
+    "metersBilling": "Billing anyway: {{meters}}",
+    "holdSite": "Hold site (type {{phrase}})",
+    "billSite": "Start billing (type {{phrase}})",
+    "held": "{{code}} is on free supply. The relay is held closed unless a safety override is on.",
+    "billed": "{{code}} is billing. {{count}} saved payments became {{kwh}} kWh.",
+    "failed": "Could not save: {{message}}",
+    "meterIntro": "One meter can bill while its site is still held. Hours before this switch stay free. Type BILL and the meter id, or FOLLOW and the meter id to use the site rule again.",
+    "meterPlaceholder": "Meter id",
+    "modeBill": "Bill this meter",
+    "modeFollow": "Follow the site",
+    "saveMeter": "Save meter",
+    "meterBilled": "{{meter}} bills even while its site is held.",
+    "meterFollows": "{{meter}} follows the site again.",
+    "reason": "Reason",
+    "confirm": "Confirmation",
+    "readOnly": "You can see this. Only a superadmin, or O&M for this country, can change it."
   }
 }

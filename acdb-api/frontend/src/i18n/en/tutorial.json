@@ -80,7 +80,8 @@
         "Drill into Customer Data for a specific account’s history, balance context, and any Active Advances panel.",
         "Open the SMS inbox only after the sidebar is on one country. It lists inbound texts. It does not credit a customer.",
         "A ledger correction on Customer Data is for superadmin and O&M only. It writes a raw row and does not change the balance. Use Record Payment for a real payment.",
-        "On Billing Priority, with one country selected, turn automatic power cutoff on or off. At zero credit a 1Meter-primary account loses power; a payment that restores credit turns it back on. Superadmin can save any country. O&M and finance can save only their own. The mutation log records who changed it and when. All countries cannot save."
+        "On Billing Priority, with one country selected, turn automatic power cutoff on or off. At zero credit a 1Meter-primary account loses power; a payment that restores credit turns it back on. Superadmin can save any country. O&M and finance can save only their own. The mutation log records who changed it and when. All countries cannot save.",
+        "Before a regulator inspection, hold the site on Billing Priority. Meters stay powered and the use is free. Connection and readyboard fees still collect. Electricity payments are saved and become kWh, at the tariff from the day they were paid, when you type BILL and the site code. To test billing on one meter during the hold, type BILL and that meter id. Hours before that switch stay free."
       ]
     },
     "advances": {
@@ -189,7 +190,7 @@
   },
   "quiz": {
     "title": "Knowledge check",
-    "intro": "Seven questions on payments, the SMS inbox, the WhatsApp bridge, automatic power cutoff, and resetting a test account. Open an answer when you are ready.",
+    "intro": "Eight questions on payments, the SMS inbox, the WhatsApp bridge, automatic power cutoff, resetting a test account, and free supply before inspection. Open an answer when you are ready.",
     "show": "Show answer",
     "hide": "Hide answer",
     "items": [
@@ -220,6 +221,10 @@
       {
         "q": "An issued account was used to test the meter. How do you clear the test payments and still keep that account number?",
         "a": "On the customer page, Reset setup data. Do not decommission. Save the real country fees first, because the reset stamps those amounts. Readyboard debt is stamped only if the customer takes a 1PWR readyboard. Type RESET and the account number. Superadmin, or O&M for their own country. Undo it from Mutations. Refused after 21 days, after 40 payments, or if an advance, financing agreement, or unmetered service is active."
+      },
+      {
+        "q": "A site is waiting on the regulator, but one meter should be billed so the tariff and relay can be tested. What do you do?",
+        "a": "On Billing Priority, hold the site with HOLD and the site code. Then set that meter to Bill and type BILL plus the meter id. The rest of the site stays on free supply. Hours before the meter switch stay free. Clearing the site with BILL and the site code turns saved electricity payments into kWh at the tariff from the day they were paid."
       }
     ]
   }

@@ -785,6 +785,10 @@ def maybe_auto_open_relay(conn, account_number: str, *, reason: str = "zero_bala
         if not relay_auto_trigger_enabled(conn):
             return None
 
+        from site_billing_hold import account_effectively_held
+        if account_effectively_held(conn, account_number):
+            return None
+
         from balance_engine import _resolve_billing_priority, get_balance_kwh
 
         cur = conn.cursor()
@@ -984,6 +988,93 @@ def maybe_auto_close_relay(
         return cmd_id
     except Exception as exc:  # noqa: BLE001
         logger.error("maybe_auto_close_relay failed for %s: %s", account_number, exc)
+        return None
+
+
+def maybe_hold_close_relay(
+    conn,
+    account_number: str,
+    *,
+    reason: str = "site_billing_hold",
+) -> Optional[str]:
+    """Close the relay while a site hold is supplying free power.
+
+    Skipped when this account has a meter set to real billing, and when a
+    safety override has cut power. Does not require the cutoff switch.
+    """
+    try:
+        from site_billing_hold import account_effectively_held
+        if not account_effectively_held(conn, account_number):
+            return None
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT meter_id, safety_override FROM meters
+             WHERE account_number = %s AND platform = 'prototype' AND status = 'active'
+             ORDER BY CASE WHEN role = 'primary' THEN 0 ELSE 1 END
+             LIMIT 1
+            """,
+            (account_number,),
+        )
+        row = cur.fetchone()
+        if not row or row[1] == "off":
+            return None
+        meter_id = str(row[0])
+        thing_name = _thing_for_meter(cur, meter_id, account_number)
+        if not thing_name or not _device_online(cur, meter_id):
+            return None
+        if relay_firmware_block(thing_name, meter_id):
+            return None
+        recent = _recent_command_for_thing(cur, thing_name, DEBOUNCE_WINDOW_SECONDS)
+        if recent and recent.get("action") == "close" and recent.get("status") in (
+            "queued", "published", "acked",
+        ):
+            return None
+        cmd_id = str(uuid.uuid4())
+        request_payload = {
+            "cmd_id": cmd_id,
+            "thing_name": thing_name,
+            "meter_id": meter_id,
+            "account_number": account_number,
+            "action": "close",
+            "reason": reason,
+            "ttl_seconds": DEFAULT_TTL_SECONDS,
+            "force": False,
+            "note": "site electricity hold keeps power on",
+        }
+        cur.execute(
+            """
+            INSERT INTO relay_commands
+                (cmd_id, thing_name, meter_id, account_number,
+                 command, platform, action, reason, requested_by,
+                 ttl_seconds, status, payload)
+            VALUES (%s::uuid, %s, %s, %s,
+                    'connect', 'prototype', 'close', %s, %s,
+                    %s, 'queued', %s::jsonb)
+            """,
+            (
+                cmd_id, thing_name, meter_id, account_number, reason,
+                f"auto:{reason}", DEFAULT_TTL_SECONDS, json.dumps(request_payload),
+            ),
+        )
+        now_auto = _now_utc()
+        if _iot_publish(thing_name, {
+            "cmd_id": cmd_id,
+            "meter_id": meter_id,
+            "action": "close",
+            "reason": reason,
+            "requested_at": now_auto.isoformat(),
+            "requested_at_unix": int(now_auto.timestamp()),
+            "ttl_seconds": DEFAULT_TTL_SECONDS,
+        }):
+            cur.execute(
+                "UPDATE relay_commands SET status = 'published', published_at = NOW() "
+                "WHERE cmd_id = %s::uuid",
+                (cmd_id,),
+            )
+        return cmd_id
+    except Exception as exc:  # noqa: BLE001
+        logger.error("maybe_hold_close_relay failed for %s: %s", account_number, exc)
         return None
 
 

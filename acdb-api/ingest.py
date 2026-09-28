@@ -479,6 +479,11 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
                         account,
                         exc,
                     )
+            try:
+                from relay_control import maybe_hold_close_relay
+                maybe_hold_close_relay(conn, account)
+            except Exception as exc:  # noqa: BLE001 - never drop telemetry
+                logger.warning("site hold relay close failed for %s: %s", account, exc)
 
             conn.commit()
 
@@ -1367,7 +1372,10 @@ def _sms_incoming_process_raw(
                     electricity_portion = pack["electricity_portion"]
                     fee_rep = pack["fee_repayment_portion"]
                     service_fee_portion = pack["service_fee_portion"]
-                    kwh = round(electricity_portion / rate, 4) if rate > 0 else 0.0
+                    from site_billing_hold import decide_vend
+                    kwh, held_amount, pay_category = decide_vend(
+                        conn, account, electricity_portion, rate,
+                    )
 
                     # ``current_balance`` is a per-row kWh snapshot (matches
                     # ``balance_engine.record_payment_kwh``). It is denormalised --
@@ -1386,10 +1394,11 @@ def _sms_incoming_process_raw(
                                  is_payment, current_balance, source,
                                  payment_reference, sms_payer_phone, sms_remark_raw, sms_allocation,
                                  payment_category, advance_portion, electricity_portion, advance_id,
-                                 fee_repayment_portion, service_fee_portion, unmetered_service_id)
+                                 fee_repayment_portion, service_fee_portion, unmetered_service_id,
+                                 held_electricity_amount)
                             VALUES (%s, '', %s, %s, %s, %s, true, %s, 'sms_gateway',
                                     %s, %s, %s, %s,
-                                    'electricity', %s, %s, %s, %s, %s, %s)
+                                    %s, %s, %s, %s, %s, %s, %s, %s)
                             RETURNING id
                         """, (
                             account, ts, amount, rate, kwh, new_balance,
@@ -1397,8 +1406,10 @@ def _sms_incoming_process_raw(
                             payer_phone,
                             remark_stored or None,
                             allocation,
+                            pay_category,
                             advance_portion, electricity_portion, pack["advance_id"],
                             fee_rep, service_fee_portion, pack["unmetered_service_id"],
+                            held_amount,
                         ))
                     except psycopg2.IntegrityError:
                         conn.rollback()
@@ -1412,6 +1423,7 @@ def _sms_incoming_process_raw(
                             or "advance_id" in err or "electricity_portion" in err
                             or "fee_repayment_portion" in err
                             or "service_fee_portion" in err or "unmetered_service_id" in err
+                            or "held_electricity_amount" in err
                         ) and "does not exist" in err:
                             # Migration 019 not yet applied — fall back to legacy
                             # SMS-meta INSERT (still the SMS-aware one, just
@@ -1544,7 +1556,7 @@ def _sms_incoming_process_raw(
                             (parsed.get("provider") or "mpesa"),
                         )
 
-                    if SMS_INGEST_PUSH_SPARKMETER and electricity_portion > 0:
+                    if SMS_INGEST_PUSH_SPARKMETER and electricity_portion > 0 and pay_category != "electricity_held":
                         background_tasks.add_task(
                             _sms_ingest_credit_sm,
                             account,

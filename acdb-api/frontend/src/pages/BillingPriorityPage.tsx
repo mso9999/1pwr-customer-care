@@ -6,13 +6,18 @@ import {
   getAccountBillingPriority,
   getBillingPrioritySummary,
   getRelayAutoTrigger,
+  getSiteBillingHolds,
   setAccountBillingPriority,
   setFleetBillingPriority,
   setRelayAutoTrigger,
+  startSiteBillingHold,
+  clearSiteBillingHold,
+  setMeterElectricityBilling,
   type BillingPriority,
   type BillingPriorityForAccount,
   type BillingPrioritySummary,
   type RelayAutoTrigger,
+  type SiteBillingHolds,
 } from '../lib/api';
 
 /**
@@ -144,6 +149,184 @@ function AutoCutoffCard() {
     </section>
   );
 }
+
+function SiteBillingHoldCard() {
+  const { t } = useTranslation('billingPriority');
+  const { country } = useCountry();
+  const [state, setState] = useState<SiteBillingHolds | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [reason, setReason] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [busy, setBusy] = useState('');
+  const [meterId, setMeterId] = useState('');
+  const [meterMode, setMeterMode] = useState<'bill' | 'inherit'>('bill');
+
+  const load = () => {
+    if (country === 'ALL') {
+      setState(null);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError('');
+    getSiteBillingHolds()
+      .then(setState)
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    setMessage('');
+    setReason('');
+    setConfirm('');
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [country]);
+
+  const runSite = async (code: string, held: boolean) => {
+    setBusy(code);
+    setMessage('');
+    try {
+      if (held) {
+        const result = await clearSiteBillingHold(code, confirm.trim(), reason.trim());
+        setMessage(t('billingPriority:siteHold.billed', { code, count: result.released_payments, kwh: result.released_kwh }));
+      } else {
+        await startSiteBillingHold(code, confirm.trim(), reason.trim());
+        setMessage(t('billingPriority:siteHold.held', { code }));
+      }
+      setReason('');
+      setConfirm('');
+      load();
+    } catch (err) {
+      setMessage(t('billingPriority:siteHold.failed', { message: (err as Error).message }));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  const runMeter = async () => {
+    const id = meterId.trim();
+    if (!id) return;
+    setBusy('meter');
+    setMessage('');
+    try {
+      await setMeterElectricityBilling(id, meterMode, confirm.trim(), reason.trim());
+      setMessage(t(meterMode === 'bill' ? 'billingPriority:siteHold.meterBilled' : 'billingPriority:siteHold.meterFollows', { meter: id }));
+      setMeterId('');
+      setReason('');
+      setConfirm('');
+      load();
+    } catch (err) {
+      setMessage(t('billingPriority:siteHold.failed', { message: (err as Error).message }));
+    } finally {
+      setBusy('');
+    }
+  };
+
+  if (country === 'ALL') {
+    return (
+      <section className="bg-white rounded-lg shadow border border-gray-200 p-5">
+        <h2 className="text-lg font-semibold text-gray-900">{t('billingPriority:siteHold.title')}</h2>
+        <p className="mt-2 text-sm text-gray-600">{t('billingPriority:autoCutoff.pickCountry')}</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="bg-white rounded-lg shadow border border-gray-200 p-5 space-y-4">
+      <div>
+        <h2 className="text-lg font-semibold text-gray-900">{t('billingPriority:siteHold.title')}</h2>
+        <p className="mt-1 text-sm text-gray-600">{t('billingPriority:siteHold.intro')}</p>
+      </div>
+      {loading && <p className="text-sm text-gray-500">{t('billingPriority:autoCutoff.loading')}</p>}
+      {error && <p className="text-sm text-red-700">{error}</p>}
+      {state && (
+        <div className="space-y-3">
+          {state.sites.map((site) => {
+            const phrase = site.held ? `BILL ${site.code}` : `HOLD ${site.code}`;
+            return (
+              <div key={site.code} className="border border-gray-200 rounded-lg p-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <p className="text-sm font-semibold text-gray-900">{site.code} · {site.name}</p>
+                  <p className="text-sm text-gray-700">
+                    {site.held
+                      ? t('billingPriority:siteHold.stateHeld', { date: (site.started_at || '').slice(0, 10) })
+                      : t('billingPriority:siteHold.stateBilling')}
+                  </p>
+                </div>
+                {site.billing_meters.length > 0 && (
+                  <p className="mt-1 text-xs text-gray-600">
+                    {t('billingPriority:siteHold.metersBilling', {
+                      meters: site.billing_meters.map((m) => m.meter_id).join(', '),
+                    })}
+                  </p>
+                )}
+                {state.can_edit && (
+                  <button
+                    type="button"
+                    disabled={busy === site.code || reason.trim().length < 8 || confirm.trim().toUpperCase() !== phrase}
+                    onClick={() => runSite(site.code, site.held)}
+                    className="mt-2 px-3 py-1.5 rounded-md text-sm font-semibold bg-gray-900 text-white disabled:bg-gray-300"
+                  >
+                    {site.held ? t('billingPriority:siteHold.billSite', { phrase }) : t('billingPriority:siteHold.holdSite', { phrase })}
+                  </button>
+                )}
+              </div>
+            );
+          })}
+          {state.can_edit && (
+            <div className="border-t border-gray-200 pt-3 space-y-2">
+              <p className="text-sm text-gray-800">{t('billingPriority:siteHold.meterIntro')}</p>
+              <div className="flex flex-wrap gap-2">
+                <input
+                  value={meterId}
+                  onChange={(e) => setMeterId(e.target.value)}
+                  placeholder={t('billingPriority:siteHold.meterPlaceholder')}
+                  className="rounded-md border border-gray-300 px-3 py-2 text-sm"
+                />
+                <button type="button" onClick={() => setMeterMode('bill')} className={`px-3 py-2 rounded-md text-sm border ${meterMode === 'bill' ? 'bg-gray-900 text-white' : 'bg-white'}`}>
+                  {t('billingPriority:siteHold.modeBill')}
+                </button>
+                <button type="button" onClick={() => setMeterMode('inherit')} className={`px-3 py-2 rounded-md text-sm border ${meterMode === 'inherit' ? 'bg-gray-900 text-white' : 'bg-white'}`}>
+                  {t('billingPriority:siteHold.modeFollow')}
+                </button>
+              </div>
+              <button
+                type="button"
+                disabled={
+                  busy === 'meter'
+                  || reason.trim().length < 8
+                  || confirm.trim().toUpperCase() !== `${meterMode === 'bill' ? 'BILL' : 'FOLLOW'} ${meterId.trim().toUpperCase()}`
+                }
+                onClick={runMeter}
+                className="px-3 py-1.5 rounded-md text-sm font-semibold bg-gray-900 text-white disabled:bg-gray-300"
+              >
+                {t('billingPriority:siteHold.saveMeter')}
+              </button>
+            </div>
+          )}
+          {state.can_edit && (
+            <div className="grid gap-2 sm:grid-cols-2">
+              <label className="text-xs text-gray-600">
+                {t('billingPriority:siteHold.reason')}
+                <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm" />
+              </label>
+              <label className="text-xs text-gray-600">
+                {t('billingPriority:siteHold.confirm')}
+                <input value={confirm} onChange={(e) => setConfirm(e.target.value)} className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm font-mono" autoComplete="off" />
+              </label>
+            </div>
+          )}
+          {!state.can_edit && <p className="text-sm text-gray-600">{t('billingPriority:siteHold.readOnly')}</p>}
+        </div>
+      )}
+      {message && <p className="text-sm text-gray-800">{message}</p>}
+    </section>
+  );
+}
+
 
 function PriorityPill({ value }: { value: BillingPriority }) {
   return (
@@ -315,6 +498,8 @@ export default function BillingPriorityPage() {
       </div>
 
       <AutoCutoffCard />
+
+      <SiteBillingHoldCard />
 
       {/* ────── Fleet default ────── */}
       <section className="bg-white rounded-lg shadow border border-gray-200 p-5">

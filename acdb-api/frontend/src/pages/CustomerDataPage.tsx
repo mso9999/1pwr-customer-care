@@ -514,6 +514,14 @@ export default function CustomerDataPage() {
             </div>
           )}
 
+          {d.electricity_billing_held && (
+            <p className="text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+              {t('customerData:billingHeld', {
+                kwh: (d.free_supply_kwh ?? 0).toFixed(3),
+                amount: (d.held_electricity_currency ?? 0).toFixed(2),
+              })}
+            </p>
+          )}
           {(d.energy_debt_kwh ?? 0) > 0 && (
             <p className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
               {t('customerData:energyDebt', {

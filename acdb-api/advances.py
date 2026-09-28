@@ -1029,7 +1029,10 @@ def convert_contract_credit_to_electricity(
         cur.execute(
             """
             UPDATE transactions
-               SET payment_category = 'electricity',
+               SET payment_category = CASE
+                       WHEN payment_category = 'electricity_held' THEN 'electricity_held'
+                       ELSE 'electricity'
+                   END,
                    electricity_portion = %s,
                    fee_repayment_portion = 0,
                    advance_portion = 0,

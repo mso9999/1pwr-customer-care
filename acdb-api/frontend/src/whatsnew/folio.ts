@@ -37,6 +37,22 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW_FOLIO: WhatsNewEntry[] = [
   {
+    id: 'site-electricity-billing-hold',
+    date: '2026-09-28T22:30:00Z',
+    title: 'Free supply until inspection',
+    blurb: 'Hold a site so installed meters stay powered without selling electricity, and bill one meter when you need to test.',
+    pages: [
+      {
+        heading: 'Billing Priority',
+        body:
+          'Hold a site before the regulator allows electricity sales. Meters keep reporting and the relay stays closed. That use is free. Connection and readyboard fees still collect.\n\n' +
+          '- Type HOLD and the site code. Clear it later with BILL and the site code.\n' +
+          '- Saved electricity payments become units at the tariff from the day they were paid.\n' +
+          '- Set one meter to Bill to test real billing while the rest of the site stays free. Hours before that switch stay free.',
+      },
+    ],
+  },
+  {
     id: 'account-setup-reset',
     date: '2026-09-28T22:00:00Z',
     title: 'Reset setup data on an issued account',

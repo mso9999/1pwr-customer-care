@@ -148,12 +148,13 @@ def _book_parked_payment(
             conn, account, meter_id, amt, rate,
             source="sms_gateway", timestamp=paid_at, payment_reference=receipt,
         )
-        sm_credit = {
-            "account_number": account,
-            "amount": amt,
-            "transaction_id": txn_id,
-            "receipt": receipt,
-        }
+        if _kwh > 0:
+            sm_credit = {
+                "account_number": account,
+                "amount": amt,
+                "transaction_id": txn_id,
+                "receipt": receipt,
+            }
     else:
         rate = _get_tariff_rate(conn, account)
         txn_id, _ = record_historical_payment_transaction(

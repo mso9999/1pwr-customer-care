@@ -5,6 +5,15 @@
 - Side effects: none. Not committed and not deployed. The live map at cc.1pwrafrica.com does not show this until a push to main.
 - Key files: `acdb-api/meter_provisioning.py`, `acdb-api/frontend/src/components/FleetMap.tsx`, `acdb-api/frontend/src/lib/api.ts`.
 
+## 2026-09-28 — Cursor — Site electricity-billing hold
+- Billing Priority can hold a site until inspection. Meters stay powered and keep reporting. Those kWh stay out of the prepaid balance, including after the hold ends. Connection and readyboard fees still collect. Electricity payments are saved at the tariff from the day they were paid and become kWh when the site is cleared.
+- A meter can be set to Bill during the hold so that account is charged normally for a test. Hours before that switch stay free. FOLLOW returns the meter to the site rule.
+- The relay is held closed during a hold unless a safety override has cut power, or the account is set to bill. Confirmation is HOLD/BILL plus the site code, or BILL/FOLLOW plus the meter id, with a reason. Superadmin, or O&M for their own country. Recorded in the mutation log. Clearing a site is not undone from Mutations.
+- Migration `077_site_electricity_hold.sql`. Tests: `tests/test_site_electricity_hold.py`.
+- Side effects: pushed to `main`. This deploys to https://cc.1pwrafrica.com. Migration 077 applies on deploy. SparkMeter credit toggle, tariff country editor, exact-match fee split, and the meter-map OTA work stay uncommitted.
+- Employee guide, tutorial payments step, and quiz cover the hold in English and French. Customer Dashboard and Customer Data show one sentence while the account is held.
+- Key files: `acdb-api/site_billing_hold.py`, `acdb-api/balance_engine.py`, `acdb-api/relay_control.py`, `acdb-api/frontend/src/pages/BillingPriorityPage.tsx`.
+
 ## 2026-09-28 — Cursor — Deploy setup reset, cutoff switch, and energy debt
 - Pushed to `main`. This deploys to https://cc.1pwrafrica.com.
 - Ships account setup reset, the Billing Priority auto-cutoff switch, and the energy-debt display plus migration 076.

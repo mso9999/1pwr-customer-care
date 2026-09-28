@@ -17,5 +17,27 @@
     "noop": "Déjà dans cet état. Rien n'a été inscrit.",
     "failed": "Enregistrement impossible : {{message}}",
     "loading": "Chargement…"
+  },
+  "siteHold": {
+    "title": "Suspension de la facturation électrique",
+    "intro": "Suspendez un site jusqu'à ce que le régulateur autorise la vente d'électricité. Les compteurs restent alimentés et continuent de remonter la consommation. Cet usage est gratuit. Les frais de raccordement et de tableau sont toujours encaissés. L'argent envoyé pour l'électricité est conservé et devient des unités quand vous ouvrez la facturation, au tarif du jour du paiement. Pour tester la facturation d'un compteur pendant que le site est encore suspendu, passez ce compteur sur Facturer.",
+    "stateHeld": "Fourniture gratuite depuis le {{date}}",
+    "stateBilling": "Facturation",
+    "metersBilling": "Facturés malgré tout : {{meters}}",
+    "holdSite": "Suspendre le site (saisir {{phrase}})",
+    "billSite": "Ouvrir la facturation (saisir {{phrase}})",
+    "held": "{{code}} est en fourniture gratuite. Le relais reste fermé, sauf override de sécurité.",
+    "billed": "{{code}} est facturé. {{count}} paiements conservés sont devenus {{kwh}} kWh.",
+    "failed": "Enregistrement impossible : {{message}}",
+    "meterIntro": "Un compteur peut être facturé pendant que son site est encore suspendu. Les heures d'avant ce choix restent gratuites. Saisissez BILL et l'identifiant du compteur, ou FOLLOW et l'identifiant pour revenir à la règle du site.",
+    "meterPlaceholder": "Identifiant du compteur",
+    "modeBill": "Facturer ce compteur",
+    "modeFollow": "Suivre le site",
+    "saveMeter": "Enregistrer le compteur",
+    "meterBilled": "{{meter}} est facturé même si son site est suspendu.",
+    "meterFollows": "{{meter}} suit de nouveau le site.",
+    "reason": "Motif",
+    "confirm": "Confirmation",
+    "readOnly": "Vous pouvez voir ceci. Seuls un superadmin, ou l'O&M de ce pays, peuvent le modifier."
   }
 }

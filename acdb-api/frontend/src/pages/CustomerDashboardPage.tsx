@@ -314,6 +314,14 @@ export default function CustomerDashboardPage() {
             {cutoffOn ? t('customerDashboard:autoCutoffOn') : t('customerDashboard:autoCutoffOff')}
           </p>
         )}
+        {data.electricity_billing_held && (
+          <p className="mt-3 text-sm text-gray-700">
+            {t('customerDashboard:billingHeld', {
+              kwh: (data.free_supply_kwh ?? 0).toFixed(3),
+              amount: (data.held_electricity_currency ?? 0).toFixed(2),
+            })}
+          </p>
+        )}
         {(data.energy_debt_kwh ?? 0) > 0 && (
           <p className="mt-3 text-sm text-amber-900">
             {t('customerDashboard:energyDebt', { kwh: (data.energy_debt_kwh ?? 0).toFixed(3) })}

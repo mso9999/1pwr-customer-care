@@ -327,6 +327,7 @@ from coverage_audit import router as coverage_audit_router
 from advances import router as advances_router
 from country_fees import router as country_fees_router
 from account_setup_reset import router as account_setup_reset_router
+from site_billing_hold import router as site_billing_hold_router
 from unmetered_service import router as unmetered_service_router
 from site_registry import router as site_registry_router
 from site_sync_ingest import router as site_sync_ingest_router
@@ -342,6 +343,7 @@ from onboarding_dashboard import router as onboarding_dashboard_router
 from app_onboarding import router as app_onboarding_router, sandbox_router as app_onboarding_sandbox_router
 from om_tickets import router as om_tickets_router
 from meter_provisioning import router as meter_provisioning_router, ensure_meter_provisioning_table
+from ota_target import start_ota_queue_advancer
 from onemeter_validation import router as onemeter_validation_router
 from sparkmeter_etl import router as sparkmeter_etl_router
 from investor_analytics import router as investor_analytics_router
@@ -395,6 +397,7 @@ app.include_router(coverage_audit_router)
 app.include_router(advances_router)
 app.include_router(country_fees_router)
 app.include_router(account_setup_reset_router)
+app.include_router(site_billing_hold_router)
 app.include_router(unmetered_service_router)
 app.include_router(site_registry_router)
 app.include_router(site_sync_ingest_router)
@@ -421,6 +424,7 @@ app.include_router(integration_router)
 app.include_router(integration_forecast_router)
 ensure_meter_assignments_table()
 ensure_meter_provisioning_table()
+start_ota_queue_advancer()
 warm_stats_cache()
 
 

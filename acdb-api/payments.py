@@ -373,7 +373,10 @@ def payment_webhook(
             cur.execute(
                 """
                 UPDATE transactions
-                   SET payment_category    = 'electricity',
+                   SET payment_category    = CASE
+                           WHEN payment_category = 'electricity_held' THEN 'electricity_held'
+                           ELSE 'electricity'
+                       END,
                        financing_portion   = %s,
                        advance_portion     = %s,
                        advance_id          = %s,
@@ -391,7 +394,7 @@ def payment_webhook(
             conn.commit()
 
             sm_credit_amount = elec_amount if elec_amount > 0 else 0
-            if sm_credit_amount > 0 and _meter_credit_enabled():
+            if sm_credit_amount > 0 and kwh_vended > 0 and _meter_credit_enabled():
                 memo = (
                     f"ref {ext_ref} sms_gateway txn {txn_id}"
                     if ext_ref
@@ -630,7 +633,10 @@ def record_manual_payment(
             cur.execute(
                 """
                 UPDATE transactions
-                   SET payment_category    = 'electricity',
+                   SET payment_category    = CASE
+                           WHEN payment_category = 'electricity_held' THEN 'electricity_held'
+                           ELSE 'electricity'
+                       END,
                        financing_portion   = %s,
                        advance_portion     = %s,
                        advance_id          = %s,
@@ -680,7 +686,7 @@ def record_manual_payment(
 
             sm_credit_amount = elec_amount if elec_amount > 0 else 0
             sm_result = None
-            if sm_credit_amount > 0 and _meter_credit_enabled():
+            if sm_credit_amount > 0 and kwh_vended > 0 and _meter_credit_enabled():
                 note_part = (payload.note or "").strip()
                 memo = (
                     f"ref {pref} {note_part}"

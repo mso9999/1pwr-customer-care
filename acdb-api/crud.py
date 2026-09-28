@@ -1594,6 +1594,19 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
         from country_config import get_tariff_rate_for_site, get_currency_for_site
         import re as _re
         _be_raw, _ = _be_balance(conn, acct)
+        try:
+            from site_billing_hold import account_hold_display
+            _hold_display = account_hold_display(conn, acct)
+        except Exception:
+            logger.debug("Dashboard: site billing hold lookup failed", exc_info=True)
+            _hold_display = {
+                "electricity_billing_held": False,
+                "held_electricity_currency": 0.0,
+                "free_supply_kwh": 0.0,
+            }
+        if _hold_display["electricity_billing_held"]:
+            from balance_engine import get_balance_kwh as _engine_balance
+            _be_raw, _ = _engine_balance(conn, acct)
         balance_kwh = max(0, _be_raw)
         energy_debt_kwh = round(max(0, -_be_raw), 4)
         _site_match = _re.search(r'[A-Z]{3}$', acct)
@@ -1707,6 +1720,9 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
             "balance_currency": round(balance_kwh * _tariff_rate, 2),
             "energy_debt_kwh": energy_debt_kwh,
             "energy_debt_currency": round(energy_debt_kwh * _tariff_rate, 2),
+            "electricity_billing_held": _hold_display["electricity_billing_held"],
+            "held_electricity_currency": _hold_display["held_electricity_currency"],
+            "free_supply_kwh": _hold_display["free_supply_kwh"],
             "currency_code": _currency_code,
             "last_payment": last_payment,
             "avg_kwh_per_day": round(avg_kwh_per_day, 2),
@@ -2050,6 +2066,19 @@ def employee_customer_data(
         from balance_live import get_display_balance as _be_balance
         from country_config import get_tariff_rate_for_site, get_currency_for_site
         _be_raw, _ = _be_balance(conn, acct)
+        try:
+            from site_billing_hold import account_hold_display
+            _hold_display = account_hold_display(conn, acct)
+        except Exception:
+            logger.debug("Customer data: site billing hold lookup failed", exc_info=True)
+            _hold_display = {
+                "electricity_billing_held": False,
+                "held_electricity_currency": 0.0,
+                "free_supply_kwh": 0.0,
+            }
+        if _hold_display["electricity_billing_held"]:
+            from balance_engine import get_balance_kwh as _engine_balance
+            _be_raw, _ = _engine_balance(conn, acct)
         balance_kwh = max(0, _be_raw)
         energy_debt_kwh = round(max(0, -_be_raw), 4)
         _emp_site = (meter_info or {}).get("community") or ""
@@ -2104,6 +2133,9 @@ def employee_customer_data(
                 "balance_currency": round(balance_kwh * _emp_tariff, 2),
                 "energy_debt_kwh": energy_debt_kwh,
                 "energy_debt_currency": round(energy_debt_kwh * _emp_tariff, 2),
+                "electricity_billing_held": _hold_display["electricity_billing_held"],
+                "held_electricity_currency": _hold_display["held_electricity_currency"],
+                "free_supply_kwh": _hold_display["free_supply_kwh"],
                 "currency_code": _emp_currency,
                 "last_payment": last_payment,
                 "avg_kwh_per_day": round(avg_kwh_per_day, 2),

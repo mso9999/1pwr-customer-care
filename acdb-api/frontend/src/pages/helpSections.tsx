@@ -1090,6 +1090,20 @@ function MetersContent() {
           <li>Les kWh utilisés après crédit zéro, avant que la coupure n'arrive, sont une <Bold>dette énergie</Bold> sur Données clients. Le prochain paiement MoMo d'électricité la rembourse en comblant le trou. Ce n'est pas une deuxième facture.</li>
         </Ul>
 
+        <SubHead>Fourniture gratuite avant inspection (<PageLink to="/billing-priority">/billing-priority</PageLink>)</SubHead>
+        <P>
+          Suspendre un site laisse les compteurs installés et alimentés sans vendre d'électricité.
+          La consommation reste visible et ne réduit pas le crédit. Les frais de raccordement et de
+          tableau sont toujours encaissés. Un paiement d'électricité est conservé au tarif du jour
+          et devient des kWh quand le site est ouvert à la facturation. Un compteur peut être passé
+          sur Facturer pour un essai : les heures d'avant ce choix restent gratuites.
+        </P>
+        <Ul>
+          <li>Saisir HOLD et le code du site, ou BILL et le code, avec un motif. Superadmin, ou O&amp;M pour son pays.</li>
+          <li>Pour un compteur : BILL et l'identifiant, ou FOLLOW pour revenir à la règle du site.</li>
+          <li>Le relais reste fermé, sauf override de sécurité. La commande manuelle reste possible.</li>
+        </Ul>
+
         <SubHead>Sécurité : forcer l'ouverture du relais (override)</SubHead>
         <P>
           En cas d'<Bold>urgence ou de sécurité</Bold> (risque d'incendie, maintenance d'urgence, suspicion de
@@ -1152,6 +1166,19 @@ function MetersContent() {
         <li>Gateways below firmware 1.1.74 are skipped.</li>
         <li>All countries cannot save. Customers see one sentence on My Dashboard and cannot change the switch.</li>
         <li>kWh used after credit hits zero, before cutoff arrives, is <Bold>energy debt</Bold> on Customer Data. The next MoMo electricity payment pays it down by filling that hole. It is not a second charge.</li>
+      </Ul>
+
+      <SubHead>Free supply before inspection (<PageLink to="/billing-priority">/billing-priority</PageLink>)</SubHead>
+      <P>
+        Holding a site keeps installed meters powered without selling electricity. Use stays visible
+        and does not reduce credit. Connection and readyboard fees still collect. An electricity
+        payment is saved at that day's tariff and becomes kWh when the site is cleared to bill.
+        One meter can be set to Bill for a test. Hours before that switch stay free.
+      </P>
+      <Ul>
+        <li>Type HOLD and the site code, or BILL and the site code, with a reason. Superadmin, or O&amp;M for their own country.</li>
+        <li>For one meter: BILL and the meter id, or FOLLOW to use the site rule again.</li>
+        <li>The relay stays closed unless a safety override has cut power. A manual relay command still works.</li>
       </Ul>
 
       <SubHead>Safety override — force relay open</SubHead>

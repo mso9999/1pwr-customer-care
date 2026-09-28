@@ -80,7 +80,8 @@
         "Approfondir avec Données clients pour l’historique, le contexte de solde et le panneau Avances actives.",
         "Ouvrir la boîte SMS seulement après avoir choisi un pays dans la barre latérale. Elle liste les SMS reçus. Elle ne crédite pas un client.",
         "Une correction de grand livre dans Données clients est réservée au superadmin et à l’O&M. Elle écrit une ligne brute et ne change pas le solde. Utilisez Enregistrer un paiement pour un vrai paiement.",
-        "Sur Priorité de facturation, avec un seul pays choisi, activez ou désactivez la coupure automatique. À crédit zéro, un compte dont le 1Meter est principal perd le courant ; un paiement qui rétablit le crédit le remet. Le superadmin peut enregistrer pour tout pays. L'O&M et la finance seulement pour le leur. Le journal des mutations indique qui a changé quoi et quand. Tous les pays ne permet pas d'enregistrer."
+        "Sur Priorité de facturation, avec un seul pays choisi, activez ou désactivez la coupure automatique. À crédit zéro, un compte dont le 1Meter est principal perd le courant ; un paiement qui rétablit le crédit le remet. Le superadmin peut enregistrer pour tout pays. L'O&M et la finance seulement pour le leur. Le journal des mutations indique qui a changé quoi et quand. Tous les pays ne permet pas d'enregistrer.",
+        "Avant l'inspection du régulateur, suspendez le site sur Priorité de facturation. Les compteurs restent alimentés et la consommation est gratuite. Les frais de raccordement et de tableau sont toujours encaissés. Les paiements d'électricité sont conservés et deviennent des kWh, au tarif du jour du paiement, quand vous saisissez BILL et le code du site. Pour tester la facturation d'un compteur pendant la suspension, saisissez BILL et l'identifiant de ce compteur. Les heures d'avant ce choix restent gratuites."
       ]
     },
     "advances": {
@@ -189,7 +190,7 @@
   },
   "quiz": {
     "title": "Contrôle des connaissances",
-    "intro": "Sept questions sur les paiements, la boîte SMS, le pont WhatsApp, la coupure automatique et la réinitialisation d'un compte d'essai. Ouvrez la réponse quand vous êtes prêt.",
+    "intro": "Huit questions sur les paiements, la boîte SMS, le pont WhatsApp, la coupure automatique, la réinitialisation d'un compte d'essai et la fourniture gratuite avant inspection. Ouvrez la réponse quand vous êtes prêt.",
     "show": "Voir la réponse",
     "hide": "Masquer la réponse",
     "items": [
@@ -220,6 +221,10 @@
       {
         "q": "Un compte déjà délivré a servi à tester le compteur. Comment effacer les paiements d'essai tout en gardant ce numéro ?",
         "a": "Sur la fiche client, Réinitialiser les données d'installation. Ne résiliez pas. Enregistrez d'abord les vrais frais du pays, car la réinitialisation grave ces montants. La dette de tableau n'est gravée que si le client prend un tableau 1PWR. Saisissez RESET et le numéro de compte. Superadmin, ou O&M pour son pays. Annulation depuis Mutations. Refusé après 21 jours, après 40 paiements, ou s'il existe une avance, un financement ou un service non compté actif."
+      },
+      {
+        "q": "Un site attend le régulateur, mais un compteur doit être facturé pour tester le tarif et le relais. Que faites-vous ?",
+        "a": "Sur Priorité de facturation, suspendez le site avec HOLD et le code du site. Passez ensuite ce compteur sur Facturer et saisissez BILL plus l'identifiant. Le reste du site reste en fourniture gratuite. Les heures d'avant le choix du compteur restent gratuites. Ouvrir le site avec BILL et le code du site transforme les paiements d'électricité conservés en kWh, au tarif du jour où ils ont été payés."
       }
     ]
   }

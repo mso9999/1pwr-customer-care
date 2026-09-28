@@ -8,6 +8,7 @@
   "exampleAccounts": "e.g. 0045MAK, 0003MAS, 0005KET — or a numeric customer ID like 5974",
   "balance": "Balance",
   "energyDebt": "Energy debt {{kwh}} kWh ({{currency}} {{amount}}). This is power used after credit ran out, before cutoff. The next MoMo electricity purchase pays it down. It is not charged a second time.",
+  "billingHeld": "This site is on free supply until inspection. Metered use {{kwh}} kWh is not billed. Electricity payments of {{amount}} are saved and become units when billing starts.",
   "avgConsumption": "Avg Consumption",
   "estRecharge": "Est. Recharge",
   "lastPayment": "Last Payment",

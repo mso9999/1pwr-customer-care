@@ -8,6 +8,7 @@
   "exampleAccounts": "ex. 0045MAK, 0003MAS, 0005KET — ou un ID client numérique comme 5974",
   "balance": "Solde",
   "energyDebt": "Dette énergie {{kwh}} kWh ({{currency}} {{amount}}). C'est l'électricité utilisée après l'épuisement du crédit, avant la coupure. Le prochain paiement MoMo d'électricité la rembourse. Elle n'est pas facturée une seconde fois.",
+  "billingHeld": "Ce site est en fourniture gratuite jusqu'à l'inspection. La consommation {{kwh}} kWh n'est pas facturée. Les paiements d'électricité de {{amount}} sont conservés et deviennent des unités à l'ouverture de la facturation.",
   "avgConsumption": "Consommation moy.",
   "estRecharge": "Recharge est.",
   "lastPayment": "Dernier paiement",

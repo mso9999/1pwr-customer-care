@@ -79,6 +79,16 @@ def _resolve_billing_priority(cur, account_number: str) -> str:
     return DEFAULT_PRIORITY
 
 
+def _hold_exclusion_sql() -> str:
+    from site_billing_hold import consumption_sql_exclusion
+    return consumption_sql_exclusion()
+
+
+def _account_site_for_hold(cur, account_number: str) -> str:
+    from site_billing_hold import account_site
+    return account_site(cur, account_number)
+
+
 def _consumption_kwh(cur, account_number: str, priority: str) -> float:
     """Sum live consumption from ``hourly_consumption`` for *account_number*
     using the source-priority rule for *priority* (``'sm'``, ``'1m'``, or
@@ -98,8 +108,7 @@ def _consumption_kwh(cur, account_number: str, priority: str) -> float:
     # — so we must explicitly cast each ANY(...) array, otherwise this query
     # 500s with `operator does not exist: transaction_source = text` (RCA on
     # 2026-04-29 from a customer-data lookup on 0226MAK).
-    cur.execute(
-        """
+    base = """
         WITH per_hour AS (
             SELECT reading_hour,
                 MAX(kwh) FILTER (WHERE source = ANY(%s::transaction_source[])) AS sm_kwh,
@@ -107,6 +116,7 @@ def _consumption_kwh(cur, account_number: str, priority: str) -> float:
                 MAX(kwh) FILTER (WHERE source = ANY(%s::transaction_source[])) AS steamaco_kwh
             FROM hourly_consumption
             WHERE account_number = %s
+            {exclusion}
             GROUP BY reading_hour
         )
         SELECT COALESCE(SUM(
@@ -118,13 +128,29 @@ def _consumption_kwh(cur, account_number: str, priority: str) -> float:
             END
         ), 0)
         FROM per_hour
-        """,
-        (
-            list(SM_SOURCES), list(M1_SOURCES), list(STEAMACO_SOURCES),
-            account_number, priority, priority, priority,
-        ),
-    )
-    return float(cur.fetchone()[0])
+    """
+    sources = (list(SM_SOURCES), list(M1_SOURCES), list(STEAMACO_SOURCES))
+    tail = (priority, priority, priority)
+    cur.execute("SAVEPOINT consumption_hold")
+    try:
+        cur.execute(
+            base.format(exclusion=_hold_exclusion_sql()),
+            (*sources, account_number, _account_site_for_hold(cur, account_number), *tail),
+        )
+        value = float(cur.fetchone()[0])
+        cur.execute("RELEASE SAVEPOINT consumption_hold")
+        return value
+    except Exception:
+        logger.exception("consumption hold exclusion failed for %s; counting every hour", account_number)
+        try:
+            cur.execute("ROLLBACK TO SAVEPOINT consumption_hold")
+        except Exception:
+            logger.exception("consumption hold savepoint rollback failed")
+        cur.execute(
+            base.format(exclusion=""),
+            (*sources, account_number, *tail),
+        )
+        return float(cur.fetchone()[0])
 
 
 def get_balance_kwh(
@@ -243,8 +269,10 @@ def record_payment_kwh(
     cur = conn.cursor()
     ts = timestamp or datetime.now(timezone.utc)
 
-    kwh_vended = kwh_override if kwh_override is not None else (
-        round(amount_currency / rate, 4) if rate > 0 else 0.0
+    from site_billing_hold import decide_vend, stamp_held_payment
+
+    kwh_vended, held_amount, _held_category = decide_vend(
+        conn, account_number, amount_currency, rate, kwh_override,
     )
 
     prev_balance, _ = get_balance_kwh(conn, account_number)
@@ -269,6 +297,8 @@ def record_payment_kwh(
         new_balance, source, payment_reference,
     ))
     txn_id = cur.fetchone()[0]
+    if held_amount is not None:
+        stamp_held_payment(cur, txn_id, held_amount)
 
     logger.info(
         "Payment: txn=%d acct=%s %s%.2f -> %.4f kWh @ %.2f  bal=%.4f kWh",
