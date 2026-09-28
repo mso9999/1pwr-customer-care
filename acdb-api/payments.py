@@ -749,7 +749,12 @@ def _credit_sm_sync(
         memo=memo,
         external_id=external_id,
     )
-    if not summary.get("success"):
+    if summary.get("skipped_koios"):
+        logger.info(
+            "Koios push skipped for %s M%.2f (billing priority %s)",
+            account_number, amount, summary.get("platform"),
+        )
+    elif not summary.get("success"):
         logger.warning(
             "SM credit failed for %s M%.2f: %s",
             account_number, amount, summary.get("error"),

@@ -206,7 +206,11 @@ export default function RecordPaymentPage() {
           </div>
           {result.sm_credit && (
             <div className="mt-3 text-xs text-gray-500">
-              {result.sm_credit.success ? t('recordPayment:success.smCreditOk') : t('recordPayment:success.smCreditFailed')} ({result.sm_credit.platform})
+              {result.sm_credit.skipped_koios
+                ? t('recordPayment:success.koiosSkipped')
+                : result.sm_credit.success
+                  ? `${t('recordPayment:success.smCreditOk')} (${result.sm_credit.platform})`
+                  : `${t('recordPayment:success.smCreditFailed')} (${result.sm_credit.platform})`}
             </div>
           )}
         </div>

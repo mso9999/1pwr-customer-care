@@ -1,3 +1,18 @@
+## 2026-09-28 — Cursor — SparkMeter credit, country tariff, exact fee match
+- Billing Priority can set SparkMeter credit per account: automatic (MAK and LAB still push to ThunderCloud; other 1Meter accounts stay on the CC ledger), always credit, or 1Meter ledger only. The choice is on `accounts.sparkmeter_credit` (migration 075) and in the mutation log. A missing column during deploy does not roll back an in-flight credit-retry batch.
+- Tariffs shows and saves that country’s default tariff on the fees card. A zero tariff does not block saving the fees. All countries cannot edit.
+- An electricity payment equal to the remaining connection balance, the remaining readyboard balance, or both settles that debt in full. Otherwise the half cap still applies, connection first.
+- Side effects: this commit deploys to https://cc.1pwrafrica.com. Migration 075 applies on deploy. The firmware queue stays uncommitted.
+- Key files: `acdb-api/sm_credit_retry.py`, `acdb-api/billing_priority.py`, `acdb-api/fee_debt.py`, `acdb-api/frontend/src/pages/TariffManagementPage.tsx`, `acdb-api/frontend/src/pages/BillingPriorityPage.tsx`.
+
+## 2026-09-28 — Cursor — Targeted firmware from the meters map and list
+- An operator (O&M, engineering, or superadmin) can pick one meter, the current list filter, or every meter on the map and queue a firmware version from the S3 fleet library. Rollback above 1.1.56 is allowed after typing the version. 1.1.56 and older cannot be chosen, and a gateway already on 1.1.56 or older is refused (USB only). Several meters on one gateway become one row.
+- The queue starts one online gateway per site and waits if that site already has a download, including a job the rollout runner started. Offline gateways stay pending. A failure holds the rest of that site until Resume. This does not write `onemeter_ota_site_releases`, so factory Promote still ships the site release.
+- IAM on `cc-postgres-backup-role` inline policy `cc-1meter-provisioning`, about 20:40 UTC: added `iot:CancelJob` and `s3:ListBucket` on `1pwr-ota-firmware` for prefix `firmware-releases/*`. Previous policy saved at `/tmp/cc-1meter-provisioning.json`.
+- Tests: `tests/test_ota_target_queue.py` — 7 passed.
+- Side effects: IAM policy change above. Not committed and not deployed. The meters page at cc.1pwrafrica.com does not show this until a push to main. Migration `078_onemeter_ota_queue.sql` runs on that deploy.
+- Key files: `acdb-api/ota_target.py`, `acdb-api/meter_provisioning.py`, `acdb-api/frontend/src/pages/MetersPage.tsx`, `acdb-api/frontend/src/components/FleetMap.tsx`, `acdb-api/frontend/src/components/FirmwareTargetDialog.tsx`.
+
 ## 2026-09-28 — Cursor — Meter map shows in-flight OTA progress
 - Clicking a meter on the meters map looks up that gateway's current AWS IoT job and, while it is queued or downloading, shows the target version and a progress bar. Queued reads as 0% until the gateway connects. The bar polls every 15 seconds only while that popup is open. Jobs created by the rollout runner are included; this does not write `meter_provisioning`.
 - `GET /api/provisioning/fleet-map/ota?thing_name=` uses the same employee gate as the map. Percent comes from the job execution's block count.

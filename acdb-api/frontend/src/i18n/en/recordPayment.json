@@ -25,6 +25,7 @@
     "newBalance": "New Balance",
     "electricityPortion": "Electricity Portion",
     "debtPortion": "Debt Portion",
+    "koiosSkipped": "1Meter account — the kWh stay on the CC ledger. Koios was not called.",
     "smCreditOk": "SM Credit OK",
     "smCreditFailed": "SM Credit Failed"
   },

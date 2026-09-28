@@ -88,6 +88,36 @@ def test_pre_commissioning_payments_are_fully_fee_first():
     assert r["electricity_portion"] == 0.0
 
 
+def test_exact_connection_balance_settles_in_full():
+    debts = {
+        "fee_debt_connection_remaining": 500.0,
+        "fee_debt_readyboard_remaining": 200.0,
+        "acquires_1pwr_readyboard": True,
+        "customer_commissioned": True,
+        "date_service_connected": "2026-09-28",
+    }
+    r = compute_fee_then_advance_split(500.0, debts, None)
+    assert r["fee_repayment_portion"] == 500.0
+    assert r["fee_to_connection"] == 500.0
+    assert r["fee_to_readyboard"] == 0.0
+    assert r["electricity_portion"] == 0.0
+
+
+def test_exact_readyboard_balance_settles_readyboard_only():
+    debts = {
+        "fee_debt_connection_remaining": 200.0,
+        "fee_debt_readyboard_remaining": 499.0,
+        "acquires_1pwr_readyboard": True,
+        "customer_commissioned": True,
+        "date_service_connected": "2026-09-28",
+    }
+    r = compute_fee_then_advance_split(499.0, debts, None)
+    assert r["fee_repayment_portion"] == 499.0
+    assert r["fee_to_connection"] == 0.0
+    assert r["fee_to_readyboard"] == 499.0
+    assert r["electricity_portion"] == 0.0
+
+
 def test_pre_commissioning_spills_to_readyboard_after_connection():
     debts = {
         "fee_debt_connection_remaining": 100.0,

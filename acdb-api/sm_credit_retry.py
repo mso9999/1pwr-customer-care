@@ -225,6 +225,27 @@ def process_due_sm_credit_retries(limit: int = 20) -> Dict[str, int]:
             attempts = int(row[5] or 0)
             processed += 1
 
+            skip = _koios_skip_priority(cur, account)
+            if skip:
+                err = f"skipped_koios:{skip}"
+                cur.execute(
+                    """
+                    UPDATE sm_credit_retry_queue
+                    SET status = 'failed',
+                        last_error = %s,
+                        first_error = COALESCE(first_error, %s),
+                        last_attempt_at = NOW(),
+                        resolved_at = NOW()
+                    WHERE id = %s
+                    """,
+                    (err, err, q_id),
+                )
+                logger.info(
+                    "SM credit retry closed id=%s acct=%s: %s",
+                    q_id, account, err,
+                )
+                continue
+
             eligible, reason = _account_credit_eligibility(cur, account)
             if not eligible:
                 blocked += 1
@@ -317,6 +338,64 @@ def process_due_sm_credit_retries(limit: int = 20) -> Dict[str, int]:
     }
 
 
+def _sparkmeter_credit_override(cur, account_number: str) -> str | None:
+    """Per-account SparkMeter credit toggle.
+
+    ``push`` forces the ThunderCloud/Koios credit (1Meter and SparkMeter in series).
+    ``skip`` withholds it when the account bills on a 1Meter.
+    ``None`` is automatic: ThunderCloud sites (MAK, LAB) still push; other 1Meter
+    accounts do not.
+    """
+    try:
+        cur.execute("SAVEPOINT sparkmeter_credit_read")
+        cur.execute(
+            "SELECT sparkmeter_credit FROM accounts WHERE account_number = %s LIMIT 1",
+            (account_number,),
+        )
+        row = cur.fetchone()
+        cur.execute("RELEASE SAVEPOINT sparkmeter_credit_read")
+    except Exception:
+        # Missing column during the deploy window, or a bad read. Roll back
+        # only this lookup so a retry batch already in this transaction stays.
+        logger.debug("sparkmeter_credit lookup failed for %s", account_number, exc_info=True)
+        try:
+            cur.execute("ROLLBACK TO SAVEPOINT sparkmeter_credit_read")
+        except Exception:
+            pass
+        return None
+    if not row:
+        return None
+    mode = row[0]
+    if mode in ("push", "skip"):
+        return mode
+    return None
+
+
+def _koios_skip_priority(cur, account_number: str) -> str | None:
+    """Reason to withhold the SparkMeter push, or None when it should be sent.
+
+    Billing priority ``sm`` always pushes. ``steamaco`` never does. ``1m``
+    pushes when the account toggle is ``push``, or when the toggle is unset
+    and the site is ThunderCloud (MAK/LAB run a 1Meter and a SparkMeter in
+    series). Elsewhere an unset toggle skips, and an explicit ``skip`` skips.
+    """
+    from balance_engine import _resolve_billing_priority
+
+    priority = _resolve_billing_priority(cur, account_number)
+    if priority == "steamaco":
+        return "steamaco"
+    mode = _sparkmeter_credit_override(cur, account_number)
+    if mode == "push":
+        return None
+    if priority != "1m":
+        return None
+    if mode == "skip":
+        return "sparkmeter_credit_skip"
+    if _site_from_account(account_number) in THUNDERCLOUD_SITES:
+        return None
+    return "1m"
+
+
 def credit_sm_with_retry(
     *,
     account_number: str,
@@ -330,6 +409,18 @@ def credit_sm_with_retry(
 
     with get_connection() as conn:
         cur = conn.cursor()
+        skip = _koios_skip_priority(cur, account_number)
+        if skip:
+            logger.info(
+                "SparkMeter push skipped for %s (%s)",
+                account_number, skip,
+            )
+            return {
+                "success": True,
+                "platform": skip,
+                "queued_retry": False,
+                "skipped_koios": True,
+            }
         eligible, reason = _account_credit_eligibility(cur, account_number)
     if not eligible:
         err = f"{BLOCKED_UNCOMMISSIONED_PREFIX}:{reason or 'ineligible'}"

@@ -7,17 +7,19 @@ import {
   getBillingPrioritySummary,
   getRelayAutoTrigger,
   getSiteBillingHolds,
-  setAccountBillingPriority,
-  setFleetBillingPriority,
-  setRelayAutoTrigger,
   startSiteBillingHold,
   clearSiteBillingHold,
   setMeterElectricityBilling,
+  type SiteBillingHolds,
+  setAccountBillingPriority,
+  setFleetBillingPriority,
+  setRelayAutoTrigger,
+  setSparkmeterCredit,
+  type SparkmeterCreditMode,
   type BillingPriority,
   type BillingPriorityForAccount,
   type BillingPrioritySummary,
   type RelayAutoTrigger,
-  type SiteBillingHolds,
 } from '../lib/api';
 
 /**
@@ -327,7 +329,6 @@ function SiteBillingHoldCard() {
   );
 }
 
-
 function PriorityPill({ value }: { value: BillingPriority }) {
   return (
     <span
@@ -411,6 +412,9 @@ export default function BillingPriorityPage() {
   const [acctNote, setAcctNote] = useState('');
   const [acctSubmitting, setAcctSubmitting] = useState(false);
   const [acctMessage, setAcctMessage] = useState('');
+  const [creditMode, setCreditMode] = useState<SparkmeterCreditMode>('auto');
+  const [creditSubmitting, setCreditSubmitting] = useState(false);
+  const [creditMessage, setCreditMessage] = useState('');
 
   const handleLookup = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -424,6 +428,8 @@ export default function BillingPriorityPage() {
       const result = await getAccountBillingPriority(acct);
       setAccountState(result);
       setAcctOverrideTarget(result.override ?? 'inherit');
+      setCreditMode(result.sparkmeter_credit ?? 'auto');
+      setCreditMessage('');
     } catch (err) {
       setAccountLookupError((err as Error).message);
     } finally {
@@ -477,6 +483,33 @@ export default function BillingPriorityPage() {
     }
   };
 
+  const handleCreditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!accountState) return;
+    if (creditMode === accountState.sparkmeter_credit) {
+      setCreditMessage('No change: SparkMeter credit is already that setting.');
+      return;
+    }
+    const confirmed = window.confirm(
+      `Set SparkMeter credit for ${accountState.account_number} to "${creditMode}"? ` +
+        'Audited in cc_mutations.',
+    );
+    if (!confirmed) return;
+    setCreditSubmitting(true);
+    setCreditMessage('');
+    try {
+      await setSparkmeterCredit(accountState.account_number, creditMode, acctNote.trim() || undefined);
+      const refreshed = await getAccountBillingPriority(accountState.account_number);
+      setAccountState(refreshed);
+      setCreditMode(refreshed.sparkmeter_credit ?? 'auto');
+      setCreditMessage(refreshed.sparkmeter_credit_reason);
+    } catch (err) {
+      setCreditMessage(`Failed: ${(err as Error).message}`);
+    } finally {
+      setCreditSubmitting(false);
+    }
+  };
+
   // ── Render ───────────────────────────────────────────────────────────
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -498,7 +531,6 @@ export default function BillingPriorityPage() {
       </div>
 
       <AutoCutoffCard />
-
       <SiteBillingHoldCard />
 
       {/* ────── Fleet default ────── */}
@@ -724,6 +756,55 @@ export default function BillingPriorityPage() {
                   </button>
                   {acctMessage && (
                     <span className="text-sm text-gray-600">{acctMessage}</span>
+                  )}
+                </div>
+              </fieldset>
+            </form>
+
+            <form
+              onSubmit={handleCreditSubmit}
+              className="border-t border-gray-200 mt-5 pt-4 space-y-3"
+            >
+              <div>
+                <h3 className="text-sm font-semibold text-gray-900">SparkMeter credit</h3>
+                <p className="mt-1 text-sm text-gray-600">
+                  Separate from which meter the balance uses. Automatic keeps ThunderCloud
+                  on at MAK and LAB, where a 1Meter and a SparkMeter are in series, and
+                  skips Koios for a 1Meter-only account. Push forces the credit. Skip
+                  withholds it while the account bills on a 1Meter.
+                </p>
+              </div>
+              <p className="text-sm text-gray-800">{accountState.sparkmeter_credit_reason}</p>
+              <fieldset disabled={creditSubmitting} className="space-y-3">
+                <div className="flex flex-wrap gap-2">
+                  {([
+                    { val: 'auto', label: 'Automatic' },
+                    { val: 'push', label: 'Always credit SparkMeter' },
+                    { val: 'skip', label: '1Meter ledger only' },
+                  ] as { val: SparkmeterCreditMode; label: string }[]).map((opt) => (
+                    <button
+                      key={opt.val}
+                      type="button"
+                      onClick={() => setCreditMode(opt.val)}
+                      className={`px-4 py-2 rounded-md text-sm font-medium border ${
+                        creditMode === opt.val
+                          ? 'bg-blue-600 border-blue-600 text-white'
+                          : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-md text-sm font-semibold bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                  >
+                    {creditSubmitting ? 'Applying…' : 'Apply SparkMeter credit'}
+                  </button>
+                  {creditMessage && (
+                    <span className="text-sm text-gray-600">{creditMessage}</span>
                   )}
                 </div>
               </fieldset>

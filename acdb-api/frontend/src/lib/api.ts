@@ -3343,6 +3343,7 @@ export async function getHealth(): Promise<HealthResponse> {
 // ---------------------------------------------------------------------------
 
 export type BillingPriority = 'sm' | '1m';
+export type SparkmeterCreditMode = 'auto' | 'push' | 'skip';
 
 export interface BillingPrioritySummary {
   fleet_default: BillingPriority;
@@ -3357,6 +3358,10 @@ export interface BillingPriorityForAccount {
   override: BillingPriority | null;
   effective_priority: BillingPriority;
   fleet_default: BillingPriority;
+  /** auto follows the site rule. push forces ThunderCloud/Koios. skip withholds it on a 1Meter. */
+  sparkmeter_credit: SparkmeterCreditMode;
+  sparkmeter_credit_pushes: boolean;
+  sparkmeter_credit_reason: string;
 }
 
 export interface BillingPriorityUpdateResult {
@@ -3387,6 +3392,17 @@ export async function setAccountBillingPriority(
   return request(`/billing-priority/${encodeURIComponent(account_number)}`, {
     method: 'PATCH',
     body: JSON.stringify({ priority, note }),
+  });
+}
+
+export async function setSparkmeterCredit(
+  account_number: string,
+  mode: SparkmeterCreditMode,
+  note?: string,
+): Promise<BillingPriorityForAccount & { status: 'ok' | 'noop'; previous?: SparkmeterCreditMode }> {
+  return request(`/billing-priority/${encodeURIComponent(account_number)}/sparkmeter-credit`, {
+    method: 'PATCH',
+    body: JSON.stringify({ mode, note }),
   });
 }
 

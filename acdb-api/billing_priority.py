@@ -96,6 +96,43 @@ def _fetch_account(cur, account_number: str) -> dict:
     return {"id": int(row[0]), "account_number": str(row[1]), "billing_meter_priority": row[2]}
 
 
+def _sparkmeter_credit_view(cur, account_number: str) -> dict:
+    """Stored toggle plus whether the next payment will credit ThunderCloud/Koios."""
+    from sm_credit_retry import (
+        THUNDERCLOUD_SITES,
+        _koios_skip_priority,
+        _site_from_account,
+        _sparkmeter_credit_override,
+    )
+
+    stored = _sparkmeter_credit_override(cur, account_number)
+    skip = _koios_skip_priority(cur, account_number)
+    site = _site_from_account(account_number)
+    priority = _resolve_billing_priority(cur, account_number)
+    if skip == "steamaco":
+        reason = "SteamaCo accounts are not credited on SparkMeter."
+    elif stored == "push":
+        reason = "This account always credits the SparkMeter."
+    elif priority != "1m" and skip is None:
+        reason = "This account bills on SparkMeter, so the credit is sent."
+    elif stored == "skip":
+        reason = "SparkMeter credit is off while this account bills on a 1Meter."
+    elif site in THUNDERCLOUD_SITES and skip is None:
+        reason = (
+            f"{site} keeps crediting ThunderCloud. "
+            "A 1Meter and a SparkMeter on this site are in series."
+        )
+    elif skip:
+        reason = "This 1Meter account does not credit Koios. The CC ledger is the credit."
+    else:
+        reason = "The SparkMeter credit will be sent."
+    return {
+        "sparkmeter_credit": stored or "auto",
+        "sparkmeter_credit_pushes": skip is None,
+        "sparkmeter_credit_reason": reason,
+    }
+
+
 def _fetch_fleet_default(cur) -> str:
     try:
         cur.execute(
@@ -141,12 +178,96 @@ def get_account_priority(
         cur = conn.cursor()
         acct = _fetch_account(cur, account_number)
         effective = _resolve_billing_priority(cur, account_number)
+        credit = _sparkmeter_credit_view(cur, account_number)
         return {
             "account_number": acct["account_number"],
             "override": acct["billing_meter_priority"],
             "effective_priority": effective,
             "fleet_default": _fetch_fleet_default(cur),
+            **credit,
         }
+
+
+class SparkmeterCreditPayload(BaseModel):
+    """Body for the series-SparkMeter credit toggle."""
+
+    mode: str = Field(description="'auto', 'push', or 'skip'.")
+    note: Optional[str] = Field(default=None, max_length=500)
+
+
+def _validate_credit_mode(value: str) -> Optional[str]:
+    mode = (value or "").strip().lower()
+    if mode == "auto":
+        return None
+    if mode in ("push", "skip"):
+        return mode
+    raise HTTPException(
+        status_code=400,
+        detail="mode must be auto, push, or skip",
+    )
+
+
+@router.patch("/{account_number}/sparkmeter-credit")
+def set_sparkmeter_credit(
+    account_number: str,
+    payload: SparkmeterCreditPayload,
+    user: CurrentUser = Depends(require_employee),
+):
+    """Choose whether payments also credit the series SparkMeter.
+
+    ``auto`` is the site rule: MAK and LAB still push to ThunderCloud when
+    billing is on a 1Meter. ``push`` forces that credit. ``skip`` withholds
+    it for a 1Meter-only account. Audited.
+    """
+    new_value = _validate_credit_mode(payload.mode)
+    try:
+        with get_connection() as conn:
+            cur = conn.cursor()
+            acct = _fetch_account(cur, account_number)
+            from sm_credit_retry import _sparkmeter_credit_override
+
+            old_value = _sparkmeter_credit_override(cur, account_number)
+            if old_value == new_value:
+                credit = _sparkmeter_credit_view(cur, account_number)
+                return {
+                    "status": "noop",
+                    "account_number": account_number,
+                    **credit,
+                }
+
+            cur.execute(
+                "UPDATE accounts SET sparkmeter_credit = %s, updated_at = NOW() "
+                "WHERE account_number = %s",
+                (new_value, account_number),
+            )
+            try_log_mutation(
+                user,
+                "update",
+                "accounts",
+                str(acct["id"]),
+                old_values={"sparkmeter_credit": old_value},
+                new_values={"sparkmeter_credit": new_value},
+                metadata={
+                    "kind": "sparkmeter_credit_change",
+                    "endpoint": "PATCH /api/billing-priority/{account_number}/sparkmeter-credit",
+                    "account_number": account_number,
+                    "note": (payload.note or "").strip()[:500] or None,
+                },
+                conn=conn,
+            )
+            conn.commit()
+            credit = _sparkmeter_credit_view(cur, account_number)
+            return {
+                "status": "ok",
+                "account_number": account_number,
+                "previous": old_value or "auto",
+                **credit,
+            }
+    except HTTPException:
+        raise
+    except psycopg2.Error as exc:
+        logger.error("sparkmeter-credit update failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.patch("/{account_number}")

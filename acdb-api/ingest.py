@@ -730,7 +730,12 @@ def _sms_ingest_credit_sm(
         logger.error("SMS path SM credit raised for %s txn=%s: %s", account_number, txn_id, e)
         return
 
-    if result.get("success"):
+    if result.get("skipped_koios"):
+        logger.info(
+            "SMS path Koios push skipped for %s txn=%s (billing priority %s)",
+            account_number, txn_id, result.get("platform"),
+        )
+    elif result.get("success"):
         sym = COUNTRY.currency_symbol
         logger.info(
             "SMS path SM credit OK for %s %s%.2f → %s",
@@ -797,6 +802,9 @@ async def sms_incoming(request: Request, background_tasks: BackgroundTasks):
 
     **Flow (unchanged for EcoCash):** insert payment into **1PDB** first; only then (unless
     ``SMS_INGEST_PUSH_SPARKMETER=0``) background ``credit_sparkmeter`` — no direct Koios/PHP-only path.
+    A 1Meter-only account skips that push; the ledger row is the credit. MAK and LAB still
+    push to ThunderCloud, because those sites run a 1Meter and a SparkMeter in series.
+    The per-account SparkMeter credit toggle can force either way.
     ``/api/bn/sms/incoming`` is an alias for operators routing ``smsbn.1pwrafrica.com`` behind ``/api/bn``.
     """
     _check_gateway_key(request)

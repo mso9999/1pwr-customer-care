@@ -26,7 +26,8 @@
     "electricityPortion": "Part électricité",
     "debtPortion": "Part dette",
     "smCreditOk": "Crédit SM OK",
-    "smCreditFailed": "Échec du crédit SM"
+    "smCreditFailed": "Échec du crédit SM",
+    "koiosSkipped": "Compte 1Meter — les kWh restent dans le grand livre CC. Koios n'a pas été appelé."
   },
   "validation": {
     "accountRequired": "Le numéro de compte est requis",

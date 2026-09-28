@@ -1,18 +1,22 @@
 {
   "title": "Tariff Management",
-  "subtitle": "Manage global, concession, and customer-level tariff rates",
+  "subtitle": "The country selected in the header is the one these rates apply to.",
   "loading": "Loading tariff data…",
   "mutationLogged": "(logged in mutation history)",
   "global": {
     "title": "Global Rate",
     "update": "Update",
-    "unit": "LSL / kWh",
+    "unit": "{{currency}} / kWh",
+    "updated": "Default rate updated to {{rate}} {{currency}}/kWh",
     "pending": "Pending: {{rate}}",
     "help": "This is the default rate applied when no concession or customer override exists."
   },
   "countryFees": {
-    "title": "Connection & Readyboard Fees",
-    "subtitle": "Country-level one-off fees. Used by the SMS / manual payment classifier.",
+    "title": "{{country}} rates",
+    "subtitle": "Tariff, connection fee, and readyboard fee for this country. New customers pick up the fees. The tariff is the default currency per kWh.",
+    "pickCountry": "Choose Lesotho, Benin, or Zambia in the header. All countries is not a rate you can edit.",
+    "tariff": "Tariff",
+    "tariffPositive": "The tariff must be greater than zero.",
     "edit": "Edit",
     "saved": "Country fees updated.",
     "connection": "Connection fee",
@@ -55,13 +59,15 @@
     "setBy": "Set By",
     "notes": "Notes",
     "actions": "Actions",
-    "pending": "(pending)"
+    "pending": "(pending)",
+    "updated": "{{code}} rate updated to {{rate}} {{currency}}/kWh"
   },
   "customer": {
     "title": "Customer Overrides",
     "titleCount": "Customer Overrides ({{count}})",
     "addOverride": "Add Override",
-    "empty": "No customer rate overrides."
+    "empty": "No customer rate overrides.",
+    "updated": "Customer {{id}} rate updated to {{rate}} {{currency}}/kWh"
   },
   "history": {
     "title": "Tariff Change History",

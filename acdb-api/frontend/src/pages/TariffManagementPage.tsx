@@ -7,16 +7,19 @@ import {
   type TariffCurrentResponse, type TariffHistoryEntry, type CountryFees,
 } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
+import { useCountry } from '../contexts/CountryContext';
 
 const FEE_ADMIN_ROLES = new Set(['superadmin', 'onm_team', 'finance_team']);
 
-function CountryFeesCard() {
+function CountryFeesCard({ onTariffSaved }: { onTariffSaved: () => void }) {
   const { t } = useTranslation(['tariff']);
   const { user } = useAuth();
-  const canEdit = (user?.roles || user?.cc_roles || (user?.role ? [user.role] : [])).some((role) => FEE_ADMIN_ROLES.has(role));
+  const { country, countries } = useCountry();
+  const countryName = countries.find((c) => c.code === country)?.name || country;
+  const canEdit = country !== 'ALL' && (user?.roles || user?.cc_roles || (user?.role ? [user.role] : [])).some((role) => FEE_ADMIN_ROLES.has(role));
   const [fees, setFees] = useState<CountryFees | null>(null);
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState({ connection: 0, readyboard: 0, unmetered: 0, threshold: '' });
+  const [draft, setDraft] = useState({ tariff: 0, connection: 0, readyboard: 0, unmetered: 0, threshold: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -26,6 +29,7 @@ function CountryFeesCard() {
       const data = await getCountryFees();
       setFees(data);
       setDraft({
+        tariff: data.tariff_rate,
         connection: data.connection_fee_amount,
         readyboard: data.readyboard_fee_amount,
         unmetered: data.unmetered_service_fee_amount,
@@ -36,11 +40,16 @@ function CountryFeesCard() {
     }
   }, []);
 
-  useEffect(() => { reload(); }, [reload]);
+  useEffect(() => { reload(); }, [reload, country]);
 
   const handleSave = async () => {
     setSaving(true);
     setError('');
+    if (fees && draft.tariff !== fees.tariff_rate && !(draft.tariff > 0)) {
+      setError(t('tariff:countryFees.tariffPositive'));
+      setSaving(false);
+      return;
+    }
     try {
       await updateCountryFees({
         connection_fee_amount: draft.connection,
@@ -48,6 +57,10 @@ function CountryFeesCard() {
         unmetered_service_fee_amount: draft.unmetered,
         connection_fee_threshold: draft.threshold.trim() === '' ? 0 : Number(draft.threshold),
       });
+      if (fees && draft.tariff > 0 && draft.tariff !== fees.tariff_rate) {
+        await updateGlobalRate(draft.tariff);
+        onTariffSaved();
+      }
       setSuccess(t('tariff:countryFees.saved'));
       setTimeout(() => setSuccess(''), 4000);
       setEditing(false);
@@ -66,9 +79,12 @@ function CountryFeesCard() {
       <div className="flex items-center justify-between mb-3">
         <div>
           <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
-            {t('tariff:countryFees.title')}
+            {t('tariff:countryFees.title', { country: countryName })}
           </h2>
           <p className="text-xs text-gray-400 mt-0.5">{t('tariff:countryFees.subtitle')}</p>
+          {country === 'ALL' && (
+            <p className="text-xs text-amber-700 mt-1">{t('tariff:countryFees.pickCountry')}</p>
+          )}
         </div>
         {canEdit && !editing && (
           <button onClick={() => setEditing(true)}
@@ -87,6 +103,12 @@ function CountryFeesCard() {
 
       {!editing ? (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <div>
+            <span className="text-xs text-gray-400 uppercase tracking-wide">{t('tariff:countryFees.tariff')}</span>
+            <div className="mt-1 text-2xl font-bold text-gray-800 tabular-nums">
+              {fees.tariff_rate} <span className="text-base text-gray-400">{fees.currency}/kWh</span>
+            </div>
+          </div>
           <div>
             <span className="text-xs text-gray-400 uppercase tracking-wide">{t('tariff:countryFees.connection')}</span>
             <div className="mt-1 text-2xl font-bold text-gray-800 tabular-nums">
@@ -116,6 +138,18 @@ function CountryFeesCard() {
         </div>
       ) : (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <label className="block">
+            <span className="text-xs text-gray-500 uppercase tracking-wide">{t('tariff:countryFees.tariff')}</span>
+            <input
+              type="number"
+              step="0.01"
+              min="0.01"
+              value={draft.tariff}
+              onChange={e => setDraft({ ...draft, tariff: Number(e.target.value) })}
+              className="mt-1 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:outline-none"
+            />
+            <span className="text-xs text-gray-400">{fees.currency}/kWh</span>
+          </label>
           <label className="block">
             <span className="text-xs text-gray-500 uppercase tracking-wide">{t('tariff:countryFees.connection')}</span>
             <input
@@ -164,7 +198,7 @@ function CountryFeesCard() {
           <div className="col-span-2 lg:col-span-4 flex justify-end gap-3 pt-1">
             <button
               type="button"
-              onClick={() => { setEditing(false); setDraft({ connection: fees.connection_fee_amount, readyboard: fees.readyboard_fee_amount, unmetered: fees.unmetered_service_fee_amount, threshold: fees.connection_fee_threshold == null ? '' : String(fees.connection_fee_threshold) }); }}
+              onClick={() => { setEditing(false); setDraft({ tariff: fees.tariff_rate, connection: fees.connection_fee_amount, readyboard: fees.readyboard_fee_amount, unmetered: fees.unmetered_service_fee_amount, threshold: fees.connection_fee_threshold == null ? '' : String(fees.connection_fee_threshold) }); }}
               className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800"
             >
               {t('tariff:modal.cancel')}
@@ -678,6 +712,8 @@ function AddOverrideModal({ scope, onSave, onCancel }: AddOverrideModalProps) {
 export default function TariffManagementPage() {
   const { t } = useTranslation(['tariff', 'common']);
   const { canWrite } = useAuth();
+  const { country, config } = useCountry();
+  const currency = config?.currency || (country === 'BN' ? 'XOF' : country === 'ZM' ? 'ZMW' : 'LSL');
   const [data, setData] = useState<TariffCurrentResponse | null>(null);
   const [history, setHistory] = useState<TariffHistoryEntry[]>([]);
   const [historyTotal, setHistoryTotal] = useState(0);
@@ -707,7 +743,7 @@ export default function TariffManagementPage() {
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, [t, country]);
 
   const reloadHistory = useCallback(async () => {
     try {
@@ -735,7 +771,7 @@ export default function TariffManagementPage() {
   const handleGlobalSave = async (rate: number, eff: string, notes: string) => {
     await updateGlobalRate(rate, eff || undefined, notes || undefined);
     setEditGlobal(false);
-    showSuccess(`Global rate updated to ${rate} LSL/kWh`);
+    showSuccess(t('tariff:global.updated', { rate, currency }));
     reload();
     reloadHistory();
   };
@@ -744,7 +780,7 @@ export default function TariffManagementPage() {
     if (!editConcession) return;
     await updateConcessionRate(editConcession, rate, eff || undefined, notes || undefined);
     setEditConcession(null);
-    showSuccess(`${editConcession} rate updated to ${rate} LSL/kWh`);
+    showSuccess(t('tariff:concession.updated', { code: editConcession, rate, currency }));
     reload();
     reloadHistory();
   };
@@ -753,7 +789,7 @@ export default function TariffManagementPage() {
     if (!editCustomer) return;
     await updateCustomerRate(editCustomer, rate, eff || undefined, notes || undefined);
     setEditCustomer(null);
-    showSuccess(`Customer ${editCustomer} rate updated to ${rate} LSL/kWh`);
+    showSuccess(t('tariff:customer.updated', { id: editCustomer, rate, currency }));
     reload();
     reloadHistory();
   };
@@ -761,7 +797,7 @@ export default function TariffManagementPage() {
   const handleAddConcession = async (key: string, rate: number, eff: string, notes: string) => {
     await updateConcessionRate(key, rate, eff || undefined, notes || undefined);
     setAddConcession(false);
-    showSuccess(`Concession ${key} override set to ${rate} LSL/kWh`);
+    showSuccess(t('tariff:concession.updated', { code: key, rate, currency }));
     reload();
     reloadHistory();
   };
@@ -769,7 +805,7 @@ export default function TariffManagementPage() {
   const handleAddCustomer = async (key: string, rate: number, eff: string, notes: string) => {
     await updateCustomerRate(key, rate, eff || undefined, notes || undefined);
     setAddCustomer(false);
-    showSuccess(`Customer ${key} override set to ${rate} LSL/kWh`);
+    showSuccess(t('tariff:customer.updated', { id: key, rate, currency }));
     reload();
     reloadHistory();
   };
@@ -820,6 +856,8 @@ export default function TariffManagementPage() {
         </div>
       )}
 
+      <CountryFeesCard key={country} onTariffSaved={() => { reload(); reloadHistory(); }} />
+
       {data && (
         <div className="bg-white rounded-xl border p-5">
           <div className="flex items-center justify-between mb-2">
@@ -833,11 +871,11 @@ export default function TariffManagementPage() {
           </div>
           <div className="flex items-baseline gap-2">
             <span className="text-4xl font-bold text-blue-700">{data.global_rate}</span>
-            <span className="text-lg text-gray-400">{t('tariff:global.unit')}</span>
+            <span className="text-lg text-gray-400">{t('tariff:global.unit', { currency })}</span>
           </div>
           {data.pending_global && (
             <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm">
-              <span className="font-medium text-amber-700">{t('tariff:global.pending', { rate: `${data.pending_global.rate_lsl} LSL/kWh effective ${fmtDate(data.pending_global.effective_from)}` })}</span>
+              <span className="font-medium text-amber-700">{t('tariff:global.pending', { rate: `${data.pending_global.rate_lsl} ${currency}/kWh effective ${fmtDate(data.pending_global.effective_from)}` })}</span>
               {data.pending_global.notes && <span className="text-gray-500"> -- {data.pending_global.notes}</span>}
             </div>
           )}
@@ -847,11 +885,9 @@ export default function TariffManagementPage() {
         </div>
       )}
 
-      <CountryFeesCard />
+      <LowBalanceKwhCard key={`lb-${country}`} />
 
-      <LowBalanceKwhCard />
-
-      <SmsGatewayBalanceRateCard />
+      <SmsGatewayBalanceRateCard key={`sms-${country}`} />
 
       <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
         {([['overrides', t('tariff:tabs.overrides')], ['history', t('tariff:tabs.history')]] as const).map(([key, label]) => (

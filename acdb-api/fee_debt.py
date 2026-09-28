@@ -1,8 +1,11 @@
 """
 Fee debt allocation for electricity-classified payments.
 
-Stage A: up to 50% of payment toward total fee debt, connection bucket first
-then readyboard. Stage B: ``compute_advance_split`` on the remainder.
+Stage A: fee debt, then the remainder can become prepaid kWh.
+An exact match to the remaining connection balance, the remaining readyboard
+balance, or the sum of both settles that debt in full. Otherwise up to 50%
+of the payment goes to fee debt, connection bucket first then readyboard.
+Stage B: ``compute_advance_split`` on the remainder.
 
 See migration ``029_customer_fee_debt.sql`` and CONTEXT.md fee section.
 """
@@ -90,11 +93,14 @@ def compute_fee_then_advance_split(
     advance: Optional[dict],
     service_enrollment: Optional[dict] = None,
 ) -> dict[str, Any]:
-    """Split an electricity payment: fee cap (50%), then service fee, then advance.
+    """Split an electricity payment: fee debt, then service fee, then advance.
 
-    Order: onboarding fee debt (connection → readyboard, capped at half) →
-    unmetered service-fee debt (``repayment_fraction`` of the remainder, capped
-    at outstanding) → advance split on what is left → electricity.
+    Onboarding fee debt is settled in full when the payment equals the
+    remaining connection balance, the remaining readyboard balance, or both
+    together. A readyboard-only match is applied to readyboard even if
+    connection debt is still open. Otherwise the fee take is capped at half
+    the payment, connection bucket first then readyboard. What remains goes
+    to unmetered service-fee debt, then an advance, then electricity.
 
     Returns keys:
       fee_repayment_portion, service_fee_portion, unmetered_service_id,
@@ -131,26 +137,41 @@ def compute_fee_then_advance_split(
         not bool(fee_debts.get("customer_commissioned"))
         or not bool(fee_debts.get("date_service_connected"))
     )
-    # If this payment exactly settles the remaining onboarding fee debt
-    # (e.g. 501+499 paid as one 1000 transfer), prioritize settling fees first.
+    exact_total = total_debt > 0 and abs(amt - total_debt) <= _FEE_EPS
+    exact_connection = conn_rem > 0 and abs(amt - conn_rem) <= _FEE_EPS
+    exact_readyboard = rb_rem > 0 and abs(amt - rb_rem) <= _FEE_EPS
+    # Exact settlement beats the half cap. A payment equal to one bucket
+    # clears that bucket; a payment equal to both clears both.
+    settle_readyboard_only = False
     if pre_commissioning and total_debt > 0:
         fee_portion = min(amt, total_debt).quantize(Decimal("0.01"))
-    elif total_debt > 0 and abs(amt - total_debt) <= _FEE_EPS:
+    elif exact_total:
         fee_portion = total_debt.quantize(Decimal("0.01"))
+    elif exact_connection:
+        fee_portion = conn_rem.quantize(Decimal("0.01"))
+    elif exact_readyboard:
+        fee_portion = rb_rem.quantize(Decimal("0.01"))
+        settle_readyboard_only = True
     else:
         fee_portion = min(half_cap, total_debt).quantize(Decimal("0.01"))
 
     fee_to_conn = Decimal("0")
     fee_to_rb = Decimal("0")
     left = fee_portion
-    if left > 0 and conn_rem > 0:
-        take = min(left, conn_rem)
-        fee_to_conn = take
-        left -= take
-    if left > 0 and rb_rem > 0:
-        take = min(left, rb_rem)
-        fee_to_rb = take
-        left -= take
+    if settle_readyboard_only:
+        if left > 0 and rb_rem > 0:
+            take = min(left, rb_rem)
+            fee_to_rb = take
+            left -= take
+    else:
+        if left > 0 and conn_rem > 0:
+            take = min(left, conn_rem)
+            fee_to_conn = take
+            left -= take
+        if left > 0 and rb_rem > 0:
+            take = min(left, rb_rem)
+            fee_to_rb = take
+            left -= take
 
     remainder = (amt - fee_portion).quantize(Decimal("0.01"))
     sf_split = compute_service_fee_split(service_enrollment, float(remainder))

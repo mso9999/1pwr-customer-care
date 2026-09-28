@@ -991,7 +991,13 @@ def _maybe_credit_sm(
         summary["error"] = result.get("error")
     if result.get("queued_retry"):
         summary["queued_retry"] = True
-    if not result.get("success"):
+    if result.get("skipped_koios"):
+        summary["skipped_koios"] = True
+        logger.info(
+            "Koios push skipped via CRUD for %s (billing priority %s)",
+            account, result.get("platform"),
+        )
+    elif not result.get("success"):
         logger.warning("SM credit via CRUD failed for %s: %s", account, result.get("error"))
     else:
         logger.info(

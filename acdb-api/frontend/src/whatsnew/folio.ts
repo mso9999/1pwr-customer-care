@@ -37,6 +37,28 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW_FOLIO: WhatsNewEntry[] = [
   {
+    id: 'sparkmeter-credit-and-country-tariff',
+    date: '2026-09-28T23:00:00Z',
+    title: 'SparkMeter credit and country tariff',
+    blurb: 'Choose whether a 1Meter account also credits its SparkMeter, and edit that country’s tariff next to its fees.',
+    pages: [
+      {
+        heading: 'Billing Priority',
+        body:
+          'Look up an account, then set SparkMeter credit.\n\n' +
+          '- Automatic keeps ThunderCloud on at MAK and LAB. Other 1Meter accounts stay on the CC ledger.\n' +
+          '- Always credit forces the SparkMeter send. 1Meter ledger only withholds it while that account bills on a 1Meter.\n' +
+          '- The change is recorded in the mutation log.',
+      },
+      {
+        heading: 'Tariffs and fee payments',
+        body:
+          'Tariffs shows this country’s tariff on the same card as the connection and readyboard fees. Pick the country in the header first. All countries is not an editable rate.\n\n' +
+          'A payment that matches the remaining connection balance, the remaining readyboard balance, or both, settles that debt in full. Any other electricity payment still puts at most half toward fee debt.',
+      },
+    ],
+  },
+  {
     id: 'site-electricity-billing-hold',
     date: '2026-09-28T22:30:00Z',
     title: 'Free supply until inspection',

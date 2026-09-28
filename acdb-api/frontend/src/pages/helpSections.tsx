@@ -521,7 +521,7 @@ function PaymentsContent() {
 
         <SubHead>Ordre de répartition d'un paiement « électricité »</SubHead>
         <Ul>
-          <li><Bold>Étape 1 (dette frais)</Bold> : jusqu'à <Bold>50 %</Bold> du paiement peut d'abord rembourser la dette de frais de raccordement / readyboard restante (raccordement en priorité, puis readyboard).</li>
+          <li><Bold>Étape 1 (dette frais)</Bold> : un paiement égal au solde restant de raccordement, au solde restant de readyboard, ou aux deux ensemble, règle cette dette en entier et ne devient pas des kWh. Sinon, jusqu'à <Bold>50 %</Bold> du paiement rembourse d'abord la dette restante (raccordement en priorité, puis readyboard).</li>
           <li><Bold>Étape 2 (service non compté)</Bold> : si le compte est inscrit au <PageLink to="#unmetered-service">service non compté</PageLink>, une part du reste (par défaut 50 %) rembourse ce forfait mensuel.</li>
           <li><Bold>Étape 3 (avance)</Bold> : sur le montant restant, la <Bold>fraction de remboursement</Bold> de l'avance est appliquée (par défaut 50 %), plafonnée au solde d'avance restant.</li>
           <li><Bold>Étape 4 (financement)</Bold> : sur la portion électricité restante, la logique de financement peut prélever sa part.</li>
@@ -582,7 +582,7 @@ function PaymentsContent() {
 
       <SubHead>Allocation order for an "electricity" payment</SubHead>
       <Ul>
-        <li><Bold>Step 1 (fee debt)</Bold>: up to <Bold>50%</Bold> of the payment may first repay outstanding connection/readyboard fee debt (connection bucket first, then readyboard).</li>
+        <li><Bold>Step 1 (fee debt)</Bold>: a payment equal to the remaining connection balance, the remaining readyboard balance, or both together settles that debt in full and does not become kWh. Otherwise up to <Bold>50%</Bold> of the payment first repays outstanding fee debt (connection bucket first, then readyboard).</li>
         <li><Bold>Step 2 (unmetered service)</Bold>: if the account is enrolled in <PageLink to="#unmetered-service">unmetered service</PageLink>, a share of the remainder (default 50%) pays down that monthly fee.</li>
         <li><Bold>Step 3 (advance)</Bold>: from the remainder, the configured advance repayment fraction is applied (default 50%), capped by remaining advance outstanding.</li>
         <li><Bold>Step 4 (financing)</Bold>: from the remaining electricity slice, financing logic may take its debt portion.</li>
@@ -1088,6 +1088,7 @@ function MetersContent() {
           <li>Les passerelles sous le firmware 1.1.74 sont ignorées.</li>
           <li>« Tous les pays » ne permet pas d'enregistrer. Les clients voient une phrase sur Mon tableau de bord et ne peuvent pas modifier le réglage.</li>
           <li>Les kWh utilisés après crédit zéro, avant que la coupure n'arrive, sont une <Bold>dette énergie</Bold> sur Données clients. Le prochain paiement MoMo d'électricité la rembourse en comblant le trou. Ce n'est pas une deuxième facture.</li>
+          <li><Bold>Crédit SparkMeter</Bold>, sur le même compte : Automatique envoie ThunderCloud à MAK et LAB (1Meter et SparkMeter en série) et laisse le grand livre CC seul pour un compte 1Meter ailleurs. Toujours créditer force l'envoi. Grand livre 1Meter seulement le retient tant que le compte est facturé sur un 1Meter. Chaque changement est au journal des mutations.</li>
         </Ul>
 
         <SubHead>Fourniture gratuite avant inspection (<PageLink to="/billing-priority">/billing-priority</PageLink>)</SubHead>
@@ -1166,6 +1167,7 @@ function MetersContent() {
         <li>Gateways below firmware 1.1.74 are skipped.</li>
         <li>All countries cannot save. Customers see one sentence on My Dashboard and cannot change the switch.</li>
         <li>kWh used after credit hits zero, before cutoff arrives, is <Bold>energy debt</Bold> on Customer Data. The next MoMo electricity payment pays it down by filling that hole. It is not a second charge.</li>
+        <li><Bold>SparkMeter credit</Bold>, on the same account lookup: Automatic still sends ThunderCloud at MAK and LAB, where a 1Meter and a SparkMeter are in series, and leaves the CC ledger as the credit for a 1Meter account elsewhere. Always credit forces the send. 1Meter ledger only withholds it while the account bills on a 1Meter. Each change is in the mutation log.</li>
       </Ul>
 
       <SubHead>Free supply before inspection (<PageLink to="/billing-priority">/billing-priority</PageLink>)</SubHead>

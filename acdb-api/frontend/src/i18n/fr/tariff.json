@@ -1,18 +1,22 @@
 {
   "title": "Gestion des tarifs",
-  "subtitle": "Gérer les tarifs globaux, par concession et par client",
+  "subtitle": "Le pays choisi dans l'en-tête est celui auquel ces taux s'appliquent.",
   "loading": "Chargement des données tarifaires…",
   "mutationLogged": "(enregistré dans l'historique des mutations)",
   "global": {
     "title": "Tarif global",
     "update": "Mettre à jour",
-    "unit": "LSL / kWh",
+    "unit": "{{currency}} / kWh",
+    "updated": "Tarif par défaut mis à jour : {{rate}} {{currency}}/kWh",
     "pending": "En attente : {{rate}}",
     "help": "Tarif par défaut appliqué en l'absence de surcharge par concession ou par client."
   },
   "countryFees": {
-    "title": "Frais de raccordement et de readyboard",
-    "subtitle": "Frais ponctuels par pays. Utilisés par le classifieur de paiements SMS / manuel.",
+    "title": "Taux {{country}}",
+    "subtitle": "Tarif, frais de raccordement et frais de readyboard pour ce pays. Les nouveaux clients prennent ces frais. Le tarif est le prix par défaut par kWh.",
+    "pickCountry": "Choisissez le Lesotho, le Bénin ou la Zambie dans l'en-tête. « Tous les pays » n'est pas un taux modifiable.",
+    "tariff": "Tarif",
+    "tariffPositive": "Le tarif doit être supérieur à zéro.",
     "edit": "Modifier",
     "saved": "Frais pays mis à jour.",
     "connection": "Frais de raccordement",
@@ -55,13 +59,15 @@
     "setBy": "Défini par",
     "notes": "Notes",
     "actions": "Actions",
-    "pending": "(en attente)"
+    "pending": "(en attente)",
+    "updated": "{{code}} : tarif mis à jour à {{rate}} {{currency}}/kWh"
   },
   "customer": {
     "title": "Surcharges par client",
     "titleCount": "Surcharges par client ({{count}})",
     "addOverride": "Ajouter une surcharge",
-    "empty": "Aucune surcharge tarifaire par client."
+    "empty": "Aucune surcharge tarifaire par client.",
+    "updated": "Client {{id}} : tarif mis à jour à {{rate}} {{currency}}/kWh"
   },
   "history": {
     "title": "Historique des modifications tarifaires",
