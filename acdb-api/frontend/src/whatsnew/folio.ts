@@ -116,6 +116,20 @@ export const WHATS_NEW_FOLIO: WhatsNewEntry[] = [
     ],
   },
   {
+    id: 'nexus-skips-login-chooser',
+    date: '2026-09-28',
+    title: 'Nexus opens Customer Care as staff',
+    blurb: 'Launching Customer Care from Nexus signs you in as an employee and skips the customer / employee / committee chooser.',
+    pages: [
+      {
+        heading: 'From Nexus you are already staff',
+        body:
+          'Open Customer Care from Nexus and you land in the tool as an employee. The customer, employee, and committee sign-in page is for opening this site directly.\n\n' +
+          'Sign out if you want that page. It is also at the Customer Care address when you have not come from Nexus.',
+      },
+    ],
+  },
+  {
     id: 'fleet-map-install-offline-firmware',
     date: '2026-09-22',
     title: 'Meter map shows install date, offline since, and firmware',

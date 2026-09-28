@@ -3,6 +3,7 @@ import { Link, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 import { useCountry } from '../contexts/CountryContext';
+import { clearNexusEntry } from '../lib/nexusEntry';
 import WhatsNewGate from './WhatsNewGate';
 
 interface NavItemDef {
@@ -130,7 +131,9 @@ export default function Layout() {
 
   const handleLogout = () => {
     logout();
-    navigate('/login');
+    // Leaving the tool on purpose shows the direct sign-in page.
+    clearNexusEntry();
+    navigate('/login?direct=1');
   };
 
   const isActive = (to: string) =>

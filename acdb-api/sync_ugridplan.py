@@ -3025,17 +3025,41 @@ def _get_iot():
     return boto3.client("iot", region_name=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"))
 
 
+def _thing_connectivity(thing_name: str) -> Optional[Dict[str, Any]]:
+    """Fleet-index connectivity for one Thing, not limited to a site prefix."""
+    thing = (thing_name or "").strip()
+    if not thing:
+        return None
+    try:
+        iot = _get_iot()
+        resp = iot.search_index(queryString=f"thingName:{thing}")
+        for t in resp.get("things", []):
+            if t.get("thingName") != thing:
+                continue
+            conn = t.get("connectivity", {}) or {}
+            return {"connected": bool(conn.get("connected")), "ts": conn.get("timestamp")}
+    except Exception as e:
+        logger.warning("thing connectivity lookup failed for %s: %s", thing, e)
+    return None
+
+
 def gateway_function_state(site_code: str, thing_name: str) -> Dict[str, Any]:
     """Live gateway function state from the fleet index (the gateway's own MQTT
     connection to the cloud — independent of whether it has read any meter).
 
     state: online (connected or contact <24h) | recent (<72h) | offline | never
     (no connectivity record) | unknown (no Thing given).
+
+    The site-prefixed index misses a Thing whose name is outside that site
+    (SAM looked up while commissioning SIN). Fall back to the Thing itself
+    so a live gateway is not reported as never.
     """
     thing = (thing_name or "").strip()
     if not thing:
         return {"state": "unknown", "connected": False, "age_h": None}
-    info = _gw_connectivity(site_code.strip().upper()).get(thing)
+    info = _gw_connectivity((site_code or "").strip().upper()).get(thing)
+    if not info:
+        info = _thing_connectivity(thing)
     if not info:
         return {"state": "never", "connected": False, "age_h": None}
     ts = info.get("ts") or 0

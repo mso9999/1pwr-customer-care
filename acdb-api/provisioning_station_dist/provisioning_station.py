@@ -499,7 +499,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(500, {"error": str(e)})
 
         if self.path == "/api/scan-softap":
-            ip = (body.get("ip") or "192.168.4.1").strip()
+            ip = (body.get("ip") or "192.168.5.1").strip()
             try:
                 status = probe_device(ip, timeout=3.0)
                 if status is None:

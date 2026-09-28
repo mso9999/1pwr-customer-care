@@ -44,21 +44,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (token) {
+    let cancelled = false;
+    const requested = token;
+    if (requested) {
+      setLoading(true);
       getMe()
         .then((data) => {
-          setUser(data as unknown as User);
+          if (!cancelled) setUser(data as unknown as User);
         })
         .catch(() => {
+          // A stale /auth/me from the previous token must not wipe a Nexus
+          // SSO session that landed while this request was in flight.
+          if (cancelled) return;
+          if (localStorage.getItem('cc_token') !== requested) return;
           localStorage.removeItem('cc_token');
           localStorage.removeItem('cc_user');
           setToken(null);
           setUser(null);
         })
-        .finally(() => setLoading(false));
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
     } else {
       setLoading(false);
     }
+    return () => {
+      cancelled = true;
+    };
   }, [token]);
 
   const login = (newToken: string, newUser: User) => {

@@ -1,6 +1,7 @@
 import { Navigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
+import { isNexusEntry, markNexusEntry, nexusAuthorizeUrl } from '../lib/nexusEntry';
 
 interface Props {
   children: React.ReactNode;
@@ -23,6 +24,14 @@ export default function ProtectedRoute({ children, requireEmployee, requireRole,
   if (!user) {
     const path = window.location.pathname;
     const params = new URLSearchParams(window.location.search);
+    const returnPath = (path === '/' ? '/dashboard' : path) + window.location.search;
+    // Arriving from Nexus already means this person is an employee. Do not
+    // show the customer/employee chooser; finish the staff sign-on.
+    if (isNexusEntry()) {
+      markNexusEntry();
+      window.location.replace(nexusAuthorizeUrl(returnPath));
+      return null;
+    }
     // Customers aren't Nexus users: keep the local login for the root and
     // customer area, and as an emergency fallback (?fallback=1, e.g. Nexus
     // outage). Staff deep links go straight to Nexus, which SSOs back to
@@ -31,13 +40,7 @@ export default function ProtectedRoute({ children, requireEmployee, requireRole,
     if (customerFriendly || params.get('fallback') === '1') {
       return <Navigate to="/login" replace />;
     }
-    window.location.replace(
-      'https://nexus.1pwrafrica.com/sso/authorize?tool=cc&redirect_uri=' +
-        encodeURIComponent(
-          'https://cc.1pwrafrica.com/auth/sso?return=' +
-            encodeURIComponent(path + window.location.search)
-        )
-    );
+    window.location.replace(nexusAuthorizeUrl(returnPath));
     return null;
   }
 

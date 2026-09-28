@@ -1,3 +1,12 @@
+## 2026-09-28 — Cursor — Ship Nexus sign-in and SoftAP station UI; seal local leftovers
+- Nexus arrival no longer shows the customer / employee / committee chooser. Staff handoff finishes SSO. Logout and `/login?direct=1` still open the local sign-in page. A stale `/auth/me` cannot wipe a token that landed while it was in flight. What’s New id `nexus-skips-login-chooser`, ship date 2026-09-28.
+- Provisioning station page offers SoftAP probe at `192.168.5.1` (`1Meter_<last6>` / `1Meter00`) when the gateway is not on the 1Meter LAN. `POST /api/scan-softap` default IP is now `192.168.5.1` to match that firmware. Repoint Wi-Fi stays on its own field.
+- Dashboard generation diagram: larger PV and genset nodes, icons on the left. No data change.
+- Sealed, not committed: `acdb-api/cc_auth.db` (`git update-index --skip-worktree`; undo with `--no-skip-worktree`). Moved `CONTEXT_SYNC_FROM_LAPTOP_2026-09-25.md` and `firebase-service-account.json.dead-2cec6286` into gitignored `_local_archive/`. Gitignore now covers `firebase-service-account.json*` and `CONTEXT_SYNC*.md`.
+- Side effects: CC main push deploys the frontend and the station bundle. No DB writes, no secrets committed.
+- Key files: `acdb-api/frontend/src/lib/nexusEntry.ts`, auth pages, `provisioning_station_dist/static/index.html`, `provisioning_station.py`, `DashboardPage.tsx`.
+- Follow-ups: none for these leftovers. Confirm a Nexus launch lands on the dashboard, and a SoftAP probe reaches `192.168.5.1`.
+
 ## 2026-09-28 — Cursor — SMS inbox, WhatsApp bridge page, and four deferred fixes
 - SMS inbox at `/sms-inbox` for the sidebar country. All-countries asks the operator to pick one country. Readers are `operate_customer_care` plus existing SMS-format editors. Replay stays on `/admin/sms-formats?tab=unprocessed`. Benin `POST /replay` returns each row skipped unless `SMS_BN_REPLAY_CREDIT_ENABLED` is on; it does not follow `meter_credit_enabled`. Low-balance SMS stay off.
 - Optional installation threshold on Tariffs (`system_config.connection_fee_threshold`, unset until set; 0 clears). Migration `073_connection_fee_threshold_exempt.sql` adds `accounts.fee_threshold_exempt`. The threshold classifies an amount at or above it as a connection fee unless the account is exempt or the fee is already verified. Exact-amount matching still runs. Only fee admins can set the exempt flag, from the inbox.

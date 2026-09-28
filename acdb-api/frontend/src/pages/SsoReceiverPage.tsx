@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { nexusSsoLogin } from '../lib/api';
 import i18n from '../i18n';
+import { markNexusEntry, nexusAuthorizeUrl } from '../lib/nexusEntry';
 
 /**
  * Nexus SSO receiver (route: /auth/sso).
@@ -25,14 +26,16 @@ export default function SsoReceiverPage() {
 
     const params = new URLSearchParams(window.location.search);
     const token = params.get('sso_token');
-    const from = params.get('from');
     // Same-site path to resume after sign-in (guard against open redirect).
     const rawReturn = params.get('return') || '/dashboard';
     const returnTo =
       rawReturn.startsWith('/') && !rawReturn.startsWith('//') ? rawReturn : '/dashboard';
 
-    if (!token || from !== 'nexus') {
-      setError('Invalid sign-on link.');
+    // This route exists only for the Nexus staff handoff. Without a token,
+    // finish that handoff instead of showing the customer/employee chooser.
+    markNexusEntry();
+    if (!token) {
+      window.location.replace(nexusAuthorizeUrl(returnTo));
       return;
     }
 
@@ -62,12 +65,12 @@ export default function SsoReceiverPage() {
             <p className="text-red-600 mb-3">{error}</p>
             <p className="text-gray-500 text-sm">
               Relaunch Customer Care from{' '}
-              <a href="https://nexus.1pwrafrica.com" className="text-blue-600 underline">
+              <a href={nexusAuthorizeUrl('/dashboard')} className="text-blue-600 underline">
                 Nexus
-              </a>{' '}
-              or{' '}
-              <a href="/login?fallback=1" className="text-blue-600 underline">
-                sign in manually
+              </a>
+              . To use the customer, committee, or staff-PIN sign-in on this site,{' '}
+              <a href="/login?direct=1" className="text-blue-600 underline">
+                open the direct sign-in page
               </a>
               .
             </p>

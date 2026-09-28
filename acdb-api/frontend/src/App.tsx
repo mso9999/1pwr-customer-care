@@ -58,10 +58,18 @@ import CustomerCohortPage from './pages/CustomerCohortPage';
 import ProvisioningPage from './pages/ProvisioningPage';
 import SiteRegistryPage from './pages/SiteRegistryPage';
 import MeterConnectivityPage from './pages/MeterConnectivityPage';
+import { isNexusEntry, nexusAuthorizeUrl } from './lib/nexusEntry';
+
 function HomeRedirect() {
   const { user, loading } = useAuth();
   if (loading) return null;
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) {
+    if (isNexusEntry()) {
+      window.location.replace(nexusAuthorizeUrl('/dashboard'));
+      return null;
+    }
+    return <Navigate to="/login" replace />;
+  }
   if (user.user_type === 'customer') return <Navigate to="/my/dashboard" replace />;
   if (user.user_type === 'registrar') return <Navigate to="/customers/new" replace />;
   return <Navigate to="/dashboard" replace />;

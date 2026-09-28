@@ -11,6 +11,11 @@ auth_info_baileys/
 .DS_Store
 .dropbox_cache/
 firebase-service-account.json
+firebase-service-account.json*
+
+# Laptop context snapshots and retired local files. Not application source.
+CONTEXT_SYNC*.md
+_local_archive/
 
 # Local SSH keys (e.g. CC EC2). Copy EOver.pem into .secrets/ yourself — never commit keys.
 .secrets/**

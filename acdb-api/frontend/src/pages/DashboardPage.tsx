@@ -268,23 +268,23 @@ export default function DashboardPage() {
             </div>
           </div>
           <div className="border rounded-xl bg-gray-50 p-2 overflow-hidden">
-            <svg viewBox="0 -76 860 436" className="w-full h-[220px] sm:h-[260px]">
+            <svg viewBox="0 -40 860 356" className="w-full h-[220px] sm:h-[260px]">
               <defs>
                 <marker id="dashArrowHead" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto" markerUnits="strokeWidth">
                   <path d="M0,0 L8,4 L0,8 z" fill="currentColor" />
                 </marker>
               </defs>
 
-              <line x1="164" y1="69" x2="360" y2="119" stroke="#d1d5db" strokeWidth="3" />
-              <line x1="164" y1="223" x2="360" y2="119" stroke="#d1d5db" strokeWidth="3" />
-              <line x1="504" y1="119" x2="690" y2="119" stroke="#d1d5db" strokeWidth="3" />
-              <line x1="432" y1="242" x2="432" y2="152" stroke="#d1d5db" strokeWidth="3" />
+              <line x1="270" y1="50" x2="420" y2="119" stroke="#d1d5db" strokeWidth="3" />
+              <line x1="270" y1="210" x2="420" y2="119" stroke="#d1d5db" strokeWidth="3" />
+              <line x1="564" y1="119" x2="710" y2="119" stroke="#d1d5db" strokeWidth="3" />
+              <line x1="492" y1="242" x2="492" y2="152" stroke="#d1d5db" strokeWidth="3" />
 
               {aggregatePvActive && (
                 <line
-                  x1="164"
-                  y1="69"
-                  x2="360"
+                  x1="270"
+                  y1="50"
+                  x2="420"
                   y2="119"
                   stroke="#eab308"
                   strokeWidth="6"
@@ -294,9 +294,9 @@ export default function DashboardPage() {
               )}
               {aggregateGensetActive && (
                 <line
-                  x1="164"
-                  y1="223"
-                  x2="360"
+                  x1="270"
+                  y1="210"
+                  x2="420"
                   y2="119"
                   stroke="#ef4444"
                   strokeWidth="6"
@@ -306,9 +306,9 @@ export default function DashboardPage() {
               )}
               {aggregateLoadActive && (
                 <line
-                  x1="504"
+                  x1="564"
                   y1="119"
-                  x2="690"
+                  x2="710"
                   y2="119"
                   stroke="#0ea5e9"
                   strokeWidth="6"
@@ -318,9 +318,9 @@ export default function DashboardPage() {
               )}
               {aggregateBatteryActive && (
                 <line
-                  x1="432"
+                  x1="492"
                   y1="242"
-                  x2="432"
+                  x2="492"
                   y2="152"
                   stroke="#22c55e"
                   strokeWidth="6"
@@ -330,31 +330,35 @@ export default function DashboardPage() {
                 />
               )}
 
-              <FlowBubble x={226} y={76} value={fmtKw(aggregateFlow.pv_kw)} color="#eab308" />
-              <FlowBubble x={226} y={170} value={fmtKw(aggregateFlow.genset_kw)} color="#ef4444" />
-              <FlowBubble x={552} y={103} value={fmtKw(aggregateFlow.load_kw)} color="#0ea5e9" />
-              <FlowBubble x={446} y={198} value={fmtKw(Math.abs(aggregateFlow.battery_kw ?? 0))} color="#22c55e" />
+              <FlowBubble x={297} y={71} value={fmtKw(aggregateFlow.pv_kw)} color="#eab308" />
+              <FlowBubble x={297} y={150} value={fmtKw(aggregateFlow.genset_kw)} color="#ef4444" />
+              <FlowBubble x={589} y={103} value={fmtKw(aggregateFlow.load_kw)} color="#0ea5e9" />
+              <FlowBubble x={506} y={183} value={fmtKw(Math.abs(aggregateFlow.battery_kw ?? 0))} color="#22c55e" />
 
               <NodeBox
-                x={20}
-                y={36}
+                x={110}
+                y={-10}
+                width={160}
+                height={120}
+                iconScale={4}
                 kind="pv"
-                iconPlacement="top"
-                iconOffsetY={12}
+                iconPlacement="left"
                 label="PV"
                 lines={[`Now ${fmtKw(aggregateFlow.pv_kw)}`]}
               />
               <NodeBox
-                x={20}
-                y={190}
+                x={110}
+                y={150}
+                width={160}
+                height={120}
+                iconScale={4}
                 kind="genset"
-                iconPlacement="bottom"
-                iconOffsetY={-16}
+                iconPlacement="left"
                 label="Genset"
                 lines={[`Now ${fmtKw(aggregateFlow.genset_kw)}`]}
               />
               <NodeBox
-                x={360}
+                x={420}
                 y={86}
                 kind="inverter"
                 iconPlacement="top"
@@ -362,7 +366,7 @@ export default function DashboardPage() {
                 lines={[`Residual ${fmtKw(aggregateFlow.balance_residual_kw)}`]}
               />
               <NodeBox
-                x={690}
+                x={710}
                 y={86}
                 kind="load"
                 iconPlacement="top"
@@ -370,7 +374,7 @@ export default function DashboardPage() {
                 lines={[`Now ${fmtKw(aggregateFlow.load_kw)}`]}
               />
               <NodeBox
-                x={360}
+                x={420}
                 y={242}
                 kind="battery"
                 iconPlacement="right"
@@ -1007,6 +1011,9 @@ function NodeBox({
   iconBatteryState,
   iconOffsetX = 0,
   iconOffsetY = 0,
+  width = 144,
+  height = 66,
+  iconScale = 3,
 }: {
   x: number;
   y: number;
@@ -1017,22 +1024,41 @@ function NodeBox({
   iconBatteryState?: BatteryIconState;
   iconOffsetX?: number;
   iconOffsetY?: number;
+  width?: number;
+  height?: number;
+  iconScale?: number;
 }) {
-  const iconScale = 3;
   const iconHalf = 11 * iconScale;
-  const iconCxBase = iconPlacement === 'right' ? 214 : iconPlacement === 'left' ? -70 : 72;
-  const iconCyBase = iconPlacement === 'top' ? -72 : iconPlacement === 'bottom' ? 138 : 33;
+  const iconCxBase = iconPlacement === 'right'
+    ? width + 70
+    : iconPlacement === 'left'
+      ? -(iconHalf + 6)
+      : width / 2;
+  const iconCyBase = iconPlacement === 'top'
+    ? -72
+    : iconPlacement === 'bottom'
+      ? height + 72
+      : height / 2;
   const iconCx = iconCxBase + iconOffsetX;
   const iconCy = iconCyBase + iconOffsetY;
+  // Taller boxes get proportionally larger, vertically centred text.
+  const textScale = height / 66;
+  const labelSize = 10 * Math.min(textScale, 1.5);
+  const lineSize = 12 * Math.min(textScale, 1.5);
+  const lineGap = lineSize + 4;
+  const blockHeight = labelSize + 8 + lines.length * lineGap;
+  const labelY = height > 66 ? (height - blockHeight) / 2 + labelSize : 19;
+  const firstLineY = height > 66 ? labelY + 8 + lineSize : 38;
+  const textX = height > 66 ? 16 : 10;
   return (
     <g transform={`translate(${x},${y})`}>
-      <rect rx="8" ry="8" width="144" height="66" fill="#ffffff" stroke="#4b5563" strokeWidth="2" />
+      <rect rx="8" ry="8" width={width} height={height} fill="#ffffff" stroke="#4b5563" strokeWidth="2" />
       <g transform={`translate(${iconCx - iconHalf},${iconCy - iconHalf}) scale(${iconScale})`}>
         <FlowIcon kind={kind} batteryState={iconBatteryState} />
       </g>
-      <text x="10" y="19" fontSize="10" fill="#6b7280">{label}</text>
+      <text x={textX} y={labelY} fontSize={labelSize} fill="#6b7280">{label}</text>
       {lines.map((line, idx) => (
-        <text key={line + idx} x="10" y={38 + idx * 16} fontSize="12" fill="#111827">{line}</text>
+        <text key={line + idx} x={textX} y={firstLineY + idx * lineGap} fontSize={lineSize} fill="#111827">{line}</text>
       ))}
     </g>
   );

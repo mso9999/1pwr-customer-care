@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 import { employeeLogin, customerLogin, customerRegister, registrarLogin } from '../lib/api';
+import { clearNexusEntry, isNexusEntry, markNexusEntry, nexusAuthorizeUrl } from '../lib/nexusEntry';
 
 type Mode = 'employee' | 'customer' | 'register' | 'registrar';
 
@@ -16,6 +17,25 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+  // ?direct=1 is the explicit bypass (logout, or "sign in on this site").
+  // A Nexus handoff must not render the customer/employee chooser.
+  const direct = new URLSearchParams(window.location.search).get('direct') === '1';
+  const nexusHandoff = !direct && isNexusEntry();
+
+  useEffect(() => {
+    if (direct) {
+      clearNexusEntry();
+      return;
+    }
+    if (!nexusHandoff) return;
+    markNexusEntry();
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('sso_token')) {
+      window.location.replace(`/auth/sso${window.location.search}`);
+      return;
+    }
+    window.location.replace(nexusAuthorizeUrl('/dashboard'));
+  }, [direct, nexusHandoff]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,6 +68,14 @@ export default function LoginPage() {
       setLoading(false);
     }
   };
+
+  if (nexusHandoff) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 flex items-center justify-center p-4">
+        <p className="text-gray-500">{t('pleaseWait')}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100 flex items-center justify-center p-4">
@@ -83,10 +111,7 @@ export default function LoginPage() {
           {mode === 'employee' && (
             <>
               <a
-                href={
-                  'https://nexus.1pwrafrica.com/sso/authorize?tool=cc&redirect_uri=' +
-                  encodeURIComponent('https://cc.1pwrafrica.com/auth/sso?return=/dashboard')
-                }
+                href={nexusAuthorizeUrl('/dashboard')}
                 className="block w-full py-2.5 bg-slate-800 text-white rounded-lg font-medium text-center hover:bg-slate-700 transition"
               >
                 Continue with Nexus (1PWR staff)

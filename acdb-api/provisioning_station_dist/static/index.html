@@ -33,6 +33,7 @@
   .mono { font-family:ui-monospace,Menlo,Consolas,monospace; }
   .err { background:#fef2f2; border:1px solid #fecaca; color:#991b1b; padding:10px; border-radius:8px; margin-bottom:12px; white-space:pre-wrap; }
   .row { display:flex; gap:14px; flex-wrap:wrap; }
+  .checkbox-row { display:flex; align-items:center; gap:6px; font-size:13px; }
   .row > div { flex:1; min-width:180px; }
   .bar { height:8px; background:#e5e7eb; border-radius:999px; overflow:hidden; }
   .bar > span { display:block; height:100%; background:var(--b); width:0; transition:width .3s; }
@@ -95,9 +96,24 @@
     <!-- DETECT + ASSIGN -->
     <div id="tab-detect">
       <div class="card">
-        <div class="row" style="align-items:flex-end">
+        <div id="lanScanRow" class="row" style="align-items:flex-end">
           <div><label>Provisioning subnet(s) — comma-separated (auto-detected; includes laptop hotspot)</label><input id="subnet" /></div>
           <div style="flex:0 0 auto"><button class="primary" id="scanBtn" onclick="scan()">Scan for gateways</button></div>
+        </div>
+
+        <div id="softapScanRow" class="row hide" style="align-items:flex-end">
+          <div><label>Gateway IP (192.168.5.1 on its own Wi-Fi)</label><input id="softapIp" value="192.168.5.1" /></div>
+          <div style="flex:0 0 auto"><button class="primary" id="softapScanBtn" onclick="scanSoftap()">Probe SoftAP device</button></div>
+        </div>
+
+        <div id="softapFallback" style="margin-top:10px;padding:8px 12px;background:#fffbeb;border-radius:8px;border:1px solid #fcd34d">
+          <b>Gateway not on 1Meter?</b>
+          <p class="muted" style="margin:6px 0">Join the gateway's own Wi-Fi instead. The name is <span class="mono">1Meter_</span> plus the last 6 characters of the MAC on the board (example <span class="mono">1Meter_27d7c1</span>), password <span class="mono">1Meter00</span>. Then choose SoftAP below and probe <span class="mono">192.168.5.1</span>. The laptop still needs another connection to reach CC (phone hotspot or tether). One gateway at a time.</p>
+          <div class="checkbox-row" style="margin-bottom:0">
+            <label class="checkbox-row" style="margin:0"><input type="radio" name="provMode" value="lan" checked onchange="onModeChange()"> LAN (batch)</label>
+            <label class="checkbox-row" style="margin:0"><input type="radio" name="provMode" value="softap" onchange="onModeChange()"> SoftAP (single device)</label>
+          </div>
+          <p id="softapNote" class="muted hide" style="margin:8px 0 0;font-size:12px">Laptop is on the gateway hotspot. Probe 192.168.5.1, then assign as usual.</p>
         </div>
 
         <div class="row" style="align-items:flex-end;margin-top:12px">
@@ -488,10 +504,40 @@ async function scan(){
   }catch(e){ showError(e.message); }
   finally{ btn.disabled=false; btn.textContent='Scan for gateways'; }
 }
+function onModeChange(){
+  const mode = document.querySelector('input[name="provMode"]:checked').value;
+  document.getElementById('lanScanRow').classList.toggle('hide', mode!=='lan');
+  document.getElementById('softapScanRow').classList.toggle('hide', mode!=='softap');
+  document.getElementById('softapNote').classList.toggle('hide', mode!=='softap');
+  SCAN = [];
+  document.getElementById('gwTable').classList.add('hide');
+  document.getElementById('assignCard').classList.add('hide');
+  document.getElementById('elimCard').classList.add('hide');
+  document.getElementById('scanInfo').textContent = '';
+}
+async function scanSoftap(){
+  clearError();
+  const btn=document.getElementById('softapScanBtn'); btn.disabled=true; btn.textContent='Probing…';
+  const ip = document.getElementById('softapIp').value.trim() || '192.168.5.1';
+  document.getElementById('scanInfo').textContent = 'Probing device at ' + ip + '…';
+  try{
+    const r = await api('/api/scan-softap','POST',{ip});
+    SCAN = r.gateways || [];
+    if(r.note) document.getElementById('scanInfo').textContent = r.note;
+    renderScan();
+  }catch(e){ showError(e.message); }
+  finally{ btn.disabled=false; btn.textContent='Probe SoftAP device'; }
+}
 function renderScan(){
   const t=document.getElementById('gwTable'), b=document.getElementById('gwBody');
-  document.getElementById('scanInfo').textContent = `${SCAN.length} device(s) responded on the provisioning network.`;
-  if(!SCAN.length){ t.classList.add('hide'); document.getElementById('assignCard').classList.add('hide'); document.getElementById('elimCard').classList.add('hide'); return; }
+  if(!SCAN.length){
+    t.classList.add('hide');
+    document.getElementById('assignCard').classList.add('hide');
+    document.getElementById('elimCard').classList.add('hide');
+    document.getElementById('scanInfo').innerHTML = 'No gateway on the 1Meter network. Join its own Wi-Fi <span class="mono">1Meter_</span> + last 6 of the MAC, password <span class="mono">1Meter00</span>, choose SoftAP, and probe <span class="mono">192.168.5.1</span>.';
+    return;
+  }
+  document.getElementById('scanInfo').textContent = `${SCAN.length} device(s) responded.`;
   t.classList.remove('hide');
   b.innerHTML = SCAN.map((g,i)=>{
     const virgin = !g.has_runtime_tls;
