@@ -1519,6 +1519,85 @@ export async function getFleetMapOta(thingName: string): Promise<FleetMapOta> {
   return request<FleetMapOta>(`/provisioning/fleet-map/ota?thing_name=${encodeURIComponent(thingName)}`);
 }
 
+export interface FirmwareLibraryEntry {
+  version: string;
+  artifact_key: string;
+  artifact_version_id: string;
+  selectable: boolean;
+}
+
+export interface FirmwareTargetGateway {
+  thing_name: string;
+  site_code: string;
+  meter_ids: string[];
+  current_fw: string | null;
+  action: string;
+}
+
+export interface FirmwareTargetPreview {
+  gateways: FirmwareTargetGateway[];
+  skipped: { meter_id?: string; thing_name?: string | null; reason: string }[];
+  rollback: boolean;
+  target_version: string | null;
+}
+
+export interface FirmwareTargetQueue {
+  rows: {
+    id: number;
+    batch_id: string;
+    site_code: string;
+    thing_name: string;
+    target_version: string;
+    status: string;
+    detail?: string | null;
+  }[];
+  pending: number;
+  active: { thing_name: string; site_code: string; target_version: string }[];
+  held: number;
+}
+
+export async function getFirmwareLibrary(): Promise<{ versions: FirmwareLibraryEntry[] }> {
+  return request('/provisioning/ota-target/library');
+}
+
+export async function previewFirmwareTarget(meterIds: string[], targetVersion?: string): Promise<FirmwareTargetPreview> {
+  return request('/provisioning/ota-target/preview', {
+    method: 'POST',
+    body: JSON.stringify({ meter_ids: meterIds, target_version: targetVersion || null }),
+  });
+}
+
+export async function enqueueFirmwareTarget(
+  meterIds: string[],
+  targetVersion: string,
+  confirmVersion?: string,
+): Promise<{ batch_id: string; queued: { thing_name: string }[]; skipped: { thing_name?: string; reason: string }[] }> {
+  return request('/provisioning/ota-target', {
+    method: 'POST',
+    body: JSON.stringify({
+      meter_ids: meterIds,
+      target_version: targetVersion,
+      confirm_version: confirmVersion || null,
+    }),
+  });
+}
+
+export async function getFirmwareTargetQueue(batchId?: string): Promise<FirmwareTargetQueue> {
+  const qs = batchId ? `?batch_id=${encodeURIComponent(batchId)}` : '';
+  return request(`/provisioning/ota-target/queue${qs}`);
+}
+
+export async function cancelFirmwareTarget(body: { batch_id?: string; site_code?: string }): Promise<{ canceled: string[] }> {
+  return request('/provisioning/ota-target/cancel', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export async function resumeFirmwareTarget(siteCode: string): Promise<{ resumed: string[] }> {
+  return request('/provisioning/ota-target/resume', {
+    method: 'POST',
+    body: JSON.stringify({ site_code: siteCode }),
+  });
+}
+
 export async function getFirmwareHistory(meterId: string): Promise<{ meter_id: string; readings: number; history: FirmwareHistoryEntry[] }> {
   return request(`/provisioning/fleet-map/firmware-history?meter_id=${encodeURIComponent(meterId)}`);
 }

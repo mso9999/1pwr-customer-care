@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { getFleetMap, type FleetMapMeter, type FleetMapResult } from '../lib/api';
+import { getFleetMap, getFleetMapOta, type FleetMapMeter, type FleetMapOta, type FleetMapResult } from '../lib/api';
 import FirmwareHistory from './FirmwareHistory';
 import { formatLastSeen } from '../lib/datetime';
 
@@ -91,11 +92,61 @@ interface FleetMapProps {
   onSiteChange?: (site: string) => void;
   /** Meter serial to zoom to and open (e.g. after a successful assign). */
   focusMeterId?: string | null;
+  selectedIds?: ReadonlySet<string>;
+  canTargetFirmware?: boolean;
+  onToggleMeter?: (meterId: string) => void;
+  onSelectMeters?: (meterIds: string[]) => void;
+  onTargetMeter?: (meterId: string) => void;
+}
+
+/** Live download for the gateway this meter reports through. Polls only while open. */
+function MeterOta({ thingName }: { thingName: string }) {
+  const [ota, setOta] = useState<FleetMapOta | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      getFleetMapOta(thingName)
+        .then((row) => { if (!cancelled) { setOta(row); setError(''); } })
+        .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); });
+    };
+    load();
+    const timer = window.setInterval(load, 15000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [thingName]);
+
+  if (error) return <div className="text-xs text-gray-400 mt-1">OTA status unavailable</div>;
+  if (!ota?.in_flight) return null;
+  const pct = Math.max(0, Math.min(100, ota.percent ?? 0));
+  const queued = ota.status === 'QUEUED';
+  const blocks = ota.blocks_total
+    ? `${ota.blocks_received ?? 0}/${ota.blocks_total} blocks`
+    : '';
+  return (
+    <div className="mt-1.5">
+      <div className="text-xs text-gray-700">
+        OTA{ota.target_version ? ` → ${ota.target_version}` : ''} · {queued ? 'queued' : 'downloading'}
+      </div>
+      <div className="mt-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+        <div className="h-full bg-blue-600" style={{ width: `${pct}%` }} />
+      </div>
+      <div className="text-[11px] text-gray-500">
+        {queued ? 'Starts when the gateway next connects' : `${pct}%${blocks ? ` · ${blocks}` : ''}`}
+      </div>
+    </div>
+  );
 }
 
 const normSerial = (s: string) => s.replace(/^0+/, '') || s;
 
-export default function FleetMap({ site, sites, onSiteChange, focusMeterId }: FleetMapProps) {
+export default function FleetMap({
+  site, sites, onSiteChange, focusMeterId,
+  selectedIds, canTargetFirmware, onToggleMeter, onSelectMeters, onTargetMeter,
+}: FleetMapProps) {
+  const { t } = useTranslation('meters');
+  const [selectMode, setSelectMode] = useState(false);
+  const [openMeterId, setOpenMeterId] = useState<string | null>(null);
   const [data, setData] = useState<FleetMapResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -243,6 +294,24 @@ export default function FleetMap({ site, sites, onSiteChange, focusMeterId }: Fl
               Hybrid
             </button>
           </div>
+          {canTargetFirmware && (
+            <>
+              <button
+                type="button"
+                onClick={() => setSelectMode((on) => !on)}
+                className={`px-2 py-1 rounded border ${selectMode ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-200'}`}
+              >
+                {t('selectMode')}
+              </button>
+              <button
+                type="button"
+                onClick={() => onSelectMeters?.((data?.meters || []).map((m) => m.meter_id))}
+                className="px-2 py-1 rounded border border-gray-200 bg-white text-gray-600"
+              >
+                {site ? t('selectAllSite') : t('selectAllOnMap')}
+              </button>
+            </>
+          )}
           {colorMode === 'status' && (
             <>
               <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-full bg-green-600" /> online / reporting ({data?.online ?? 0})</span>
@@ -358,20 +427,26 @@ export default function FleetMap({ site, sites, onSiteChange, focusMeterId }: Fl
                   : colorMode === 'firmware'
                     ? fill
                     : statusFill;
-              const weight = colorMode === 'hybrid'
+              const picked = Boolean(selectedIds?.has(m.meter_id));
+              const weight = picked ? 5 : colorMode === 'hybrid'
                 ? (isFocus ? 6 : 4)
                 : (isFocus ? 4 : (m.linked ? 3.5 : 1.5));
               return (
                 <CircleMarker
-                  key={`${m.meter_id}-${colorMode}-${fill}-${stroke}`}
+                  key={`${m.meter_id}-${colorMode}-${fill}-${stroke}-${picked ? 1 : 0}`}
                   ref={(r) => { markerRefs.current[m.meter_id] = r; }}
                   center={[m.lat, m.lng]}
-                  radius={isFocus ? 11 : 7}
+                  radius={isFocus || picked ? 11 : 7}
                   pathOptions={{
-                    color: isFocus && colorMode !== 'hybrid' && colorMode !== 'installed' ? '#2563eb' : stroke,
+                    color: picked || (isFocus && colorMode !== 'hybrid' && colorMode !== 'installed') ? '#2563eb' : stroke,
                     fillColor: fill,
                     fillOpacity: 0.85,
                     weight,
+                  }}
+                  eventHandlers={{
+                    click: () => { if (selectMode) onToggleMeter?.(m.meter_id); },
+                    popupopen: () => setOpenMeterId(m.meter_id),
+                    popupclose: () => setOpenMeterId((cur) => (cur === m.meter_id ? null : cur)),
                   }}
                 >
                   <Popup>
@@ -407,6 +482,16 @@ export default function FleetMap({ site, sites, onSiteChange, focusMeterId }: Fl
                         </div>
                       )}
                       <div className="text-xs text-gray-600">FW {m.fw_version || '—'}</div>
+                      {canTargetFirmware && (
+                        <button
+                          type="button"
+                          className="mt-1 text-xs text-blue-600 hover:underline"
+                          onClick={() => onTargetMeter?.(m.meter_id)}
+                        >
+                          {t('updateFirmware')}
+                        </button>
+                      )}
+                      {openMeterId === m.meter_id && m.thing_name && <MeterOta thingName={m.thing_name} />}
                       {m.last_seen && <div className="text-xs text-gray-400">last seen {formatLastSeen(m.last_seen)}</div>}
                       {m.linked && <FirmwareHistory meterId={m.meter_id} />}
                     </div>

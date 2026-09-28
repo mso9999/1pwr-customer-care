@@ -543,6 +543,9 @@ def ensure_meter_provisioning_table():
                     updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
             """)
+            from ota_target import QUEUE_TABLE_SQL
+            for statement in QUEUE_TABLE_SQL:
+                cur.execute(statement)
             conn.commit()
     except Exception as exc:  # noqa: BLE001 - never block app startup
         logger.error("meter_provisioning table init failed: %s", exc)
@@ -2818,6 +2821,242 @@ def _iso_stamp(value):
         return value.isoformat()
     text = str(value).strip()
     return text or None
+
+
+def _version_from_ota_id(ota_id: str) -> Optional[str]:
+    """``1m1176-MAK-GW-…`` → ``1.1.76``. Used when the OTA record cannot be read."""
+    match = re.match(r"1m(\d)(\d)(\d+)", ota_id or "")
+    if not match:
+        return None
+    return f"{match.group(1)}.{match.group(2)}.{match.group(3)}"
+
+
+def fleet_map_ota_for_thing(iot, thing_name: str) -> dict:
+    """In-flight AWS IoT job for one gateway, including download percent.
+
+    Jobs created outside CC (the rollout runner) are included. Only QUEUED and
+    IN_PROGRESS count as in flight. ``list_job_executions_for_thing`` is not
+    ordered, so the newest active execution wins.
+    """
+    resp = iot.list_job_executions_for_thing(thingName=thing_name, maxResults=20)
+    active = []
+    for item in resp.get("executionSummaries") or []:
+        summary = item.get("jobExecutionSummary") or {}
+        if summary.get("status") not in ("QUEUED", "IN_PROGRESS"):
+            continue
+        updated = summary.get("lastUpdatedAt") or summary.get("queuedAt")
+        active.append((str(updated or ""), item))
+    if not active:
+        return {"thing_name": thing_name, "in_flight": False}
+    active.sort(key=lambda pair: pair[0], reverse=True)
+    item = active[0][1]
+    summary = item.get("jobExecutionSummary") or {}
+    job_id = str(item.get("jobId") or "")
+    status = summary.get("status")
+    percent = 0 if status == "QUEUED" else None
+    blocks_received = None
+    blocks_total = None
+    if status == "IN_PROGRESS" and job_id:
+        try:
+            det = iot.describe_job_execution(jobId=job_id, thingName=thing_name)["execution"]
+            details = (det.get("statusDetails") or {}).get("detailsMap") or {}
+            if details.get("percent") is not None:
+                percent = int(details["percent"])
+            if details.get("blocks_received") is not None:
+                blocks_received = int(details["blocks_received"])
+            if details.get("blocks_total") is not None:
+                blocks_total = int(details["blocks_total"])
+        except Exception:  # noqa: BLE001 - the bar still renders without a percent
+            pass
+        if percent is None:
+            percent = 0
+    target_version = None
+    ota_id = job_id[len("AFR_OTA-"):] if job_id.startswith("AFR_OTA-") else ""
+    if ota_id:
+        try:
+            info = iot.get_ota_update(otaUpdateId=ota_id).get("otaUpdateInfo") or {}
+            target_version = ((info.get("files") or [{}])[0] or {}).get("fileVersion")
+        except Exception:  # noqa: BLE001
+            target_version = None
+        if not target_version:
+            target_version = _version_from_ota_id(ota_id)
+    return {
+        "thing_name": thing_name,
+        "in_flight": True,
+        "job_id": job_id,
+        "status": status,
+        "target_version": target_version,
+        "percent": percent,
+        "blocks_received": blocks_received,
+        "blocks_total": blocks_total,
+    }
+
+
+@router.get("/fleet-map/ota")
+def fleet_map_ota(
+    thing_name: str,
+    _user: CurrentUser = Depends(require_employee),
+):
+    """Live OTA progress for the gateway behind a meter-map popup."""
+    thing = (thing_name or "").strip()
+    if not re.match(r"^[A-Za-z0-9_-]{1,128}$", thing):
+        raise HTTPException(status_code=400, detail="Invalid thing name.")
+    try:
+        return fleet_map_ota_for_thing(_client("iot"), thing)
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Unable to read OTA progress: {exc}") from exc
+
+
+class OtaTargetPreviewBody(BaseModel):
+    meter_ids: list[str] = Field(default_factory=list, max_length=5000)
+    target_version: Optional[str] = None
+
+
+class OtaTargetBody(BaseModel):
+    meter_ids: list[str] = Field(default_factory=list, max_length=5000)
+    target_version: str
+    confirm_version: Optional[str] = None
+
+
+class OtaTargetCancelBody(BaseModel):
+    batch_id: Optional[str] = None
+    site_code: Optional[str] = None
+
+
+class OtaTargetResumeBody(BaseModel):
+    site_code: str
+
+
+def _ota_target_preview(body: OtaTargetPreviewBody) -> dict:
+    import ota_target
+    from customer_api import get_connection
+
+    if not body.meter_ids:
+        raise HTTPException(status_code=400, detail="Select at least one meter.")
+    with get_connection() as conn:
+        resolved = ota_target.resolve_meters(conn.cursor(), _client("dynamodb"), body.meter_ids)
+    version = (body.target_version or "").strip() or None
+    return ota_target.build_preview(resolved, version)
+
+
+@router.get("/ota-target/library")
+def ota_target_library(_user: CurrentUser = Depends(CC_OPERATE_GATE)):
+    """Fleet images in S3. Does not read or change the site release rows."""
+    import ota_target
+    try:
+        versions = ota_target.library_from_s3(_client("s3"))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Unable to list firmware: {exc}") from exc
+    return {"versions": versions}
+
+
+@router.post("/ota-target/preview")
+def ota_target_preview(
+    body: OtaTargetPreviewBody,
+    _user: CurrentUser = Depends(CC_OPERATE_GATE),
+):
+    return _ota_target_preview(body)
+
+
+@router.post("/ota-target")
+def ota_target_enqueue(
+    body: OtaTargetBody,
+    user: CurrentUser = Depends(CC_OPERATE_GATE),
+):
+    """Queue selected meters for one firmware version. One online gateway per site."""
+    import ota_target
+    from customer_api import get_connection
+
+    version = body.target_version.strip()
+    try:
+        images = ota_target.library_from_s3(_client("s3"))
+        artifact = ota_target.artifact_for_version(images, version)
+        preview = _ota_target_preview(OtaTargetPreviewBody(
+            meter_ids=body.meter_ids, target_version=version,
+        ))
+        planned = ota_target.rows_to_queue(preview, artifact, body.confirm_version)
+    except ota_target.TargetRefused as exc:
+        raise HTTPException(status_code=400, detail=exc.detail) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=502, detail=f"Unable to prepare the firmware target: {exc}") from exc
+    if not planned:
+        raise HTTPException(status_code=400, detail="Nothing to queue. Every selected gateway was skipped.")
+    with get_connection() as conn:
+        result = ota_target.enqueue(conn, planned, user.user_id)
+        try:
+            try_log_mutation(
+                user, "create", "onemeter_ota_queue", result["batch_id"],
+                new_values={
+                    "target_version": version,
+                    "queued": [row["thing_name"] for row in result["queued"]],
+                },
+            )
+            conn.commit()
+        except Exception:  # noqa: BLE001
+            logger.warning("OTA target mutation log failed for %s", result["batch_id"])
+    skipped = list(result["skipped"])
+    for gateway in preview["gateways"]:
+        if gateway["action"] in ("too_old", "already", "no_gateway"):
+            skipped.append({
+                "thing_name": gateway["thing_name"],
+                "reason": gateway["action"],
+                "meter_ids": gateway["meter_ids"],
+            })
+    skipped.extend(preview["skipped"])
+    try:
+        ota_target.advance_once()
+    except Exception:  # noqa: BLE001
+        logger.exception("OTA target advance after enqueue failed")
+    result["skipped"] = skipped
+    return result
+
+
+@router.get("/ota-target/queue")
+def ota_target_queue(
+    batch_id: Optional[str] = None,
+    _user: CurrentUser = Depends(CC_OPERATE_GATE),
+):
+    import ota_target
+    from customer_api import get_connection
+
+    with get_connection() as conn:
+        return ota_target.queue_status(conn, batch_id)
+
+
+@router.post("/ota-target/cancel")
+def ota_target_cancel(
+    body: OtaTargetCancelBody,
+    _user: CurrentUser = Depends(CC_OPERATE_GATE),
+):
+    import ota_target
+    from customer_api import get_connection
+
+    try:
+        with get_connection() as conn:
+            return ota_target.cancel_queue(
+                conn, _client("iot"), batch_id=body.batch_id, site_code=body.site_code,
+            )
+    except ota_target.TargetRefused as exc:
+        raise HTTPException(status_code=400, detail=exc.detail) from exc
+
+
+@router.post("/ota-target/resume")
+def ota_target_resume(
+    body: OtaTargetResumeBody,
+    _user: CurrentUser = Depends(CC_OPERATE_GATE),
+):
+    import ota_target
+    from customer_api import get_connection
+
+    with get_connection() as conn:
+        result = ota_target.resume_site(conn, body.site_code)
+    try:
+        ota_target.advance_once()
+    except Exception:  # noqa: BLE001
+        logger.exception("OTA target advance after resume failed")
+    return result
 
 
 @router.get("/fleet-map")

@@ -1,0 +1,137 @@
+"""Operator firmware targeting: library, dedupe, and one-at-a-time queue rules."""
+
+import os
+from datetime import datetime, timezone
+
+os.environ.setdefault("CC_JWT_SECRET", "unit-test-secret")
+os.environ.setdefault("CC_OTA_TARGET_ADVANCE", "0")
+
+import ota_target as ot
+
+
+def _ver(key, version_id, when, is_delete=False):
+    return {
+        "Key": key,
+        "VersionId": version_id,
+        "LastModified": when,
+        "IsDeleteMarker": is_delete,
+    }
+
+
+def test_library_keeps_fleet_images_and_blocks_baseline():
+    older = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    newer = datetime(2026, 9, 28, tzinfo=timezone.utc)
+    images = ot.fleet_images_from_versions([
+        _ver("firmware-releases/v1.1.76/Fleet1176/FeaturedFreeRTOSIoTIntegration.bin", "old", older),
+        _ver("firmware-releases/v1.1.76/Fleet1176/FeaturedFreeRTOSIoTIntegration.bin", "new", newer),
+        _ver("firmware-releases/v1.1.62/SIN-GW-0001/FeaturedFreeRTOSIoTIntegration.bin", "thing", newer),
+        _ver("firmware-releases/v1.1.56/Fleet1156/FeaturedFreeRTOSIoTIntegration.bin", "base", newer),
+        _ver("firmware-releases/v1.1.77/Fleet1177/FeaturedFreeRTOSIoTIntegration.bin", "next", newer),
+        _ver("firmware-releases/v1.1.71/Fleet1171/FeaturedFreeRTOSIoTIntegration.bin", "gone", newer, is_delete=True),
+    ])
+    by_version = {row["version"]: row for row in images}
+    assert set(by_version) == {"1.1.77", "1.1.76", "1.1.56"}
+    assert by_version["1.1.76"]["artifact_version_id"] == "new"
+    assert by_version["1.1.77"]["selectable"] is True
+    assert by_version["1.1.56"]["selectable"] is False
+    assert images[0]["version"] == "1.1.77"
+
+
+def test_preview_dedupes_meters_on_one_gateway():
+    preview = ot.build_preview([
+        {"meter_id": "23022613", "thing_name": "MAK-GW-0196", "fw_version": "1.1.74", "site": "MAK"},
+        {"meter_id": "23022614", "thing_name": "MAK-GW-0196", "fw_version": "1.1.74", "site": "MAK"},
+        {"meter_id": "23020001", "thing_name": None, "fw_version": None, "site": "MAK"},
+    ], "1.1.77")
+    assert len(preview["gateways"]) == 1
+    assert preview["gateways"][0]["meter_ids"] == ["23022613", "23022614"]
+    assert preview["gateways"][0]["action"] == "update"
+    assert preview["skipped"][0]["reason"] == "no_gateway"
+
+
+def test_rollback_above_baseline_is_allowed_when_confirmed():
+    preview = ot.build_preview([
+        {"meter_id": "1", "thing_name": "KOT-GW-0006", "fw_version": "1.1.76", "site": "KOT"},
+    ], "1.1.71")
+    assert preview["rollback"] is True
+    artifact = {
+        "version": "1.1.71",
+        "selectable": True,
+        "artifact_key": "firmware-releases/v1.1.71/Fleet1171/FeaturedFreeRTOSIoTIntegration.bin",
+        "artifact_version_id": "v71",
+    }
+    try:
+        ot.rows_to_queue(preview, artifact, None)
+        raise AssertionError("rollback without confirmation should be refused")
+    except ot.TargetRefused:
+        pass
+    queued = ot.rows_to_queue(preview, artifact, "1.1.71")
+    assert queued[0]["thing_name"] == "KOT-GW-0006"
+    assert queued[0]["target_version"] == "1.1.71"
+
+
+def test_baseline_firmware_is_refused():
+    preview = ot.build_preview([
+        {"meter_id": "1", "thing_name": "MAK-GW-0016", "fw_version": "1.1.56", "site": "MAK"},
+    ], "1.1.76")
+    assert preview["gateways"][0]["action"] == "too_old"
+    artifact = {
+        "version": "1.1.76",
+        "selectable": True,
+        "artifact_key": "k",
+        "artifact_version_id": "v",
+    }
+    assert ot.rows_to_queue(preview, artifact, None) == []
+    try:
+        ot.rows_to_queue(preview, {**artifact, "version": "1.1.56", "selectable": False}, None)
+        raise AssertionError("1.1.56 must not be selectable")
+    except ot.TargetRefused:
+        pass
+
+
+def test_one_online_gateway_per_site_and_offline_waits():
+    rows = [
+        {"id": 1, "site_code": "MAK", "thing_name": "MAK-GW-0196", "status": "pending", "created_at": "1"},
+        {"id": 2, "site_code": "MAK", "thing_name": "MAK-GW-0191", "status": "pending", "created_at": "2"},
+        {"id": 3, "site_code": "KOT", "thing_name": "KOT-GW-0006", "status": "pending", "created_at": "1"},
+    ]
+    online = {"MAK-GW-0196", "MAK-GW-0191", "KOT-GW-0006"}
+    starts = ot.plan_advance(rows, online, set())
+    assert [row["thing_name"] for row in starts] == ["MAK-GW-0196", "KOT-GW-0006"]
+    assert ot.plan_advance(rows, set(), set()) == []
+    held_back = ot.plan_advance(rows, online, {"MAK"})
+    assert [row["thing_name"] for row in held_back] == ["KOT-GW-0006"]
+    busy = rows + [{
+        "id": 9, "site_code": "MAK", "thing_name": "MAK-GW-0085", "status": "active", "created_at": "0",
+    }]
+    blocked = ot.plan_advance(busy, online, set())
+    assert [row["thing_name"] for row in blocked] == ["KOT-GW-0006"]
+
+
+def test_create_is_one_thing_and_does_not_touch_site_releases():
+    kwargs = ot.operator_ota_kwargs(
+        ota_id="1m-target-1-1-77-MAK-GW-0196-20260928220000",
+        thing="MAK-GW-0196",
+        site="MAK",
+        version="1.1.77",
+        bucket="1pwr-ota-firmware",
+        key="firmware-releases/v1.1.77/Fleet1177/FeaturedFreeRTOSIoTIntegration.bin",
+        version_id="abc",
+    )
+    assert kwargs["targets"] == [
+        "arn:aws:iot:us-east-1:758201218523:thing/MAK-GW-0196"
+    ]
+    assert kwargs["targetSelection"] == "SNAPSHOT"
+    assert kwargs["files"][0]["attributes"]["workflow"] == "operator_target"
+    assert kwargs["files"][0]["codeSigning"]["startSigningJobParameter"]["destination"]["s3Destination"]["prefix"] == (
+        "signed/operator-target/1.1.77"
+    )
+    blob = ot.INSERT_SQL + "".join(ot.QUEUE_TABLE_SQL)
+    assert "onemeter_ota_site_releases" not in blob
+
+
+def test_already_on_target_is_skipped():
+    preview = ot.build_preview([
+        {"meter_id": "1", "thing_name": "MAK-GW-0196", "fw_version": "1.1.76", "site": "MAK"},
+    ], "1.1.76")
+    assert preview["gateways"][0]["action"] == "already"

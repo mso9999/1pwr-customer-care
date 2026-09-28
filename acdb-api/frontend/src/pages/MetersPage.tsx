@@ -18,12 +18,13 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import CountryPill from '../components/CountryPill';
 import FleetMap from '../components/FleetMap';
+import { FirmwareQueueLine, FirmwareTargetDialog } from '../components/FirmwareTargetDialog';
 import RolloutWarnings from '../components/RolloutWarnings';
 import { SitePtbGapWarnings } from '../components/PtbGapWarning';
 import { UGPConnectionPicker } from './CommissionCustomerPage';
 import UGPPolePicker from '../components/UGPPolePicker';
 
-type ModalKind = 'decommission' | 'history' | 'override' | 'edit' | null;
+type ModalKind = 'decommission' | 'history' | 'override' | 'edit' | 'firmware' | null;
 interface Site { concession: string; country?: string | null }
 
 export default function MetersPage() {
@@ -41,7 +42,9 @@ export default function MetersPage() {
   const [filterStatus, setFilterStatus] = useState('');
   const [sites, setSites] = useState<Site[]>([]);
   const [loading, setLoading] = useState(true);
-  const { canWriteCustomers } = useAuth();
+  const { canWriteCustomers, hasPrivilegeAction } = useAuth();
+  const canOperate = hasPrivilegeAction('operate_customer_care');
+  const canSelect = canWriteCustomers || canOperate;
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -68,6 +71,7 @@ export default function MetersPage() {
   const [siteGateways, setSiteGateways] = useState<string[]>([]);
   const [ptbResult, setPtbResult] = useState<AssignPtbResult | null>(null);
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
+  const [firmwareIds, setFirmwareIds] = useState<string[]>([]);
   const [focusMeterId, setFocusMeterId] = useState<string | null>(null);
   const [showUGPPicker, setShowUGPPicker] = useState(false);
   const [showPolePicker, setShowPolePicker] = useState(false);
@@ -188,6 +192,43 @@ export default function MetersPage() {
       return next;
     });
   }, []);
+
+  const selectAllMatching = async () => {
+    setBusy(true);
+    try {
+      const filters: Record<string, string> = {};
+      if (filterSite) filters.community = filterSite;
+      if (filterPlatform) filters.platform = filterPlatform;
+      if (filterStatus) filters.status = filterStatus;
+      const ids: string[] = [];
+      let pageN = 1;
+      let pages = 1;
+      while (pageN <= pages) {
+        const res = await listRows('meters', {
+          page: pageN,
+          limit: 500,
+          search: search || undefined,
+          filters,
+          linked: filterLinked ? 'true' : undefined,
+          filter_country: !filterSite && filterCountry ? filterCountry : undefined,
+        });
+        pages = res.pages;
+        for (const row of res.rows) {
+          const id = String(row['meter_id'] ?? '');
+          if (id) ids.push(id);
+        }
+        pageN += 1;
+      }
+      setSelected(new Set(ids));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openFirmware = (ids: string[]) => {
+    setFirmwareIds(ids);
+    setModal('firmware');
+  };
 
   const toggleAll = useCallback(() => {
     setSelected(prev => {
@@ -471,16 +512,38 @@ export default function MetersPage() {
           />
           1Meter linked
         </label>
+        {canOperate && (
+          <button
+            type="button"
+            onClick={selectAllMatching}
+            disabled={busy}
+            className="px-3 py-2 border rounded-lg text-sm bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            {t('meters:selectAllMatching')}
+          </button>
+        )}
       </div>
 
-      {canWriteCustomers && selected.size > 0 && (
+      {canOperate && <FirmwareQueueLine />}
+
+      {canSelect && selected.size > 0 && (
         <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl px-4 py-3">
           <span className="text-sm font-medium text-blue-800">
             {t('meters:metersSelected', { count: selected.size })}
           </span>
           <div className="flex gap-2">
             <button onClick={() => setSelected(new Set())} className="px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 rounded-lg transition">{t('meters:clear')}</button>
-            <button
+            {canOperate && (
+              <button
+                type="button"
+                onClick={() => openFirmware([...selected])}
+                disabled={busy}
+                className="px-3 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                {t('meters:updateFirmware')}
+              </button>
+            )}
+            {canWriteCustomers && <button
               onClick={() => { setDecommReason('faulty'); setDecommReplacement(''); setDecommNotes(''); setModal('decommission'); }}
               disabled={busy}
               className="px-3 py-1.5 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 transition flex items-center gap-1.5"
@@ -489,7 +552,7 @@ export default function MetersPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
               </svg>
               {t('meters:decommission')}
-            </button>
+            </button>}
           </div>
         </div>
       )}
@@ -885,12 +948,25 @@ export default function MetersPage() {
         </div>
       )}
 
+      {modal === 'firmware' && (
+        <FirmwareTargetDialog
+          meterIds={firmwareIds}
+          onClose={() => setModal(null)}
+          onQueued={() => setSelected(new Set())}
+        />
+      )}
+
       {viewMode === 'map' ? (
         <FleetMap
           site={filterSite || undefined}
           sites={visibleSites}
           onSiteChange={(s) => { setFilterSite(s); setFilterPlatform(''); setFilterStatus(''); }}
           focusMeterId={focusMeterId}
+          selectedIds={selected}
+          canTargetFirmware={canOperate}
+          onToggleMeter={toggleOne}
+          onSelectMeters={(ids) => setSelected(new Set(ids))}
+          onTargetMeter={(id) => openFirmware([id])}
         />
       ) : loading || busy ? (
         <div className="text-center py-8 text-gray-400">{busy ? t('meters:processing') : t('meters:loading')}</div>
@@ -902,7 +978,7 @@ export default function MetersPage() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b">
                 <tr>
-                  {canWriteCustomers && (
+                  {canSelect && (
                     <th className="px-3 py-3 w-10">
                       <input type="checkbox" checked={allSelected} onChange={toggleAll} className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
                     </th>
@@ -931,7 +1007,7 @@ export default function MetersPage() {
                   const isSelected = selected.has(mid);
                   return (
                     <tr key={i} className={`hover:bg-gray-50 ${isSelected ? 'bg-blue-50' : ''}`}>
-                      {canWriteCustomers && (
+                      {canSelect && (
                         <td className="px-3 py-2">
                           <input type="checkbox" checked={isSelected} onChange={() => toggleOne(mid)} className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500" />
                         </td>
@@ -1003,7 +1079,7 @@ export default function MetersPage() {
           </div>
 
           <div className="md:hidden space-y-2">
-            {canWriteCustomers && data.rows.length > 0 && (
+            {canSelect && data.rows.length > 0 && (
               <button onClick={toggleAll} className="text-sm text-blue-600 font-medium px-1 py-1">
                 {allSelected ? t('meters:deselectAll') : t('meters:selectAll')}
               </button>
@@ -1021,7 +1097,7 @@ export default function MetersPage() {
               return (
                 <div key={i} className={`bg-white rounded-lg shadow p-4 ${isSelected ? 'ring-2 ring-blue-400' : ''}`}>
                   <div className="flex items-start gap-3">
-                    {canWriteCustomers && (
+                    {canSelect && (
                       <input type="checkbox" checked={isSelected} onChange={() => toggleOne(mid)} className="w-4 h-4 mt-1 rounded border-gray-300 text-blue-600 focus:ring-blue-500 shrink-0" />
                     )}
                     <div className="flex-1 min-w-0">

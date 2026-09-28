@@ -10,14 +10,14 @@
 - The queue starts one online gateway per site and waits if that site already has a download, including a job the rollout runner started. Offline gateways stay pending. A failure holds the rest of that site until Resume. This does not write `onemeter_ota_site_releases`, so factory Promote still ships the site release.
 - IAM on `cc-postgres-backup-role` inline policy `cc-1meter-provisioning`, about 20:40 UTC: added `iot:CancelJob` and `s3:ListBucket` on `1pwr-ota-firmware` for prefix `firmware-releases/*`. Previous policy saved at `/tmp/cc-1meter-provisioning.json`.
 - Tests: `tests/test_ota_target_queue.py` — 7 passed.
-- Side effects: IAM policy change above. Not committed and not deployed. The meters page at cc.1pwrafrica.com does not show this until a push to main. Migration `078_onemeter_ota_queue.sql` runs on that deploy.
+- Side effects: this push to `main` deploys to https://cc.1pwrafrica.com. Migration `078_onemeter_ota_queue.sql` runs on deploy. IAM (`iot:CancelJob`, `s3:ListBucket` on `firmware-releases/*`) was applied about 20:40 UTC and is already live. Factory site-release rows are not changed.
 - Key files: `acdb-api/ota_target.py`, `acdb-api/meter_provisioning.py`, `acdb-api/frontend/src/pages/MetersPage.tsx`, `acdb-api/frontend/src/components/FleetMap.tsx`, `acdb-api/frontend/src/components/FirmwareTargetDialog.tsx`.
 
 ## 2026-09-28 — Cursor — Meter map shows in-flight OTA progress
 - Clicking a meter on the meters map looks up that gateway's current AWS IoT job and, while it is queued or downloading, shows the target version and a progress bar. Queued reads as 0% until the gateway connects. The bar polls every 15 seconds only while that popup is open. Jobs created by the rollout runner are included; this does not write `meter_provisioning`.
 - `GET /api/provisioning/fleet-map/ota?thing_name=` uses the same employee gate as the map. Percent comes from the job execution's block count.
 - Tests: `tests/test_fleet_map_ota.py` — 3 passed.
-- Side effects: none. Not committed and not deployed. The live map at cc.1pwrafrica.com does not show this until a push to main.
+- Side effects: this push to `main` deploys the map progress bar to https://cc.1pwrafrica.com. No DB writes.
 - Key files: `acdb-api/meter_provisioning.py`, `acdb-api/frontend/src/components/FleetMap.tsx`, `acdb-api/frontend/src/lib/api.ts`.
 
 ## 2026-09-28 — Cursor — Site electricity-billing hold
