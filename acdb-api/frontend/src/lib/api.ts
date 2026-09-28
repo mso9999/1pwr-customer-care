@@ -3367,6 +3367,8 @@ export async function setFleetBillingPriority(
 
 export interface CountryFees {
   connection_fee_amount: number;
+  /** Optional installation threshold. Null when unset. Amounts at or above it classify as a connection fee. */
+  connection_fee_threshold: number | null;
   readyboard_fee_amount: number;
   /** Monthly flat service fee for connected-but-unmetered accounts (0 disables enrollment). */
   unmetered_service_fee_amount: number;
@@ -3442,6 +3444,7 @@ export async function updateCountryFees(
     Pick<
       CountryFees,
       | 'connection_fee_amount'
+      | 'connection_fee_threshold'
       | 'readyboard_fee_amount'
       | 'unmetered_service_fee_amount'
       | 'low_balance_kwh_threshold'
@@ -5458,4 +5461,62 @@ export async function replaySmsUnprocessed(body: { log_ids: number[]; allow_poss
   results: Array<{ log_id: number; status: string; reason?: string; outcome?: string | null; transaction_id?: number | null }>;
 }> {
   return request('/admin/sms-formats/replay', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export interface SmsInboundRow {
+  id: number;
+  received_at: string | null;
+  gateway_msg_id: string | null;
+  sender: string | null;
+  content: string | null;
+  country_code: string | null;
+  parsed_ok: boolean | null;
+  account_number: string | null;
+  amount: number | null;
+  receipt_key: string | null;
+  outcome: string | null;
+  error: string | null;
+  transaction_id: number | null;
+}
+
+export async function getSmsInboundLog(params: {
+  account?: string;
+  outcome?: string;
+  limit?: number;
+} = {}): Promise<{ rows: SmsInboundRow[]; note?: string }> {
+  const q = new URLSearchParams();
+  if (params.account) q.set('account', params.account);
+  if (params.outcome) q.set('outcome', params.outcome);
+  q.set('limit', String(params.limit ?? 200));
+  return request(`/sms/inbound-log?${q.toString()}`);
+}
+
+export async function getSmsPhoneMeters(phone: string): Promise<{ phone: string; accounts: string[]; note?: string }> {
+  return request(`/sms/phone-meters?phone=${encodeURIComponent(phone)}`);
+}
+
+export async function getFeeThresholdExempt(account: string): Promise<{ account_number: string; exempt: boolean }> {
+  return request(`/sms/fee-threshold-exempt?account=${encodeURIComponent(account)}`);
+}
+
+export async function setFeeThresholdExempt(account_number: string, exempt: boolean): Promise<{ account_number: string; exempt: boolean }> {
+  return request('/sms/fee-threshold-exempt', {
+    method: 'PUT',
+    body: JSON.stringify({ account_number, exempt }),
+  });
+}
+
+export interface WhatsAppBridgeStatus {
+  configured: boolean;
+  country_code: string;
+  linked: boolean | null;
+  qr: string | null;
+  pairing_code: string | null;
+  tracker_group: string | null;
+  reachable?: boolean;
+  detail?: string | null;
+}
+
+export async function getWhatsAppBridge(): Promise<WhatsAppBridgeStatus> {
+  return request('/admin/whatsapp-bridge');
 }

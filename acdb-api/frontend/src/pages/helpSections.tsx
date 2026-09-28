@@ -78,6 +78,7 @@ const FEATURE_ROWS: [string, string, string, string, string][] = [
   ['Metering',       'Comptage',              'Assign meter to customer',          'Attribuer un compteur à un client',        '/assign-meter'],
   ['Metering',       'Comptage',              'Check meter comparison',            'Comparaison des compteurs de contrôle',    '/check-meters'],
   ['Payments',       'Paiements',             'Record missed payment',             'Enregistrer un paiement manqué',           '/record-payment'],
+  ['Payments',       'Paiements',             'SMS inbox',                         'Boîte SMS',                                '/sms-inbox'],
   ['Payments',       'Paiements',             'Payment verification',              'Vérification des paiements',               '/payment-verification'],
   ['Advances',       'Avances',               'Connection / readyboard advance ledger', 'Grand livre des avances raccordement / tableau', '/advances'],
   ['Commerce',       'Commerce',              'Unmetered service ledger',          'Service non compté (sans compteur)',      '/unmetered-service'],
@@ -95,6 +96,7 @@ const FEATURE_ROWS: [string, string, string, string, string][] = [
   ['Customer',       'Client',                'Self-service dashboard',             'Tableau de bord client',                   '/my/dashboard'],
   ['Customer',       'Client',                'My profile',                         'Mon profil',                               '/my/profile'],
   ['Admin',          'Administration',        'Tariff management',                 'Gestion des tarifs',                       '/tariffs'],
+  ['Admin',          'Administration',        'WhatsApp bridge',                   'Pont WhatsApp',                            '/admin/whatsapp-bridge'],
   ['Admin',          'Administration',        'Role management',                   'Gestion des rôles',                        '/admin/roles'],
   ['Admin',          'Administration',        'Audit trail',                       'Journal d\'audit',                         '/mutations'],
   ['Admin',          'Administration',        'UGridPlan sync',                    'Synchronisation uGridPlan',                '/sync'],
@@ -378,7 +380,7 @@ function CustomerMgmtContent() {
           <li><Bold>Estimation de recharge</Bold> — Jours restants au rythme actuel</li>
           <li><Bold>Dernier paiement</Bold> — Montant et date du dernier paiement</li>
           <li><Bold>Financement actif</Bold> — Résumé de la dette avec barres de progression (le cas échéant)</li>
-          <li><Bold>Historique des transactions</Bold> — Tableau triable avec modification en ligne</li>
+          <li><Bold>Historique des transactions</Bold> — Tableau triable. Une <Bold>correction de grand livre</Bold> (superadmin et O&amp;M seulement) écrit une ligne brute et ne crédite <Bold>pas</Bold> de kWh ni le solde. Un vrai paiement se saisit dans <PageLink to="/record-payment">Enregistrer un paiement</PageLink>.</li>
           <li><Bold>Graphiques de consommation</Bold> — Vues 24h, 7 jours, 30 jours et 12 mois</li>
         </Ul>
       </>
@@ -426,7 +428,7 @@ function CustomerMgmtContent() {
         <li><Bold>Estimated Recharge Time</Bold> — Days until balance runs out at current rate</li>
         <li><Bold>Last Payment</Bold> — Most recent payment amount and date</li>
         <li><Bold>Active Financing</Bold> — Debt summary with progress bars (if applicable)</li>
-        <li><Bold>Transaction History</Bold> — Sortable table with inline editing</li>
+        <li><Bold>Transaction History</Bold> — Sortable table. A <Bold>ledger correction</Bold> (superadmin and O&amp;M only) writes a raw row and does <Bold>not</Bold> credit kWh or change the balance. Record a real payment on <PageLink to="/record-payment">Record Payment</PageLink>.</li>
         <li><Bold>Consumption Charts</Bold> — 24h, 7-day, 30-day, and 12-month views</li>
       </Ul>
     </>
@@ -508,6 +510,9 @@ function PaymentsContent() {
           <li>Cliquer sur <Bold>Enregistrer le paiement</Bold>.</li>
         </Ol>
         <P>Le système convertit automatiquement en kWh au tarif en vigueur, crédite le solde du client et crédite SparkMeter.</P>
+        <SubHead>Boîte SMS (<PageLink to="/sms-inbox">/sms-inbox</PageLink>)</SubHead>
+        <P>La boîte montre les SMS reçus pour le pays choisi dans la barre latérale. « Tous les pays » ne charge pas une boîte combinée : choisissez le Lesotho, le Bénin ou la Zambie. Les lignes échouées renvoient vers Formats SMS si vous pouvez les modifier, sinon vers Enregistrer un paiement. La relecture qui crédite reste sur Formats SMS, pas dans la boîte.</P>
+        <Warning>Ne pas utiliser la correction de grand livre dans Données clients pour un paiement. Elle n'a aucun effet sur le solde.</Warning>
         <Warning>
           Si le client a un financement actif, le paiement est automatiquement réparti entre l'électricité et le remboursement de la dette. Un indicateur affiche la répartition sur l'écran de résultat.
         </Warning>
@@ -532,6 +537,7 @@ function PaymentsContent() {
           <li><Bold>Règle « exact-jusqu'à-payé »</Bold> : un paiement est classé comme frais de raccordement / tableau uniquement si le compte n'a pas encore de paiement <Bold>vérifié</Bold> de ce type. Une fois le frais vérifié, les futurs paiements du même montant exact sont traités comme paiements d'électricité normaux (avec répartition d'avance / financement le cas échéant).</li>
           <li>Les paiements de frais reconnus <Bold>n'augmentent pas le crédit kWh</Bold> ; ils sont placés en <Bold>Vérification des paiements</Bold> en attente d'approbation par l'équipe financière.</li>
           <li>Cette règle s'applique de manière identique aux paiements SMS (M-Pesa, MTN MoMo) et aux paiements manuels / webhook.</li>
+          <li>Un <Bold>seuil d'installation</Bold> facultatif, sur la même carte Tarifs, classe tout paiement égal ou supérieur comme frais de raccordement, sauf si le compte est exempté sur la boîte SMS ou si le frais est déjà vérifié. Laisser le seuil vide le désactive. L'exemption n'ignore pas un montant exact.</li>
         </Ul>
 
         <SubHead>Vérification des paiements (<PageLink to="/payment-verification">/payment-verification</PageLink>)</SubHead>
@@ -565,6 +571,9 @@ function PaymentsContent() {
         <li>Click <Bold>Record Payment</Bold>.</li>
       </Ol>
       <P>The system converts the currency to kWh at the current tariff rate, credits the customer's balance, and credits SparkMeter.</P>
+      <SubHead>SMS inbox (<PageLink to="/sms-inbox">/sms-inbox</PageLink>)</SubHead>
+      <P>The inbox shows inbound texts for the country selected in the sidebar. All countries does not load a combined inbox: pick Lesotho, Benin, or Zambia. Failed rows link to SMS Formats if you can edit formats, otherwise to Record Payment. Replay that credits a customer stays on SMS Formats, not in the inbox.</P>
+      <Warning>Do not use the Customer Data ledger correction for a payment. It does not change the balance.</Warning>
       <Warning>
         If the customer has active financing, the payment is automatically split between electricity and debt repayment. An indicator shows the split on the result screen.
       </Warning>
@@ -593,6 +602,7 @@ function PaymentsContent() {
         <li>Recognised fee payments <Bold>do not credit kWh</Bold>; they land in <Bold>Payment Verification</Bold> for
           finance to approve.</li>
         <li>The rule applies identically to SMS payments (M-Pesa, MTN MoMo) and to manual / webhook payments.</li>
+        <li>An optional <Bold>installation threshold</Bold> on the same Tariffs card treats any payment at or above that amount as a connection fee, unless the account is marked exempt on the SMS inbox or the fee is already verified. Leave the threshold blank to turn it off. An exemption does not skip an exact fee amount.</li>
       </Ul>
 
       <SubHead>Payment Verification (<PageLink to="/payment-verification">/payment-verification</PageLink>)</SubHead>
@@ -1382,7 +1392,7 @@ function TariffsContent() {
         <Tip>
           Réservé aux rôles <Bold>superadmin</Bold>, <Bold>onm_team</Bold> ou <Bold>finance_team</Bold>.
           Les avances accordées avant un changement conservent leur montant initial — voir <PageLink to="#advances">Avances</PageLink>.
-          Le forfait <PageLink to="#unmetered-service">service non compté</PageLink> se règle sur la même carte.
+          Le forfait <PageLink to="#unmetered-service">service non compté</PageLink> et le seuil d'installation se règlent sur la même carte.
         </Tip>
       </>
     );
@@ -1408,7 +1418,7 @@ function TariffsContent() {
       <Tip>
         Restricted to <Bold>superadmin</Bold>, <Bold>onm_team</Bold>, and <Bold>finance_team</Bold> roles.
         Advances granted before a fee change keep their original amount — see <PageLink to="#advances">Advances</PageLink>.
-        The <PageLink to="#unmetered-service">unmetered service</PageLink> monthly fee is on the same card.
+        The <PageLink to="#unmetered-service">unmetered service</PageLink> monthly fee and the installation threshold are on the same card.
       </Tip>
     </>
   );
@@ -1420,6 +1430,9 @@ function AdminContent() {
   if (fr) {
     return (
       <>
+        <SubHead>Pont WhatsApp (<PageLink to="/admin/whatsapp-bridge">/admin/whatsapp-bridge</PageLink>)</SubHead>
+        <P>Superadmin, O&amp;M / IT et les titulaires Nexus <Bold>administer_cc</Bold> voient le QR du pays sélectionné. La page ne bascule pas vers le pont d'un autre pays. Le QR n'est pas dans la boîte SMS.</P>
+
         <SubHead>Gestion des rôles (<PageLink to="/admin/roles">/admin/roles</PageLink>)</SubHead>
         <P>Accessible aux utilisateurs <Bold>superadmin</Bold> uniquement :</P>
         <Ul>
@@ -1456,6 +1469,9 @@ function AdminContent() {
 
   return (
     <>
+      <SubHead>WhatsApp bridge (<PageLink to="/admin/whatsapp-bridge">/admin/whatsapp-bridge</PageLink>)</SubHead>
+      <P>Superadmin, O&amp;M / IT, and Nexus <Bold>administer_cc</Bold> holders see the QR for the selected country. The page does not fall back to another country’s bridge. The QR is not on the SMS inbox.</P>
+
       <SubHead>Role Management (<PageLink to="/admin/roles">/admin/roles</PageLink>)</SubHead>
       <P>Available to <Bold>superadmin</Bold> users only:</P>
       <Ul>

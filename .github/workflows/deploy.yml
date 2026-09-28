@@ -284,6 +284,10 @@ jobs:
             else
               echo "Skipping onepower_zm (database not present on this host)"
             fi
+            if ! python3 /opt/cc-portal/backend/scripts/check_schema_drift.py; then
+              echo "Schema drift: Benin or Zambia is missing a Lesotho table or column"
+              MIG_FAILED=1
+            fi
             if [ "$MIG_FAILED" -ne 0 ]; then
               echo "WARNING: one or more migrations failed (APIs already restarted)"
               exit 1

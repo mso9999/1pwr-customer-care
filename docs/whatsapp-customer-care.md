@@ -127,6 +127,34 @@ still point at the current CC API, not a deprecated Windows host.
 
 **Disconnect logging.** Set **`BAILEYS_LOG_LEVEL=debug`** (or `trace`) in PM2 env to surface all baileys internal events when diagnosing link failures. The default is `warn`; `[DISCONNECTED]` lines already include the status code, error message, and any `data` payload (e.g. `"stream:error"`).
 
+**CC admin page.** Superadmin, O&M / IT (`onm_team`), and Nexus `administer_cc` open **WhatsApp bridge** in CC (`/admin/whatsapp-bridge`). That page calls this process’s country API, which proxies `GET /link-status` on the bridge (same `X-Bridge-Secret` as `/notify`). The secret is not sent to the browser. The page shows the QR while the bridge is unlinked and polls while Baileys rotates it. If that country’s `CC_BRIDGE_NOTIFY_URL_<CC>` / `CC_BRIDGE_SECRET_<CC>` are unset, the page says so and points here. Benin and Zambia do not fall back to the Lesotho bridge. Lesotho still accepts the unsuffixed `CC_BRIDGE_NOTIFY_URL` / `CC_BRIDGE_SECRET`.
+
+### Benin checklist (do not start this from a code deploy)
+
+Lesotho already runs PM2 `whatsapp-cc`. Benin does not. Stand up a second process only when a Benin Customer Care phone is ready, then scan from the CC page on the Benin lane (`/api/bn`).
+
+1. A dedicated Benin CC phone. Do not link it to the Lesotho auth directory.
+2. A second PM2 process with its own paths and port. `BRIDGE_INBOUND_PORT` must not be `3847`. Example:
+
+```text
+AUTH_DIR=/home/ubuntu/whatsapp-logger/baileys_auth_cc_bn
+STATE_FILE=/home/ubuntu/whatsapp-logger/cc-state-bn.json
+CONV_FILE=/home/ubuntu/whatsapp-logger/cc-conversations-bn.json
+QR_FILE=/tmp/whatsapp-cc-bn-qr.txt
+PAIRING_FILE=/tmp/whatsapp-cc-bn-pairing-code.txt
+BRIDGE_INBOUND_PORT=<not 3847>
+CC_BRIDGE_SECRET=<shared with the Benin API>
+TICKET_TRACKER_GROUP_NAME=<Benin tracker group>
+CC_API=https://cc.1pwrafrica.com/api/bn
+```
+
+The process already presents itself as `Browsers.macOS("Desktop")`. Do not switch that back to the Baileys Chrome fingerprint.
+
+3. In `/opt/1pdb-bn/.env` set `CC_BRIDGE_NOTIFY_URL_BN=http://127.0.0.1:<port>/notify` and `CC_BRIDGE_SECRET_BN` to the same secret. Restart `1pdb-api-bn`.
+4. Open CC with the sidebar on Benin and scan the QR on **WhatsApp bridge**.
+
+Zambia later uses the same pattern: its own process, `CC_API=https://cc.1pwrafrica.com/api/zm`, and `CC_BRIDGE_NOTIFY_URL_ZM` / `CC_BRIDGE_SECRET_ZM` in `/opt/1pdb-zm/.env`.
+
 ### Anti-Spam / Message Filtering
 
 The bridge should skip:

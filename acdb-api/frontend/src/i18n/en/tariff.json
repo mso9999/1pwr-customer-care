@@ -16,9 +16,11 @@
     "edit": "Edit",
     "saved": "Country fees updated.",
     "connection": "Connection fee",
+    "threshold": "Installation threshold",
+    "thresholdUnset": "Not set",
     "readyboard": "Readyboard fee",
     "unmetered": "Unmetered service fee / month",
-    "help": "A customer paying exactly the connection or readyboard fee is auto-tagged for finance verification rather than credited as kWh. After the fee is verified, future payments of the same amount route normally."
+    "help": "A customer paying exactly the connection or readyboard fee is auto-tagged for finance verification rather than credited as kWh. After the fee is verified, future payments of the same amount route normally. When an installation threshold is set, any payment at or above it is treated as a connection fee unless that account is exempt or the fee is already verified. Leave the threshold blank to clear it."
   },
   "lowBalance": {
     "title": "Low balance SMS (kWh)",

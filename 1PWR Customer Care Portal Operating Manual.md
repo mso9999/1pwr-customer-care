@@ -198,7 +198,7 @@ Enter an **account number** to view:
 - **Last payment**.
 - **Totals** (consumption / purchases — per implementation).
 - **Active financing** summary when applicable.
-- **Transaction history** (sortable; some inline editing may be available).
+- **Transaction history** (sortable). A **ledger correction** is available only to superadmin and O&M. It writes a raw row and does **not** credit kWh or change the balance. Record a real payment on **Record Payment**.
 - **Consumption charts** (24h, 7d, 30d, 12m).
 
 ---
@@ -215,6 +215,16 @@ When M-PESA (or other gateway) did not record a payment:
 4. **Record Payment**.
 
 The system converts to kWh at the tariff, credits balance, and integrates with SparkMeter where configured. **Financing:** payments may split between electricity and debt; amounts ending in **1** or **9** in the ones digit can be treated as dedicated debt payments per product rules.
+
+### 11.1a SMS inbox (`/sms-inbox`)
+
+Shows inbound texts for the **sidebar country**. **All countries** asks you to pick Lesotho, Benin, or Zambia and does not open a combined inbox. Failed rows link to **SMS Formats → Unprocessed** for editors, and to **Record Payment** for everyone else. Replay that can credit a customer stays on SMS Formats. Benin replay does not credit unless `SMS_BN_REPLAY_CREDIT_ENABLED` is on.
+
+An optional **installation threshold** on Tariffs treats a payment at or above that amount as a connection fee, unless the account is exempt on the inbox or the fee is already verified. Leave the threshold blank to keep exact-amount matching only. An exemption skips the threshold, not an exact fee.
+
+### 11.1b WhatsApp bridge (`/admin/whatsapp-bridge`)
+
+Superadmin, O&M / IT, and Nexus `administer_cc` scan the QR for the selected country. The page does not fall back from Benin or Zambia to the Lesotho bridge, and the QR is not on the operator inbox.
 
 ### 11.2 Payment verification (`/payment-verification`)
 

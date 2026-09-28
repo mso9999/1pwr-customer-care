@@ -11,7 +11,9 @@
     "financeAll": "All employees; finance leads verification",
     "financeOps": "Finance and operations (tariffs, financing, exports)",
     "financeOnm": "superadmin, finance_team, onm_team (write); all employees (view)",
-    "superadmin": "superadmin (system configuration and logs)"
+    "superadmin": "superadmin (system configuration and logs)",
+    "smsReaders": "Customer-care operators, superadmin, and O&M / IT",
+    "bridgeAdmins": "superadmin, O&M / IT, and Nexus administer_cc"
   },
   "workflows": {
     "orientation": {
@@ -74,7 +76,9 @@
         "Record a missed mobile-money payment so 1PDB and SparkMeter stay aligned. The classifier auto-detects connection / readyboard fees by exact amount. Remaining electricity payments then pay unmetered-service fees (if enrolled), then advances, then kWh.",
         "Work the verification queue for fees and deposits that need human matching — connection and readyboard fees auto-route here.",
         "Browse Transactions for recent credits and amounts site-wide; the kWh balance column reflects the kWh balance after each row.",
-        "Drill into Customer Data for a specific account’s history, balance context, and any Active Advances panel."
+        "Drill into Customer Data for a specific account’s history, balance context, and any Active Advances panel.",
+        "Open the SMS inbox only after the sidebar is on one country. It lists inbound texts. It does not credit a customer.",
+        "A ledger correction on Customer Data is for superadmin and O&M only. It writes a raw row and does not change the balance. Use Record Payment for a real payment."
       ]
     },
     "advances": {
@@ -125,7 +129,7 @@
       "title": "Tariffs, financing, and exports",
       "description": "Rate configuration, asset financing, unmetered service, and bulk extracts for analysis.",
       "steps": [
-        "Tariffs: site/concession rates that drive kWh conversion for new payments, plus country fees (connection, readyboard, unmetered service).",
+        "Tariffs: site/concession rates that drive kWh conversion for new payments, plus country fees (connection, readyboard, unmetered service). An optional installation threshold, blank by default, treats amounts at or above it as a connection fee unless that account is exempt.",
         "Financing: products, agreements, and ledger views.",
         "Unmetered Service: enroll connected customers awaiting a meter; see the dedicated walkthrough.",
         "Export: CSV/XLSX extracts for offline analysis (respect data-handling policy)."
@@ -160,6 +164,53 @@
         "The Gateway column tells you whether the SMS host accepted the request (green Queued = success; red Failed = error). The CM.com column is the carrier delivery confirmation — Accepted means it reached the handset; Rejected or another status means the carrier refused or could not deliver it.",
         "Click any row to expand the full message body, raw gateway URL, CM.com status timestamp and error code, and any internal error message."
       ]
+    },
+    "smsInbox": {
+      "title": "SMS inbox",
+      "description": "See inbound payment texts for one country, without crediting from this page.",
+      "steps": [
+        "Set the sidebar to Lesotho, Benin, or Zambia. All countries asks you to pick one and does not open the Lesotho inbox by mistake.",
+        "Filter by account or outcome. Download CSV covers only the rows on screen. Phone-to-account lookup is read-only.",
+        "Editors open failed rows on SMS Formats → Unprocessed. Replay stays there. Benin replay does not credit unless an administrator has explicitly enabled it.",
+        "Everyone else follows the link to Record Payment. Do not type an account on the inbox in order to force a credit."
+      ]
+    },
+    "whatsappBridge": {
+      "title": "WhatsApp bridge",
+      "description": "Link this country’s Customer Care phone. The QR is an admin page, not part of the inbox.",
+      "steps": [
+        "Use a dedicated phone and a separate bridge process per country. Do not point Benin or Zambia at the Lesotho bridge.",
+        "Open System → WhatsApp bridge with the sidebar on that country. Scan WhatsApp → Linked devices → Link a device. The code rotates about every minute.",
+        "If the page says this country has no bridge URL, follow the Customer Care WhatsApp SOP. Starting the process and setting the secret is an operations step, not something the page does for you."
+      ]
     }
+  },
+  "quiz": {
+    "title": "Knowledge check",
+    "intro": "Five questions on payments, the SMS inbox, and the WhatsApp bridge. Open an answer when you are ready.",
+    "show": "Show answer",
+    "hide": "Hide answer",
+    "items": [
+      {
+        "q": "A mobile-money text did not credit the customer. Where do you enter the payment?",
+        "a": "Record Payment. The Customer Data ledger correction does not credit kWh or change the balance, and only superadmin and O&M can open it."
+      },
+      {
+        "q": "The sidebar says All countries. What does the SMS inbox do?",
+        "a": "It asks you to pick Lesotho, Benin, or Zambia. It does not load a combined inbox, and it does not silently use Lesotho."
+      },
+      {
+        "q": "Who replays an unprocessed SMS so it can credit the account?",
+        "a": "SMS format editors, from SMS Formats → Unprocessed. The inbox only links there. Benin replay stays off unless SMS_BN_REPLAY_CREDIT_ENABLED is set."
+      },
+      {
+        "q": "An installation threshold is set and this account is exempt. They pay exactly the connection fee. What is it?",
+        "a": "Still a connection fee. Exemption skips only the threshold rule. An exact connection or readyboard amount still classifies as that fee until it is verified."
+      },
+      {
+        "q": "Where is the WhatsApp QR, and which phone does it link?",
+        "a": "System → WhatsApp bridge, for the country in the sidebar. It is for superadmin, O&M / IT, and Nexus administer_cc. It does not fall back from Benin or Zambia to the Lesotho phone."
+      }
+    ]
   }
 }

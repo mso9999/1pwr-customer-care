@@ -93,6 +93,22 @@ def _read_fee_amount(conn, key: str, fallback: float) -> float:
     return _read_system_float(conn, key, fallback)
 
 
+def _read_optional_positive(conn, key: str) -> Optional[float]:
+    """Positive system_config amount, or None when missing, blank, or zero."""
+    cur = conn.cursor()
+    cur.execute("SELECT value FROM system_config WHERE key = %s LIMIT 1", (key,))
+    row = cur.fetchone()
+    if not row or row[0] is None or str(row[0]).strip() == "":
+        return None
+    try:
+        value = float(row[0])
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    return value
+
+
 def get_low_balance_thresholds(conn) -> tuple[float, float]:
     """Warn/clear kWh thresholds for ``low_balance_alerts`` (single source of truth)."""
     warn = _read_system_float(
@@ -137,6 +153,7 @@ def get_country_fees(conn) -> dict:
         "connection_fee_amount": _read_fee_amount(
             conn, "connection_fee_amount", COUNTRY.default_connection_fee
         ),
+        "connection_fee_threshold": _read_optional_positive(conn, "connection_fee_threshold"),
         "readyboard_fee_amount": _read_fee_amount(
             conn, "readyboard_fee_amount", COUNTRY.default_readyboard_fee
         ),
@@ -165,6 +182,11 @@ def get_country_fees(conn) -> dict:
 class CountryFeesUpdate(BaseModel):
     connection_fee_amount: Optional[float] = Field(
         None, ge=0, description="Country connection fee. 0 disables auto-classification."
+    )
+    connection_fee_threshold: Optional[float] = Field(
+        None,
+        ge=0,
+        description="Optional installation threshold. Amounts at or above this are connection fees. 0 or blank clears it.",
     )
     readyboard_fee_amount: Optional[float] = Field(
         None, ge=0, description="Country readyboard fee. 0 disables auto-classification."
@@ -225,6 +247,7 @@ def update_country_fees(
 
     if (
         payload.connection_fee_amount is None
+        and payload.connection_fee_threshold is None
         and payload.readyboard_fee_amount is None
         and payload.unmetered_service_fee_amount is None
         and payload.low_balance_kwh_threshold is None
@@ -239,6 +262,8 @@ def update_country_fees(
     int_updates: list[tuple[str, int]] = []
     if payload.connection_fee_amount is not None:
         updates.append(("connection_fee_amount", float(payload.connection_fee_amount)))
+    if payload.connection_fee_threshold is not None:
+        updates.append(("connection_fee_threshold", float(payload.connection_fee_threshold)))
     if payload.readyboard_fee_amount is not None:
         updates.append(("readyboard_fee_amount", float(payload.readyboard_fee_amount)))
     if payload.unmetered_service_fee_amount is not None:
@@ -314,6 +339,7 @@ def update_country_fees(
             "country_fees",
             old_values={
                 "connection_fee_amount": old["connection_fee_amount"],
+                "connection_fee_threshold": old.get("connection_fee_threshold"),
                 "readyboard_fee_amount": old["readyboard_fee_amount"],
                 "unmetered_service_fee_amount": old["unmetered_service_fee_amount"],
                 "low_balance_kwh_threshold": old["low_balance_kwh_threshold"],
@@ -324,6 +350,7 @@ def update_country_fees(
             },
             new_values={
                 "connection_fee_amount": new["connection_fee_amount"],
+                "connection_fee_threshold": new.get("connection_fee_threshold"),
                 "readyboard_fee_amount": new["readyboard_fee_amount"],
                 "unmetered_service_fee_amount": new["unmetered_service_fee_amount"],
                 "low_balance_kwh_threshold": new["low_balance_kwh_threshold"],

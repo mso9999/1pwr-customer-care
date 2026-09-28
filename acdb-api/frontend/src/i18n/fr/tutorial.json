@@ -11,7 +11,9 @@
     "financeAll": "Tous les employés ; la finance pilote la vérification",
     "financeOps": "Finance et opérations (tarifs, financement, exports)",
     "financeOnm": "superadmin, finance_team, onm_team (écriture) ; tous les employés (lecture)",
-    "superadmin": "superadmin (configuration système et journaux)"
+    "superadmin": "superadmin (configuration système et journaux)",
+    "smsReaders": "Opérateurs service client, superadmin, et O&M / IT",
+    "bridgeAdmins": "superadmin, O&M / IT, et Nexus administer_cc"
   },
   "workflows": {
     "orientation": {
@@ -74,7 +76,9 @@
         "Enregistrer un paiement mobile manquant pour garder 1PDB et SparkMeter alignés. La passerelle de classification détecte automatiquement les frais de raccordement / tableau par montant exact. Le reste paie ensuite le forfait service non compté (si inscrit), puis les avances, puis les kWh.",
         "Traiter la file de vérification pour les frais et acomptes à rapprocher — les frais de raccordement et tableau y sont automatiquement routés.",
         "Parcourir les Transactions pour les crédits récents et les montants par site ; la colonne Solde (kWh) reflète le solde en kWh après chaque ligne.",
-        "Approfondir avec Données clients pour l’historique, le contexte de solde et le panneau Avances actives."
+        "Approfondir avec Données clients pour l’historique, le contexte de solde et le panneau Avances actives.",
+        "Ouvrir la boîte SMS seulement après avoir choisi un pays dans la barre latérale. Elle liste les SMS reçus. Elle ne crédite pas un client.",
+        "Une correction de grand livre dans Données clients est réservée au superadmin et à l’O&M. Elle écrit une ligne brute et ne change pas le solde. Utilisez Enregistrer un paiement pour un vrai paiement."
       ]
     },
     "advances": {
@@ -125,7 +129,7 @@
       "title": "Tarifs, financement et exports",
       "description": "Paramétrage des taux, financement d’actifs, service non compté et extractions pour analyse.",
       "steps": [
-        "Tarifs : taux par site/concession pour la conversion kWh, plus les frais pays (raccordement, tableau, service non compté).",
+        "Tarifs : taux par site/concession pour la conversion kWh, plus les frais pays (raccordement, tableau, service non compté). Un seuil d'installation facultatif, vide par défaut, traite les montants égaux ou supérieurs comme frais de raccordement, sauf compte exempté.",
         "Financement : produits, accords et journaux.",
         "Service non compté : inscrire les clients raccordés en attente de compteur ; voir le parcours dédié.",
         "Export : extraits CSV/XLSX pour analyse hors ligne (respecter la politique de données)."
@@ -160,6 +164,53 @@
         "La colonne Passerelle indique si l'hôte SMS a accepté la requête (vert Queued = succès ; rouge Failed = erreur). La colonne CM.com est la confirmation de distribution par l'opérateur — Accepted signifie que le message est arrivé au téléphone ; Rejected ou un autre statut signifie que l'opérateur l'a refusé ou n'a pas pu le distribuer.",
         "Cliquez sur une ligne pour afficher le corps complet du message, l'URL brute de la passerelle, l'horodatage et le code d'erreur CM.com, ainsi que tout message d'erreur interne."
       ]
+    },
+    "smsInbox": {
+      "title": "Boîte SMS",
+      "description": "Voir les SMS de paiement d'un seul pays, sans créditer depuis cette page.",
+      "steps": [
+        "Choisissez le Lesotho, le Bénin ou la Zambie dans la barre latérale. « Tous les pays » demande de choisir et n'ouvre pas la boîte du Lesotho par erreur.",
+        "Filtrez par compte ou résultat. Le CSV ne contient que les lignes affichées. La recherche téléphone vers compte est en lecture seule.",
+        "Les éditeurs ouvrent les lignes échouées dans Formats SMS → Non traités. La relecture reste là. La relecture Bénin ne crédite pas tant qu'un administrateur ne l'a pas explicitement activée.",
+        "Les autres suivent le lien vers Enregistrer un paiement. Ne saisissez pas un compte dans la boîte pour forcer un crédit."
+      ]
+    },
+    "whatsappBridge": {
+      "title": "Pont WhatsApp",
+      "description": "Associer le téléphone Service client de ce pays. Le QR est une page admin, pas la boîte SMS.",
+      "steps": [
+        "Un téléphone dédié et un processus de pont par pays. Ne pointez pas le Bénin ou la Zambie vers le pont du Lesotho.",
+        "Ouvrez Système → Pont WhatsApp avec ce pays dans la barre latérale. Sur le téléphone : WhatsApp → Appareils connectés → Connecter un appareil. Le code change environ chaque minute.",
+        "Si la page dit que ce pays n'a pas d'URL de pont, suivez la procédure WhatsApp Service client. Démarrer le processus et poser le secret est une étape d'exploitation, pas un bouton de la page."
+      ]
     }
+  },
+  "quiz": {
+    "title": "Contrôle des connaissances",
+    "intro": "Cinq questions sur les paiements, la boîte SMS et le pont WhatsApp. Ouvrez la réponse quand vous êtes prêt.",
+    "show": "Voir la réponse",
+    "hide": "Masquer la réponse",
+    "items": [
+      {
+        "q": "Un SMS mobile n'a pas crédité le client. Où saisissez-vous le paiement ?",
+        "a": "Enregistrer un paiement. La correction de grand livre dans Données clients ne crédite pas de kWh et ne change pas le solde. Seuls le superadmin et l'O&M peuvent l'ouvrir."
+      },
+      {
+        "q": "La barre latérale indique Tous les pays. Que fait la boîte SMS ?",
+        "a": "Elle demande de choisir le Lesotho, le Bénin ou la Zambie. Elle ne charge pas une boîte combinée et n'utilise pas le Lesotho en silence."
+      },
+      {
+        "q": "Qui relance un SMS non traité pour qu'il puisse créditer le compte ?",
+        "a": "Les éditeurs de formats SMS, depuis Formats SMS → Non traités. La boîte ne fait que renvoyer vers cette page. La relecture Bénin reste désactivée tant que SMS_BN_REPLAY_CREDIT_ENABLED n'est pas défini."
+      },
+      {
+        "q": "Un seuil d'installation est défini et ce compte est exempté. Le client paie exactement le frais de raccordement. Qu'est-ce que c'est ?",
+        "a": "Toujours un frais de raccordement. L'exemption ignore seulement la règle de seuil. Un montant exact de raccordement ou de tableau reste un frais tant qu'il n'est pas vérifié."
+      },
+      {
+        "q": "Où est le QR WhatsApp, et quel téléphone associe-t-il ?",
+        "a": "Système → Pont WhatsApp, pour le pays de la barre latérale. Réservé au superadmin, à l'O&M / IT et à Nexus administer_cc. Le Bénin et la Zambie ne basculent pas vers le téléphone du Lesotho."
+      }
+    ]
   }
 }

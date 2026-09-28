@@ -25,10 +25,13 @@ const http = require("http");
 // ============================================================
 
 // --- Configuration ---
-var AUTH_DIR = "/home/ubuntu/whatsapp-logger/baileys_auth_cc";
-var STATE_FILE = "/home/ubuntu/whatsapp-logger/cc-state.json";
-var QR_FILE = "/tmp/whatsapp-cc-qr.txt";
-var CONV_FILE = "/home/ubuntu/whatsapp-logger/cc-conversations.json";
+var AUTH_DIR = process.env.AUTH_DIR || "/home/ubuntu/whatsapp-logger/baileys_auth_cc";
+var STATE_FILE = process.env.STATE_FILE || "/home/ubuntu/whatsapp-logger/cc-state.json";
+var QR_FILE = process.env.QR_FILE || "/tmp/whatsapp-cc-qr.txt";
+var PAIRING_FILE = process.env.PAIRING_FILE || "/tmp/whatsapp-cc-pairing-code.txt";
+var CONV_FILE = process.env.CONV_FILE || "/home/ubuntu/whatsapp-logger/cc-conversations.json";
+var latestQr = "";
+var latestPairingCode = "";
 var LOG_DIR = "/home/ubuntu/whatsapp-logger/cc-logs";
 
 // APIs
@@ -45,7 +48,7 @@ var CC_API = process.env.CC_API || process.env.ACDB_API || "https://cc.1pwrafric
 var UGRIDPLAN_USER = process.env.UGRIDPLAN_USER || "whatsapp-cc";
 
 // Notification group JID - discovered after connection, persisted in state file
-var TICKET_TRACKER_GROUP_NAME = "1PWR LS - OnM Ticket Tracker";
+var TICKET_TRACKER_GROUP_NAME = process.env.TICKET_TRACKER_GROUP_NAME || "1PWR LS - OnM Ticket Tracker";
 var TICKET_TRACKER_JID = process.env.TICKET_TRACKER_JID || "";   // set after first discovery
 
 // Load persisted state (ticket tracker JID, etc.) from previous run
@@ -1157,6 +1160,28 @@ function startInboundHttpServer() {
             });
             return;
         }
+        if (req.method === "GET" && (req.url === "/link-status" || req.url === "/link-status/")) {
+            var linkHdr = req.headers["x-bridge-secret"] || "";
+            if (linkHdr !== secret) {
+                sendText(res, 401, "unauthorized");
+                return;
+            }
+            var qrPayload = latestQr;
+            if (!qrPayload && fs.existsSync(QR_FILE)) {
+                try { qrPayload = fs.readFileSync(QR_FILE, "utf8"); } catch (e) { qrPayload = ""; }
+            }
+            var pairPayload = latestPairingCode;
+            if (!pairPayload && fs.existsSync(PAIRING_FILE)) {
+                try { pairPayload = fs.readFileSync(PAIRING_FILE, "utf8").trim(); } catch (e) { pairPayload = ""; }
+            }
+            sendJson(res, 200, {
+                linked: !!isReady,
+                qr: isReady ? null : (qrPayload || null),
+                pairing_code: pairPayload || null,
+                tracker_group: TICKET_TRACKER_GROUP_NAME || ""
+            });
+            return;
+        }
         if (req.method !== "POST") {
             res.writeHead(404);
             res.end();
@@ -1264,7 +1289,8 @@ async function startSocket() {
             try {
                 var code = await sock.requestPairingCode(pairPhone);
                 if (code && code.length) {
-                    fs.writeFileSync("/tmp/whatsapp-cc-pairing-code.txt", code);
+                    latestPairingCode = code;
+                    fs.writeFileSync(PAIRING_FILE, code);
                     console.log("\n[PAIRING-CODE] phone=+" + pairPhone +
                         " code=" + code +
                         " (enter on WhatsApp -> Settings -> Linked devices -> Link with phone number)");
@@ -1282,6 +1308,7 @@ async function startSocket() {
             if (update.qr) {
                 console.log("\n[QR] Scan with Customer Care phone (+266 58342168):");
                 qrcode.generate(update.qr, { small: true });
+                latestQr = update.qr;
                 fs.writeFileSync(QR_FILE, update.qr);
             }
 
@@ -1326,6 +1353,8 @@ async function startSocket() {
                 }
                 console.log("[CONNECTED] Customer Care Bridge online at " + new Date().toISOString());
                 isReady = true;
+                latestQr = "";
+                latestPairingCode = "";
                 reconnectAttempt = 0;
                 if (fs.existsSync(QR_FILE)) fs.unlinkSync(QR_FILE);
                 saveState({ status: "connected", since: new Date().toISOString(), ticketTrackerJid: TICKET_TRACKER_JID || "", ticketTrackerName: TICKET_TRACKER_GROUP_NAME });

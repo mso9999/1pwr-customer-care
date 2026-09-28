@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -104,7 +105,8 @@ export default function SmsFormatsPage() {
   const roles = user?.roles || user?.cc_roles || (user?.role ? [user.role] : []);
   const allowed = isSuperadmin || roles.some((r) => r === 'superadmin' || r === 'onm_team');
 
-  const [tab, setTab] = useState<Tab>('formats');
+  const [searchParams] = useSearchParams();
+  const [tab, setTab] = useState<Tab>(searchParams.get('tab') === 'unprocessed' ? 'unprocessed' : 'formats');
   const [data, setData] = useState<SmsFormatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');

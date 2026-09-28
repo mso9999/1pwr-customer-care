@@ -36,10 +36,11 @@ import requests as http_requests
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from country_config import COUNTRY, KOIOS_SITES, UTC_OFFSET_HOURS
+from country_config import COUNTRY, KOIOS_SITES
+from middleware import require_employee
 from cc_bridge_notify import notify_cc_bridge
 from customer_api import get_connection
-from onemeter_binding import ensure_1meter_binding, telemetry_refusal
+from onemeter_binding import ensure_1meter_binding, record_gateway_link, telemetry_refusal
 from momo_bj import parse_momo_bn_sms, resolve_bn_momo_account
 from mpesa_sms import mpesa_receipt_in_use, parse_ls_sms_payment, resolve_sms_account
 from sms_formats import (
@@ -48,6 +49,7 @@ from sms_formats import (
     match_balance_request,
     parse_payment,
     require_sms_format_editor,
+    require_sms_inbox_reader,
     sender_check,
 )
 from models import CurrentUser
@@ -149,7 +151,17 @@ def _update_sms_inbound(conn, log_id: int | None, outcome: str,
     except Exception:
         pass
 
-_METER_TZ = timezone(timedelta(hours=UTC_OFFSET_HOURS))
+def meter_clock_offset_hours() -> int:
+    """1Meter sample stamps are UTC+2 on every site, including Benin (UTC+1)."""
+    raw = os.environ.get("METER_CLOCK_OFFSET_HOURS", "2")
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 2
+
+
+def meter_sample_tz() -> timezone:
+    return timezone(timedelta(hours=meter_clock_offset_hours()))
 
 router = APIRouter(tags=["ingest"])
 
@@ -353,7 +365,7 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
 
     try:
         ts = datetime.strptime(reading.timestamp, "%Y%m%d%H%M").replace(
-            tzinfo=_METER_TZ).astimezone(timezone.utc)
+            tzinfo=meter_sample_tz()).astimezone(timezone.utc)
     except ValueError:
         raise HTTPException(status_code=400, detail=f"Bad timestamp format: {reading.timestamp}")
 
@@ -373,6 +385,9 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
                     raise HTTPException(status_code=409, detail=refusal)
                 cur.execute("SAVEPOINT onemeter_binding")
                 try:
+                    record_gateway_link(
+                        cur, meter_id, reading.thing_name, account, community, "telemetry",
+                    )
                     if ensure_1meter_binding(cur, account, reading.thing_name):
                         logger.info(
                             "1Meter binding repaired: %s on %s -> %s",
@@ -1563,7 +1578,7 @@ def get_sms_inbound_log(
     account: str | None = Query(None),
     outcome: str | None = Query(None),
     limit: int = Query(50, ge=1, le=500),
-    user: CurrentUser = Depends(require_sms_format_editor),
+    user: CurrentUser = Depends(require_sms_inbox_reader),
 ):
     """Query the SMS inbound audit log. Returns full SMS content for replay/investigation."""
     with get_connection() as conn:
@@ -1595,6 +1610,106 @@ def get_sms_inbound_log(
             raise
         cols = [d[0] for d in cur.description]
         return {"rows": [dict(zip(cols, row)) for row in cur.fetchall()]}
+
+
+@router.get("/api/sms/phone-meters")
+def sms_phone_meters(
+    phone: str = Query(..., min_length=6, max_length=32),
+    user: CurrentUser = Depends(require_sms_inbox_reader),
+):
+    """Read-only phone-to-account lookup from transactions.sms_payer_phone."""
+    digits = re.sub(r"\D", "", phone)
+    if len(digits) < 6:
+        return {"phone": phone, "accounts": []}
+    needle = f"%{digits[-9:]}%"
+    with get_connection() as conn:
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                SELECT DISTINCT account_number
+                  FROM transactions
+                 WHERE sms_payer_phone IS NOT NULL
+                   AND sms_payer_phone LIKE %s
+                   AND NULLIF(account_number, '') IS NOT NULL
+                 ORDER BY 1
+                 LIMIT 20
+                """,
+                (needle,),
+            )
+            accounts = [row[0] for row in cur.fetchall()]
+        except Exception as exc:
+            if "sms_payer_phone" in str(exc):
+                conn.rollback()
+                return {"phone": phone, "accounts": [], "note": "sms_payer_phone is not on this database"}
+            raise
+    return {"phone": phone, "accounts": accounts}
+
+
+class FeeThresholdExemptIn(BaseModel):
+    account_number: str
+    exempt: bool
+
+
+@router.get("/api/sms/fee-threshold-exempt")
+def get_fee_threshold_exempt(
+    account: str = Query(..., min_length=1, max_length=32),
+    user: CurrentUser = Depends(require_sms_inbox_reader),
+):
+    with get_connection() as conn:
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                SELECT COALESCE(fee_threshold_exempt, FALSE)
+                  FROM accounts
+                 WHERE UPPER(account_number) = UPPER(%s)
+                 LIMIT 1
+                """,
+                (account.strip(),),
+            )
+        except Exception as exc:
+            if "fee_threshold_exempt" in str(exc):
+                raise HTTPException(status_code=503, detail="migration 073 is not applied") from exc
+            raise
+        row = cur.fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="account not found")
+    return {"account_number": account.strip().upper(), "exempt": bool(row[0])}
+
+
+@router.put("/api/sms/fee-threshold-exempt")
+def set_fee_threshold_exempt(
+    body: FeeThresholdExemptIn,
+    user: CurrentUser = Depends(require_employee),
+):
+    """Fee admins only. SMS format editors cannot set this flag."""
+    from country_fees import _require_fee_admin
+
+    _require_fee_admin(user)
+    account = body.account_number.strip().upper()
+    if not account:
+        raise HTTPException(status_code=400, detail="account_number is required")
+    with get_connection() as conn:
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                UPDATE accounts
+                   SET fee_threshold_exempt = %s
+                 WHERE UPPER(account_number) = UPPER(%s)
+                """,
+                (bool(body.exempt), account),
+            )
+        except Exception as exc:
+            if "fee_threshold_exempt" in str(exc):
+                raise HTTPException(status_code=503, detail="migration 073 is not applied") from exc
+            raise
+        if cur.rowcount != 1:
+            conn.rollback()
+            raise HTTPException(status_code=404, detail="account not found")
+        conn.commit()
+    return {"account_number": account, "exempt": bool(body.exempt)}
 
 
 @router.post("/api/sms/reconcile")

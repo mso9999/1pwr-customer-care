@@ -132,6 +132,8 @@ Do **not** assume Lesotho M-Pesa regexes apply to Zambia—validate against samp
 
 `cc_bridge_notify.bridge_credentials()` resolves `CC_BRIDGE_NOTIFY_URL_<CC>` / `CC_BRIDGE_SECRET_<CC>` automatically—no code change per country beyond env.
 
+The CC **WhatsApp bridge** page (`/admin/whatsapp-bridge`, superadmin / O&M / IT / Nexus `administer_cc`) shows the QR for the lane you are logged into. It does not fall back from Benin or Zambia to the Lesotho bridge. The Benin checklist (separate PM2 process, auth dir, port, tracker group, then env and a scan) is in `docs/whatsapp-customer-care.md`. Do not start that process until the Benin phone is ready.
+
 ---
 
 ## 6. Frontend (`acdb-api/frontend`)

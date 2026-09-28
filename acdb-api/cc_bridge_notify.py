@@ -28,6 +28,21 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger("cc-api.bridge-notify")
 
 
+def bridge_link_credentials(country_code: str) -> tuple[str, str]:
+    """Credentials for the admin link page.
+
+    Benin and Zambia never fall back to the unsuffixed Lesotho bridge.
+    Lesotho keeps the unsuffixed pair when ``_LS`` is unset.
+    """
+    cc = (country_code or "LS").upper()
+    url = os.environ.get(f"CC_BRIDGE_NOTIFY_URL_{cc}") or ""
+    secret = os.environ.get(f"CC_BRIDGE_SECRET_{cc}") or ""
+    if cc == "LS":
+        url = url or os.environ.get("CC_BRIDGE_NOTIFY_URL", "")
+        secret = secret or os.environ.get("CC_BRIDGE_SECRET", "")
+    return url, secret
+
+
 def bridge_credentials(country_code: str) -> tuple[str, str]:
     """Return (notify_url, secret) for WhatsApp bridge HTTP inbound for this country."""
     cc = (country_code or "LS").upper()

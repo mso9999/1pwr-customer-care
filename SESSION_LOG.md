@@ -1,45 +1,26 @@
-## Session 2026-09-27 [202609272220] — Migration 070 last_sample_time for Zambia
-- Benin meter-page 500 (missing `prototype_meter_state.last_sample_time`) was patched live on `onepower_bj` at 14:54Z. `070_prototype_meter_last_sample_time.sql` was written then but never committed, so Zambia stayed unpatched. `onepower_zm` still lacks the column; LS/BN have it; `cc_schema_migrations` has 071 but not 070.
-- Committing 070 so deploy applies `ADD COLUMN IF NOT EXISTS last_sample_time VARCHAR(20)` to every country DB and records the file. No-op on LS/BN.
-- Side effects: production DDL on `onepower_zm` (and a recorded no-op on LS/BN) via the deploy migration step.
+## 2026-09-28 — Cursor — SMS inbox, WhatsApp bridge page, and four deferred fixes
+- SMS inbox at `/sms-inbox` for the sidebar country. All-countries asks the operator to pick one country. Readers are `operate_customer_care` plus existing SMS-format editors. Replay stays on `/admin/sms-formats?tab=unprocessed`. Benin `POST /replay` returns each row skipped unless `SMS_BN_REPLAY_CREDIT_ENABLED` is on; it does not follow `meter_credit_enabled`. Low-balance SMS stay off.
+- Optional installation threshold on Tariffs (`system_config.connection_fee_threshold`, unset until set; 0 clears). Migration `073_connection_fee_threshold_exempt.sql` adds `accounts.fee_threshold_exempt`. The threshold classifies an amount at or above it as a connection fee unless the account is exempt or the fee is already verified. Exact-amount matching still runs. Only fee admins can set the exempt flag, from the inbox.
+- WhatsApp: bridge `GET /link-status` (same secret as `/notify`). CC `GET /api/admin/whatsapp-bridge` for this process’s country. Page `/admin/whatsapp-bridge` for superadmin, `onm_team`, and Nexus `administer_cc`. Benin/Zambia do not fall back to the Lesotho bridge. Benin SOP added in `docs/whatsapp-customer-care.md`. The Benin process was not started and no `CC_BRIDGE_*` secrets were written.
+- Deploy schema check `scripts/check_schema_drift.py` after migrations. Allowlist is the 2026-09-28 Lesotho-only diff. New missing tables or columns fail the deploy.
+- Customer Data add/edit of a raw transaction is superadmin and `onm_team` only, labeled “Ledger correction (no balance effect)”. `POST /api/tables/transactions` rejects other roles, including finance.
+- 1Meter sample timestamps use `METER_CLOCK_OFFSET_HOURS` (default 2), not the country offset. Historical `hourly_consumption` rows were not rewritten.
+- Migration `074_backfill_1meter_commissioned_bindings.sql` reruns the 059 rules and skips `rotating`. Dry-run at about 05:20Z on 2026-09-28: `onepower_cc` would update 38 rows, `onepower_bj` 0. Both transactions were rolled back. Not applied until a main deploy.
+- Tests: `tests/test_sms_inbox_and_gaps.py` plus `tests/test_sms_formats.py` — 32 passed. Frontend `tsc -b --noEmit` clean.
+- Side effects: none live. No deploy, no DB writes left applied, no secrets, no Benin PM2 process.
+- Key files: `acdb-api/sms_formats.py`, `acdb-api/ingest.py`, `acdb-api/fee_classifier.py`, `acdb-api/country_fees.py`, `acdb-api/whatsapp_bridge_admin.py`, `acdb-api/crud.py`, `acdb-api/migrations/073_connection_fee_threshold_exempt.sql`, `acdb-api/migrations/074_backfill_1meter_commissioned_bindings.sql`, `acdb-api/scripts/check_schema_drift.py`, `whatsapp-bridge/whatsapp-customer-care.js`, `acdb-api/frontend/src/pages/SmsInboxPage.tsx`, `acdb-api/frontend/src/pages/WhatsAppBridgePage.tsx`, `.github/workflows/deploy.yml`.
+- Follow-ups: this session commits and pushes to main (deploy). After deploy, confirm the 38 Lesotho bindings and that Benin replay stays skipped. Start the Benin bridge only when the phone and secrets are ready. Help, the operating manual, the tutorial, and the tutorial knowledge check describe the inbox, the bridge, the threshold, and the ledger correction.
 
-## Session 2026-09-27 [202609272125] — Second meter on a 1Meter gateway blocked commission
-- Nils: GABRIEL APKANON / `0002KOT` created; assign of `000023021758` to KOT-GW-0004 succeeded (18:40Z); commission 409 "No gateway associated with this meter". Screenshot is that gate, not assign.
-- Deployed `_commission_gateway_gate` only looks at `req.gateway_thing_name`, `meter_gateway_link` (empty in BN — assign-ptb 400'd, no pole/survey), then `meter_provisioning` by exact serial. That table holds one serial per Thing (`000023021769` / `0001KOT`). A second RS-485 meter never matches. DynamoDB already had `000023021758` → KOT-GW-0004.
-- Live: wrote `meter_gateway_link` for `23021758`→KOT-GW-0004/`0002KOT` and `23021769`→`0001KOT` at 2026-09-27 ~19:26Z so they can retry commission now (deployed gate reads this table).
-- Code: commission also uses `last_seen_thing_for_meter`; link lookup matches padded or stripped serials. Assign writes `meter_gateway_link` via `record_gateway_link` (does not need a PTB). Test `test_record_gateway_link_strips_serial_and_upserts`.
-- Readings for `0002KOT` will keep 409 until the customer is commissioned (`telemetry_refusal`).
-- Side effects: two `onepower_bj.meter_gateway_link` rows; CC deploy via push.
-
-## Session 2026-09-27 [202609272010] — 1Meter billing gate follows customer commissioning; ingest alert
-- Durable fix for the 0001KOT refusal. `/api/meters/reading` required the publishing Thing's `meter_provisioning` row (one serial per Thing) to name the account and be `commissioned`. Only migration 059 and, since `b660eea`, Commission set it. Assign, reassign, gateway swap and rotate did not. A multi-meter gateway could never pass for its second meter.
-- New `onemeter_binding.py`: `telemetry_refusal` accepts once the account's customer is `customer_commissioned`, and still refuses if the serial is `commissioned` to a different account. `ensure_1meter_binding` (059 rules plus a commissioned-customer requirement) runs on every accepted reading inside a savepoint, so the provisioning row that Thing-level relay commands read repairs itself whichever workflow changed the chain. Commission calls the same function.
-- New `scripts/ops/check_1meter_ingest.py` + `cc-1meter-ingest-check` timer (30 min, LS/BN/ZM lanes, installed by deploy). It flags commissioned 1Meters that publish (DynamoDB `meter_last_seen`) but have no CC accept for 45 min+, sends WhatsApp through that country's bridge only, re-alerts every 24 h per meter, and exits 1. Uses `GetItem`: the BN lane runs on instance role `cc-postgres-backup-role`, which lacks `BatchGetItem`. Dry-run on the host: LS 63 commissioned / 0 stuck, BN 2 / 0, ZM 0.
-- Tests: `test_onemeter_binding.py` (a gateway's second meter is accepted; fails on the old gate), `test_check_1meter_ingest.py`. Suite 373 passed; 2 failures also on clean HEAD (`test_provisioning_station_download`, `test_sync_ugridplan_discover_match`).
-- Open: BN has no WhatsApp bridge config (`CC_BRIDGE_NOTIFY_URL_BN`), so BN alerts are journal-only. The old `cc-1meter-monitor` (offline alert) runs from a script deleted from the repo in `f592b3b`.
-- Side effects: CC deploy via push; new systemd timer on the CC host.
-
-## Session 2026-09-27 [202609271810] — Commissioning did not open the 1Meter billing gate; credit entered via ledger editor
-- Nils: credit added to `0001KOT`, meter records consumption, account shows none.
-- Cause 1: `/api/meters/reading` (ingest.py) requires the gateway's `meter_provisioning` row to name the account and be `commissioned`, else 409. Nothing in the commission flow sets that; only the one-off migration 059 ever did. `KOT-GW-0004` / `000023021769` was `online` with no account, so every reading 409'd. Benin has no DynamoDB→PG `prototype_sync` (LS does), so BN had zero consumption.
-- Live fix (prod, `onepower_bj`, 16:05:08 UTC): `meter_provisioning` id 8 → `account_number=0001KOT`, `status=commissioned` (was `online`, NULL).
-- Code: `commission.py` `_commission_1meter_binding` promotes the account's 1Meter binding on commission (059 rules, gateway-scoped if chosen, skips duplicate serials and `rotating`). Response gains `telemetry_bound`. Rollback-tested on LS/BN.
-- Cause 2: the 100 XOF at 15:03 (transactions id 144349, by 1PWR0512) was typed into the Customer Data page ledger form (`POST /api/tables/transactions`): raw row, `kwh_value=0`, no meter, no balance/relay logic. Real payments go through Record Payment (`/api/payments/record`). Row left in place.
-- LS: 38 MAK 1Meters assigned to accounts are not `commissioned` in `meter_provisioning`, so their CC posts 409 too. No consumption loss (LS `prototype_sync.py` reads DynamoDB directly), but relay commands also gate on `commissioned`. Not changed; needs a decision.
-- Side effects: one production row update in `onepower_bj`; CC deploy via push (`b660eea`, success).
-- Verified: 16:21 UTC first 200 (baseline 0.38 kWh), 16:37 UTC delta 0.04 kWh into `hourly_consumption`. `RELAY_AUTO_TRIGGER_ENABLED` unset in BN, so the zero balance cannot cut off.
-- Open: firmware timestamps are UTC+2 (liveTime 1755 at 15:55Z), and BN ingest parses them as UTC+1 (`UTC_OFFSET_HOURS`), so BN reading times and hourly buckets are 1 h ahead.
-
-## Session 2026-09-27 [202609271515] — Financing schema for Benin and Zambia
-- BN customer page (`GET /api/financing/customer/0001KOT`) 500'd: `financing_agreements` does not exist. Only `onepower_cc` had the financing tables (created ad hoc, never in a migration). LS has 0 products and 0 agreements.
-- `migrations/071_financing_schema.sql`: `financing_products`, `financing_agreements`, `financing_ledger` matching the LS definitions (columns, checks, FKs, indexes), plus explicit `cc_api` grants on tables and sequences. `IF NOT EXISTS` throughout, so a no-op on LS.
-- Dry-run in a rolled-back transaction on `onepower_cc`, `onepower_bj`, `onepower_zm`: applies cleanly; `cc_api` can select and insert.
-- Behaviour: with no agreements, payment split still sends 100% to electricity; `financing_penalties.py` is not scheduled anywhere. Financing becomes available in BN/ZM once staff create products or agreements.
-- Side effects: production DDL on `onepower_bj` and `onepower_zm` through the deploy's migration step.
-
-## Session 2026-09-27 [202609271505] — Confirmed Benin meter-page 500 is cleared
-- Nils (14:48 UTC): 500 on every meter after commissioning. `1pdb-api-bn` log: `UndefinedColumn: last_sample_time` in `meter_detail`, the same fault as the 16:51 entry below. `onepower_bj` now has the column; no `/detail` 500 after 14:50 UTC. Nothing changed here.
-- Still open: `financing_agreements` is missing in BN, so the customer-page financing panel 500s. Migration `070` is not yet committed, and `cc_schema_migrations` in BN ends at `069`.
+## Session 2026-09-27 [202609272050] — SMS parsing on CC: editable SMS Formats, gateways pass-through (not deployed)
+- Trigger: Nils (BN) 0001KOT MoMo SMS `Paiement 10F de … Message:0001KOT Solde:10563519F ID:12985` showed "Échoué" and was not credited; paid manually. Root cause: `momo_bj.parse_momo_bn_sms` only accepted `FCFA|XOF|CFA`, so the SMS was `unparsed`.
+- `momo_bj.py`: bare `F` after a payment keyword (`Paiement 10F`), generic match still needs the currency; `Solde:`/fees never read as amount; `10 000`/`10.000` thousands; keep leading 0 of 10-digit `01…` numbers; phone lookup on last 8 digits; `Message:` remark stops at `Solde`/`ID`. Real SMS added to `tests/test_momo_bj.py`.
+- New `sms_formats.py` + migration `072_sms_formats.sql` + page `/admin/sms-formats` (`SmsFormatsPage.tsx`, EN/FR): operator-defined payment and balance-request formats (template `{amount}`/`{account}`/`{phone}`/`{txn_id}`/`{remark}`/`{*}` or regex), tried before built-ins; samples required to enable and re-checked on save; test, 30-day impact preview, unprocessed list + replay (skips already-credited; flags similar manual payments); audit table. Access: `superadmin`/`onm_team` (IS&T→onm_team) or Nexus `administer_cc`.
+- `ingest.py`: formats-first parse; balance-request SMS answered by CC when `sms_balance_replies_enabled` (default off); trusted payment senders (`sms_trusted_senders[_mode]`, default off); `X-Gateway-Key` check on `/api/sms/incoming*` (`SMS_INGEST_GATEWAY_KEY_MODE`, default `warn`); `/api/sms/inbound-log` and `/api/sms/reconcile` now need the SMS-formats role (were unauthenticated; full SMS bodies). `mpesa_sms.resolve_sms_account` honours a format's `account` group.
+- Gateway PHP (SMSComms, SMSComms-BN, local branches only): `receive.php` answers the app, forwards to CC with key + retry queue (`cc_forward.php`, cron `cc_forward_retry.php`); legacy typed files behind `SMS_LEGACY_TYPED_FILES`. `sparkmeter_Benin`: `$LEGACY_FILE_WATCHER_CREDIT_ENABLED=false` (it credited Koios from MoMo files with no switch — possible double credit with CC for SAM/OCE/UEF), `$LEGACY_BALANCE_REPLIES_ENABLED`.
+- Tests: `test_sms_formats.py` (20) + `test_momo_bj.py`; full suite 399 pass, 2 pre-existing failures (station bundle version, `unittest.patch` in sync_ugridplan test). Throwaway Postgres integration run (pgserver) of migration + all endpoints: 21/21. Frontend `tsc -b`, vite build, eslint clean.
+- Side effects: none in production. Not committed here: this tree also holds another session's staged 1Meter work in `ingest.py`, so commit must separate hunks.
+- Key files: `acdb-api/sms_formats.py`, `acdb-api/ingest.py`, `acdb-api/momo_bj.py`, `acdb-api/mpesa_sms.py`, `acdb-api/migrations/072_sms_formats.sql`, `acdb-api/frontend/src/pages/SmsFormatsPage.tsx`, `docs/ops/sms-pass-through-and-formats.md`.
+- Follow-ups: cutover checklist in the runbook (rotate the public default gateway key; deploy gateways; Benin watcher diff vs live; trusted senders warn→enforce; move balance replies). Do not replay `ID:12985` (entered manually). Locate the "SMS reçus" dashboard host from Nils's screenshot — not smsbn, not in any repo.
 
 ## Session 2026-09-27 [202609271440] — Commission persists CC-created customers (no legacy id)
 - Nils (BN, 14:27:33Z): "Contracts were generated but the customer record could not be updated… customer row not found after contract generation". `cc-api-bn` log: `legacy_id=None`. Customer was created in CC, so `customers.customer_id_legacy` is NULL; the flags UPDATE keyed on it matched no row. Not a PTB/uGridPlan link issue.
@@ -213,6 +194,67 @@
 ### Follow-ups
 - USB-reflash KOT-GW-0004 to 1.1.70. Do not run another 1.1.61 canary.
 - Commit `ota_releases.json` when asked so a wiped DB row cannot fall back to 1.1.61.
+
+---
+
+## Session 2026-09-27 [202609271657] — Dashboard power flow: PV and genset icons on the left
+
+### What Was Done
+- Aggregate power flow on the dashboard: the solar and genset icons moved from above/below their boxes to the left. PV and Genset boxes grew from 144×66 to 160×120, with larger, vertically centred text and 4× icons. Inverter, load, and battery moved right by 20–60 units to keep the lines readable. The viewBox shrank from 436 to 356 units tall, so the diagram draws larger at the same height on screen.
+- `NodeBox` takes optional `width`, `height`, and `iconScale`; other nodes keep the old size. `tsc -b --noEmit` clean. Checked in a throwaway SVG render.
+
+### Side effects
+- None. Not deployed.
+
+### Key files
+- `acdb-api/frontend/src/pages/DashboardPage.tsx`
+
+---
+
+## Session 2026-09-27 [202609272010] — 1Meter billing gate follows customer commissioning; ingest alert
+- Durable fix for the 0001KOT refusal. `/api/meters/reading` required the publishing Thing's `meter_provisioning` row (one serial per Thing) to name the account and be `commissioned`. Only migration 059 and, since `b660eea`, Commission set it. Assign, reassign, gateway swap and rotate did not. A multi-meter gateway could never pass for its second meter.
+- New `onemeter_binding.py`: `telemetry_refusal` accepts once the account's customer is `customer_commissioned`, and still refuses if the serial is `commissioned` to a different account. `ensure_1meter_binding` (059 rules plus a commissioned-customer requirement) runs on every accepted reading inside a savepoint, so the provisioning row that Thing-level relay commands read repairs itself whichever workflow changed the chain. Commission calls the same function.
+- New `scripts/ops/check_1meter_ingest.py` + `cc-1meter-ingest-check` timer (30 min, LS/BN/ZM lanes, installed by deploy). It flags commissioned 1Meters that publish (DynamoDB `meter_last_seen`) but have no CC accept for 45 min+, sends WhatsApp through that country's bridge only, re-alerts every 24 h per meter, and exits 1. Uses `GetItem`: the BN lane runs on instance role `cc-postgres-backup-role`, which lacks `BatchGetItem`. Dry-run on the host: LS 63 commissioned / 0 stuck, BN 2 / 0, ZM 0.
+- Tests: `test_onemeter_binding.py` (a gateway's second meter is accepted; fails on the old gate), `test_check_1meter_ingest.py`. Suite 373 passed; 2 failures also on clean HEAD (`test_provisioning_station_download`, `test_sync_ugridplan_discover_match`).
+- Open: BN has no WhatsApp bridge config (`CC_BRIDGE_NOTIFY_URL_BN`), so BN alerts are journal-only. The old `cc-1meter-monitor` (offline alert) runs from a script deleted from the repo in `f592b3b`.
+- Side effects: CC deploy via push; new systemd timer on the CC host.
+
+## Session 2026-09-27 [202609271810] — Commissioning did not open the 1Meter billing gate; credit entered via ledger editor
+- Nils: credit added to `0001KOT`, meter records consumption, account shows none.
+- Cause 1: `/api/meters/reading` (ingest.py) requires the gateway's `meter_provisioning` row to name the account and be `commissioned`, else 409. Nothing in the commission flow sets that; only the one-off migration 059 ever did. `KOT-GW-0004` / `000023021769` was `online` with no account, so every reading 409'd. Benin has no DynamoDB→PG `prototype_sync` (LS does), so BN had zero consumption.
+- Live fix (prod, `onepower_bj`, 16:05:08 UTC): `meter_provisioning` id 8 → `account_number=0001KOT`, `status=commissioned` (was `online`, NULL).
+- Code: `commission.py` `_commission_1meter_binding` promotes the account's 1Meter binding on commission (059 rules, gateway-scoped if chosen, skips duplicate serials and `rotating`). Response gains `telemetry_bound`. Rollback-tested on LS/BN.
+- Cause 2: the 100 XOF at 15:03 (transactions id 144349, by 1PWR0512) was typed into the Customer Data page ledger form (`POST /api/tables/transactions`): raw row, `kwh_value=0`, no meter, no balance/relay logic. Real payments go through Record Payment (`/api/payments/record`). Row left in place.
+- LS: 38 MAK 1Meters assigned to accounts are not `commissioned` in `meter_provisioning`, so their CC posts 409 too. No consumption loss (LS `prototype_sync.py` reads DynamoDB directly), but relay commands also gate on `commissioned`. Not changed; needs a decision.
+- Side effects: one production row update in `onepower_bj`; CC deploy via push (`b660eea`, success).
+- Verified: 16:21 UTC first 200 (baseline 0.38 kWh), 16:37 UTC delta 0.04 kWh into `hourly_consumption`. `RELAY_AUTO_TRIGGER_ENABLED` unset in BN, so the zero balance cannot cut off.
+- Open: firmware timestamps are UTC+2 (liveTime 1755 at 15:55Z), and BN ingest parses them as UTC+1 (`UTC_OFFSET_HOURS`), so BN reading times and hourly buckets are 1 h ahead.
+
+## Session 2026-09-27 [202609271515] — Financing schema for Benin and Zambia
+- BN customer page (`GET /api/financing/customer/0001KOT`) 500'd: `financing_agreements` does not exist. Only `onepower_cc` had the financing tables (created ad hoc, never in a migration). LS has 0 products and 0 agreements.
+- `migrations/071_financing_schema.sql`: `financing_products`, `financing_agreements`, `financing_ledger` matching the LS definitions (columns, checks, FKs, indexes), plus explicit `cc_api` grants on tables and sequences. `IF NOT EXISTS` throughout, so a no-op on LS.
+- Dry-run in a rolled-back transaction on `onepower_cc`, `onepower_bj`, `onepower_zm`: applies cleanly; `cc_api` can select and insert.
+- Behaviour: with no agreements, payment split still sends 100% to electricity; `financing_penalties.py` is not scheduled anywhere. Financing becomes available in BN/ZM once staff create products or agreements.
+- Side effects: production DDL on `onepower_bj` and `onepower_zm` through the deploy's migration step.
+
+## Session 2026-09-27 [202609271505] — Confirmed Benin meter-page 500 is cleared
+- Nils (14:48 UTC): 500 on every meter after commissioning. `1pdb-api-bn` log: `UndefinedColumn: last_sample_time` in `meter_detail`, the same fault as the 16:51 entry below. `onepower_bj` now has the column; no `/detail` 500 after 14:50 UTC. Nothing changed here.
+- Still open: `financing_agreements` is missing in BN, so the customer-page financing panel 500s. Migration `070` is not yet committed, and `cc_schema_migrations` in BN ends at `069`.
+
+## Session 2026-09-27 [202609271651] — Benin meter pages returned HTTP 500
+
+### What Was Done
+- Nils (KOT, after commissioning `0001KOT`): every meter page 500'd. `GET /api/meters/{id}/detail` (added in `7fb5ecc`) selects `prototype_meter_state.last_sample_time`. Lesotho has that column because `/opt/1pdb/services/prototype_sync.py` writes it; `onepower_bj` never had it. The O&M check-meter report reads it too.
+- Live fix: `ALTER TABLE prototype_meter_state ADD COLUMN IF NOT EXISTS last_sample_time VARCHAR(20)` on `onepower_bj` at 2026-09-27 14:54 UTC (same type as LS). Ran `meter_detail` as `cc_api` for `000023021769` (0001KOT) and `SMRSD-04-00030778` (0034SAM): both return.
+- Added `migrations/070_prototype_meter_last_sample_time.sql` so deploys keep every country DB in step. Not committed.
+- Commission for `0001KOT` 500'd at 14:27 ("customer row not found after contract generation") and succeeded at 14:46 after `086aed8`. The customer is commissioned and the contract is signed.
+
+### Side effects
+- Production DDL on `onepower_bj`: nullable column added to `prototype_meter_state`. No data change, no deploy.
+
+### Follow-ups
+- Benin has no `financing_agreements`, so `GET /api/financing/customer/0001KOT` 500s. That table is not created by any repo migration; it only exists in LS.
+- Commission logs a base64 error for the signature image each time (393 characters, invalid padding). PDFs still generate.
 
 ---
 

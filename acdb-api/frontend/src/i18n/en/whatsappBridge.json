@@ -1,0 +1,18 @@
+{
+  "title": "WhatsApp bridge",
+  "subtitle": "Link this country’s Customer Care phone. The QR is not shown on the operator inbox.",
+  "country": "This lane",
+  "linked": "Linked",
+  "notLinked": "Not linked",
+  "waiting": "Waiting for a QR from the bridge.",
+  "tracker": "Tracker group",
+  "trackerUnset": "No tracker group name reported.",
+  "steps": "On the Customer Care phone: WhatsApp → Linked devices → Link a device, then scan this code. WhatsApp rotates it about every 60 seconds.",
+  "pairing": "Pairing code",
+  "pairingHelp": "On the phone choose Link with phone number instead, and enter this code immediately.",
+  "pickCountry": "Choose Lesotho, Benin, or Zambia in the sidebar. This page talks to that lane’s API only.",
+  "notConfigured": "This country has no bridge URL. The page does not fall back to another country’s bridge.",
+  "sop": "Setup steps are in the Customer Care WhatsApp SOP.",
+  "unreachable": "The bridge URL is set, but the link status could not be read.",
+  "loading": "Checking the bridge…"
+}

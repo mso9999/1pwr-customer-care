@@ -1015,6 +1015,17 @@ def create_record(
             required.append(CCRole.finance_team)
         raise_privilege_denied(user, required, f"create records in the {table_name} table")
 
+    # Raw transaction inserts do not credit kWh or update the balance.
+    # Record Payment is the operator path. Ledger corrections stay with admin / O&M.
+    if table_name.lower() == "transactions" and not set(effective_roles(user)).intersection(
+        {CCRole.superadmin.value, CCRole.onm_team.value}
+    ):
+        raise_privilege_denied(
+            user,
+            [CCRole.superadmin, CCRole.onm_team],
+            "create raw ledger rows in transactions",
+        )
+
     if not req.data:
         raise HTTPException(status_code=400, detail="No data provided")
 

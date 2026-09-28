@@ -1,0 +1,63 @@
+# Lesotho-only objects as of 2026-09-28. A country missing one of these
+# does not fail deploy. Anything Lesotho has that is not listed here does.
+# Format: <database> table:<name>   or   <database> column:<table>.<column>
+
+onepower_bj table:casing_bak_hourly_consumption_20260618
+onepower_bj table:casing_bak_meter_assignments_20260618
+onepower_bj table:casing_bak_meters_20260618
+onepower_bj table:casing_bak_transactions_20260618
+onepower_bj table:cc_echo_backup_realign
+onepower_bj table:cc_koios_echo_backup_20260605
+onepower_bj table:cc_seed_backup_realign
+onepower_bj table:cc_seed_backup_realign2
+onepower_bj table:hourly_consumption_2021
+onepower_bj table:hourly_consumption_2022
+onepower_bj table:hourly_consumption_dedup_bak_ls_20260609
+onepower_bj table:meter_readings_default
+onepower_bj table:payment_verifications
+onepower_bj table:recon_anchors_20260618
+onepower_bj table:transactions_date_repair_20260604
+onepower_bj table:transactions_seed_archive
+onepower_bj table:wa_tickets
+
+onepower_zm table:app_device_tokens
+onepower_zm table:app_notifications
+onepower_zm table:casing_bak_hourly_consumption_20260618
+onepower_zm table:casing_bak_meter_assignments_20260618
+onepower_zm table:casing_bak_meters_20260618
+onepower_zm table:casing_bak_transactions_20260618
+onepower_zm table:cc_echo_backup_realign
+onepower_zm table:cc_koios_echo_backup_20260605
+onepower_zm table:cc_seed_backup_realign
+onepower_zm table:cc_seed_backup_realign2
+onepower_zm table:hourly_consumption_2021
+onepower_zm table:hourly_consumption_2022
+onepower_zm table:hourly_consumption_2023
+onepower_zm table:hourly_consumption_2024
+onepower_zm table:hourly_consumption_2025
+onepower_zm table:hourly_consumption_2026
+onepower_zm table:hourly_consumption_2027
+onepower_zm table:hourly_consumption_bak_koiosdup_20260617
+onepower_zm table:hourly_consumption_dedup_bak_ls_20260609
+onepower_zm table:hourly_consumption_default
+onepower_zm table:hourly_consumption_legacy
+onepower_zm table:meter_readings_default
+onepower_zm table:payment_verifications
+onepower_zm table:recon_anchors_20260618
+onepower_zm table:recon_deleted_dupes_20260618
+onepower_zm table:transactions_bak_recon_20260618
+onepower_zm table:transactions_date_repair_20260604
+onepower_zm table:transactions_seed_archive
+onepower_zm column:meters.customer_id_legacy
+onepower_zm column:wa_tickets.cause_of_fault
+onepower_zm column:wa_tickets.duration
+onepower_zm column:wa_tickets.failure_time
+onepower_zm column:wa_tickets.precautions
+onepower_zm column:wa_tickets.resolution_approach
+onepower_zm column:wa_tickets.resolved_by
+onepower_zm column:wa_tickets.restoration_time
+onepower_zm column:wa_tickets.services_affected
+onepower_zm column:wa_tickets.status
+onepower_zm column:wa_tickets.ticket_name
+onepower_zm column:wa_tickets.troubleshooting_steps
+onepower_zm column:wa_tickets.updated_at

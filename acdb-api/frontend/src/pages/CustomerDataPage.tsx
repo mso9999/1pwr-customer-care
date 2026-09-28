@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { Link, useSearchParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -129,7 +129,8 @@ function TransactionFormModal({ initial, accountNumber, meterId, defaultRate, on
   return (
     <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4" onClick={onCancel}>
       <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-5 sm:p-6 space-y-4" onClick={e => e.stopPropagation()}>
-        <h3 className="text-lg font-bold text-gray-800">{isEdit ? t('customerData:editTransaction') : t('customerData:addTransaction')}</h3>
+        <h3 className="text-lg font-bold text-gray-800">{isEdit ? t('customerData:editTransaction') : t('customerData:ledgerCorrection')}</h3>
+        {!isEdit && <p className="text-xs text-amber-700">{t('customerData:ledgerCorrectionHelp')}</p>}
 
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">{t('customerData:dateTime')}</label>
@@ -203,7 +204,7 @@ export default function CustomerDataPage() {
   const { t } = useTranslation(['customerData', 'common']);
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { canWrite } = useAuth();
+  const { canWrite, user } = useAuth();
   const paramAcct = searchParams.get('account') || '';
 
   const [account, setAccount] = useState(paramAcct);
@@ -261,6 +262,8 @@ export default function CustomerDataPage() {
 
   // CRUD helpers
   const canEditTxns = canWrite; // write_customers OR write_transactions
+  const ledgerRoles = user?.roles || user?.cc_roles || (user?.role ? [user.role] : []);
+  const canLedgerCorrect = ledgerRoles.some((role) => role === 'superadmin' || role === 'onm_team');
   const meterId = data?.meter?.meterid || '';
 
   const handleTxnSaved = useCallback(() => {
@@ -675,9 +678,10 @@ export default function CustomerDataPage() {
           {tab === 'transactions' && (
             <div className="bg-white rounded-xl border overflow-hidden">
               {/* Add transaction button */}
-              {canEditTxns && (
-                <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between">
+              {(canEditTxns || canLedgerCorrect) && (
+                <div className="px-4 py-3 border-b bg-gray-50 flex items-center justify-between gap-3">
                   <span className="text-xs text-gray-500 font-medium uppercase tracking-wide">{t('customerData:transactionHistory')}</span>
+                  {canLedgerCorrect ? (
                   <button
                     onClick={() => { setEditingTxn(null); setShowForm(true); setCrudError(''); }}
                     className="px-4 py-2 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 active:bg-blue-800 transition flex items-center gap-1.5"
@@ -685,8 +689,11 @@ export default function CustomerDataPage() {
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                     </svg>
-                    {t('customerData:addTransaction')}
+                    {t('customerData:ledgerCorrection')}
                   </button>
+                  ) : (
+                    <Link to="/record-payment" className="text-xs text-blue-700 underline">{t('customerData:useRecordPayment')}</Link>
+                  )}
                 </div>
               )}
               <div className="overflow-x-auto">
@@ -756,6 +763,7 @@ export default function CustomerDataPage() {
                         {canEditTxns && (
                           <td className="px-4 py-2.5 text-right">
                             <div className="opacity-0 group-hover:opacity-100 transition flex items-center justify-end gap-1">
+                              {canLedgerCorrect && (
                               <button
                                 onClick={() => { setEditingTxn(txn); setShowForm(true); setCrudError(''); }}
                                 className="p-1.5 rounded-lg hover:bg-blue-50 text-blue-500 hover:text-blue-700 transition"
@@ -765,6 +773,7 @@ export default function CustomerDataPage() {
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
                                 </svg>
                               </button>
+                              )}
                               <button
                                 onClick={() => { setDeleteConfirm(txn); setCrudError(''); }}
                                 className="p-1.5 rounded-lg hover:bg-red-50 text-red-400 hover:text-red-600 transition"

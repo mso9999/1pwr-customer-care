@@ -37,6 +37,28 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW_FOLIO: WhatsNewEntry[] = [
   {
+    id: 'sms-inbox-bridge-ledger',
+    date: '2026-09-28',
+    title: 'SMS inbox, WhatsApp QR, and ledger corrections',
+    blurb: 'Inbound texts have their own page, the WhatsApp QR is an admin page, and Customer Data no longer pretends a raw row is a payment.',
+    pages: [
+      {
+        heading: 'SMS inbox',
+        body:
+          'Commerce → SMS Inbox shows texts for the country in the sidebar. All countries asks you to pick one.\n\n' +
+          '- Failed rows go to SMS Formats if you edit formats, otherwise to Record Payment.\n' +
+          '- Replay stays on SMS Formats. It does not credit from the inbox.',
+      },
+      {
+        heading: 'Payments and the WhatsApp phone',
+        body:
+          '- Tariffs can set an installation threshold. Amounts at or above it are connection fees unless that account is exempt.\n' +
+          '- Customer Data → Ledger correction is for superadmin and O&M only. It does not change the balance.\n' +
+          '- System → WhatsApp bridge shows the QR for this country. It does not use another country’s phone.',
+      },
+    ],
+  },
+  {
     id: 'ptb-on-install-and-assign',
     date: '2026-09-25',
     title: 'Pole boxes (PTBs) are confirmed, not assumed',

@@ -1,0 +1,18 @@
+{
+  "title": "Pont WhatsApp",
+  "subtitle": "Associer le téléphone Service client de ce pays. Le QR n’apparaît pas dans la boîte opérateur.",
+  "country": "Cette voie",
+  "linked": "Associé",
+  "notLinked": "Non associé",
+  "waiting": "En attente d’un QR du pont.",
+  "tracker": "Groupe de suivi",
+  "trackerUnset": "Aucun nom de groupe de suivi.",
+  "steps": "Sur le téléphone Service client : WhatsApp → Appareils connectés → Connecter un appareil, puis scannez ce code. WhatsApp le renouvelle environ toutes les 60 secondes.",
+  "pairing": "Code d’association",
+  "pairingHelp": "Sur le téléphone, choisissez Associer avec un numéro de téléphone et saisissez ce code tout de suite.",
+  "pickCountry": "Choisissez le Lesotho, le Bénin ou la Zambie dans la barre latérale. Cette page parle seulement à l’API de cette voie.",
+  "notConfigured": "Ce pays n’a pas d’URL de pont. La page ne bascule pas vers le pont d’un autre pays.",
+  "sop": "Les étapes sont dans la procédure WhatsApp Service client.",
+  "unreachable": "L’URL du pont est définie, mais l’état du lien n’a pas pu être lu.",
+  "loading": "Vérification du pont…"
+}

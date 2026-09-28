@@ -330,6 +330,7 @@ from site_registry import router as site_registry_router
 from site_sync_ingest import router as site_sync_ingest_router
 from sms_log import router as sms_log_router
 from sms_formats import router as sms_formats_router
+from whatsapp_bridge_admin import router as whatsapp_bridge_router
 from analytics import router as analytics_router
 from customer_cohort import router as customer_cohort_router
 from payment_status import router as ps_router
@@ -395,6 +396,7 @@ app.include_router(site_registry_router)
 app.include_router(site_sync_ingest_router)
 app.include_router(sms_log_router)
 app.include_router(sms_formats_router)
+app.include_router(whatsapp_bridge_router)
 app.include_router(analytics_router)
 app.include_router(customer_cohort_router)
 app.include_router(ps_router)

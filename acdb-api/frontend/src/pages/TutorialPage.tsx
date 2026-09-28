@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { TUTORIAL_WORKFLOWS } from './tutorialWorkflows';
@@ -5,6 +6,34 @@ import { TUTORIAL_WORKFLOWS } from './tutorialWorkflows';
 function helpHref(sectionId: string | null): string | null {
   if (!sectionId) return null;
   return `/help#${encodeURIComponent(sectionId)}`;
+}
+
+function KnowledgeCheck() {
+  const { t } = useTranslation('tutorial');
+  const items = t('quiz.items', { returnObjects: true }) as { q: string; a: string }[];
+  const [open, setOpen] = useState<number | null>(null);
+  if (!Array.isArray(items)) return null;
+  return (
+    <section id="quiz" className="bg-white rounded-xl border border-gray-200 p-5 sm:p-6 scroll-mt-20">
+      <h2 className="text-lg font-bold text-gray-900">{t('quiz.title')}</h2>
+      <p className="text-sm text-gray-600 mt-1 mb-4">{t('quiz.intro')}</p>
+      <ol className="list-decimal list-outside ml-5 space-y-4 text-sm text-gray-800">
+        {items.map((item, i) => (
+          <li key={i} className="pl-1">
+            <p>{item.q}</p>
+            <button
+              type="button"
+              onClick={() => setOpen(open === i ? null : i)}
+              className="mt-2 text-xs font-medium text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md px-2.5 py-1.5"
+            >
+              {open === i ? t('quiz.hide') : t('quiz.show')}
+            </button>
+            {open === i && <p className="mt-2 text-gray-700 bg-gray-50 border border-gray-100 rounded-lg p-3">{item.a}</p>}
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
 }
 
 export default function TutorialPage() {
@@ -79,6 +108,7 @@ export default function TutorialPage() {
             </section>
           );
         })}
+        <KnowledgeCheck />
       </div>
     </div>
   );

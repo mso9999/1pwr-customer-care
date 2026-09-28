@@ -50,13 +50,14 @@ import LpgSitePage from './pages/LpgSitePage';
 import CommissionSitePage from './pages/CommissionSitePage';
 import SMSLogPage from './pages/SMSLogPage';
 import SmsFormatsPage from './pages/SmsFormatsPage';
+import SmsInboxPage from './pages/SmsInboxPage';
+import WhatsAppBridgePage from './pages/WhatsAppBridgePage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import InvestorAnalyticsPage from './pages/InvestorAnalyticsPage';
 import CustomerCohortPage from './pages/CustomerCohortPage';
 import ProvisioningPage from './pages/ProvisioningPage';
 import SiteRegistryPage from './pages/SiteRegistryPage';
 import MeterConnectivityPage from './pages/MeterConnectivityPage';
-
 function HomeRedirect() {
   const { user, loading } = useAuth();
   if (loading) return null;
@@ -110,6 +111,7 @@ export default function App() {
             <Route path="record-payment" element={<ProtectedRoute requireEmployee><RecordPaymentPage /></ProtectedRoute>} />
             <Route path="payment-verification" element={<ProtectedRoute requireEmployee><PaymentVerificationPage /></ProtectedRoute>} />
             <Route path="unmatched-payments" element={<ProtectedRoute requireEmployee><UnmatchedPaymentsPage /></ProtectedRoute>} />
+            <Route path="sms-inbox" element={<ProtectedRoute requireEmployee><SmsInboxPage /></ProtectedRoute>} />
             <Route path="pipeline" element={<ProtectedRoute requireEmployee><PipelinePage /></ProtectedRoute>} />
             <Route path="onboarding-dashboard" element={<ProtectedRoute requireEmployee><OnboardingDashboardPage /></ProtectedRoute>} />
             <Route path="fee-trace-review" element={<ProtectedRoute requireEmployee><FeeTraceReviewPage /></ProtectedRoute>} />
@@ -130,6 +132,7 @@ export default function App() {
             <Route path="admin/coverage" element={<ProtectedRoute requireEmployee requireAction="administer_cc" requiredLevel="A"><CoverageAuditPage /></ProtectedRoute>} />
             <Route path="admin/sms-log" element={<ProtectedRoute requireEmployee requireAction="administer_cc" requiredLevel="A"><SMSLogPage /></ProtectedRoute>} />
             <Route path="admin/sms-formats" element={<ProtectedRoute requireEmployee><SmsFormatsPage /></ProtectedRoute>} />
+            <Route path="admin/whatsapp-bridge" element={<ProtectedRoute requireEmployee><WhatsAppBridgePage /></ProtectedRoute>} />
           </Route>
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

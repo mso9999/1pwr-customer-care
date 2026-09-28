@@ -63,8 +63,8 @@ export const TUTORIAL_WORKFLOWS: TutorialWorkflowDef[] = [
     id: 'payments',
     i18nKey: 'workflows.payments',
     rolesKey: 'roles.financeAll',
-    links: ['/record-payment', '/payment-verification', '/transactions', '/customer-data'],
-    helpSectionIds: ['payments', 'payments', 'data-browsers', 'customers'],
+    links: ['/record-payment', '/payment-verification', '/transactions', '/customer-data', '/sms-inbox', '/customer-data'],
+    helpSectionIds: ['payments', 'payments', 'data-browsers', 'customers', 'payments', 'customers'],
   },
   {
     id: 'advances',
@@ -150,5 +150,19 @@ export const TUTORIAL_WORKFLOWS: TutorialWorkflowDef[] = [
     rolesKey: 'roles.superadmin',
     links: ['/admin/sms-log', null, null, null],
     helpSectionIds: ['sms-log', null, null, 'sms-log'],
+  },
+  {
+    id: 'smsInbox',
+    i18nKey: 'workflows.smsInbox',
+    rolesKey: 'roles.smsReaders',
+    links: ['/sms-inbox', '/sms-inbox', '/admin/sms-formats', '/record-payment'],
+    helpSectionIds: ['payments', 'payments', 'payments', 'payments'],
+  },
+  {
+    id: 'whatsappBridge',
+    i18nKey: 'workflows.whatsappBridge',
+    rolesKey: 'roles.bridgeAdmins',
+    links: [null, '/admin/whatsapp-bridge', null],
+    helpSectionIds: ['admin', 'admin', 'admin'],
   },
 ];

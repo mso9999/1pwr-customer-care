@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -69,6 +70,27 @@ def require_sms_format_editor(user: CurrentUser = Depends(require_employee)) -> 
         return user
     raise_privilege_denied(user, EDITOR_ROLES, "manage SMS formats")
     return user
+
+
+def require_sms_inbox_reader(user: CurrentUser = Depends(require_employee)) -> CurrentUser:
+    """Inbox viewers: customer-care operators plus the existing format editors.
+
+    Finance and a direct-login employee with neither ``operate_customer_care``
+    nor an editor role stay denied. Replay and format settings stay on
+    ``require_sms_format_editor``.
+    """
+    actions = set(user.privilege_actions or [])
+    if actions.intersection({"operate_customer_care", "administer_cc"}):
+        return user
+    if set(effective_roles(user)).intersection(EDITOR_ROLES):
+        return user
+    raise_privilege_denied(user, EDITOR_ROLES, "view the SMS inbox")
+    return user
+
+
+def benin_replay_credit_enabled() -> bool:
+    """Benin replay must not follow ``meter_credit_enabled`` (that defaults on)."""
+    return os.environ.get("SMS_BN_REPLAY_CREDIT_ENABLED", "").strip().lower() in ("1", "true", "yes")
 
 
 # ---------------------------------------------------------------------------
@@ -1024,6 +1046,18 @@ def list_unprocessed(days: int = Query(30, ge=1, le=180),
 @router.post("/replay")
 def replay_unprocessed(body: ReplayIn, background_tasks: BackgroundTasks,
                        user: CurrentUser = Depends(require_sms_format_editor)):
+    if COUNTRY.code == "BN" and not benin_replay_credit_enabled():
+        return {
+            "results": [
+                {
+                    "log_id": log_id,
+                    "status": "skipped",
+                    "reason": "Benin replay credit is disabled (SMS_BN_REPLAY_CREDIT_ENABLED)",
+                }
+                for log_id in body.log_ids
+            ]
+        }
+
     from ingest import _sms_incoming_process_raw
 
     actor = _actor(user)

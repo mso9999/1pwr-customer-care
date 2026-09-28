@@ -69,6 +69,50 @@ def _has_verified_fee(conn, account_number: str, payment_type: str) -> bool:
         return False
 
 
+def _connection_fee_threshold(fees: dict) -> Optional[float]:
+    """Positive installation threshold, or None when unset, blank, or zero."""
+    raw = fees.get("connection_fee_threshold")
+    if raw is None:
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    return value
+
+
+def _account_fee_threshold_exempt(conn, account_number: str) -> bool:
+    """True when this account skips only the threshold rule.
+
+    A missing column (migration 073 not applied) fails open: the account is
+    not treated as exempt, and the caller's transaction is left usable.
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute("SAVEPOINT fee_threshold_exempt")
+        cur.execute(
+            """
+            SELECT COALESCE(fee_threshold_exempt, FALSE)
+              FROM accounts
+             WHERE UPPER(account_number) = UPPER(%s)
+             LIMIT 1
+            """,
+            (account_number,),
+        )
+        row = cur.fetchone()
+        cur.execute("RELEASE SAVEPOINT fee_threshold_exempt")
+        return bool(row and row[0])
+    except Exception as exc:
+        logger.warning("Fee threshold exempt lookup failed for %s: %s", account_number, exc)
+        try:
+            cur.execute("ROLLBACK TO SAVEPOINT fee_threshold_exempt")
+        except Exception:
+            pass
+        return False
+
+
 def classify_payment(
     conn,
     account_number: str,
@@ -100,6 +144,19 @@ def classify_payment(
     conn_fee = float(fees.get("connection_fee_amount") or 0)
     rb_fee = float(fees.get("readyboard_fee_amount") or 0)
     currency = fees.get("currency", "")
+    threshold = _connection_fee_threshold(fees)
+
+    if (
+        threshold is not None
+        and round(amount, 2) + _AMOUNT_EPSILON >= round(threshold, 2)
+        and not _account_fee_threshold_exempt(conn, account_number)
+        and not _has_verified_fee(conn, account_number, "connection_fee")
+    ):
+        return {
+            "category": "connection_fee",
+            "matched_amount": threshold,
+            "currency": currency,
+        }
 
     if _amounts_match(amount, conn_fee) and not _has_verified_fee(
         conn, account_number, "connection_fee"
