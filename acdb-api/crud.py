@@ -1595,6 +1595,7 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
         import re as _re
         _be_raw, _ = _be_balance(conn, acct)
         balance_kwh = max(0, _be_raw)
+        energy_debt_kwh = round(max(0, -_be_raw), 4)
         _site_match = _re.search(r'[A-Z]{3}$', acct)
         _site_code = _site_match.group(0) if _site_match else ""
         _tariff_rate = get_tariff_rate_for_site(_site_code)
@@ -1704,6 +1705,8 @@ def my_dashboard(user: CurrentUser = Depends(get_current_user)):
         return {
             "balance_kwh": round(balance_kwh, 2),
             "balance_currency": round(balance_kwh * _tariff_rate, 2),
+            "energy_debt_kwh": energy_debt_kwh,
+            "energy_debt_currency": round(energy_debt_kwh * _tariff_rate, 2),
             "currency_code": _currency_code,
             "last_payment": last_payment,
             "avg_kwh_per_day": round(avg_kwh_per_day, 2),
@@ -2048,6 +2051,7 @@ def employee_customer_data(
         from country_config import get_tariff_rate_for_site, get_currency_for_site
         _be_raw, _ = _be_balance(conn, acct)
         balance_kwh = max(0, _be_raw)
+        energy_debt_kwh = round(max(0, -_be_raw), 4)
         _emp_site = (meter_info or {}).get("community") or ""
         _emp_tariff = get_tariff_rate_for_site(_emp_site)
         _emp_currency = get_currency_for_site(_emp_site)
@@ -2098,6 +2102,8 @@ def employee_customer_data(
             "dashboard": {
                 "balance_kwh": round(balance_kwh, 2),
                 "balance_currency": round(balance_kwh * _emp_tariff, 2),
+                "energy_debt_kwh": energy_debt_kwh,
+                "energy_debt_currency": round(energy_debt_kwh * _emp_tariff, 2),
                 "currency_code": _emp_currency,
                 "last_payment": last_payment,
                 "avg_kwh_per_day": round(avg_kwh_per_day, 2),

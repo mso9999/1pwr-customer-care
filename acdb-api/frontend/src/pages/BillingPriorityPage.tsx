@@ -1,13 +1,18 @@
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
+import { useCountry } from '../contexts/CountryContext';
 import {
   getAccountBillingPriority,
   getBillingPrioritySummary,
+  getRelayAutoTrigger,
   setAccountBillingPriority,
   setFleetBillingPriority,
+  setRelayAutoTrigger,
   type BillingPriority,
   type BillingPriorityForAccount,
   type BillingPrioritySummary,
+  type RelayAutoTrigger,
 } from '../lib/api';
 
 /**
@@ -34,6 +39,111 @@ const PRIORITY_PILL: Record<BillingPriority, string> = {
   sm: 'bg-blue-100 text-blue-800 border-blue-200',
   '1m': 'bg-purple-100 text-purple-800 border-purple-200',
 };
+
+function AutoCutoffCard() {
+  const { t } = useTranslation('billingPriority');
+  const { country } = useCountry();
+  const [state, setState] = useState<RelayAutoTrigger | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (country === 'ALL') {
+      setState(null);
+      setError('');
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError('');
+    setMessage('');
+    getRelayAutoTrigger()
+      .then((next) => {
+        if (!cancelled) setState(next);
+      })
+      .catch((err: Error) => {
+        if (!cancelled) setError(err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [country]);
+
+  const save = async (enabled: boolean) => {
+    const confirmed = window.confirm(enabled ? t('autoCutoff.confirmOn') : t('autoCutoff.confirmOff'));
+    if (!confirmed) return;
+    setSaving(true);
+    setMessage('');
+    try {
+      const result = await setRelayAutoTrigger(enabled);
+      setState(result);
+      setMessage(result.status === 'noop' ? t('autoCutoff.noop') : t('autoCutoff.saved'));
+    } catch (err) {
+      setMessage(t('autoCutoff.failed', { message: (err as Error).message }));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="bg-white rounded-lg shadow border border-gray-200 p-5">
+      <h2 className="text-lg font-semibold text-gray-900">{t('autoCutoff.title')}</h2>
+      <p className="mt-1 text-sm text-gray-600">{t('autoCutoff.intro')}</p>
+      <p className="mt-2 text-sm text-gray-600">{t('autoCutoff.who')}</p>
+      <p className="mt-2 text-sm text-gray-600">{t('autoCutoff.firmware')}</p>
+
+      {country === 'ALL' && (
+        <p className="mt-4 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+          {t('autoCutoff.pickCountry')}
+        </p>
+      )}
+
+      {country !== 'ALL' && loading && (
+        <p className="mt-4 text-sm text-gray-500">{t('autoCutoff.loading')}</p>
+      )}
+
+      {error && (
+        <p className="mt-4 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{error}</p>
+      )}
+
+      {state && !loading && (
+        <div className="mt-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <p className="text-sm font-semibold text-gray-900">
+              {state.enabled
+                ? t('autoCutoff.stateOn', { country: state.country })
+                : t('autoCutoff.stateOff', { country: state.country })}
+            </p>
+            {state.force_off && (
+              <p className="mt-1 text-sm text-amber-800">{t('autoCutoff.locked')}</p>
+            )}
+            {!state.force_off && !state.can_edit && (
+              <p className="mt-1 text-sm text-gray-500 italic">{t('autoCutoff.readOnly')}</p>
+            )}
+          </div>
+          {state.can_edit && (
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => save(!state.enabled)}
+              className="shrink-0 rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50"
+            >
+              {state.enabled ? t('autoCutoff.turnOff') : t('autoCutoff.turnOn')}
+            </button>
+          )}
+        </div>
+      )}
+
+      {message && <p className="mt-3 text-sm text-gray-700">{message}</p>}
+    </section>
+  );
+}
 
 function PriorityPill({ value }: { value: BillingPriority }) {
   return (
@@ -203,6 +313,8 @@ export default function BillingPriorityPage() {
           ). Every change is audited in <code className="px-1 bg-gray-100 rounded text-[12px]">cc_mutations</code>.
         </p>
       </div>
+
+      <AutoCutoffCard />
 
       {/* ────── Fleet default ────── */}
       <section className="bg-white rounded-lg shadow border border-gray-200 p-5">

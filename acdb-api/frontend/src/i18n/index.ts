@@ -41,6 +41,7 @@ import unmeteredServiceEn from './en/unmeteredService.json';
 import smsFormatsEn from './en/smsFormats.json';
 import smsInboxEn from './en/smsInbox.json';
 import whatsappBridgeEn from './en/whatsappBridge.json';
+import billingPriorityEn from './en/billingPriority.json';
 
 import commonFr from './fr/common.json';
 import loginFr from './fr/login.json';
@@ -82,6 +83,7 @@ import unmeteredServiceFr from './fr/unmeteredService.json';
 import smsFormatsFr from './fr/smsFormats.json';
 import smsInboxFr from './fr/smsInbox.json';
 import whatsappBridgeFr from './fr/whatsappBridge.json';
+import billingPriorityFr from './fr/billingPriority.json';
 
 const savedLang = localStorage.getItem('cc_lang');
 
@@ -132,6 +134,7 @@ i18n.use(initReactI18next).init({
       smsFormats: smsFormatsEn,
       smsInbox: smsInboxEn,
       whatsappBridge: whatsappBridgeEn,
+      billingPriority: billingPriorityEn,
     },
     fr: {
       common: commonFr,
@@ -174,6 +177,7 @@ i18n.use(initReactI18next).init({
       smsFormats: smsFormatsFr,
       smsInbox: smsInboxFr,
       whatsappBridge: whatsappBridgeFr,
+      billingPriority: billingPriorityFr,
     },
   },
 });

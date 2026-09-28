@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import PtbGapWarning from '../components/PtbGapWarning';
 import {
-  getRecord, updateRecord, deleteRecord, getCustomerContracts, decommissionCustomer,
+  getRecord, updateRecord, deleteRecord, getCustomerContracts, decommissionCustomer, resetAccountSetup,
   getFinancingProducts, createFinancingAgreement,
   type CommissionContract, type FinancingProduct,
   getInferredPaymentStatus, setPaymentStatusOverride, clearPaymentStatusOverride,
@@ -284,6 +284,11 @@ export default function CustomerDetailPage() {
   const [contracts, setContracts] = useState<CommissionContract[]>([]);
   const [accountNumbers, setAccountNumbers] = useState<string[]>([]);
   const [decommissioning, setDecommissioning] = useState(false);
+  const [showSetupReset, setShowSetupReset] = useState(false);
+  const [setupResetReason, setSetupResetReason] = useState('');
+  const [setupResetConfirm, setSetupResetConfirm] = useState('');
+  const [setupResetBusy, setSetupResetBusy] = useState(false);
+  const [setupResetMessage, setSetupResetMessage] = useState('');
   const [showCreditWizard, setShowCreditWizard] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState<InferredPaymentStatus | null>(null);
   const [proofs, setProofs] = useState<PaymentProof[]>([]);
@@ -295,6 +300,9 @@ export default function CustomerDetailPage() {
   const [cohortOverrideSaving, setCohortOverrideSaving] = useState(false);
   const [linkage, setLinkage] = useState<CustomerLinkage | null>(null);
   const { canWrite, canWriteCustomers, isSuperadmin, user } = useAuth();
+  const canSetupReset = (user?.roles || user?.cc_roles || (user?.role ? [user.role] : [])).some((role) =>
+    role === 'superadmin' || role === 'onm_team',
+  );
   const { config } = useCountry();
   const { t } = useTranslation(['customerDetail', 'customerCohort', 'common']);
   const navigate = useNavigate();
@@ -530,6 +538,31 @@ export default function CustomerDetailPage() {
     }
   };
 
+  const setupResetAccount = (accountNumber || urlParam || '').trim().toUpperCase();
+  const setupResetPhrase = `RESET ${setupResetAccount}`;
+  const handleSetupReset = async () => {
+    setSetupResetBusy(true);
+    setSetupResetMessage('');
+    setError('');
+    try {
+      const result = await resetAccountSetup(setupResetAccount, setupResetConfirm.trim(), setupResetReason.trim());
+      setSetupResetMessage(t('customerDetail:setupResetDone', {
+        id: result.mutation_id,
+        connection: result.fees.fee_debt_connection_remaining,
+        readyboard: result.fees.fee_debt_readyboard_remaining,
+      }));
+      setSetupResetConfirm('');
+      if (recordId) {
+        const { record: r } = await getRecord('customers', recordId);
+        setRecord(r);
+      }
+    } catch (e: any) {
+      setSetupResetMessage(t('customerDetail:setupResetFailed', { message: e.message }));
+    } finally {
+      setSetupResetBusy(false);
+    }
+  };
+
   if (error && !record) return <div className="text-center py-8 text-red-500">{error}</div>;
   if (!record) return <div className="text-center py-8 text-gray-400">{t('common:loading')}</div>;
 
@@ -578,6 +611,13 @@ export default function CustomerDetailPage() {
                 onClick={() => navigate(`/customer-data?account=${accountNumbers[0] || accountNumber || urlParam}`)}
                 className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-sm hover:bg-indigo-700"
               >{t('customerDetail:viewData')}</button>
+              {canSetupReset && (
+                <button
+                  type="button"
+                  onClick={() => setShowSetupReset((open) => !open)}
+                  className="px-4 py-2 bg-white text-red-700 border border-red-300 rounded-lg text-sm hover:bg-red-50"
+                >{t('customerDetail:setupReset')}</button>
+              )}
               {canWriteCustomers && (
                 <button onClick={() => setEditing(true)} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700">{t('customerDetail:edit')}</button>
               )}
@@ -633,6 +673,37 @@ export default function CustomerDetailPage() {
           )}
         </div>
       </div>
+      {showSetupReset && canSetupReset && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-4 space-y-3">
+          <p className="text-sm text-red-950">{t('customerDetail:setupResetHelp')}</p>
+          <label className="block text-xs font-medium text-gray-700">
+            {t('customerDetail:setupResetReason')}
+            <textarea
+              value={setupResetReason}
+              onChange={(e) => setSetupResetReason(e.target.value)}
+              rows={2}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+            />
+          </label>
+          <label className="block text-xs font-medium text-gray-700">
+            {t('customerDetail:setupResetConfirm', { phrase: setupResetPhrase })}
+            <input
+              value={setupResetConfirm}
+              onChange={(e) => setSetupResetConfirm(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono"
+              autoComplete="off"
+            />
+          </label>
+          <button
+            type="button"
+            disabled={setupResetBusy || setupResetReason.trim().length < 8 || setupResetConfirm.trim() !== setupResetPhrase}
+            onClick={handleSetupReset}
+            className="px-4 py-2 bg-red-700 text-white rounded-lg text-sm hover:bg-red-800 disabled:opacity-50"
+          >{t('customerDetail:setupResetGo')}</button>
+          {setupResetMessage && <p className="text-sm text-gray-800">{setupResetMessage}</p>}
+        </div>
+      )}
+
       {siteCode && (accountNumbers[0] || accountNumber) && (
         <PtbGapWarning site={siteCode} account={accountNumbers[0] || accountNumber} />
       )}

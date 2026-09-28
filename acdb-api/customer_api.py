@@ -319,12 +319,14 @@ from customer_direct_messages import router as customer_direct_messages_router
 from billing_priority import router as billing_priority_router
 from cost_signals import router as cost_signals_router
 from relay_control import router as relay_control_router
+from relay_control import settings_router as relay_auto_trigger_router
 from meter_safety_override import router as meter_safety_override_router
 from odyssey_api import router as odyssey_api_router
 from programs import router as programs_router
 from coverage_audit import router as coverage_audit_router
 from advances import router as advances_router
 from country_fees import router as country_fees_router
+from account_setup_reset import router as account_setup_reset_router
 from unmetered_service import router as unmetered_service_router
 from site_registry import router as site_registry_router
 from site_sync_ingest import router as site_sync_ingest_router
@@ -385,12 +387,14 @@ app.include_router(customer_direct_messages_router)
 app.include_router(billing_priority_router)
 app.include_router(cost_signals_router)
 app.include_router(relay_control_router)
+app.include_router(relay_auto_trigger_router)
 app.include_router(meter_safety_override_router)
 app.include_router(odyssey_api_router)
 app.include_router(programs_router)
 app.include_router(coverage_audit_router)
 app.include_router(advances_router)
 app.include_router(country_fees_router)
+app.include_router(account_setup_reset_router)
 app.include_router(unmetered_service_router)
 app.include_router(site_registry_router)
 app.include_router(site_sync_ingest_router)

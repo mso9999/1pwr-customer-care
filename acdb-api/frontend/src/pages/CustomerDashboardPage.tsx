@@ -5,7 +5,7 @@ import {
   BarChart, Bar, LineChart, Line, Legend,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts';
-import { getMyDashboard, getMyProfile, type CustomerDashboard, type MeterInfo, type HourlyPoint } from '../lib/api';
+import { getMyDashboard, getMyProfile, getRelayAutoTrigger, type CustomerDashboard, type MeterInfo, type HourlyPoint } from '../lib/api';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -256,13 +256,19 @@ export default function CustomerDashboardPage() {
   const [acct, setAcct] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [cutoffOn, setCutoffOn] = useState<boolean | null>(null);
 
   useEffect(() => {
-    Promise.all([getMyDashboard(), getMyProfile()])
-      .then(([dash, prof]) => {
+    Promise.all([
+      getMyDashboard(),
+      getMyProfile(),
+      getRelayAutoTrigger().catch(() => null),
+    ])
+      .then(([dash, prof, cutoff]) => {
         setData(dash);
         const c = prof.customer;
         setAcct(String(c.account_number || c.customer_id_legacy || ''));
+        setCutoffOn(cutoff ? cutoff.enabled : null);
       })
       .catch(e => setError(e.message))
       .finally(() => setLoading(false));
@@ -302,6 +308,16 @@ export default function CustomerDashboardPage() {
           >
             {t('customerDashboard:accountLabel', { acct })}
           </Link>
+        )}
+        {cutoffOn !== null && (
+          <p className="mt-3 text-sm text-gray-600">
+            {cutoffOn ? t('customerDashboard:autoCutoffOn') : t('customerDashboard:autoCutoffOff')}
+          </p>
+        )}
+        {(data.energy_debt_kwh ?? 0) > 0 && (
+          <p className="mt-3 text-sm text-amber-900">
+            {t('customerDashboard:energyDebt', { kwh: (data.energy_debt_kwh ?? 0).toFixed(3) })}
+          </p>
         )}
       </div>
 

@@ -33,8 +33,9 @@ export const TUTORIAL_WORKFLOWS: TutorialWorkflowDef[] = [
       '/assign-meter',
       '/customer-data',
       '/pipeline',
+      null,
     ],
-    helpSectionIds: ['customers', 'payments', 'commission', 'meters', 'customers', 'reports'],
+    helpSectionIds: ['customers', 'payments', 'commission', 'meters', 'customers', 'reports', 'customers'],
   },
   {
     id: 'countryActivation',
@@ -63,8 +64,8 @@ export const TUTORIAL_WORKFLOWS: TutorialWorkflowDef[] = [
     id: 'payments',
     i18nKey: 'workflows.payments',
     rolesKey: 'roles.financeAll',
-    links: ['/record-payment', '/payment-verification', '/transactions', '/customer-data', '/sms-inbox', '/customer-data'],
-    helpSectionIds: ['payments', 'payments', 'data-browsers', 'customers', 'payments', 'customers'],
+    links: ['/record-payment', '/payment-verification', '/transactions', '/customer-data', '/sms-inbox', '/customer-data', '/billing-priority'],
+    helpSectionIds: ['payments', 'payments', 'data-browsers', 'customers', 'payments', 'customers', 'meters'],
   },
   {
     id: 'advances',

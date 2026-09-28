@@ -554,6 +554,39 @@ def revert_mutation(
     if mutation["reverted"]:
         raise HTTPException(status_code=400, detail="Mutation already reverted")
 
+    if mutation.get("table_name") == "account_setup_reset":
+        from account_setup_reset import restore_account_setup_reset
+        from customer_api import get_connection
+        snapshot = mutation.get("old_values") or {}
+        if not snapshot.get("account_number"):
+            raise HTTPException(status_code=400, detail="This setup reset has nothing to restore")
+        with get_connection() as conn:
+            try:
+                restore_account_setup_reset(conn, snapshot)
+                log_mutation(
+                    user,
+                    "revert_delete",
+                    "account_setup_reset",
+                    str(mutation.get("record_id") or snapshot["account_number"]),
+                    old_values=mutation.get("new_values"),
+                    new_values={"restored_account": snapshot["account_number"]},
+                    conn=conn,
+                    reverts_mutation_id=mutation_id,
+                )
+                conn.commit()
+            except HTTPException:
+                conn.rollback()
+                raise
+            except Exception as exc:
+                conn.rollback()
+                raise HTTPException(status_code=500, detail=f"Revert failed: {exc}") from exc
+        return {
+            "message": f"Mutation #{mutation_id} reverted successfully",
+            "action": "delete",
+            "table": "account_setup_reset",
+            "record_id": snapshot["account_number"],
+        }
+
     action = mutation["action"]
     table_name = mutation["table_name"]
     record_id = mutation["record_id"]

@@ -1,0 +1,21 @@
+{
+  "autoCutoff": {
+    "title": "Coupure automatique",
+    "intro": "Lorsqu'elle est activée, un compte dont le compteur principal est un 1Meter perd le courant à crédit zéro. Un paiement qui rétablit le crédit remet le courant. Les comptes SparkMeter ne changent pas.",
+    "who": "Le superadmin peut enregistrer pour n'importe quel pays. L'O&M et la finance ne peuvent enregistrer que pour leur propre pays. Le changement est inscrit au journal des mutations, avec l'auteur et l'heure.",
+    "firmware": "Les passerelles sous le firmware 1.1.74 sont ignorées. Les versions plus anciennes se figent ou inversent ouverture et fermeture.",
+    "pickCountry": "Choisissez le Lesotho, le Bénin ou la Zambie dans la barre latérale. Tous les pays ne modifie pas ce réglage.",
+    "readOnly": "Lecture seule pour votre rôle ou votre pays.",
+    "locked": "Un verrou d'exploitation est actif. Ce réglage ne peut pas activer la coupure.",
+    "stateOn": "Activée pour {{country}}",
+    "stateOff": "Désactivée pour {{country}}",
+    "turnOn": "Activer",
+    "turnOff": "Désactiver",
+    "confirmOn": "Activer la coupure automatique pour ce pays ? Les comptes 1Meter à crédit zéro perdront le courant. Ceci est inscrit au journal des mutations.",
+    "confirmOff": "Désactiver la coupure automatique pour ce pays ? Les comptes 1Meter ne perdront plus le courant à crédit zéro. Ceci est inscrit au journal des mutations.",
+    "saved": "Enregistré. Le journal des mutations contient l'ancienne valeur, la nouvelle valeur et votre nom.",
+    "noop": "Déjà dans cet état. Rien n'a été inscrit.",
+    "failed": "Enregistrement impossible : {{message}}",
+    "loading": "Chargement…"
+  }
+}

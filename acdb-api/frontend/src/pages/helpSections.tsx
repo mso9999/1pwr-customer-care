@@ -370,6 +370,7 @@ function CustomerMgmtContent() {
           <li><Bold>Accorder un crédit</Bold> — Ouvrir l'assistant de financement (pour les clients mis en service)</li>
           <li><Bold>Attribuer un compteur</Bold> — Attribuer un compteur à ce client</li>
           <li><Bold>Résilier</Bold> — Mettre fin au service (l'historique est conservé)</li>
+          <li><Bold>Réinitialiser les données d'installation</Bold> — Superadmin, ou O&amp;M pour son pays. Efface les paiements et relevés d'essai, remet les dettes de frais aux montants enregistrés pour le pays, et conserve le client, le numéro de compte et le compteur. Confirmation : saisir RESET et le numéro. Annulation depuis Mutations. Refusé après 21 jours, après 40 paiements, ou s'il existe une avance, un financement ou un service non compté actif.</li>
         </Ul>
 
         <SubHead>Consultation des données client (<PageLink to="/customer-data">/customer-data</PageLink>)</SubHead>
@@ -418,6 +419,7 @@ function CustomerMgmtContent() {
         <li><Bold>Extend Credit</Bold> — Open the financing wizard (for commissioned customers)</li>
         <li><Bold>Assign Meter</Bold> — Assign a meter to this customer</li>
         <li><Bold>Decommission</Bold> — Terminate service (preserves all history)</li>
+        <li><Bold>Reset setup data</Bold> — Superadmin, or O&amp;M for their own country. Deletes test payments and readings, restamps fee debt from the fees saved for this country, and keeps the customer, account number, and meter. Confirm by typing RESET and the account number. Undo it from Mutations. Refused after 21 days, after 40 payments, or while an advance, financing agreement, or unmetered enrollment is active.</li>
       </Ul>
 
       <SubHead>Customer Data Lookup (<PageLink to="/customer-data">/customer-data</PageLink>)</SubHead>
@@ -1073,6 +1075,21 @@ function MetersContent() {
           <li>Indicateurs de santé : en ligne (vert), obsolète (jaune), hors ligne (rouge).</li>
         </Ul>
 
+        <SubHead>Coupure automatique (<PageLink to="/billing-priority">/billing-priority</PageLink>)</SubHead>
+        <P>
+          Choisissez le pays dans la barre latérale, puis activez ou désactivez la coupure sur
+          Priorité de facturation. À crédit zéro, le courant s'ouvre sur les comptes dont le compteur
+          principal est un 1Meter. Un paiement qui rétablit le crédit le referme. Les comptes SparkMeter
+          ne sont pas concernés.
+        </P>
+        <Ul>
+          <li>Le <Bold>superadmin</Bold> peut enregistrer pour n'importe quel pays. L'<Bold>O&amp;M</Bold> et la <Bold>finance</Bold> uniquement pour leur pays (BJ et BN désignent tous deux le Bénin).</li>
+          <li>Chaque changement réel est inscrit au <PageLink to="/mutations">journal des mutations</PageLink> : auteur, pays, ancienne valeur, nouvelle valeur, heure.</li>
+          <li>Les passerelles sous le firmware 1.1.74 sont ignorées.</li>
+          <li>« Tous les pays » ne permet pas d'enregistrer. Les clients voient une phrase sur Mon tableau de bord et ne peuvent pas modifier le réglage.</li>
+          <li>Les kWh utilisés après crédit zéro, avant que la coupure n'arrive, sont une <Bold>dette énergie</Bold> sur Données clients. Le prochain paiement MoMo d'électricité la rembourse en comblant le trou. Ce n'est pas une deuxième facture.</li>
+        </Ul>
+
         <SubHead>Sécurité : forcer l'ouverture du relais (override)</SubHead>
         <P>
           En cas d'<Bold>urgence ou de sécurité</Bold> (risque d'incendie, maintenance d'urgence, suspicion de
@@ -1121,6 +1138,20 @@ function MetersContent() {
         <li>Per-meter deviation statistics: total %, mean %, standard deviation.</li>
         <li>Fleet-wide total deviation summary across all check meters.</li>
         <li>Meter health indicators: online (green), stale (yellow), offline (red).</li>
+      </Ul>
+
+      <SubHead>Automatic power cutoff (<PageLink to="/billing-priority">/billing-priority</PageLink>)</SubHead>
+      <P>
+        Pick the country in the sidebar, then turn cutoff on or off on Billing Priority. At zero
+        credit, power opens on accounts whose primary meter is a 1Meter. A payment that restores
+        credit closes it again. SparkMeter accounts are left alone.
+      </P>
+      <Ul>
+        <li><Bold>superadmin</Bold> can save any country. <Bold>O&amp;M</Bold> and <Bold>finance</Bold> can save only their own country (BJ and BN both mean Benin).</li>
+        <li>A real change is written to the <PageLink to="/mutations">mutation log</PageLink>: who, country, previous value, new value, and when.</li>
+        <li>Gateways below firmware 1.1.74 are skipped.</li>
+        <li>All countries cannot save. Customers see one sentence on My Dashboard and cannot change the switch.</li>
+        <li>kWh used after credit hits zero, before cutoff arrives, is <Bold>energy debt</Bold> on Customer Data. The next MoMo electricity payment pays it down by filling that hole. It is not a second charge.</li>
       </Ul>
 
       <SubHead>Safety override — force relay open</SubHead>
@@ -1990,7 +2021,7 @@ export function useHelpSections(): HelpSection[] {
     { id: 'advances',             content: <AdvancesContent />, searchKeywords: 'advance ledger connection readyboard fee monthly accrual contract upload writeoff repayment fraction premium' },
     { id: 'unmetered-service',    content: <UnmeteredServiceContent />, searchKeywords: 'unmetered service fee connected no meter 50 lsl enroll accrual monthly ledger' },
     { id: 'financing',            content: <FinancingContent /> },
-    { id: 'meters',               content: <MetersContent /> },
+    { id: 'meters',               content: <MetersContent />, searchKeywords: 'automatic power cutoff relay billing priority 1meter firmware mutation log' },
     { id: 'provisioning',         content: <ProvisioningContent />, searchKeywords: 'gateway station batch virgin bootstrap commissioning provision certificate softap mak-gw download laptop' },
     { id: 'field-validation',     content: <FieldValidationContent />, searchKeywords: 'firmware canary validate field reacquire re-acquire button prg meter discover diag logs serial gateway ip new build ota' },
     { id: 'reports',              content: <ReportsContent /> },

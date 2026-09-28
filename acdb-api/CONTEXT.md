@@ -38,7 +38,7 @@ Access/ACCDB era. The live system is now `1PDB`-backed and Linux-hosted.
 | `hr_directory.py` | HR portal (`hr.1pwrafrica.com`) directory client — canonical employee + department affiliation, dept→CC-role mapping, admin department picker |
 | `balance_engine.py` | Priority-aware kWh balance engine (SM/1M source primacy via `accounts.billing_meter_priority` + `system_config(key='billing_meter_priority')`); also exposes `get_balance_kwh_what_if` for the migration test |
 | `billing_priority.py` | `GET`/`PATCH` `/api/billing-priority(/account)` for ops to flip primacy per-account or fleet-wide; audited |
-| `relay_control.py` | CC -> AWS IoT relay command channel (`POST /api/meters/{thing}/relay`, `POST /api/meters/relay-ack`) plus `maybe_auto_open_relay` hook gated by `RELAY_AUTO_TRIGGER_ENABLED` env. See [`docs/ops/1meter-billing-migration-protocol.md`](../docs/ops/1meter-billing-migration-protocol.md) |
+| `relay_control.py` | CC -> AWS IoT relay command channel (`POST /api/meters/{thing}/relay`, `POST /api/meters/relay-ack`) plus `maybe_auto_open_relay` / `maybe_auto_close_relay`. The country switch is `GET`/`PUT /api/relay-auto-trigger` (`system_config.relay_auto_trigger_enabled`), audited in `cc_mutations`. Env `RELAY_AUTO_TRIGGER_ENABLED` is only the fallback when the row is missing; `RELAY_AUTO_TRIGGER_FORCE_OFF=1` locks it off. See [`docs/ops/1meter-billing-migration-protocol.md`](../docs/ops/1meter-billing-migration-protocol.md) |
 
 ### Frontend Pages
 

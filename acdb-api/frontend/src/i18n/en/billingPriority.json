@@ -1,0 +1,21 @@
+{
+  "autoCutoff": {
+    "title": "Automatic power cutoff",
+    "intro": "When this is on, a 1Meter-primary account loses power at zero credit. A payment that restores credit turns power back on. SparkMeter accounts are unchanged.",
+    "who": "Superadmin can save any country. O&M and finance can save only their own country. The change is recorded in the mutation log, with who changed it and when.",
+    "firmware": "Gateways below firmware 1.1.74 are skipped. Older builds freeze or reverse open and close.",
+    "pickCountry": "Pick Lesotho, Benin, or Zambia in the sidebar. All countries does not change this switch.",
+    "readOnly": "Read-only for your role or country.",
+    "locked": "An operations lock is on. This switch cannot turn cutoff on.",
+    "stateOn": "On for {{country}}",
+    "stateOff": "Off for {{country}}",
+    "turnOn": "Turn on",
+    "turnOff": "Turn off",
+    "confirmOn": "Turn on automatic power cutoff for this country? 1Meter accounts at zero credit will lose power. This is recorded in the mutation log.",
+    "confirmOff": "Turn off automatic power cutoff for this country? 1Meter accounts will no longer lose power at zero credit. This is recorded in the mutation log.",
+    "saved": "Saved. The mutation log has the previous value, the new value, and your name.",
+    "noop": "Already set that way. Nothing was recorded.",
+    "failed": "Could not save: {{message}}",
+    "loading": "Loading…"
+  }
+}

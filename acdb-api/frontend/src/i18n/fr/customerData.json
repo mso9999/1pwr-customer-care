@@ -7,6 +7,7 @@
   "enterAccount": "Saisissez un numéro de compte ou un ID client pour commencer",
   "exampleAccounts": "ex. 0045MAK, 0003MAS, 0005KET — ou un ID client numérique comme 5974",
   "balance": "Solde",
+  "energyDebt": "Dette énergie {{kwh}} kWh ({{currency}} {{amount}}). C'est l'électricité utilisée après l'épuisement du crédit, avant la coupure. Le prochain paiement MoMo d'électricité la rembourse. Elle n'est pas facturée une seconde fois.",
   "avgConsumption": "Consommation moy.",
   "estRecharge": "Recharge est.",
   "lastPayment": "Dernier paiement",

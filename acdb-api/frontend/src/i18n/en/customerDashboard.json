@@ -44,5 +44,8 @@
     "bothMetersNote": "Both meters measure the same load. Close agreement confirms accuracy.",
     "consumption": "Consumption"
   },
-  "error": "Unable to load your dashboard. Please try again later."
+  "error": "Unable to load your dashboard. Please try again later.",
+  "autoCutoffOn": "When your credit reaches zero, power turns off until a payment restores credit.",
+  "autoCutoffOff": "Power is not turned off automatically when your credit runs out.",
+  "energyDebt": "You have used {{kwh}} kWh after your credit ran out. Your next payment pays that down before new credit shows."
 }

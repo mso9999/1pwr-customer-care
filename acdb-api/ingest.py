@@ -459,9 +459,12 @@ def ingest_meter_reading(reading: MeterReading, x_iot_key: str = Header(None)):
             ))
 
             # Consumption, not payment entry, is what normally crosses a
-            # prepaid balance through zero. The relay hook remains fail-closed
-            # behind RELAY_AUTO_TRIGGER_ENABLED and its own billing-priority,
-            # online, debounce, and gateway-binding checks.
+            # prepaid balance through zero. Record that overshoot as energy
+            # debt, then try the relay. The relay hook remains fail-closed
+            # behind the country auto-cutoff switch.
+            if delta_kwh > 0:
+                from balance_engine import _sync_energy_debt
+                _sync_energy_debt(conn, account, source="meter_reading")
             if delta_kwh > 0:
                 try:
                     from relay_control import maybe_auto_open_relay

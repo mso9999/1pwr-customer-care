@@ -37,6 +37,61 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW_FOLIO: WhatsNewEntry[] = [
   {
+    id: 'account-setup-reset',
+    date: '2026-09-28T22:00:00Z',
+    title: 'Reset setup data on an issued account',
+    blurb: 'O&M can wipe test payments and readings on a customer still being installed, keep the account number, and undo it from Mutations.',
+    pages: [
+      {
+        heading: 'Customer page',
+        body:
+          'Reset setup data keeps the person, the account number, and the meter. It deletes test payments and readings, then sets connection and readyboard debt to the fees saved for that country.\n\n' +
+          '- Type RESET and the account number. Give a reason.\n' +
+          '- Only while the account is still being installed.\n' +
+          '- Undo it from Mutations. Decommission is a different action and does not do this.',
+      },
+    ],
+  },
+  {
+    id: 'energy-debt-cutoff-lag',
+    date: '2026-09-28T21:45:00Z',
+    title: 'Energy used before cutoff is customer debt',
+    blurb: 'kWh drawn after credit hits zero, before the relay opens, shows as energy debt. The next MoMo electricity payment pays it down.',
+    pages: [
+      {
+        heading: 'Customer Data',
+        body:
+          'When a meter keeps running after credit is gone, that kWh is energy debt on Customer Data.\n\n' +
+          '- It is the negative balance, kept as debt instead of hidden at 0.0.\n' +
+          '- A MoMo payment that buys electricity fills this hole before new credit shows.\n' +
+          '- It is not charged a second time.',
+      },
+    ],
+  },
+  {
+    id: 'relay-auto-cutoff-switch',
+    date: '2026-09-28T21:30:00Z',
+    title: 'Automatic power cutoff by country',
+    blurb: 'O&M and finance can turn 1Meter zero-credit cutoff on or off from Billing Priority. The change is written to the mutation log.',
+    pages: [
+      {
+        heading: 'Where to set it',
+        body:
+          'Open Billing Priority and pick Lesotho, Benin, or Zambia in the sidebar. All countries cannot save.\n\n' +
+          '- Superadmin can save any country.\n' +
+          '- O&M and finance can save only their own country.\n' +
+          '- The mutation log records who changed it, the old value, the new value, and when.',
+      },
+      {
+        heading: 'What customers see',
+        body:
+          'When cutoff is on, a 1Meter-primary account loses power at zero credit. A payment that restores credit turns power back on.\n\n' +
+          '- Customers see one sentence on My Dashboard. They cannot change the switch.\n' +
+          '- Gateways below firmware 1.1.74 are skipped.',
+      },
+    ],
+  },
+  {
     id: 'sms-inbox-bridge-ledger',
     date: '2026-09-28',
     title: 'SMS inbox, WhatsApp QR, and ledger corrections',

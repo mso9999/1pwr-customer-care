@@ -514,6 +514,16 @@ export default function CustomerDataPage() {
             </div>
           )}
 
+          {(d.energy_debt_kwh ?? 0) > 0 && (
+            <p className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              {t('customerData:energyDebt', {
+                kwh: (d.energy_debt_kwh ?? 0).toFixed(3),
+                currency: d.currency_code || 'LSL',
+                amount: (d.energy_debt_currency ?? 0).toFixed(2),
+              })}
+            </p>
+          )}
+
           {/* Stats row */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <Stat

@@ -36,7 +36,8 @@
         "Run the commissioning wizard: look up the customer, fill details, then link the uGridPLAN connection (pole/PTB) — required, or Generate Contract stays blocked — capture the signature, and generate the bilingual contract and SMS.",
         "Assign or confirm the meter and serial in the meter registry.",
         "Use Customer Data for balances, charts, and transaction history (including any active advances).",
-        "Track funnel position on the Pipeline page."
+        "Track funnel position on the Pipeline page.",
+        "If the issued account was used to test the meter, do not decommission it. On the customer page, Reset setup data keeps the person, the account number, and the meter. It deletes test payments and readings, then stamps connection and readyboard debt from the fees saved for that country. Save the real fees first. Type RESET and the account number, and give a reason. Superadmin, or O&M for their own country. Undo it from Mutations. Refused after 21 days, after 40 payments, or while an advance, financing agreement, or unmetered service is active."
       ]
     },
     "countryActivation": {
@@ -78,7 +79,8 @@
         "Browse Transactions for recent credits and amounts site-wide; the kWh balance column reflects the kWh balance after each row.",
         "Drill into Customer Data for a specific account’s history, balance context, and any Active Advances panel.",
         "Open the SMS inbox only after the sidebar is on one country. It lists inbound texts. It does not credit a customer.",
-        "A ledger correction on Customer Data is for superadmin and O&M only. It writes a raw row and does not change the balance. Use Record Payment for a real payment."
+        "A ledger correction on Customer Data is for superadmin and O&M only. It writes a raw row and does not change the balance. Use Record Payment for a real payment.",
+        "On Billing Priority, with one country selected, turn automatic power cutoff on or off. At zero credit a 1Meter-primary account loses power; a payment that restores credit turns it back on. Superadmin can save any country. O&M and finance can save only their own. The mutation log records who changed it and when. All countries cannot save."
       ]
     },
     "advances": {
@@ -187,7 +189,7 @@
   },
   "quiz": {
     "title": "Knowledge check",
-    "intro": "Five questions on payments, the SMS inbox, and the WhatsApp bridge. Open an answer when you are ready.",
+    "intro": "Seven questions on payments, the SMS inbox, the WhatsApp bridge, automatic power cutoff, and resetting a test account. Open an answer when you are ready.",
     "show": "Show answer",
     "hide": "Hide answer",
     "items": [
@@ -210,6 +212,14 @@
       {
         "q": "Where is the WhatsApp QR, and which phone does it link?",
         "a": "System → WhatsApp bridge, for the country in the sidebar. It is for superadmin, O&M / IT, and Nexus administer_cc. It does not fall back from Benin or Zambia to the Lesotho phone."
+      },
+      {
+        "q": "Who can turn on automatic power cutoff for Benin, and where is that recorded?",
+        "a": "On Billing Priority, with the sidebar on Benin. Superadmin can save any country. O&M and finance can save only their own country. The mutation log stores who changed it, the old value, the new value, and when. Customers see a sentence on My Dashboard and cannot change it."
+      },
+      {
+        "q": "An issued account was used to test the meter. How do you clear the test payments and still keep that account number?",
+        "a": "On the customer page, Reset setup data. Do not decommission. Save the real country fees first, because the reset stamps those amounts. Readyboard debt is stamped only if the customer takes a 1PWR readyboard. Type RESET and the account number. Superadmin, or O&M for their own country. Undo it from Mutations. Refused after 21 days, after 40 payments, or if an advance, financing agreement, or unmetered service is active."
       }
     ]
   }

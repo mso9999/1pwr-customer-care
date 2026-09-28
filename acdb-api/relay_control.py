@@ -27,8 +27,10 @@ are queryable independently.
 * ``POST /api/meters/relay-ack`` accepts firmware acks (HMAC via
   ``X-IoT-Key`` shared secret, same pattern as ``/api/meters/reading``).
 * ``maybe_auto_open_relay()`` is the auto-cutoff hook for ``record_payment``
-  / scheduled jobs to call. **No-op unless ``RELAY_AUTO_TRIGGER_ENABLED=1``**
-  in the environment. Default off; flips to on at Phase 2 entry.
+  / scheduled jobs to call. It reads ``system_config.relay_auto_trigger_enabled``
+  on each check (Billing Priority). A missing row falls back to
+  ``RELAY_AUTO_TRIGGER_ENABLED`` (default off). ``RELAY_AUTO_TRIGGER_FORCE_OFF=1``
+  locks the switch off.
 
 The firmware subscription, mesh-routing, and ack-publish handlers in
 ``onepwr-aws-mesh`` plus the ack-forwarding Lambda extension in
@@ -48,10 +50,11 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
+from country_config import COUNTRY
 from customer_api import get_connection
-from middleware import require_action, require_employee
-from models import CCRole, CurrentUser
-from mutations import try_log_mutation
+from middleware import effective_roles, get_current_user, raise_privilege_denied, require_action, require_employee
+from models import CCRole, CurrentUser, UserType
+from mutations import log_mutation, try_log_mutation
 
 logger = logging.getLogger("cc-api.relay-control")
 
@@ -79,11 +82,107 @@ IOT_RELAY_ACK_KEY = os.environ.get(
     "IOT_INGEST_KEY", "1pwr-iot-ingest-2026"
 )  # shared secret for the ack receiver; same as /api/meters/reading
 
-# Phase 2 entry flag. Default off so balance-zero auto-cutoff is dormant
-# during Phase 1. Flip to '1' on the host at Phase 2 entry.
+# Env fallback when system_config has no row. The live switch is
+# ``relay_auto_trigger_enabled(conn)`` — staff set it on Billing Priority.
 RELAY_AUTO_TRIGGER_ENABLED = os.environ.get(
     "RELAY_AUTO_TRIGGER_ENABLED", "0"
 ).strip() in ("1", "true", "True", "yes")
+
+RELAY_CONFIG_KEY = "relay_auto_trigger_enabled"
+_TRUTHY = ("1", "true", "True", "yes")
+# Nexus scopeCountries uses BJ for Benin; this API's country code is BN.
+_SCOPE_ALIASES = {"BJ": "BN", "BENIN": "BN", "LESOTHO": "LS", "ZAMBIA": "ZM"}
+_RELAY_EDITOR_ROLES = {
+    CCRole.superadmin.value,
+    CCRole.onm_team.value,
+    CCRole.finance_team.value,
+}
+
+
+def _env_truthy(name: str) -> bool:
+    return os.environ.get(name, "0").strip() in _TRUTHY
+
+
+def canonical_scope_country(raw: str) -> str:
+    code = (raw or "").strip().upper()
+    return _SCOPE_ALIASES.get(code, code)
+
+
+def relay_auto_trigger_force_off() -> bool:
+    """Host brake. The Billing Priority switch cannot override this."""
+    return _env_truthy("RELAY_AUTO_TRIGGER_FORCE_OFF")
+
+
+def _parse_enabled(value: Any) -> Optional[bool]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return text in _TRUTHY
+
+
+_READ_FAILED = object()
+
+
+def _load_stored_relay_auto_trigger(conn):
+    """Stored bool, None when unset, or ``_READ_FAILED``.
+
+    A read error rolls back to a savepoint so the caller's transaction survives,
+    and the switch stays off.
+    """
+    cur = conn.cursor()
+    try:
+        cur.execute("SAVEPOINT relay_auto_cfg")
+        cur.execute(
+            "SELECT value FROM system_config WHERE key = %s LIMIT 1",
+            (RELAY_CONFIG_KEY,),
+        )
+        row = cur.fetchone()
+        cur.execute("RELEASE SAVEPOINT relay_auto_cfg")
+    except Exception:
+        logger.exception("relay auto-trigger config read failed")
+        try:
+            cur.execute("ROLLBACK TO SAVEPOINT relay_auto_cfg")
+        except Exception:
+            logger.exception("relay auto-trigger savepoint rollback failed")
+        return _READ_FAILED
+    if not row:
+        return None
+    return _parse_enabled(row[0])
+
+
+def read_stored_relay_auto_trigger(conn) -> Optional[bool]:
+    """Stored switch, or None when the row is missing or the read failed."""
+    loaded = _load_stored_relay_auto_trigger(conn)
+    if loaded is _READ_FAILED:
+        return None
+    return loaded
+
+
+def relay_auto_trigger_state(conn) -> dict:
+    """One read: effective ``enabled``, stored value, and the host lock."""
+    force_off = relay_auto_trigger_force_off()
+    loaded = _load_stored_relay_auto_trigger(conn)
+    failed = loaded is _READ_FAILED
+    stored = None if failed else loaded
+    if force_off or failed:
+        enabled = False
+    elif stored is None:
+        enabled = _env_truthy("RELAY_AUTO_TRIGGER_ENABLED")
+    else:
+        enabled = bool(stored)
+    return {
+        "enabled": enabled,
+        "stored": stored,
+        "force_off": force_off,
+        "read_error": failed,
+    }
+
+
+def relay_auto_trigger_enabled(conn) -> bool:
+    """Live country switch. Force-off wins. Missing row uses the env default."""
+    return bool(relay_auto_trigger_state(conn)["enabled"])
 
 
 # Below 1.1.73 gateways freeze on any relay command; 1.1.73 has open/close
@@ -674,7 +773,7 @@ def maybe_auto_open_relay(conn, account_number: str, *, reason: str = "zero_bala
     """If the account is on 1M-primary and balance has hit zero, queue a
     relay-open command.
 
-    No-op unless ``RELAY_AUTO_TRIGGER_ENABLED=1``. Used by ``record_payment``
+    No-op unless the country auto-cutoff switch is on. Used by ``record_payment``
     and a scheduled balance sweeper. Returns the new ``cmd_id`` when a command
     was queued, ``None`` otherwise.
 
@@ -682,10 +781,10 @@ def maybe_auto_open_relay(conn, account_number: str, *, reason: str = "zero_bala
     online check). Payment-grace doesn't apply because zero-balance is
     *after* a payment is processed.
     """
-    if not RELAY_AUTO_TRIGGER_ENABLED:
-        return None
-
     try:
+        if not relay_auto_trigger_enabled(conn):
+            return None
+
         from balance_engine import _resolve_billing_priority, get_balance_kwh
 
         cur = conn.cursor()
@@ -811,10 +910,10 @@ def maybe_auto_close_relay(
     binding, online check, command ledger, MQTT payload, and firmware
     acknowledgement as zero-balance cutoff.
     """
-    if not RELAY_AUTO_TRIGGER_ENABLED:
-        return None
-
     try:
+        if not relay_auto_trigger_enabled(conn):
+            return None
+
         from balance_engine import _resolve_billing_priority, get_balance_kwh
 
         cur = conn.cursor()
@@ -886,3 +985,148 @@ def maybe_auto_close_relay(
     except Exception as exc:  # noqa: BLE001
         logger.error("maybe_auto_close_relay failed for %s: %s", account_number, exc)
         return None
+
+
+# ---------------------------------------------------------------------------
+# Country switch — Billing Priority reads and saves this
+# ---------------------------------------------------------------------------
+
+
+def user_may_edit_relay_auto_trigger(user: CurrentUser) -> bool:
+    """Superadmin: any lane. O&M and finance: only a scope that includes this lane.
+
+    An empty scope is global for superadmin only. BJ and BN both mean Benin.
+    """
+    if user.user_type != UserType.employee:
+        return False
+    roles = set(effective_roles(user))
+    if CCRole.superadmin.value in roles:
+        return True
+    if not roles.intersection({CCRole.onm_team.value, CCRole.finance_team.value}):
+        return False
+    scoped = {canonical_scope_country(code) for code in (user.scope_countries or [])}
+    return COUNTRY.code.upper() in scoped
+
+
+def _require_relay_editor(user: CurrentUser) -> None:
+    roles = set(effective_roles(user))
+    if not roles.intersection(_RELAY_EDITOR_ROLES):
+        raise_privilege_denied(
+            user, _RELAY_EDITOR_ROLES, "change automatic power cutoff",
+        )
+    if not user_may_edit_relay_auto_trigger(user):
+        raise HTTPException(
+            status_code=403,
+            detail="You can change automatic power cutoff only for your own country.",
+        )
+
+
+def _switch_payload(state: dict, user: CurrentUser, status: Optional[str] = None) -> dict:
+    payload = {
+        "country": COUNTRY.code,
+        "enabled": bool(state["enabled"]),
+        "stored": state["stored"],
+        "force_off": bool(state["force_off"]),
+        "can_edit": user_may_edit_relay_auto_trigger(user) and not state["force_off"],
+    }
+    if status:
+        payload["status"] = status
+    return payload
+
+
+class RelayAutoTriggerBody(BaseModel):
+    enabled: bool
+
+
+settings_router = APIRouter(prefix="/api/relay-auto-trigger", tags=["relay-control"])
+
+
+@settings_router.get("")
+def get_relay_auto_trigger(user: CurrentUser = Depends(get_current_user)):
+    """Read-only for any signed-in user, including a customer on My Dashboard."""
+    with get_connection() as conn:
+        try:
+            return _switch_payload(relay_auto_trigger_state(conn), user)
+        finally:
+            conn.rollback()
+
+
+@settings_router.put("")
+def put_relay_auto_trigger(
+    body: RelayAutoTriggerBody,
+    user: CurrentUser = Depends(require_employee),
+):
+    """Save the country switch and write one mutation row in the same transaction."""
+    _require_relay_editor(user)
+    if relay_auto_trigger_force_off():
+        raise HTTPException(
+            status_code=409,
+            detail="Automatic power cutoff is locked off on this server.",
+        )
+    with get_connection() as conn:
+        committed = False
+        try:
+            state = relay_auto_trigger_state(conn)
+            if state["read_error"]:
+                raise HTTPException(
+                    status_code=500,
+                    detail="Could not read the current automatic power cutoff setting.",
+                )
+            current = (
+                state["stored"]
+                if state["stored"] is not None
+                else _env_truthy("RELAY_AUTO_TRIGGER_ENABLED")
+            )
+            if bool(current) == body.enabled:
+                return _switch_payload(state, user, "noop")
+
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO system_config (key, value)
+                VALUES (%s, %s)
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+                """,
+                (RELAY_CONFIG_KEY, "1" if body.enabled else "0"),
+            )
+            log_mutation(
+                user,
+                "update",
+                "system_config",
+                RELAY_CONFIG_KEY,
+                old_values={"enabled": bool(current), "country": COUNTRY.code},
+                new_values={"enabled": body.enabled, "country": COUNTRY.code},
+                metadata={
+                    "kind": "relay_auto_trigger",
+                    "endpoint": "PUT /api/relay-auto-trigger",
+                },
+                conn=conn,
+            )
+            conn.commit()
+            committed = True
+            return {
+                "status": "ok",
+                "country": COUNTRY.code,
+                "enabled": body.enabled,
+                "stored": body.enabled,
+                "force_off": False,
+                "can_edit": True,
+            }
+        except HTTPException:
+            if not committed:
+                conn.rollback()
+            raise
+        except Exception as exc:
+            if not committed:
+                conn.rollback()
+            logger.exception("relay auto-trigger save failed")
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to save automatic power cutoff.",
+            ) from exc
+        finally:
+            if not committed:
+                try:
+                    conn.rollback()
+                except Exception:
+                    logger.exception("relay auto-trigger rollback failed")

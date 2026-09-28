@@ -1,8 +1,81 @@
+## 2026-09-28 — Cursor — Meter map shows in-flight OTA progress
+- Clicking a meter on the meters map looks up that gateway's current AWS IoT job and, while it is queued or downloading, shows the target version and a progress bar. Queued reads as 0% until the gateway connects. The bar polls every 15 seconds only while that popup is open. Jobs created by the rollout runner are included; this does not write `meter_provisioning`.
+- `GET /api/provisioning/fleet-map/ota?thing_name=` uses the same employee gate as the map. Percent comes from the job execution's block count.
+- Tests: `tests/test_fleet_map_ota.py` — 3 passed.
+- Side effects: none. Not committed and not deployed. The live map at cc.1pwrafrica.com does not show this until a push to main.
+- Key files: `acdb-api/meter_provisioning.py`, `acdb-api/frontend/src/components/FleetMap.tsx`, `acdb-api/frontend/src/lib/api.ts`.
+
+## 2026-09-28 — Cursor — Deploy setup reset, cutoff switch, and energy debt
+- Pushed to `main`. This deploys to https://cc.1pwrafrica.com.
+- Ships account setup reset, the Billing Priority auto-cutoff switch, and the energy-debt display plus migration 076.
+- Left uncommitted: SparkMeter credit toggle, the unfinished tariff country editor, and the exact-match fee split.
+- Employee guide, tutorial lifecycle step, and quiz cover the setup reset in English and French. Customers do not get that control.
+
+## 2026-09-28 — Cursor — Setup reset keeps the issued account
+- Customer page → Reset setup data. Superadmin, or O&M for their own country. Confirmation is `RESET` plus the account number, plus a reason. Refused after 21 days, after 40 payments, or if an advance, financing agreement, or unmetered enrollment is active.
+- Deletes test payments, verifications, readings, hourly use, relay commands, and energy-debt rows. Clears connection and readyboard paid marks. Restamps connection debt from the country fee saved now; readyboard debt only if the customer takes a 1PWR readyboard. Keeps the customer, account number, meter assignment, and the meter energy register. The wiped rows sit on mutation `account_setup_reset`; Mutations → Revert puts them back. A failed safety check rolls the connection back so nothing is left half-written.
+- Decommission still only sets the termination date and does not free the number.
+- Tests: `tests/test_account_setup_reset.py`.
+- Side effects: deployed to cc.1pwrafrica.com with this session's push to main. No manual DB write beyond migration 076 on deploy.
+- Key files: `acdb-api/account_setup_reset.py`, `acdb-api/mutations.py`, `acdb-api/frontend/src/pages/CustomerDetailPage.tsx`.
+
+## 2026-09-28 — Cursor — Energy debt for kWh used before cutoff
+- Prepaid balance stays at 0 on screen when the engine is negative. The overshoot (kWh used after credit hit zero, before the relay opens) is energy debt: `customers.energy_debt_kwh` plus `energy_debt_ledger` (migration 076). Customer Data and My Dashboard show it.
+- A MoMo electricity purchase pays that debt by lifting the balance. The payment is not skimmed a second time. Accrual is written from the 1Meter reading ingest; repayment is written from `record_payment_kwh`, which is the MoMo path.
+- Tests: `tests/test_energy_debt.py`.
+- Side effects: deployed to cc.1pwrafrica.com with this session's push to main. Migration 076 runs on deploy.
+- Key files: `acdb-api/energy_debt.py`, `acdb-api/migrations/076_energy_debt_ledger.sql`, `acdb-api/ingest.py`, `acdb-api/balance_engine.py`.
+
+## 2026-09-28 — Cursor — Country automatic power cutoff switch
+- Billing Priority now has a per-country automatic power cutoff control. It writes `system_config.relay_auto_trigger_enabled` on the lane in the sidebar and takes effect on the next balance check, without a service restart. A missing row still follows `RELAY_AUTO_TRIGGER_ENABLED` (off when unset). `RELAY_AUTO_TRIGGER_FORCE_OFF=1` locks the switch off.
+- Superadmin can save any country. O&M and finance can save only when their Nexus scope includes that lane (`BJ` and `BN` both mean Benin). An empty scope does not let those roles edit every country. A real change calls `log_mutation` in the same transaction (`system_config` / `relay_auto_trigger_enabled`, old and new `enabled` plus country). An unchanged save writes no row. A failed audit rolls the save back.
+- Employees: Help → Metering, the payments tutorial step, and a quiz item. Customers: one sentence on My Dashboard; they cannot change the switch.
+- Tests: `tests/test_relay_auto_trigger.py` — 16 passed.
+- Side effects: deployed to cc.1pwrafrica.com with this session's push to main. Benin stays off until someone with scope turns the switch on from Billing Priority with the sidebar on Benin. SparkMeter credit toggle, tariff country editor, and exact-match fee split stayed uncommitted.
+- Key files: `acdb-api/relay_control.py`, `acdb-api/frontend/src/pages/BillingPriorityPage.tsx`, `acdb-api/frontend/src/pages/CustomerDashboardPage.tsx`.
+- Follow-ups: Benin stays off until someone with scope turns it on from Billing Priority with the sidebar on Benin.
+
 ## 2026-09-28 — Cursor — Edit PTB link button opened nothing
 - On Edit PTB/pole, “Link uGridPlan Connection” set `showUGPPicker` but the picker was only mounted inside the new-commission wizard, so the click did nothing and Update stayed disabled. The picker now opens on that screen. `?edit` with no value also stays on the pole editor, so that URL cannot start contract generation. Commissioned customer pages show Edit PTB; it had been nested under the not-yet-commissioned branch.
 - 0001KOT: do not delete the customer. Two PDFs are the English and Sesotho copies. Updating the pole does not regenerate them. KOT is mapped to uGridPlan project `KOT_minigrid`.
 - Side effects: this push to `main` deploys to cc.1pwrafrica.com. No DB writes.
 - Key files: `acdb-api/frontend/src/pages/CommissionCustomerPage.tsx`, `acdb-api/frontend/src/pages/CustomerDetailPage.tsx`.
+
+## 2026-09-28 — Cursor — SparkMeter credit toggle for meters in series
+- Billing priority `1m` no longer always skips ThunderCloud. MAK and LAB stay on automatic push, because those sites run a 1Meter and a SparkMeter in series. Other 1Meter accounts (KOT, SIN) still skip Koios. SteamaCo still never pushes. An account that bills on SparkMeter still pushes.
+- Per-account toggle `accounts.sparkmeter_credit` (`NULL` automatic, `push`, `skip`), migration `075_sparkmeter_credit_toggle.sql`. Set from Billing-source primacy after looking up the account: Automatic, Always credit SparkMeter, or 1Meter ledger only. `PATCH /api/billing-priority/{account}/sparkmeter-credit`, audited.
+- Tests: `tests/test_koios_skip_for_1m.py` — 7 passed. `0045MAK` at priority `1m` still calls ThunderCloud; `skip` on MAK withholds it; `push` on KOT sends it.
+- Side effects: this commit on `main` deploys via `.github/workflows/deploy.yml`. Migration `075` adds `accounts.sparkmeter_credit` on each country DB the workflow migrates, then restarts `1pdb-api`, `1pdb-api-bn`, `1pdb-api-zm`, and `1pdb-api-sandbox`. No manual DB writes.
+- Key files: `acdb-api/sm_credit_retry.py`, `acdb-api/billing_priority.py`, `acdb-api/migrations/075_sparkmeter_credit_toggle.sql`, `acdb-api/frontend/src/pages/BillingPriorityPage.tsx`.
+- Follow-ups: confirm the deploy run. A MAK account that drops the series SparkMeter needs the toggle set to “1Meter ledger only”.
+
+## 2026-09-28 — Cursor — Skip Koios when the account bills on a 1Meter
+- `credit_sm_with_retry` now reads `billing_meter_priority`. Priority `1m` or `steamaco` returns success with `skipped_koios` and does not call Koios or enqueue a retry. Priority `sm` (the Benin fleet default) still pushes. The retry drain closes already-queued rows for those accounts as `failed` / `skipped_koios` so they stop spinning.
+- How CC is told: assign a prototype meter as primary (`meter_lifecycle` sets the account to `1m`), or set the account on the Billing Priority page. `0001KOT`, `0002KOT`, and `0001SIN` are already `1m`. `0002SIN` is unset, so it still resolves to SparkMeter until that is set.
+- Record Payment shows “1Meter account — kWh stayed on the CC ledger” instead of “SM Credit OK” when the push is skipped.
+- Tests: `tests/test_koios_skip_for_1m.py` — 4 passed.
+- Side effects: none live. Not deployed. No DB writes. KOT/SIN were not added to `koios_sites`.
+- Key files: `acdb-api/sm_credit_retry.py`, `acdb-api/ingest.py`, `acdb-api/payments.py`, `acdb-api/crud.py`, `acdb-api/frontend/src/pages/RecordPaymentPage.tsx`.
+- Follow-ups: deploy Benin before this applies to live MoMo. After deploy, the existing KOT retry rows close on the next drain.
+
+## 2026-09-28 — Cursor — KOT and SIN are already 1Meter sites, not missing SparkMeter IDs
+- `onepower_bj.country_sites`: KOT (KOTOKPA) and SIN (SINLITA) are `active=true`, source `pr`. GBO and SAM rows in that table are inactive; those two still credit because they are hardcoded in `country_config.BENIN`.
+- `credit_sparkmeter` does not read `country_sites`. A KOT/SIN MoMo payment is written to the CC ledger, then the Koios push logs `Site 'KOT' not mapped to any country`. That push is the SparkMeter path. Fleet `billing_meter_priority` is `sm`. Accounts `0001KOT`, `0002KOT`, `0001SIN` are `1m`. `0002SIN` is unset, so it still resolves to SparkMeter.
+- Side effects: none (read-only).
+- Follow-ups: do not add KOT/SIN to `koios_sites`. SMS ingest still calls Koios for every electricity payment, including 1Meter accounts.
+
+## 2026-09-28 — Cursor — Reversed Benin replay credits on SparkMeter and in the ledger
+- Koios BN: every replay payment that was still `processed` was reversed (`POST /payments/{id}/reverse`). Follow-up lookup at ~10:00 UTC: 105 `reversed`, 38 absent, 0 still processed. Ids are the CC transaction ids 144867–145009 except none of 145022.
+- `onepower_bj.transactions` ~10:05 UTC: 143 `sms_gateway` rows from 08:13–08:19 UTC zeroed (amount, kWh, electricity portion), `source_table=replay_reversed_20260928`, original amount appended on `sms_remark_raw`. Receipt keys kept. 145022 (0001KOT test, 10 XOF) and 144354 (12985) not modified.
+- Side effects: those Koios reversals and that update. No SMS sent.
+- Follow-ups: Hostinger cron still unconfirmed. Note drafted for Nils.
+
+## 2026-09-28 — Cursor — Held Benin SparkMeter retries from the Medic history replay
+- After the merchant phone was pointed at smsbn, `onepower_bj` ingested 159 SMS at 08:13–08:18 UTC. Most were historical MoMo messages (2025-09 through 2026-06). 94 SparkMeter credits from that burst are already `done` (117 350 XOF).
+- Production write ~09:15 UTC: `sm_credit_retry_queue` ids 105–120 (16 rows, 20 500 XOF, status `retrying`) set to `failed` with last_error `held 2026-09-28: Medic inbox replay of historical MoMo SMS; do not credit`, so the 09:38 UTC retry timer will not post them. KOT queue rows left as they were (site KOT is unmapped, so they cannot credit).
+- New test payment 0001KOT / MTN 12990230827 / CC txn 145022 (10 XOF) is in the ledger and was not posted to SparkMeter.
+- Side effects: that queue update only. Dump stored gitignored at `Onepowerpayement/u413182875_payement.sql`.
+- Follow-ups: unwind the 117 350 XOF already posted. Full note in `SMSComms/session-log.md`.
 
 ## 2026-09-28 — Cursor — Ship Nexus sign-in and SoftAP station UI; seal local leftovers
 - Nexus arrival no longer shows the customer / employee / committee chooser. Staff handoff finishes SSO. Logout and `/login?direct=1` still open the local sign-in page. A stale `/auth/me` cannot wipe a token that landed while it was in flight. What’s New id `nexus-skips-login-chooser`, ship date 2026-09-28.

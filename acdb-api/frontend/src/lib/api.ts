@@ -669,6 +669,8 @@ export interface HourlyPoint {
 export interface CustomerDashboard {
   balance_kwh: number;
   balance_currency?: number;
+  energy_debt_kwh?: number;
+  energy_debt_currency?: number;
   currency_code?: string;
   last_payment: DashboardPayment | null;
   avg_kwh_per_day: number;
@@ -1499,6 +1501,21 @@ export interface FirmwareHistoryEntry {
   ota_completed_at: string | null;
 }
 
+export interface FleetMapOta {
+  thing_name: string;
+  in_flight: boolean;
+  job_id?: string;
+  status?: string;
+  target_version?: string | null;
+  percent?: number | null;
+  blocks_received?: number | null;
+  blocks_total?: number | null;
+}
+
+export async function getFleetMapOta(thingName: string): Promise<FleetMapOta> {
+  return request<FleetMapOta>(`/provisioning/fleet-map/ota?thing_name=${encodeURIComponent(thingName)}`);
+}
+
 export async function getFirmwareHistory(meterId: string): Promise<{ meter_id: string; readings: number; history: FirmwareHistoryEntry[] }> {
   return request(`/provisioning/fleet-map/firmware-history?meter_id=${encodeURIComponent(meterId)}`);
 }
@@ -2066,6 +2083,23 @@ export interface DecommissionResult {
   connected_date: string;
   meters: { source: string; meterid: string; accountnumber: string; community: string }[];
   accounts: { accountnumber: string; meterid: string }[];
+}
+
+export async function resetAccountSetup(
+  accountNumber: string,
+  confirmation: string,
+  reason: string,
+): Promise<{
+  status: string;
+  account_number: string;
+  mutation_id: number;
+  fees: { fee_debt_connection_remaining: number; fee_debt_readyboard_remaining: number };
+  wiped: Record<string, number>;
+}> {
+  return request(`/accounts/${encodeURIComponent(accountNumber)}/setup-reset`, {
+    method: 'POST',
+    body: JSON.stringify({ confirmation, reason }),
+  });
 }
 
 export async function decommissionCustomer(customerId: number): Promise<DecommissionResult> {
@@ -3360,6 +3394,26 @@ export async function setFleetBillingPriority(
   return request('/billing-priority', {
     method: 'PATCH',
     body: JSON.stringify({ priority, note }),
+  });
+}
+
+export interface RelayAutoTrigger {
+  country: string;
+  enabled: boolean;
+  stored: boolean | null;
+  force_off: boolean;
+  can_edit: boolean;
+  status?: 'ok' | 'noop';
+}
+
+export async function getRelayAutoTrigger(): Promise<RelayAutoTrigger> {
+  return request('/relay-auto-trigger');
+}
+
+export async function setRelayAutoTrigger(enabled: boolean): Promise<RelayAutoTrigger> {
+  return request('/relay-auto-trigger', {
+    method: 'PUT',
+    body: JSON.stringify({ enabled }),
   });
 }
 

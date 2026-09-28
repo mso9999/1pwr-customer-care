@@ -324,8 +324,7 @@ The non-primary source is computed in parallel as a "what-if" balance and surfac
 [Check Meters](acdb-api/frontend/src/pages/CheckMeterPage.tsx); never written to
 `transactions`. Phase 1 of the migration is in progress on the MAK fleet (SM primary,
 1M what-if). Phase 2 flips primacy and adds a CC-driven relay-command channel
-([`acdb-api/relay_control.py`](acdb-api/relay_control.py)) gated by
-`RELAY_AUTO_TRIGGER_ENABLED`. See **[`docs/ops/1meter-billing-migration-protocol.md`](docs/ops/1meter-billing-migration-protocol.md)**
+([`acdb-api/relay_control.py`](acdb-api/relay_control.py)). Staff turn it on per country from Billing Priority (`system_config.relay_auto_trigger_enabled`). A missing row still follows `RELAY_AUTO_TRIGGER_ENABLED` (default off). `RELAY_AUTO_TRIGGER_FORCE_OFF=1` locks it off. See **[`docs/ops/1meter-billing-migration-protocol.md`](docs/ops/1meter-billing-migration-protocol.md)**
 for the full protocol, gating criteria, and rollback procedures.
 
 ### Prototype 1Meters

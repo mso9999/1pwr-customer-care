@@ -303,7 +303,25 @@ def record_payment_kwh(
                 account_number, txn_id, exc,
             )
 
+    _sync_energy_debt(conn, account_number, source="payment")
+
     return txn_id, kwh_vended, new_balance
+
+
+def _sync_energy_debt(conn, account_number: str, *, source: str) -> None:
+    """Record cutoff-lag kWh debt without failing the caller transaction."""
+    cur = conn.cursor()
+    try:
+        cur.execute("SAVEPOINT energy_debt")
+        from energy_debt import sync_energy_debt
+        sync_energy_debt(conn, account_number, source=source)
+        cur.execute("RELEASE SAVEPOINT energy_debt")
+    except Exception as exc:  # noqa: BLE001 - never break payment or telemetry
+        logger.warning("energy debt sync failed for %s (%s): %s", account_number, source, exc)
+        try:
+            cur.execute("ROLLBACK TO SAVEPOINT energy_debt")
+        except Exception:
+            logger.warning("energy debt savepoint rollback failed for %s", account_number)
 
 
 def balance_to_currency(balance_kwh: float, rate: float) -> float:

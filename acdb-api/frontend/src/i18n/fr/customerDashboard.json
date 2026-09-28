@@ -44,5 +44,8 @@
     "bothMetersNote": "Les deux compteurs mesurent la même charge. Un accord proche confirme la précision.",
     "consumption": "Consommation"
   },
-  "error": "Impossible de charger votre tableau de bord. Veuillez réessayer plus tard."
+  "error": "Impossible de charger votre tableau de bord. Veuillez réessayer plus tard.",
+  "autoCutoffOn": "Lorsque votre crédit atteint zéro, le courant se coupe jusqu'à un paiement qui le rétablit.",
+  "autoCutoffOff": "Le courant n'est pas coupé automatiquement lorsque votre crédit est épuisé.",
+  "energyDebt": "Vous avez utilisé {{kwh}} kWh après l'épuisement de votre crédit. Votre prochain paiement rembourse cela avant d'afficher un nouveau crédit."
 }

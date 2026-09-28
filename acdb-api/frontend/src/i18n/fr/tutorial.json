@@ -36,7 +36,8 @@
         "Lancer l’assistant de mise en service : rechercher le client, remplir les détails, lier le raccordement uGridPLAN (poteau/PTB) — obligatoire, sinon Générer le contrat reste bloqué — capturer la signature, puis générer le contrat bilingue et le SMS.",
         "Attribuer ou confirmer le compteur et le numéro de série dans le registre.",
         "Utiliser Données clients pour soldes, graphiques et historique des transactions (y compris toute avance active).",
-        "Suivre l’avancement dans le Pipeline."
+        "Suivre l’avancement dans le Pipeline.",
+        "Si le compte déjà délivré a servi à tester le compteur, ne le résiliez pas. Sur la fiche client, Réinitialiser les données d'installation conserve la personne, le numéro de compte et le compteur. Cela efface les paiements et relevés d'essai, puis remet les dettes de frais aux montants enregistrés pour ce pays. Enregistrez d'abord les vrais frais. Saisissez RESET et le numéro de compte, avec une raison. Superadmin, ou O&M pour son pays. Annulation depuis Mutations. Refusé après 21 jours, après 40 paiements, ou tant qu'une avance, un financement ou un service non compté est actif."
       ]
     },
     "countryActivation": {
@@ -78,7 +79,8 @@
         "Parcourir les Transactions pour les crédits récents et les montants par site ; la colonne Solde (kWh) reflète le solde en kWh après chaque ligne.",
         "Approfondir avec Données clients pour l’historique, le contexte de solde et le panneau Avances actives.",
         "Ouvrir la boîte SMS seulement après avoir choisi un pays dans la barre latérale. Elle liste les SMS reçus. Elle ne crédite pas un client.",
-        "Une correction de grand livre dans Données clients est réservée au superadmin et à l’O&M. Elle écrit une ligne brute et ne change pas le solde. Utilisez Enregistrer un paiement pour un vrai paiement."
+        "Une correction de grand livre dans Données clients est réservée au superadmin et à l’O&M. Elle écrit une ligne brute et ne change pas le solde. Utilisez Enregistrer un paiement pour un vrai paiement.",
+        "Sur Priorité de facturation, avec un seul pays choisi, activez ou désactivez la coupure automatique. À crédit zéro, un compte dont le 1Meter est principal perd le courant ; un paiement qui rétablit le crédit le remet. Le superadmin peut enregistrer pour tout pays. L'O&M et la finance seulement pour le leur. Le journal des mutations indique qui a changé quoi et quand. Tous les pays ne permet pas d'enregistrer."
       ]
     },
     "advances": {
@@ -187,7 +189,7 @@
   },
   "quiz": {
     "title": "Contrôle des connaissances",
-    "intro": "Cinq questions sur les paiements, la boîte SMS et le pont WhatsApp. Ouvrez la réponse quand vous êtes prêt.",
+    "intro": "Sept questions sur les paiements, la boîte SMS, le pont WhatsApp, la coupure automatique et la réinitialisation d'un compte d'essai. Ouvrez la réponse quand vous êtes prêt.",
     "show": "Voir la réponse",
     "hide": "Masquer la réponse",
     "items": [
@@ -210,6 +212,14 @@
       {
         "q": "Où est le QR WhatsApp, et quel téléphone associe-t-il ?",
         "a": "Système → Pont WhatsApp, pour le pays de la barre latérale. Réservé au superadmin, à l'O&M / IT et à Nexus administer_cc. Le Bénin et la Zambie ne basculent pas vers le téléphone du Lesotho."
+      },
+      {
+        "q": "Qui peut activer la coupure automatique pour le Bénin, et où est-ce inscrit ?",
+        "a": "Sur Priorité de facturation, avec le Bénin dans la barre latérale. Le superadmin peut enregistrer pour tout pays. L'O&M et la finance seulement pour le leur. Le journal des mutations garde l'auteur, l'ancienne valeur, la nouvelle valeur et l'heure. Le client voit une phrase sur Mon tableau de bord et ne peut pas modifier le réglage."
+      },
+      {
+        "q": "Un compte déjà délivré a servi à tester le compteur. Comment effacer les paiements d'essai tout en gardant ce numéro ?",
+        "a": "Sur la fiche client, Réinitialiser les données d'installation. Ne résiliez pas. Enregistrez d'abord les vrais frais du pays, car la réinitialisation grave ces montants. La dette de tableau n'est gravée que si le client prend un tableau 1PWR. Saisissez RESET et le numéro de compte. Superadmin, ou O&M pour son pays. Annulation depuis Mutations. Refusé après 21 jours, après 40 paiements, ou s'il existe une avance, un financement ou un service non compté actif."
       }
     ]
   }
