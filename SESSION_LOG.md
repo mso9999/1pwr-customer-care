@@ -1,3 +1,9 @@
+## 2026-09-28 — Cursor — Edit PTB link button opened nothing
+- On Edit PTB/pole, “Link uGridPlan Connection” set `showUGPPicker` but the picker was only mounted inside the new-commission wizard, so the click did nothing and Update stayed disabled. The picker now opens on that screen. `?edit` with no value also stays on the pole editor, so that URL cannot start contract generation. Commissioned customer pages show Edit PTB; it had been nested under the not-yet-commissioned branch.
+- 0001KOT: do not delete the customer. Two PDFs are the English and Sesotho copies. Updating the pole does not regenerate them. KOT is mapped to uGridPlan project `KOT_minigrid`.
+- Side effects: this push to `main` deploys to cc.1pwrafrica.com. No DB writes.
+- Key files: `acdb-api/frontend/src/pages/CommissionCustomerPage.tsx`, `acdb-api/frontend/src/pages/CustomerDetailPage.tsx`.
+
 ## 2026-09-28 — Cursor — Ship Nexus sign-in and SoftAP station UI; seal local leftovers
 - Nexus arrival no longer shows the customer / employee / committee chooser. Staff handoff finishes SSO. Logout and `/login?direct=1` still open the local sign-in page. A stale `/auth/me` cannot wipe a token that landed while it was in flight. What’s New id `nexus-skips-login-chooser`, ship date 2026-09-28.
 - Provisioning station page offers SoftAP probe at `192.168.5.1` (`1Meter_<last6>` / `1Meter00`) when the gateway is not on the 1Meter LAN. `POST /api/scan-softap` default IP is now `192.168.5.1` to match that firmware. Repoint Wi-Fi stays on its own field.

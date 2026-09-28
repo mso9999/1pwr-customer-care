@@ -376,7 +376,9 @@ export default function CommissionCustomerPage() {
   const [searchParams] = useSearchParams();
   const prefilledCustomerId = searchParams.get('customer') || '';
   const prefilledAccount = searchParams.get('account') || '';
-  const editMode = searchParams.get('edit') === '1' || searchParams.get('edit') === 'true';
+  // `?edit` with no value is the URL Nils typed. Treat any presence as the
+  // pole editor so that URL cannot open the contract-generating wizard.
+  const editMode = searchParams.has('edit') && searchParams.get('edit') !== '0';
 
   const [step, setStep] = useState(0);
 
@@ -1013,7 +1015,14 @@ export default function CommissionCustomerPage() {
               ) : (
                 <button
                   type="button"
-                  onClick={() => setShowUGPPicker(true)}
+                  onClick={() => {
+                    if (!ugpSite) {
+                      setError(t('commission:fields.ugpNoSite'));
+                      return;
+                    }
+                    setError('');
+                    setShowUGPPicker(true);
+                  }}
                   disabled={!accountNumber.trim()}
                   className="w-full py-3 bg-gray-100 border-2 border-dashed border-gray-300 rounded-xl text-sm font-medium text-gray-600 hover:bg-gray-200 active:bg-gray-300 disabled:opacity-40 transition flex items-center justify-center gap-2"
                 >
@@ -1022,6 +1031,9 @@ export default function CommissionCustomerPage() {
                   </svg>
                   {t('commission:fields.linkUgp')}
                 </button>
+              )}
+              {!surveyId && accountNumber.trim() && !ugpSite && (
+                <p className="text-xs text-red-500 mt-1">{t('commission:fields.ugpNoSite')}</p>
               )}
             </div>
             {error && (
@@ -1040,6 +1052,17 @@ export default function CommissionCustomerPage() {
               {saving ? 'Updating…' : 'Update PTB/pole association'}
             </button>
           </div>
+          {showUGPPicker && ugpSite && (
+            <UGPConnectionPicker
+              site={ugpSite}
+              accountNumber={accountNumber.trim() || undefined}
+              onSelect={(conn) => {
+                setSurveyId(conn.survey_id);
+                setShowUGPPicker(false);
+              }}
+              onClose={() => setShowUGPPicker(false)}
+            />
+          )}
         </div>
       ) : (
         <>
