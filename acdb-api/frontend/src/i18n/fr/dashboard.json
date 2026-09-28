@@ -16,7 +16,7 @@
     },
     "portfolio": {
       "title": "Revenus et ARPU du portefeuille",
-      "subtitle": "Vue glissante de {{months}} mois · Toutes les valeurs converties en USD aux taux indicatifs"
+      "subtitle": "Jusqu'en {{latestMonth}} · Vue glissante de {{months}} mois · USD aux taux indicatifs"
     },
     "kpi": {
       "activeConnections": "Raccordements actifs",

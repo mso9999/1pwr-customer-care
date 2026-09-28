@@ -206,6 +206,39 @@
 
 ---
 
+## Session 2026-09-28 [202609281306] — Durable monthly revenue rebuild
+
+### What Was Done
+- Shared `monthly_aggregates.rebuild_monthly_transactions()` (join meters by serial, COALESCE NULL meter_id). `import_hourly.py` and `scripts/rebuild_monthly_transactions.py` use it.
+- Dashboard portfolio already sums `transactions`. Financial ARPU endpoints (`/arpu`, `/monthly-arpu`) now prefer `transactions` too.
+- Host (live now, no API restart): copied the helper to `/opt/cc-portal/backend/`. LS `periodic_import.sh` detaches that script instead of `import_service.py --rebuild`. BN `periodic_import.sh` runs it after the Koios month pull. Fixed the leftover `import_service.py` rebuild SQL so it no longer joins meters by account.
+
+### Side effects
+- Next LS import (~6h) and BN import (11:25 UTC) will rebuild `monthly_transactions` from the ledger. This push to `main` deploys the dashboard query to cc.1pwrafrica.com and restarts the APIs.
+
+### Key files
+- `acdb-api/monthly_aggregates.py`, `acdb-api/scripts/rebuild_monthly_transactions.py`, `acdb-api/import_hourly.py`, `acdb-api/om_report.py`, `acdb-api/stats.py`
+
+---
+
+## Session 2026-09-28 [202609281300] — Dashboard Portfolio Revenue froze at 2026-06
+
+### What Was Done
+- Portfolio Revenue & ARPU on the dashboard ended at June 2026. `transactions` on LS and BJ run through 2026-09-28. `monthly_transactions.max(year_month)` was `2026-06`; last rebuild `created_at` 2026-06-05.
+- Cause: the dashboard (`GET /api/stats/revenue-summary`) read `monthly_transactions`. LS `periodic_import.sh` runs `import_hourly.py --no-aggregate` and detaches `import_service.py --rebuild`, whose log is empty and whose SQL still joins `meters` by account (fan-out). BN `import_benin.py` only upserts `SITE_*` Koios summaries and does not refresh per-account months.
+- Live rebuild from `transactions` (COALESCE meter_id, join meters by meter_id) at 2026-09-28 ~11:05 UTC:
+  - `onepower_cc`: 26,304 / through 2026-06 → 28,057 / 2019-03–2026-09 / LSL 4,644,050.74
+  - `onepower_bj`: 2,539 / through 2026-06 → 2,036 / 2025-08–2026-09 / XOF 9,965,093.12
+- Code: `_country_monthly_revenue` now sums `transactions` so this widget cannot freeze when the importer skips aggregates. Subtitle shows `Through {{latestMonth}}`. API adds `latest_month` / `as_of`. Test `test_revenue_summary.py` passes. Not deployed — live numbers update after the 10-minute stats cache expires.
+
+### Side effects
+- Production TRUNCATE+INSERT on `monthly_transactions` in `onepower_cc` and `onepower_bj`. Financial / Analytics pages that still read that table will also move to September after cache expiry.
+
+### Follow-ups
+- Fix `/opt/1pdb/services/import_service.py --rebuild` (and mirror into the 1PDB repo) so the detached monthly job actually completes. Do not join meters by account_number.
+
+---
+
 ## Session 2026-09-27 [202609271657] — Dashboard power flow: PV and genset icons on the left
 
 ### What Was Done

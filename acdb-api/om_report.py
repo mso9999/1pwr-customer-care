@@ -1097,8 +1097,8 @@ def arpu_time_series(user: CurrentUser = Depends(require_employee)):
     customer base, and divides quarterly revenue by that base.
 
     Data source priority:
-      1. monthly_transactions (SparkMeter portfolio data, includes manual corrections)
-      2. transactions (raw history, fallback)
+      1. transactions (live ledger — monthly_transactions can lag for months)
+      2. monthly_transactions (fallback)
     """
 
     with _get_connection() as conn:
@@ -1109,44 +1109,44 @@ def arpu_time_series(user: CurrentUser = Depends(require_employee)):
 
         try:
             cursor.execute(
-                "SELECT account_number, year_month, amount_lsl, community "
-                "FROM monthly_transactions"
+                "SELECT account_number, transaction_date, transaction_amount "
+                "FROM transactions"
             )
             raw = cursor.fetchall()
             if raw:
-                for row in raw:
-                    acct = str(row[0] or "").strip()
-                    ym = str(row[1] or "").strip()
-                    lsl = float(row[2] or 0)
-                    community = str(row[3] or "").strip().upper()
-                    if not acct or not ym or lsl <= 0:
-                        continue
-                    try:
-                        y, m = int(ym[:4]), int(ym[5:7])
-                        dt = datetime(y, m, 15)
-                    except (ValueError, IndexError):
-                        continue
-                    txn_rows.append((acct, dt, lsl, community))
-                if txn_rows:
-                    source_table = "monthly_transactions"
+                txn_rows = [
+                    (str(r[0] or "").strip(), r[1], float(r[2] or 0), "")
+                    for r in raw
+                ]
+                source_table = "transactions"
         except Exception as e:
-            logger.warning("Failed to query monthly_transactions for ARPU: %s", e)
+            logger.warning("Failed to query transactions for ARPU: %s", e)
 
         if not txn_rows:
             try:
                 cursor.execute(
-                    "SELECT account_number, transaction_date, transaction_amount "
-                    "FROM transactions"
+                    "SELECT account_number, year_month, amount_lsl, community "
+                    "FROM monthly_transactions"
                 )
                 raw = cursor.fetchall()
                 if raw:
-                    txn_rows = [
-                        (str(r[0] or "").strip(), r[1], float(r[2] or 0), "")
-                        for r in raw
-                    ]
-                    source_table = "transactions"
-            except Exception:
-                pass
+                    for row in raw:
+                        acct = str(row[0] or "").strip()
+                        ym = str(row[1] or "").strip()
+                        lsl = float(row[2] or 0)
+                        community = str(row[3] or "").strip().upper()
+                        if not acct or not ym or lsl <= 0:
+                            continue
+                        try:
+                            y, m = int(ym[:4]), int(ym[5:7])
+                            dt = datetime(y, m, 15)
+                        except (ValueError, IndexError):
+                            continue
+                        txn_rows.append((acct, dt, lsl, community))
+                    if txn_rows:
+                        source_table = "monthly_transactions"
+            except Exception as e:
+                logger.warning("Failed to query monthly_transactions for ARPU: %s", e)
 
         if txn_rows:
             q_revenue: Dict[str, float] = defaultdict(float)
@@ -1253,8 +1253,8 @@ def monthly_arpu_time_series(user: CurrentUser = Depends(require_employee)):
     Monthly ARPU: total revenue / cumulative customer base per month.
 
     Data source priority:
-      1. monthly_transactions (SparkMeter portfolio, includes corrections)
-      2. transactions (raw history, fallback)
+      1. transactions (live ledger — monthly_transactions can lag for months)
+      2. monthly_transactions (fallback)
     """
     with _get_connection() as conn:
         cursor = conn.cursor()
@@ -1264,41 +1264,41 @@ def monthly_arpu_time_series(user: CurrentUser = Depends(require_employee)):
 
         try:
             cursor.execute(
-                "SELECT account_number, year_month, amount_lsl, community "
-                "FROM monthly_transactions"
+                "SELECT account_number, transaction_date, transaction_amount "
+                "FROM transactions"
             )
             raw = cursor.fetchall()
             if raw:
-                for row in raw:
-                    acct = str(row[0] or "").strip()
-                    ym = str(row[1] or "").strip()
-                    lsl = float(row[2] or 0)
-                    community = str(row[3] or "").strip().upper()
-                    if acct and ym and lsl > 0:
-                        txn_rows.append((acct, ym, lsl, community))
+                for r in raw:
+                    acct = str(r[0] or "").strip()
+                    m = _date_to_month(r[1])
+                    lsl = float(r[2] or 0)
+                    if acct and m:
+                        txn_rows.append((acct, m, lsl, ""))
                 if txn_rows:
-                    source_table = "monthly_transactions"
+                    source_table = "transactions"
         except Exception as e:
-            logger.warning("monthly_transactions query failed: %s", e)
+            logger.warning("transactions query failed: %s", e)
 
         if not txn_rows:
             try:
                 cursor.execute(
-                    "SELECT account_number, transaction_date, transaction_amount "
-                    "FROM transactions"
+                    "SELECT account_number, year_month, amount_lsl, community "
+                    "FROM monthly_transactions"
                 )
                 raw = cursor.fetchall()
                 if raw:
-                    for r in raw:
-                        acct = str(r[0] or "").strip()
-                        m = _date_to_month(r[1])
-                        lsl = float(r[2] or 0)
-                        if acct and m:
-                            txn_rows.append((acct, m, lsl, ""))
+                    for row in raw:
+                        acct = str(row[0] or "").strip()
+                        ym = str(row[1] or "").strip()
+                        lsl = float(row[2] or 0)
+                        community = str(row[3] or "").strip().upper()
+                        if acct and ym and lsl > 0:
+                            txn_rows.append((acct, ym, lsl, community))
                     if txn_rows:
-                        source_table = "transactions"
-            except Exception:
-                pass
+                        source_table = "monthly_transactions"
+            except Exception as e:
+                logger.warning("monthly_transactions query failed: %s", e)
 
         if not txn_rows:
             return {"monthly_arpu": [], "site_codes": [], "error": "No transaction data found"}

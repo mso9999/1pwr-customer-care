@@ -2854,6 +2854,8 @@ export interface RevenueSummaryResponse {
   fx_rates: Record<string, number>;
   fx_note: string;
   window_months: number;
+  latest_month?: string;
+  as_of?: string;
 }
 
 export async function getRevenueSummary(months = 12): Promise<RevenueSummaryResponse> {

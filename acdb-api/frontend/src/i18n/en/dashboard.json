@@ -16,7 +16,7 @@
     },
     "portfolio": {
       "title": "Portfolio Revenue & ARPU",
-      "subtitle": "Rolling {{months}}-month view · All values converted to USD at indicative rates"
+      "subtitle": "Through {{latestMonth}} · Rolling {{months}}-month view · USD at indicative rates"
     },
     "kpi": {
       "activeConnections": "Active Connections",

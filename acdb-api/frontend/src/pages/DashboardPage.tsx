@@ -488,7 +488,12 @@ export default function DashboardPage() {
               <div>
                 <h2 className="text-base sm:text-lg font-semibold text-gray-700">{t('dashboard:dashboard.portfolio.title')}</h2>
                 <p className="text-xs text-gray-500 mt-0.5">
-                  {t('dashboard:dashboard.portfolio.subtitle', { months: revenueSummary.window_months })}
+                  {t('dashboard:dashboard.portfolio.subtitle', {
+                    months: revenueSummary.window_months,
+                    latestMonth: revenueSummary.latest_month
+                      || revenueSummary.consolidated[revenueSummary.consolidated.length - 1]?.month
+                      || '',
+                  })}
                 </p>
               </div>
               <div className="flex items-center gap-2">

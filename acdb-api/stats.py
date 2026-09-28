@@ -500,63 +500,34 @@ _FX_TO_USD = {
 
 
 def _country_monthly_revenue(conn, country: str, currency: str, months: int) -> List[Dict[str, Any]]:
-    """Query monthly_transactions for a single country DB.
+    """Roll monthly revenue from ``transactions`` (the live ledger).
 
-    Handles two data shapes:
-      - Per-customer rows (LS): COUNT(DISTINCT account_number) for paying customers
-      - Site-level aggregates (BJ): account_number like 'SITE_%'; falls back to
-        counting accounts with consumption in that month.
-
-    Returns list of {month, revenue_local, paying_customers, currency, country}.
+    ``monthly_transactions`` is only rebuilt when an importer runs without
+    ``--no-aggregate``. The LS periodic job skips that step and the detached
+    ``import_service.py --rebuild`` has been failing silently, so the
+    dashboard froze at 2026-06 while payments continued through 2026-09.
     """
     cursor = conn.cursor()
-
-    cutoff = f"to_char(NOW() - interval '{int(months)} months', 'YYYY-MM')"
+    window = int(months)
 
     cursor.execute(
-        "SELECT year_month, "
-        f"      SUM(amount_lsl)::numeric(14,2) AS revenue, "
-        "       COUNT(DISTINCT account_number) AS acct_count, "
-        "       COUNT(DISTINCT CASE WHEN amount_lsl > 0 "
+        "SELECT to_char(transaction_date, 'YYYY-MM') AS year_month, "
+        "       SUM(transaction_amount)::numeric(14,2) AS revenue, "
+        "       COUNT(DISTINCT CASE WHEN transaction_amount > 0 "
         "                             AND account_number NOT LIKE 'SITE_%%' "
-        "                             THEN account_number END) AS real_acct_count "
-        "FROM monthly_transactions "
-        f"WHERE year_month >= {cutoff} "
-        "GROUP BY year_month "
-        "ORDER BY year_month"
+        "                            THEN account_number END) AS paying_customers "
+        "FROM transactions "
+        "WHERE transaction_date >= date_trunc('month', NOW() - %s * INTERVAL '1 month') "
+        "GROUP BY 1 "
+        "ORDER BY 1",
+        (window,),
     )
-    raw = cursor.fetchall()
-
-    has_consumption_table = _table_exists(cursor, "monthly_consumption") or _table_exists(cursor, "hourly_consumption")
-
     results = []
-    for r in raw:
-        ym = str(r[0])
-        revenue = float(r[1])
-        real_accts = int(r[3])
-
-        if real_accts > 0:
-            paying = real_accts
-        elif has_consumption_table:
-            try:
-                cursor.execute(
-                    "SELECT COUNT(DISTINCT account_number) "
-                    "FROM monthly_consumption "
-                    "WHERE year_month = %s AND kwh > 0",
-                    (ym,),
-                )
-                row = cursor.fetchone()
-                paying = int(row[0]) if row and row[0] else 0
-            except Exception:
-                conn.rollback()
-                paying = int(r[2])
-        else:
-            paying = int(r[2])
-
+    for ym, revenue, paying in cursor.fetchall():
         results.append({
-            "month": ym,
-            "revenue_local": revenue,
-            "paying_customers": paying,
+            "month": str(ym),
+            "revenue_local": float(revenue or 0),
+            "paying_customers": int(paying or 0),
             "currency": currency,
             "country": country,
         })
@@ -691,12 +662,15 @@ def revenue_summary(
                 m["month_fraction"] = 1.0
                 m["arpu_local_prorated"] = raw
 
+    latest_month = consolidated[-1]["month"] if consolidated else current_ym
     result = {
         "countries": countries,
         "consolidated": consolidated,
         "fx_rates": _FX_TO_USD,
         "fx_note": "Approximate indicative rates; not live market rates.",
         "window_months": months,
+        "latest_month": latest_month,
+        "as_of": today.isoformat(),
     }
     _set_cached(cache_key, result)
     return result
