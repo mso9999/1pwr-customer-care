@@ -1513,6 +1513,8 @@ export interface FleetMapOta {
   percent?: number | null;
   blocks_received?: number | null;
   blocks_total?: number | null;
+  /** starting: job exists, gateway is being nudged. waiting_online: not connected yet. */
+  phase?: 'starting' | 'waiting_online' | 'downloading' | 'held';
 }
 
 export async function getFleetMapOta(thingName: string): Promise<FleetMapOta> {

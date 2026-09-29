@@ -38,6 +38,29 @@ function statusColor(freshness: ReportFreshness): string {
   if (freshness === 'recent') return STATUS_RECENT;
   return STATUS_SILENT;
 }
+
+/** History loads after the popup opens. Re-measure so the box stays in the map. */
+function RefitPopup() {
+  const map = useMap();
+  useEffect(() => {
+    const pane = map.getPane('popupPane');
+    if (!pane) return;
+    let timer = 0;
+    const obs = new MutationObserver(() => {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        const popup = (map as unknown as { _popup?: L.Popup })._popup;
+        if (popup?.isOpen()) popup.update();
+      }, 40);
+    });
+    obs.observe(pane, { childList: true, subtree: true });
+    return () => {
+      obs.disconnect();
+      window.clearTimeout(timer);
+    };
+  }, [map]);
+  return null;
+}
 const INSTALL_UNKNOWN = '#9ca3af';
 
 function installEpoch(raw: string | null | undefined): number | null {
@@ -140,21 +163,29 @@ function MeterOta({ thingName }: { thingName: string }) {
   if (error) return <div className="text-xs text-gray-400 mt-1">OTA status unavailable</div>;
   if (!ota?.in_flight) return null;
   const pct = Math.max(0, Math.min(100, ota.percent ?? 0));
-  const queued = ota.status === 'QUEUED';
+  const version = ota.target_version ? ` ${ota.target_version}` : '';
+  const phase = ota.phase || (ota.status === 'QUEUED' ? 'starting' : 'downloading');
   const blocks = ota.blocks_total
     ? `${ota.blocks_received ?? 0}/${ota.blocks_total} blocks`
     : '';
+  const line = phase === 'waiting_online'
+    ? `Queued for${version}. Starts when the gateway is online.`
+    : phase === 'held'
+      ? `Queued for${version}. Held until this site is resumed.`
+      : phase === 'starting'
+        ? `Queued for${version}. Starting it on the gateway now.`
+        : `OTA →${version} · downloading`;
   return (
     <div className="mt-1.5">
-      <div className="text-xs text-gray-700">
-        OTA{ota.target_version ? ` → ${ota.target_version}` : ''} · {queued ? 'queued' : 'downloading'}
-      </div>
-      <div className="mt-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-        <div className="h-full bg-blue-600" style={{ width: `${pct}%` }} />
-      </div>
-      <div className="text-[11px] text-gray-500">
-        {queued ? 'Starts when the gateway next connects' : `${pct}%${blocks ? ` · ${blocks}` : ''}`}
-      </div>
+      <div className="text-xs text-gray-700">{line}</div>
+      {phase === 'downloading' && (
+        <>
+          <div className="mt-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+            <div className="h-full bg-blue-600" style={{ width: `${pct}%` }} />
+          </div>
+          <div className="text-[11px] text-gray-500">{pct}%{blocks ? ` · ${blocks}` : ''}</div>
+        </>
+      )}
     </div>
   );
 }
@@ -434,6 +465,7 @@ export default function FleetMap({
         ) : (
           <MapContainer center={center} zoom={13} className="relative z-0" style={{ height: '100%', width: '100%' }}>
             <FitBounds points={points} />
+            <RefitPopup />
             <FocusController target={focus} markerRefs={markerRefs} />
             <TileLayer
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
@@ -478,7 +510,13 @@ export default function FleetMap({
                     popupclose: () => setOpenMeterId((cur) => (cur === m.meter_id ? null : cur)),
                   }}
                 >
-                  <Popup>
+                  <Popup
+                    maxHeight={300}
+                    autoPan
+                    keepInView
+                    autoPanPaddingTopLeft={L.point(24, 24)}
+                    autoPanPaddingBottomRight={L.point(24, 24)}
+                  >
                     <div className="text-sm">
                       <div className="font-semibold">{m.thing_name || m.meter_id}</div>
                       <div className="text-xs text-gray-600">

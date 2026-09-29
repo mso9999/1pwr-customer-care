@@ -1,3 +1,10 @@
+## 2026-09-29 — Cursor — Manual firmware update starts a connected gateway
+- A manual update was matching the meter's old provisioning gateway when `meter_last_seen` stored a zero-padded serial. Meter 23024464 was queued on offline MAK-GW-0061. The row was retargeted to MAK-GW-0184, which is the gateway reporting that meter. The advancer created `AFR_OTA-1m-target-1-1-76-MAK-GW-0184-20260929094759` at 09:47 UTC.
+- A connected gateway is now nudged as soon as its job exists, and again every 15 minutes while the execution is still queued. It is not left for three minutes. An offline gateway still waits until it connects. The meter popup says queued for the target version instead of staying blank.
+- Side effects: `onemeter_ota_queue` id 1 in `onepower_cc` changed from thing MAK-GW-0061 to MAK-GW-0184 while pending. API venv gained `awsiotsdk` 1.31.0 and `awscrt` 0.36.1; `1pdb-api` was restarted about 09:44 UTC so the nudge can run. This push to `main` deploys to https://cc.1pwrafrica.com. MAK-GW-0184 was nudged after the job was created.
+- Key files: `acdb-api/ota_target.py`, `acdb-api/meter_provisioning.py`, `acdb-api/frontend/src/components/FleetMap.tsx`.
+- Tests: `tests/test_ota_target_queue.py` and `tests/test_fleet_map_ota.py` — 13 passed.
+
 ## 2026-09-29 — Cursor — Firmware dialog was opening behind the meters map
 - The Update firmware window used the page overlay level, and the map’s panes sit higher, so the window opened underneath the map. The map now keeps those panes inside itself, and the firmware window sits above them.
 - Side effects: this push to `main` deploys to https://cc.1pwrafrica.com. No DB writes.

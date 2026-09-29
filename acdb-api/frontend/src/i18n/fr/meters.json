@@ -72,7 +72,7 @@
   "selectAllSite": "Tout sélectionner sur ce site",
   "selectAllOnMap": "Tout sélectionner sur la carte",
   "firmwareTitle": "Mettre à jour le firmware",
-  "firmwareHint": "Une passerelle à la fois par site. Une passerelle hors ligne attend d'être en ligne.",
+  "firmwareHint": "Une passerelle à la fois par site. Une passerelle en ligne est invitée à démarrer tout de suite. Une passerelle hors ligne attend d'être en ligne.",
   "firmwareVersion": "Version du firmware",
   "firmwareNotSelectable": "pas en MQTT",
   "firmwareSummary": "{{meters}} compteurs, {{gateways}} passerelles seront mises en file",

@@ -130,6 +130,34 @@ def test_create_is_one_thing_and_does_not_touch_site_releases():
     assert "onemeter_ota_site_releases" not in blob
 
 
+def test_meter_id_lookup_includes_the_padded_dynamo_key():
+    assert ot.meter_id_keys("23024464") == ["23024464", "000023024464"]
+    assert ot.meter_id_keys("000023024464") == ["000023024464", "23024464"]
+
+
+def test_connected_gateway_is_kicked_immediately_and_not_again_for_15_minutes():
+    now = datetime(2026, 9, 29, 9, 45, tzinfo=timezone.utc)
+    assert ot.should_kick(kicked_at=None, connected=True, now=now) is True
+    assert ot.should_kick(kicked_at=None, connected=False, now=now) is False
+    assert ot.should_kick(kicked_at=now, connected=True, now=now) is False
+    later = datetime(2026, 9, 29, 10, 1, tzinfo=timezone.utc)
+    assert ot.should_kick(kicked_at=now, connected=True, now=later) is True
+
+
+def test_popup_shows_a_queue_row_before_an_aws_job_exists():
+    blank = {"thing_name": "MAK-GW-0184", "in_flight": False}
+    waiting = ot.present_map_ota(blank, {"target_version": "1.1.76", "queue_status": "pending"})
+    assert waiting["in_flight"] is True
+    assert waiting["phase"] == "waiting_online"
+    assert waiting["target_version"] == "1.1.76"
+    downloading = ot.present_map_ota(
+        {"thing_name": "MAK-GW-0184", "in_flight": True, "status": "IN_PROGRESS", "percent": 12},
+        {"target_version": "1.1.76", "queue_status": "active"},
+    )
+    assert downloading["phase"] == "downloading"
+    assert downloading["percent"] == 12
+
+
 def test_already_on_target_is_skipped():
     preview = ot.build_preview([
         {"meter_id": "1", "thing_name": "MAK-GW-0196", "fw_version": "1.1.76", "site": "MAK"},

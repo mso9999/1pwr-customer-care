@@ -72,7 +72,7 @@
   "selectAllSite": "Select all at this site",
   "selectAllOnMap": "Select all on the map",
   "firmwareTitle": "Update firmware",
-  "firmwareHint": "One gateway at a time per site. A gateway that is offline waits until it is online.",
+  "firmwareHint": "One gateway at a time per site. A gateway that is online is asked to start immediately. One that is offline waits until it is online.",
   "firmwareVersion": "Firmware version",
   "firmwareNotSelectable": "not over MQTT",
   "firmwareSummary": "{{meters}} meters, {{gateways}} gateways will be queued",

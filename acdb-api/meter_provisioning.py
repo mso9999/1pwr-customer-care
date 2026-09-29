@@ -2902,11 +2902,34 @@ def fleet_map_ota(
     if not re.match(r"^[A-Za-z0-9_-]{1,128}$", thing):
         raise HTTPException(status_code=400, detail="Invalid thing name.")
     try:
-        return fleet_map_ota_for_thing(_client("iot"), thing)
+        aws = fleet_map_ota_for_thing(_client("iot"), thing)
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=502, detail=f"Unable to read OTA progress: {exc}") from exc
+    queue = None
+    try:
+        from customer_api import get_connection
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT target_version, status
+                  FROM onemeter_ota_queue
+                 WHERE thing_name = %s
+                   AND status IN ('pending', 'active', 'held')
+                 ORDER BY id DESC
+                 LIMIT 1
+                """,
+                (thing,),
+            )
+            row = cur.fetchone()
+        if row:
+            queue = {"target_version": row[0], "queue_status": row[1]}
+    except Exception as exc:  # noqa: BLE001 - the AWS bar still renders
+        logger.warning("operator queue lookup failed for %s: %s", thing, exc)
+    import ota_target
+    return ota_target.present_map_ota(aws, queue)
 
 
 class OtaTargetPreviewBody(BaseModel):

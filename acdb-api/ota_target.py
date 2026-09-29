@@ -29,7 +29,6 @@ OTA_ROLE_ARN = os.environ.get(
 IOT_ENDPOINT = os.environ.get("IOT_ENDPOINT", "a3p95svnbmzyit-ats.iot.us-east-1.amazonaws.com")
 
 FACTORY_BASELINE = (1, 1, 56)
-KICK_AFTER_S = 180
 KICK_AGAIN_S = 900
 ADVISORY_LOCK = 117608
 OPEN_STATUSES = ("pending", "active", "held")
@@ -106,6 +105,65 @@ def site_of_thing(thing: str | None, community: str | None = None) -> str:
     if match:
         return match.group(1).upper()
     return str(community or "").strip().upper()
+
+
+def meter_id_keys(meter_id: str) -> list[str]:
+    """Forms a meter serial takes in CC and in meter_last_seen.
+
+    The map matches the raw id, the id without leading zeros, and the
+    12-digit form. A lookup of only the CC id misses a padded Dynamo key
+    and then targets the provisioning record, which can be an old gateway.
+    """
+    text = str(meter_id or "").strip()
+    keys: list[str] = []
+    for candidate in (text, text.lstrip("0"), text.zfill(12)):
+        if candidate and candidate not in keys:
+            keys.append(candidate)
+    return keys
+
+
+def should_kick(*, kicked_at: datetime | None, connected: bool, now: datetime) -> bool:
+    """A manual update nudges a connected gateway as soon as its job exists.
+
+    Firmware before 1.1.72 only asks AWS for a job on MQTT connect, so a job
+    created while the gateway is already connected stays queued until something
+    drops that session. Kick once immediately, then again every 15 minutes
+    while the execution is still queued.
+    """
+    if not connected:
+        return False
+    if kicked_at is None:
+        return True
+    return now - kicked_at >= timedelta(seconds=KICK_AGAIN_S)
+
+
+def present_map_ota(aws: dict, queue: dict | None) -> dict:
+    """What the meter popup should say.
+
+    An AWS job wins. A CC queue row with no job yet still shows as queued,
+    so the popup is not blank while the gateway is offline or the job is
+    being created.
+    """
+    if aws.get("in_flight"):
+        phase = "downloading" if aws.get("status") == "IN_PROGRESS" else "starting"
+        return {**aws, "phase": phase}
+    if not queue:
+        return aws
+    queue_status = queue.get("queue_status") or queue.get("status")
+    if queue_status == "pending":
+        phase = "waiting_online"
+    elif queue_status == "held":
+        phase = "held"
+    else:
+        phase = "starting"
+    return {
+        "thing_name": aws.get("thing_name"),
+        "in_flight": True,
+        "status": "QUEUED",
+        "target_version": queue.get("target_version"),
+        "percent": 0,
+        "phase": phase,
+    }
 
 
 def prefer_thing(seen: str | None, prov: str | None, link: str | None) -> str | None:
@@ -511,17 +569,16 @@ def advance_ota_queue(conn, iot, *, kick=kick_gateway, now: datetime | None = No
                     """,
                     (f"Held after {row['thing_name']} {status}", row["site_code"]),
                 )
-            elif status == "QUEUED":
-                age = now - (_aware(row.get("started_at")) or now)
-                last_kick = _aware(row.get("kicked_at"))
-                due = age >= timedelta(seconds=KICK_AFTER_S) and (
-                    last_kick is None or now - last_kick >= timedelta(seconds=KICK_AGAIN_S)
-                )
-                if due and row["thing_name"] in connected_things(iot, {row["site_code"]}):
-                    try:
-                        kick(row["thing_name"])
-                    except Exception as exc:  # noqa: BLE001
-                        logger.warning("OTA kick failed for %s: %s", row["thing_name"], exc)
+            elif status == "QUEUED" and should_kick(
+                kicked_at=_aware(row.get("kicked_at")),
+                connected=row["thing_name"] in connected_things(iot, {row["site_code"]}),
+                now=now,
+            ):
+                try:
+                    kick(row["thing_name"])
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("OTA kick failed for %s: %s", row["thing_name"], exc)
+                else:
                     cur.execute(
                         "UPDATE onemeter_ota_queue SET kicked_at = %s WHERE id = %s",
                         (now, row["id"]),
@@ -590,6 +647,17 @@ def advance_ota_queue(conn, iot, *, kick=kick_gateway, now: datetime | None = No
             )
             conn.commit()
             started.append(row["thing_name"])
+            if should_kick(kicked_at=None, connected=True, now=now):
+                try:
+                    kick(row["thing_name"])
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("OTA kick failed for %s: %s", row["thing_name"], exc)
+                else:
+                    cur.execute(
+                        "UPDATE onemeter_ota_queue SET kicked_at = %s WHERE id = %s",
+                        (now, row["id"]),
+                    )
+                    conn.commit()
         return {"advanced": True, "started": started}
     finally:
         try:
@@ -667,17 +735,21 @@ def _last_seen_things(ddb, meter_ids: list[str]) -> dict[str, str]:
         return {}
     found = {}
     for meter_id in meter_ids:
-        try:
-            resp = ddb.get_item(
-                TableName="meter_last_seen",
-                Key={"meterId": {"S": meter_id}},
-                ProjectionExpression="meterId, thingName",
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("meter_last_seen read failed for %s: %s", meter_id, exc)
-            continue
-        item = resp.get("Item") or {}
-        thing = (item.get("thingName") or {}).get("S")
+        thing = None
+        for key in meter_id_keys(meter_id):
+            try:
+                resp = ddb.get_item(
+                    TableName="meter_last_seen",
+                    Key={"meterId": {"S": key}},
+                    ProjectionExpression="meterId, thingName",
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("meter_last_seen read failed for %s: %s", key, exc)
+                continue
+            item = resp.get("Item") or {}
+            thing = (item.get("thingName") or {}).get("S")
+            if thing:
+                break
         if thing:
             found[meter_id] = thing
     return found
