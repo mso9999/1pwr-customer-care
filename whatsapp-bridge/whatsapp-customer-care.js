@@ -1219,7 +1219,7 @@ function startInboundHttpServer() {
                     return;
                 }
                 var jid = body.jid || TICKET_TRACKER_JID;
-                if (!jid || !sock) {
+                if (!jid || !sock || !isReady) {  // 503 while disconnected so callers see the failure (2026-09-29)
                     sendJson(res, 503, { ok: false, reason: "wa_not_ready" });
                     return;
                 }
@@ -1232,7 +1232,7 @@ function startInboundHttpServer() {
                 });
                 return;
             }
-            if (!TICKET_TRACKER_JID || !sock) {
+            if (!TICKET_TRACKER_JID || !sock || !isReady) {  // 503 while disconnected so callers see the failure (2026-09-29)
                 sendJson(res, 503, { ok: false, reason: "wa_not_ready" });
                 return;
             }
