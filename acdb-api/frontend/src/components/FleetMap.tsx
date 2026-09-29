@@ -224,12 +224,22 @@ export default function FleetMap({
   }, []);
 
   useEffect(() => {
-    setLoading(true);
-    setError('');
-    getFleetMap(site)
-      .then(setData)
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setLoading(false));
+    let cancel = false;
+    const load = (first: boolean) => {
+      if (first) {
+        setLoading(true);
+        setError('');
+      }
+      getFleetMap(site)
+        .then((row) => { if (!cancel) setData(row); })
+        .catch((e) => { if (!cancel && first) setError(e instanceof Error ? e.message : String(e)); })
+        .finally(() => { if (!cancel && first) setLoading(false); });
+    };
+    load(true);
+    // Last-seen is a snapshot. Without this, a meter goes orange after 20 minutes
+    // on screen even while it keeps reporting.
+    const timer = window.setInterval(() => load(false), 60_000);
+    return () => { cancel = true; window.clearInterval(timer); };
   }, [site]);
 
   const findMeter = (q: string): FleetMapMeter | null => {

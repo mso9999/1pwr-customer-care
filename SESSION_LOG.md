@@ -1,3 +1,8 @@
+## 2026-09-29 — Cursor — Map status refreshes while the page stays open
+- The meters map loaded last-seen once. A later re-render aged that snapshot, so a meter still reporting turned orange after 20 minutes on screen, and two people looking at the same fleet could disagree. The map now reloads meter status every minute without replacing the map. A finished download drops the violet dot on the 20-second download check, then the next status reload paints it from the new report.
+- Side effects: this push to `main` deploys to https://cc.1pwrafrica.com. No DB writes.
+- Key files: `acdb-api/frontend/src/components/FleetMap.tsx`.
+
 ## 2026-09-29 — Cursor — Downloading meters have their own map color
 - A gateway transferring firmware was painted by how long ago the meter reported, so a live download looked like "last 24 hours". Status and hybrid fills now use violet for a thing whose job execution is IN_PROGRESS, and that meter is counted as downloading rather than in the freshness buckets. The popup says "downloading firmware".
 - Side effects: this push to `main` deploys to https://cc.1pwrafrica.com. No DB writes. `GET /api/provisioning/fleet-map/downloads` is employee-readable.
