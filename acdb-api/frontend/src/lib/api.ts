@@ -1521,6 +1521,11 @@ export async function getFleetMapOta(thingName: string): Promise<FleetMapOta> {
   return request<FleetMapOta>(`/provisioning/fleet-map/ota?thing_name=${encodeURIComponent(thingName)}`);
 }
 
+/** Gateways whose firmware execution is transferring right now. */
+export async function getFleetMapDownloads(): Promise<{ things: string[] }> {
+  return request<{ things: string[] }>('/provisioning/fleet-map/downloads');
+}
+
 export interface FirmwareLibraryEntry {
   version: string;
   artifact_key: string;

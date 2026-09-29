@@ -2892,6 +2892,55 @@ def fleet_map_ota_for_thing(iot, thing_name: str) -> dict:
     }
 
 
+def downloading_things(iot) -> list[str]:
+    """Gateways whose firmware execution is IN_PROGRESS.
+
+    A job left open while the execution is still QUEUED does not count. The
+    map uses this so a download is not painted as "last 24 hours".
+    """
+    names: list[str] = []
+    seen: set[str] = set()
+    token = None
+    for _ in range(5):
+        kwargs: dict = {"status": "IN_PROGRESS", "maxResults": 50}
+        if token:
+            kwargs["nextToken"] = token
+        resp = iot.list_jobs(**kwargs)
+        for job in resp.get("jobs") or []:
+            job_id = job.get("jobId") or ""
+            if not job_id:
+                continue
+            ex_token = None
+            for _page in range(5):
+                ex_kwargs: dict = {"jobId": job_id, "status": "IN_PROGRESS", "maxResults": 20}
+                if ex_token:
+                    ex_kwargs["nextToken"] = ex_token
+                executions = iot.list_job_executions_for_job(**ex_kwargs)
+                for item in executions.get("executionSummaries") or []:
+                    thing = str(item.get("thingArn") or "").rsplit("/", 1)[-1].strip()
+                    if thing and thing not in seen:
+                        seen.add(thing)
+                        names.append(thing)
+                ex_token = executions.get("nextToken")
+                if not ex_token:
+                    break
+        token = resp.get("nextToken")
+        if not token:
+            break
+    return names
+
+
+@router.get("/fleet-map/downloads")
+def fleet_map_downloads(_user: CurrentUser = Depends(require_employee)):
+    """Thing names currently transferring firmware. Employee-readable."""
+    try:
+        things = downloading_things(_client("iot"))
+    except Exception as exc:  # noqa: BLE001 - the map still renders without the color
+        logger.warning("fleet-map downloads lookup failed: %s", exc)
+        things = []
+    return {"things": things}
+
+
 @router.get("/fleet-map/ota")
 def fleet_map_ota(
     thing_name: str,

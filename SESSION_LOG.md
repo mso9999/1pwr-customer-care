@@ -1,3 +1,9 @@
+## 2026-09-29 — Cursor — Downloading meters have their own map color
+- A gateway transferring firmware was painted by how long ago the meter reported, so a live download looked like "last 24 hours". Status and hybrid fills now use violet for a thing whose job execution is IN_PROGRESS, and that meter is counted as downloading rather than in the freshness buckets. The popup says "downloading firmware".
+- Side effects: this push to `main` deploys to https://cc.1pwrafrica.com. No DB writes. `GET /api/provisioning/fleet-map/downloads` is employee-readable.
+- Key files: `acdb-api/meter_provisioning.py`, `acdb-api/frontend/src/components/FleetMap.tsx`.
+- Tests: `tests/test_fleet_map_ota.py` — downloading things are IN_PROGRESS executions only.
+
 ## 2026-09-29 — Cursor — Manual firmware update starts a connected gateway
 - A manual update was matching the meter's old provisioning gateway when `meter_last_seen` stored a zero-padded serial. Meter 23024464 was queued on offline MAK-GW-0061. The row was retargeted to MAK-GW-0184, which is the gateway reporting that meter. The advancer created `AFR_OTA-1m-target-1-1-76-MAK-GW-0184-20260929094759` at 09:47 UTC.
 - A connected gateway is now nudged as soon as its job exists, and again every 15 minutes while the execution is still queued. It is not left for three minutes. An offline gateway still waits until it connects. The meter popup says queued for the target version instead of staying blank.

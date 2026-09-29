@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { MapContainer, TileLayer, CircleMarker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import { getFleetMap, getFleetMapOta, type FleetMapMeter, type FleetMapOta, type FleetMapResult } from '../lib/api';
+import { getFleetMap, getFleetMapDownloads, getFleetMapOta, type FleetMapMeter, type FleetMapOta, type FleetMapResult } from '../lib/api';
 import FirmwareHistory from './FirmwareHistory';
 import { formatLastSeen, parseTelemetryTs } from '../lib/datetime';
 
@@ -18,6 +18,7 @@ const FW_UNKNOWN = '#9ca3af';
 const STATUS_LIVE = '#16a34a';
 const STATUS_RECENT = '#d97706';
 const STATUS_SILENT = '#ef4444';
+const STATUS_DOWNLOADING = '#7c3aed';
 const LIVE_MS = 20 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -207,7 +208,20 @@ export default function FleetMap({
   const [query, setQuery] = useState('');
   const [focus, setFocus] = useState<FleetMapMeter | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [downloading, setDownloading] = useState<Set<string>>(new Set());
   const markerRefs = useRef<Record<string, L.CircleMarker | null>>({});
+
+  useEffect(() => {
+    let cancel = false;
+    const load = () => {
+      getFleetMapDownloads()
+        .then((row) => { if (!cancel) setDownloading(new Set(row.things || [])); })
+        .catch(() => { if (!cancel) setDownloading(new Set()); });
+    };
+    load();
+    const timer = window.setInterval(load, 20000);
+    return () => { cancel = true; window.clearInterval(timer); };
+  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -302,10 +316,16 @@ export default function FleetMap({
   );
   const center: [number, number] = points.length ? points[0] : [-29.179, 27.592];
   const freshnessCounts = useMemo(() => {
-    const counts = { live: 0, recent: 0, silent: 0 };
-    for (const m of data?.meters || []) counts[reportFreshness(m.last_seen)] += 1;
+    const counts = { live: 0, recent: 0, silent: 0, downloading: 0 };
+    for (const m of data?.meters || []) {
+      if (m.thing_name && downloading.has(m.thing_name)) {
+        counts.downloading += 1;
+        continue;
+      }
+      counts[reportFreshness(m.last_seen)] += 1;
+    }
     return counts;
-  }, [data]);
+  }, [data, downloading]);
 
   const onSearch = () => {
     const m = findMeter(query);
@@ -371,6 +391,7 @@ export default function FleetMap({
           )}
           {colorMode === 'status' && (
             <>
+              <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-full" style={{ background: STATUS_DOWNLOADING }} /> downloading ({freshnessCounts.downloading})</span>
               <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-full" style={{ background: STATUS_LIVE }} /> reporting now ({freshnessCounts.live})</span>
               <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-full" style={{ background: STATUS_RECENT }} /> last 24 hours ({freshnessCounts.recent})</span>
               <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-full" style={{ background: STATUS_SILENT }} /> not reporting ({freshnessCounts.silent})</span>
@@ -386,6 +407,7 @@ export default function FleetMap({
             <>
               {colorMode === 'hybrid' && (
                 <>
+                  <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-full" style={{ background: STATUS_DOWNLOADING }} /> fill downloading</span>
                   <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-full" style={{ background: STATUS_LIVE }} /> fill now</span>
                   <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-full" style={{ background: STATUS_RECENT }} /> fill 24 h</span>
                   <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-full" style={{ background: STATUS_SILENT }} /> fill silent</span>
@@ -474,7 +496,8 @@ export default function FleetMap({
             {visibleMeters.map((m) => {
               const isFocus = focus?.meter_id === m.meter_id;
               const freshness = reportFreshness(m.last_seen);
-              const statusFill = statusColor(freshness);
+              const downloadingNow = Boolean(m.thing_name && downloading.has(m.thing_name));
+              const statusFill = downloadingNow ? STATUS_DOWNLOADING : statusColor(freshness);
               const heat = installScale.color(m.installed_at);
               const fill = colorMode === 'firmware'
                 ? fwColor(m.fw_version)
@@ -542,7 +565,9 @@ export default function FleetMap({
                         </div>
                       )}
                       <div className="text-xs mt-1">
-                        {freshness === 'live' ? 'reporting now' : freshness === 'recent' ? 'reported in the last 24 hours' : 'not reporting'}
+                        {downloadingNow
+                          ? 'downloading firmware'
+                          : freshness === 'live' ? 'reporting now' : freshness === 'recent' ? 'reported in the last 24 hours' : 'not reporting'}
                       </div>
                       <div className="text-xs text-gray-600">installed {formatInstalled(m.installed_at)}</div>
                       {!m.online && (
