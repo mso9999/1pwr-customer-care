@@ -86,7 +86,7 @@ export function FirmwareTargetDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+    <div className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/40" onClick={onClose}>
       <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full mx-4 p-6 max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
         <h3 className="text-lg font-semibold text-gray-800">{t('firmwareTitle')}</h3>
         <p className="text-xs text-gray-500 mt-1">{t('firmwareHint')}</p>

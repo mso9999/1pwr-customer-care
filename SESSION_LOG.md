@@ -1,3 +1,8 @@
+## 2026-09-29 — Cursor — Firmware dialog was opening behind the meters map
+- The Update firmware window used the page overlay level, and the map’s panes sit higher, so the window opened underneath the map. The map now keeps those panes inside itself, and the firmware window sits above them.
+- Side effects: this push to `main` deploys to https://cc.1pwrafrica.com. No DB writes.
+- Key files: `acdb-api/frontend/src/components/FleetMap.tsx`, `acdb-api/frontend/src/components/FirmwareTargetDialog.tsx`.
+
 ## 2026-09-29 — Cursor — Flag a 1Meter failure against a site-wide outage
 - The meters page now compares, per site, 1Meter reporting with SparkMeter readings (`thundercloud` / `koios`) and the site PCS (`inverter_readings`, the gensite poller). SparkMeters or the PCS reporting now, with no 1Meter in the last 20 minutes, is a red 1Meter-problem flag. Every source the site has gone silent is a separate grey site-wide-outage flag. A source that is only a bit late raises neither.
 - Live windows: 1Meter 20 minutes, SparkMeter 45 minutes (15-minute ThunderCloud cycle), site PCS 10 minutes (polled every minute). Outage silence: SparkMeter 2 hours, PCS 30 minutes.

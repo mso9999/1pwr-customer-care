@@ -432,7 +432,7 @@ export default function FleetMap({
         ) : !data || !visibleMeters.length ? (
           <div className="h-full flex items-center justify-center text-gray-400 text-sm">{linkedOnly ? 'No 1Meter-linked meters with GPS to map.' : 'No meters with GPS to map.'}</div>
         ) : (
-          <MapContainer center={center} zoom={13} style={{ height: '100%', width: '100%' }}>
+          <MapContainer center={center} zoom={13} className="relative z-0" style={{ height: '100%', width: '100%' }}>
             <FitBounds points={points} />
             <FocusController target={focus} markerRefs={markerRefs} />
             <TileLayer
