@@ -1268,7 +1268,7 @@ async function startSocket() {
         // Present as a desktop client. The default ["Baileys", "Chrome", "6.0.0"]
         // fingerprint can be rejected at pair time by WA; the macOS Desktop
         // tuple matches what WhatsApp Web registers itself as.
-        browser: Browsers.macOS("Desktop"),
+        browser: Browsers.macOS("Chrome"),  // macOS("Desktop") is rejected with 428 at registration (tested 2026-09-29)
         printQRInTerminal: false,
         generateHighQualityLinkPreview: false,
         markOnlineOnConnect: true,
@@ -1284,7 +1284,8 @@ async function startSocket() {
     // request succeeded on this socket. Each new socket (reconnect) gets a
     // new code because the baileys pairing is socket-scoped.
     var pairPhone = (process.env.BAILEYS_PAIR_PHONE || "").replace(/[^0-9]/g, "");
-    if (pairPhone && !sock.authState.creds.registered) {
+    // creds.me is set once a QR scan pairs; requesting a code then overwrites it and logs the new link out (2026-09-29).
+    if (pairPhone && !sock.authState.creds.registered && !sock.authState.creds.me) {
         setTimeout(async function() {
             try {
                 var code = await sock.requestPairingCode(pairPhone);
