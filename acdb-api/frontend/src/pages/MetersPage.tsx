@@ -20,6 +20,7 @@ import CountryPill from '../components/CountryPill';
 import FleetMap from '../components/FleetMap';
 import { FirmwareQueueLine, FirmwareTargetDialog } from '../components/FirmwareTargetDialog';
 import RolloutWarnings from '../components/RolloutWarnings';
+import SiteReportingFlags from '../components/SiteReportingFlags';
 import { SitePtbGapWarnings } from '../components/PtbGapWarning';
 import { UGPConnectionPicker } from './CommissionCustomerPage';
 import UGPPolePicker from '../components/UGPPolePicker';
@@ -461,6 +462,7 @@ export default function MetersPage() {
         </div>
       </div>
 
+      <SiteReportingFlags />
       <RolloutWarnings />
       <SitePtbGapWarnings />
 

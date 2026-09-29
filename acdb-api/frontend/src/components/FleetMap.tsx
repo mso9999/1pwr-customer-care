@@ -6,7 +6,7 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { getFleetMap, getFleetMapOta, type FleetMapMeter, type FleetMapOta, type FleetMapResult } from '../lib/api';
 import FirmwareHistory from './FirmwareHistory';
-import { formatLastSeen } from '../lib/datetime';
+import { formatLastSeen, parseTelemetryTs } from '../lib/datetime';
 
 type MapColorMode = 'status' | 'firmware' | 'installed' | 'hybrid';
 
@@ -15,8 +15,29 @@ const FW_PALETTE = [
   '#0f766e', '#c2410c', '#4f46e5', '#65a30d', '#9333ea',
 ];
 const FW_UNKNOWN = '#9ca3af';
-const STATUS_ONLINE = '#16a34a';
-const STATUS_OFFLINE = '#ef4444';
+const STATUS_LIVE = '#16a34a';
+const STATUS_RECENT = '#d97706';
+const STATUS_SILENT = '#ef4444';
+const LIVE_MS = 20 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+type ReportFreshness = 'live' | 'recent' | 'silent';
+
+/** Live is the normal report cadence. Recent still counted as today's fleet. */
+function reportFreshness(lastSeen: string | null | undefined): ReportFreshness {
+  const seen = parseTelemetryTs(lastSeen);
+  if (!seen) return 'silent';
+  const age = Date.now() - seen.getTime();
+  if (age <= LIVE_MS) return 'live';
+  if (age <= DAY_MS) return 'recent';
+  return 'silent';
+}
+
+function statusColor(freshness: ReportFreshness): string {
+  if (freshness === 'live') return STATUS_LIVE;
+  if (freshness === 'recent') return STATUS_RECENT;
+  return STATUS_SILENT;
+}
 const INSTALL_UNKNOWN = '#9ca3af';
 
 function installEpoch(raw: string | null | undefined): number | null {
@@ -249,6 +270,11 @@ export default function FleetMap({
     [visibleMeters]
   );
   const center: [number, number] = points.length ? points[0] : [-29.179, 27.592];
+  const freshnessCounts = useMemo(() => {
+    const counts = { live: 0, recent: 0, silent: 0 };
+    for (const m of data?.meters || []) counts[reportFreshness(m.last_seen)] += 1;
+    return counts;
+  }, [data]);
 
   const onSearch = () => {
     const m = findMeter(query);
@@ -289,7 +315,7 @@ export default function FleetMap({
               type="button"
               onClick={() => setColorMode('hybrid')}
               className={`px-2 py-1 ${colorMode === 'hybrid' ? 'bg-gray-800 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
-              title="Fill is online or offline. Border is install-date heat."
+              title="Fill is how recently the meter reported. Border is install-date heat."
             >
               Hybrid
             </button>
@@ -314,8 +340,9 @@ export default function FleetMap({
           )}
           {colorMode === 'status' && (
             <>
-              <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-full bg-green-600" /> online / reporting ({data?.online ?? 0})</span>
-              <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-full bg-red-500" /> installed, offline ({data?.offline ?? 0})</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-full" style={{ background: STATUS_LIVE }} /> reporting now ({freshnessCounts.live})</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-full" style={{ background: STATUS_RECENT }} /> last 24 hours ({freshnessCounts.recent})</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-full" style={{ background: STATUS_SILENT }} /> not reporting ({freshnessCounts.silent})</span>
             </>
           )}
           {colorMode === 'firmware' && fwLegend.map((row) => (
@@ -328,8 +355,9 @@ export default function FleetMap({
             <>
               {colorMode === 'hybrid' && (
                 <>
-                  <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-full bg-green-600" /> fill online</span>
-                  <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-full bg-red-500" /> fill offline</span>
+                  <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-full" style={{ background: STATUS_LIVE }} /> fill now</span>
+                  <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-full" style={{ background: STATUS_RECENT }} /> fill 24 h</span>
+                  <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 rounded-full" style={{ background: STATUS_SILENT }} /> fill silent</span>
                 </>
               )}
               <span className="flex items-center gap-1.5">
@@ -413,7 +441,8 @@ export default function FleetMap({
             />
             {visibleMeters.map((m) => {
               const isFocus = focus?.meter_id === m.meter_id;
-              const statusFill = m.online ? STATUS_ONLINE : STATUS_OFFLINE;
+              const freshness = reportFreshness(m.last_seen);
+              const statusFill = statusColor(freshness);
               const heat = installScale.color(m.installed_at);
               const fill = colorMode === 'firmware'
                 ? fwColor(m.fw_version)
@@ -474,7 +503,9 @@ export default function FleetMap({
                           {m.gateway_pending ? ' · gateway pending' : ''}
                         </div>
                       )}
-                      <div className="text-xs mt-1">{m.online ? 'online / reporting' : 'installed, offline'}</div>
+                      <div className="text-xs mt-1">
+                        {freshness === 'live' ? 'reporting now' : freshness === 'recent' ? 'reported in the last 24 hours' : 'not reporting'}
+                      </div>
                       <div className="text-xs text-gray-600">installed {formatInstalled(m.installed_at)}</div>
                       {!m.online && (
                         <div className="text-xs text-gray-600">

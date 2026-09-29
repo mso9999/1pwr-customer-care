@@ -1,3 +1,11 @@
+## 2026-09-29 — Cursor — Flag a 1Meter failure against a site-wide outage
+- The meters page now compares, per site, 1Meter reporting with SparkMeter readings (`thundercloud` / `koios`) and the site PCS (`inverter_readings`, the gensite poller). SparkMeters or the PCS reporting now, with no 1Meter in the last 20 minutes, is a red 1Meter-problem flag. Every source the site has gone silent is a separate grey site-wide-outage flag. A source that is only a bit late raises neither.
+- Live windows: 1Meter 20 minutes, SparkMeter 45 minutes (15-minute ThunderCloud cycle), site PCS 10 minutes (polled every minute). Outage silence: SparkMeter 2 hours, PCS 30 minutes.
+- The meters map colors a meter green when it reported in the last 20 minutes, amber when it reported in the last 24 hours, and red after that.
+- Side effects: this push to `main` deploys to https://cc.1pwrafrica.com. No DB writes. `GET /api/provisioning/site-reporting` is employee-readable.
+- Key files: `acdb-api/site_reporting.py`, `acdb-api/meter_provisioning.py`, `acdb-api/frontend/src/components/SiteReportingFlags.tsx`, `acdb-api/frontend/src/components/FleetMap.tsx`.
+- Tests: `tests/test_site_reporting.py` — 9 passed.
+
 ## 2026-09-28 — Cursor — SparkMeter credit, country tariff, exact fee match
 - Billing Priority can set SparkMeter credit per account: automatic (MAK and LAB still push to ThunderCloud; other 1Meter accounts stay on the CC ledger), always credit, or 1Meter ledger only. The choice is on `accounts.sparkmeter_credit` (migration 075) and in the mutation log. A missing column during deploy does not roll back an in-flight credit-retry batch.
 - Tariffs shows and saves that country’s default tariff on the fees card. A zero tariff does not block saving the fees. All countries cannot edit.

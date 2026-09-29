@@ -3059,6 +3059,27 @@ def ota_target_resume(
     return result
 
 
+@router.get("/site-reporting")
+def site_reporting(_user: CurrentUser = Depends(require_employee)):
+    """Per site, distinguish a 1Meter failure from a site-wide outage.
+
+    Employee-readable. A site is a 1Meter fault when SparkMeters or the site
+    PCS reported in their real-time window and no 1Meter has. A site is a
+    site-wide outage when every one of those sources is silent. Sites that are
+    reporting, or that sit in the gap between the two, are omitted.
+    """
+    from customer_api import get_connection
+    import site_reporting as reporting
+
+    try:
+        with get_connection() as conn:
+            sites = reporting.load_site_reporting(conn)
+    except Exception as exc:  # noqa: BLE001 - the meters page must still load
+        logger.warning("site-reporting comparison failed: %s", exc)
+        sites = []
+    return {"sites": sites}
+
+
 @router.get("/fleet-map")
 def fleet_map(
     site: Optional[str] = None,

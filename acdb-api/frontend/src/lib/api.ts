@@ -4962,6 +4962,25 @@ export async function getInstallationStatus(): Promise<{ sites: SiteInstallation
   return request<{ sites: SiteInstallationStatus[] }>('/provisioning/installation-status');
 }
 
+/** 1Meter silence compared with SparkMeter and site-PCS reporting. */
+export interface SiteReportingFlag {
+  site: string;
+  condition: 'meter_fault' | 'site_outage';
+  onemeter_known: number;
+  onemeter_live: number;
+  onemeter_last_seen?: string | null;
+  has_spark: boolean;
+  spark_live: boolean;
+  spark_last_seen?: string | null;
+  has_pcs: boolean;
+  pcs_live: boolean;
+  pcs_last_seen?: string | null;
+}
+
+export async function getSiteReporting(): Promise<{ sites: SiteReportingFlag[] }> {
+  return request<{ sites: SiteReportingFlag[] }>('/provisioning/site-reporting');
+}
+
 /** Download the provisioning-station local app (zip) with the auth token. */
 export async function downloadProvisioningStation(): Promise<void> {
   const token = getToken();
