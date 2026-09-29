@@ -86,6 +86,84 @@ except Exception as exc:
 # PDF generation
 # ---------------------------------------------------------------------------
 
+def _active_country_code() -> str:
+    from country_config import COUNTRY
+    return (getattr(COUNTRY, "code", None) or "LS").upper()
+
+
+def _signature_b64(raw: str) -> str:
+    text = (raw or "").strip()
+    if text.startswith("data:") and "," in text:
+        text = text.split(",", 1)[1]
+    return text
+
+
+def _load_logo_b64() -> str:
+    path = os.path.join(MEDIA_DIR, "1pwr-logo.png")
+    if os.path.isfile(path) and os.path.getsize(path) > 0:
+        with open(path, "rb") as handle:
+            return base64.b64encode(handle.read()).decode("ascii")
+    return ""
+
+
+def _format_xof(rate: float) -> str:
+    value = float(rate)
+    if value.is_integer():
+        return str(int(value))
+    return f"{value:.2f}".replace(".", ",")
+
+
+def _benin_tariff(concession: str, customer_id: Optional[str]) -> float:
+    """Site tariff for a Benin contract.
+
+    Customer and concession overrides win. Otherwise use the Benin default
+    (160 XOF/kWh). The shared resolver's global fallback is the Lesotho rate.
+    """
+    from country_config import BENIN
+    rate = float(BENIN.default_tariff_rate or 160)
+    try:
+        from tariff import resolve_rate
+        resolved = resolve_rate(customer_id=customer_id, concession=concession)
+        if resolved.get("source") in ("customer", "concession"):
+            rate = float(resolved["rate_lsl"])
+    except Exception:
+        logger.warning("Benin tariff lookup failed; using %s XOF/kWh", rate)
+    return rate
+
+
+def _benin_place(concession: str) -> tuple[str, str]:
+    from country_config import BENIN
+    code = (concession or "").strip().upper()
+    locality = BENIN.site_abbrev.get(code) or (concession or "")
+    commune = BENIN.site_districts.get(code, "")
+    return locality, commune
+
+
+def _phase_label(service_phase: str) -> str:
+    labels = {"single": "Monophasé", "three": "Triphasé"}
+    text = (service_phase or "").strip()
+    return labels.get(text.lower(), text)
+
+
+def _format_fr_date(iso_day: str) -> str:
+    text = (iso_day or "").strip()
+    try:
+        year, month, day = text.split("-")
+        return f"{day}/{month}/{year}"
+    except ValueError:
+        return text
+
+
+_cached_commission_fr: Optional[jinja2.Template] = None
+
+
+def _french_contract_template() -> jinja2.Template:
+    global _cached_commission_fr
+    if _cached_commission_fr is None:
+        _cached_commission_fr = _env.get_template("template_bj.html")
+    return _cached_commission_fr
+
+
 def generate_contract(
     *,
     first_name: str,
@@ -102,13 +180,63 @@ def generate_contract(
     email: str = "",
     rate_lsl: Optional[float] = None,
     customer_id: Optional[str] = None,
+    connection_date: str = "",
 ) -> dict:
-    """Generate bilingual contract PDFs and store on disk.
+    """Generate the commissioning contract PDF(s) and store them on disk.
 
-    Returns dict with:
-        en_filename, so_filename, en_path, so_path
+    Lesotho: English and Sesotho. Benin: one French Mionwa Generation contract.
     """
-    # Resolve tariff rate if not explicitly provided
+    if _active_country_code() == "BN":
+        return _generate_contract_fr(
+            first_name=first_name,
+            last_name=last_name,
+            national_id=national_id,
+            phone_number=phone_number,
+            concession=concession,
+            customer_type=customer_type,
+            service_phase=service_phase,
+            ampacity=ampacity,
+            account_number=account_number,
+            customer_signature_b64=customer_signature_b64,
+            customer_id=customer_id,
+            connection_date=connection_date,
+        )
+    return _generate_contract_ls(
+        first_name=first_name,
+        last_name=last_name,
+        national_id=national_id,
+        phone_number=phone_number,
+        concession=concession,
+        customer_type=customer_type,
+        service_phase=service_phase,
+        ampacity=ampacity,
+        account_number=account_number,
+        customer_signature_b64=customer_signature_b64,
+        phone_number_2=phone_number_2,
+        email=email,
+        rate_lsl=rate_lsl,
+        customer_id=customer_id,
+    )
+
+
+def _generate_contract_ls(
+    *,
+    first_name: str,
+    last_name: str,
+    national_id: str,
+    phone_number: str,
+    concession: str,
+    customer_type: str,
+    service_phase: str,
+    ampacity: str,
+    account_number: str,
+    customer_signature_b64: str,
+    phone_number_2: str = "",
+    email: str = "",
+    rate_lsl: Optional[float] = None,
+    customer_id: Optional[str] = None,
+) -> dict:
+    """Generate bilingual Lesotho contract PDFs."""
     if rate_lsl is None:
         try:
             from tariff import resolve_rate
@@ -128,7 +256,7 @@ def generate_contract(
         "service_phase": service_phase,
         "ampacity": ampacity,
         "account_number": account_number,
-        "customer_signature": customer_signature_b64,
+        "customer_signature": _signature_b64(customer_signature_b64),
         "staff_signature": _STAFF_SIGNATURE_B64,
         "customer_signature_date": date.today().isoformat(),
         "staff_name": STAFF_NAME,
@@ -137,18 +265,15 @@ def generate_contract(
         "rate_lsl": rate_lsl,
     }
 
-    # Render HTML from templates
     tmpl_en, tmpl_so = _commission_contract_templates()
     html_en = tmpl_en.render(json_data=data)
     html_so = tmpl_so.render(json_data=data)
 
-    # Filenames
     safe_last = _safe_name(last_name)
     safe_first = _safe_name(first_name)
     en_filename = f"{account_number}_{safe_last}_{safe_first}_Contract_en.pdf"
     so_filename = f"{account_number}_{safe_last}_{safe_first}_Contract_so.pdf"
 
-    # Ensure output directory exists
     site_dir = os.path.join(CONTRACTS_DIR, concession.upper())
     os.makedirs(site_dir, exist_ok=True)
 
@@ -169,6 +294,61 @@ def generate_contract(
     }
 
 
+def _generate_contract_fr(
+    *,
+    first_name: str,
+    last_name: str,
+    national_id: str,
+    phone_number: str,
+    concession: str,
+    customer_type: str,
+    service_phase: str,
+    ampacity: str,
+    account_number: str,
+    customer_signature_b64: str,
+    customer_id: Optional[str] = None,
+    connection_date: str = "",
+) -> dict:
+    """Generate the French Mionwa Generation subscription contract."""
+    locality, commune = _benin_place(concession)
+    signed = date.today().isoformat()
+    data = {
+        "first_name": first_name,
+        "last_name": last_name,
+        "national_id": national_id,
+        "phone_number": phone_number,
+        "concession": concession,
+        "locality": locality,
+        "commune": commune,
+        "customer_type": customer_type,
+        "service_phase_label": _phase_label(service_phase),
+        "ampacity": ampacity,
+        "account_number": account_number,
+        "connection_date": _format_fr_date(connection_date),
+        "customer_signature": _signature_b64(customer_signature_b64),
+        "customer_signature_date": _format_fr_date(signed),
+        "rate_xof": _format_xof(_benin_tariff(concession, customer_id)),
+        "logo_b64": _load_logo_b64(),
+    }
+
+    html_fr = _french_contract_template().render(json_data=data)
+    safe_last = _safe_name(last_name)
+    safe_first = _safe_name(first_name)
+    fr_filename = f"{account_number}_{safe_last}_{safe_first}_Contract_fr.pdf"
+    site_dir = os.path.join(CONTRACTS_DIR, (concession or "BN").upper())
+    os.makedirs(site_dir, exist_ok=True)
+    fr_path = os.path.join(site_dir, fr_filename)
+    if not _html_to_pdf(html_fr, fr_path):
+        raise RuntimeError("French contract PDF was not written")
+
+    logger.info("Generated French contract: %s", fr_path)
+    return {
+        "fr_filename": fr_filename,
+        "fr_path": fr_path,
+        "site_code": (concession or "BN").upper(),
+    }
+
+
 def _html_to_pdf(html_source: str, output_path: str) -> bool:
     """Convert HTML string to PDF file using xhtml2pdf.
 
@@ -182,7 +362,7 @@ def _html_to_pdf(html_source: str, output_path: str) -> bool:
         logger.error("xhtml2pdf import failed (PDF generation unavailable): %s", exc)
         return False
     with open(output_path, "w+b") as f:
-        status = pisa.CreatePDF(src=html_source, dest=f)
+        status = pisa.CreatePDF(src=html_source, dest=f, encoding="utf-8")
     if status.err:
         logger.error("xhtml2pdf error for %s: %d errors", output_path, status.err)
     return not status.err
@@ -235,24 +415,35 @@ def send_contract_sms(
     first_name: str,
     last_name: str,
     phone_number: str,
-    en_url: str,
-    so_url: str,
+    en_url: str = "",
+    so_url: str = "",
+    fr_url: str = "",
     account_number: str | None = None,
 ) -> bool:
-    """Send the contract download links to the customer via SMS.
+    """Send the contract download link to the customer via SMS.
 
-    Sends a Sesotho message (primary language) with the Sesotho link.
+    Lesotho: Sesotho message with the Sesotho link.
+    Benin: French message with the French link, on this process's SMS gateway.
     Returns True if the SMS was dispatched successfully.
     """
     from sms_outbound import send_gateway_sms
 
-    short_so = shorten_url(so_url)
-
-    message = (
-        f"Lumela {first_name} {last_name}. Rea leboha ha u ngolisitse le One Power. "
-        f"Fumana konteraka ea hau eo u e saenneng mona: {short_so}. "
-        f"Hore u e bale u lokeloa ho e bula ka internet."
-    )
+    if _active_country_code() == "BN":
+        short = shorten_url(fr_url) if fr_url else ""
+        message = (
+            f"Bonjour {first_name} {last_name}. Merci pour votre abonnement chez "
+            f"Mionwa Generation. Votre contrat signé est disponible ici : {short}. "
+            f"Une connexion internet est nécessaire pour l'ouvrir."
+        )
+        contract_url = short
+    else:
+        short_so = shorten_url(so_url)
+        message = (
+            f"Lumela {first_name} {last_name}. Rea leboha ha u ngolisitse le One Power. "
+            f"Fumana konteraka ea hau eo u e saenneng mona: {short_so}. "
+            f"Hore u e bale u lokeloa ho e bula ka internet."
+        )
+        contract_url = short_so
 
     ok = send_gateway_sms(phone_number, message, sms_type="welcome",
                           trigger="contract")
@@ -264,7 +455,7 @@ def send_contract_sms(
                 "welcome",
                 "1PWR",
                 message,
-                {"contract_url": short_so},
+                {"contract_url": contract_url},
             )
         except Exception:  # noqa: BLE001
             pass
@@ -291,7 +482,12 @@ def list_customer_contracts(account_number: str) -> list[dict]:
             continue
         for fname in os.listdir(site_path):
             if fname.upper().startswith(prefix) and fname.lower().endswith(".pdf"):
-                lang = "so" if "_Contract_so.pdf" in fname else "en"
+                if "_Contract_fr.pdf" in fname:
+                    lang = "fr"
+                elif "_Contract_so.pdf" in fname:
+                    lang = "so"
+                else:
+                    lang = "en"
                 results.append({
                     "filename": fname,
                     "lang": lang,

@@ -38,7 +38,8 @@
         "Utiliser Données clients pour soldes, graphiques et historique des transactions (y compris toute avance active).",
         "Suivre l’avancement dans le Pipeline.",
         "Si le compte déjà délivré a servi à tester le compteur, ne le résiliez pas. Sur la fiche client, Réinitialiser les données d'installation conserve la personne, le numéro de compte et le compteur. Cela efface les paiements et relevés d'essai, puis remet les dettes de frais aux montants enregistrés pour ce pays. Enregistrez d'abord les vrais frais. Saisissez RESET et le numéro de compte, avec une raison. Superadmin, ou O&M pour son pays. Annulation depuis Mutations. Refusé après 21 jours, après 40 paiements, ou tant qu'une avance, un financement ou un service non compté est actif."
-      ]
+      ],
+      "commissionStepBn": "Lancer l’assistant de mise en service : rechercher le client, remplir les détails, lier le raccordement uGridPLAN (poteau/PTB) — obligatoire, sinon Générer le contrat reste bloqué — capturer la signature, puis générer le contrat français de Mionwa Generation et envoyer le SMS en français."
     },
     "countryActivation": {
       "title": "Préparation de l’activation pays (Bénin / Zambie)",

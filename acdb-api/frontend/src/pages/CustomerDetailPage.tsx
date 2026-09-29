@@ -1027,7 +1027,7 @@ export default function CustomerDetailPage() {
                 </svg>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-medium text-gray-800 truncate">{c.filename}</p>
-                  <p className="text-xs text-gray-400">{c.lang === 'en' ? t('customerDetail:english') : t('customerDetail:sesotho')}</p>
+                  <p className="text-xs text-gray-400">{c.lang === 'fr' ? t('customerDetail:french') : c.lang === 'so' ? t('customerDetail:sesotho') : t('customerDetail:english')}</p>
                 </div>
                 <svg className="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />

@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import type { ReactNode } from 'react';
+import { useCountry } from '../contexts/CountryContext';
 import { WHATS_NEW_FOLIO } from '../whatsnew/folio';
 
 /** Match Layout.tsx: FR toggle sets `fr`; resolved locale may be `fr-*`. */
@@ -439,6 +440,8 @@ function CustomerMgmtContent() {
 
 function CommissionContent() {
   const fr = useHelpLangIsFr();
+  const { country } = useCountry();
+  const benin = country === 'BN';
 
   if (fr) {
     return (
@@ -449,8 +452,17 @@ function CommissionContent() {
           <li><Bold>Vérifier/mettre à jour</Bold> les détails : nom, ID national, téléphone, coordonnées GPS, type de client, phase de service, ampérage.</li>
           <li><Bold>Lier le raccordement uGridPLAN</Bold> (poteau/PTB) — obligatoire. Sans ce lien, le bouton Générer reste bloqué.</li>
           <li><Bold>Capturer la signature</Bold> — le client signe sur l'écran de la tablette/téléphone.</li>
-          <li><Bold>Générer les contrats</Bold> — des PDF bilingues (anglais/sesotho) sont générés et enregistrés.</li>
-          <li><Bold>Envoyer le SMS</Bold> — le lien de téléchargement du contrat est envoyé automatiquement au client.</li>
+          {benin ? (
+            <>
+              <li><Bold>Générer le contrat</Bold> — un PDF en français (Mionwa Generation) est généré et enregistré.</li>
+              <li><Bold>Envoyer le SMS</Bold> — le lien de téléchargement en français est envoyé au client.</li>
+            </>
+          ) : (
+            <>
+              <li><Bold>Générer les contrats</Bold> — des PDF bilingues (anglais/sesotho) sont générés et enregistrés.</li>
+              <li><Bold>Envoyer le SMS</Bold> — le lien de téléchargement du contrat est envoyé automatiquement au client.</li>
+            </>
+          )}
         </Ol>
 
         <SubHead>Étapes de mise en service</SubHead>
@@ -477,8 +489,17 @@ function CommissionContent() {
         <li><Bold>Verify/update</Bold> details: name, national ID, phone, GPS coordinates, customer type, service phase, ampacity.</li>
         <li><Bold>Link the uGridPLAN connection</Bold> (pole/PTB) — required. Generate Contract stays blocked until this is linked.</li>
         <li><Bold>Capture signature</Bold> — the customer signs on the tablet/phone canvas.</li>
-        <li><Bold>Generate contracts</Bold> — bilingual (English/Sesotho) PDFs are generated and stored.</li>
-        <li><Bold>Send SMS</Bold> — the contract download link is sent to the customer automatically.</li>
+        {benin ? (
+          <>
+            <li><Bold>Generate the contract</Bold> — one French PDF (Mionwa Generation) is generated and stored.</li>
+            <li><Bold>Send SMS</Bold> — the French download link is sent to the customer.</li>
+          </>
+        ) : (
+          <>
+            <li><Bold>Generate contracts</Bold> — bilingual (English/Sesotho) PDFs are generated and stored.</li>
+            <li><Bold>Send SMS</Bold> — the contract download link is sent to the customer automatically.</li>
+          </>
+        )}
       </Ol>
 
       <SubHead>Commissioning Steps</SubHead>

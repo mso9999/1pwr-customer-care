@@ -38,7 +38,8 @@
         "Use Customer Data for balances, charts, and transaction history (including any active advances).",
         "Track funnel position on the Pipeline page.",
         "If the issued account was used to test the meter, do not decommission it. On the customer page, Reset setup data keeps the person, the account number, and the meter. It deletes test payments and readings, then stamps connection and readyboard debt from the fees saved for that country. Save the real fees first. Type RESET and the account number, and give a reason. Superadmin, or O&M for their own country. Undo it from Mutations. Refused after 21 days, after 40 payments, or while an advance, financing agreement, or unmetered service is active."
-      ]
+      ],
+      "commissionStepBn": "Run the commissioning wizard: look up the customer, fill details, then link the uGridPLAN connection (pole/PTB) — required, or Generate Contract stays blocked — capture the signature, then generate the French Mionwa Generation contract and send the French SMS."
     },
     "countryActivation": {
       "title": "Country activation readiness (Benin / Zambia)",

@@ -13,6 +13,7 @@
   "signatureCapturedAt": "Captured {{date}} by {{by}}",
   "english": "English",
   "sesotho": "Sesotho",
+  "french": "French",
   "notSet": "Not set",
   "confirmDelete": "Confirm Delete",
   "confirmDecommission": "Decommission customer {{name}}?",

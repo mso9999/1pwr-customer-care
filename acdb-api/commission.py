@@ -431,6 +431,7 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
             ampacity=req.ampacity,
             account_number=req.account_number,
             customer_signature_b64=req.customer_signature,
+            connection_date=req.connection_date,
         )
     except Exception as exc:
         logger.error("Contract generation failed: %s", exc, exc_info=True)
@@ -511,8 +512,14 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
             ),
         )
 
-    en_url = build_download_url(result["site_code"], result["en_filename"])
-    so_url = build_download_url(result["site_code"], result["so_filename"])
+    fr_url = ""
+    en_url = ""
+    so_url = ""
+    if result.get("fr_filename"):
+        fr_url = build_download_url(result["site_code"], result["fr_filename"])
+    else:
+        en_url = build_download_url(result["site_code"], result["en_filename"])
+        so_url = build_download_url(result["site_code"], result["so_filename"])
 
     # ----- Phase 3b: Record the chosen gateway on the install, not the customer ----- #
     # Accounts bind to meter serials. Writing account_number onto the Thing
@@ -558,6 +565,7 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
             phone_number=req.phone_number,
             en_url=en_url,
             so_url=so_url,
+            fr_url=fr_url,
             account_number=req.account_number,
         )
     except Exception as exc:
@@ -640,8 +648,10 @@ async def execute_commission(req: CommissionRequest, user: CurrentUser = Depends
         "account_number": resolved_acct or req.account_number,
         "contract_en_url": en_url,
         "contract_so_url": so_url,
-        "en_filename": result["en_filename"],
-        "so_filename": result["so_filename"],
+        "contract_fr_url": fr_url,
+        "en_filename": result.get("en_filename") or "",
+        "so_filename": result.get("so_filename") or "",
+        "fr_filename": result.get("fr_filename") or "",
         "sms_sent": sms_sent,
         "gateway_associated": gateway_associated,
         "telemetry_bound": telemetry_bound,

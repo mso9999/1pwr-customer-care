@@ -2147,8 +2147,10 @@ export interface CommissionResult {
   account_number: string;
   contract_en_url: string;
   contract_so_url: string;
+  contract_fr_url?: string;
   en_filename: string;
   so_filename: string;
+  fr_filename?: string;
   sms_sent: boolean;
   gateway_associated?: boolean;
   ugp_sync?: UgpSyncResult;

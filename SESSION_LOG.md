@@ -1,6 +1,13 @@
+## 2026-09-29 — Cursor — Site commissioning is the first energy sale
+- A site’s commissioning date is the local day of the first transaction with kWh greater than zero. Connection fees, readyboard fees, and electricity held before inspection do not count. Known sites with no sale stay blank. The hand-entered `site_metadata.commissioning_date` is returned as the recorded date and is not overwritten. The per-customer date already sent to uGridPlan is unchanged.
+- Employees: Investor Analytics → Asset Register, plus `GET /api/site-commissioning` and `/export` (CSV), on the sidebar country lane. Nexus apps: `GET /api/integration/sites/commissioning` and `…/commissioning.csv` with `X-CC-Integration-Key`, once per lane (`/api`, `/api/bn`, `/api/zm`).
+- Tests: `tests/test_site_commissioning.py` — 5 passed. Frontend typecheck passed.
+- Side effects: none live. Not committed and not deployed.
+- Key files: `acdb-api/site_commissioning.py`, `acdb-api/integration.py`, `acdb-api/frontend/src/pages/InvestorAnalyticsPage.tsx`.
+
 ## 2026-09-29 — Cursor — Automatic OTA ships only the newest fleet image
 - Factory promote and its readiness check now replace the site-release version with the newest selectable image under `firmware-releases/`. A 1.1.71 row cannot be sent by the station. The map queue is unchanged: an operator can still name an older library version and confirm the rollback.
-- Side effects: push of this commit to `main` deploys https://cc.1pwrafrica.com and restarts `1pdb-api` and `1pdb-api-bn`. Running behavior changes from “promote sends `onemeter_ota_site_releases.target_firmware_version`” to “promote sends the newest selectable fleet image”. No OTA job created by this change. No DB write.
+- Side effects: `cfbf120` pushed to `main` at 15:53 UTC. Deploy run [36593653415](https://github.com/mso9999/1pwr-customer-care/actions/runs/36593653415) succeeded at 15:58 UTC. https://cc.1pwrafrica.com health checks passed for LS, BN, and ZM. Running behavior changed from “promote sends `onemeter_ota_site_releases.target_firmware_version`” to “promote sends the newest selectable fleet image”. No OTA job created. No DB write.
 - Key files: `acdb-api/ota_target.py` (`pin_release_to_latest`), `acdb-api/meter_provisioning.py` (`_shipping_release` on `POST /ota/promote` and `GET /ota/readiness`).
 - Tests: `tests/test_ota_target_queue.py`, `tests/test_meter_provisioning_ota.py` (stale 1.1.71 row creates a 1.1.76 job).
 
@@ -11,7 +18,7 @@
 
 ## 2026-09-29 — Cursor — Benin commissioning writes a French Mionwa contract
 - The Benin commissioning wizard now generates one French subscription PDF for Mionwa Generation S.A. and texts that link in French on the Benin SMS gateway. Lesotho still generates the English and Sesotho pair and the Sesotho SMS. The customer signs on the same canvas. There is no operator signature image. The tariff line is the Benin site rate (default 160 XOF/kWh). Connection fees stay the January 2025 annex. When the header country is Benin, the tutorial and help describe that French contract instead of the English/Sesotho pair.
-- Side effects: none live until this is committed and pushed. No DB writes. Sample PDF: `Work/contracts/20260929T1407-contrat-abonnement-bj-mionwa-sample.pdf` (example customer, not a real account).
+- Side effects: this push to `main` deploys https://cc.1pwrafrica.com and restarts `1pdb-api` and `1pdb-api-bn`. Benin commissioning changes from the English/Sesotho pair to one French Mionwa PDF and a French SMS. Lesotho stays English and Sesotho. No DB write. Sample PDF: `Work/contracts/20260929T1407-contrat-abonnement-bj-mionwa-sample.pdf` (example customer, not a real account).
 - Key files: `acdb-api/templates/template_bj.html`, `acdb-api/contract_gen.py`, `acdb-api/commission.py`, `acdb-api/frontend/src/pages/CommissionCustomerPage.tsx`, `CustomerDetailPage.tsx`, `TutorialPage.tsx`, `helpSections.tsx`.
 
 ## 2026-09-29 — Cursor — Benin type contract names Mionwa Generation

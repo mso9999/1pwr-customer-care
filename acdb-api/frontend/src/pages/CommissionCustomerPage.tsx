@@ -20,6 +20,7 @@ import {
   getGatewayHealth,
   type GatewayHealth,
 } from '../lib/api';
+import { useCountry } from '../contexts/CountryContext';
 import SignatureCapture from '../components/SignatureCapture';
 import MeterTroubleshoot, { type MeterTroubleContext } from '../components/MeterTroubleshoot';
 
@@ -372,6 +373,8 @@ export function UGPConnectionPicker({ site, accountNumber, onSelect, onClose }: 
 
 export default function CommissionCustomerPage() {
   const { t } = useTranslation(['commission', 'common']);
+  const { country } = useCountry();
+  const benin = country === 'BN';
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const prefilledCustomerId = searchParams.get('customer') || '';
@@ -807,8 +810,8 @@ export default function CommissionCustomerPage() {
             <h3 className="text-lg font-bold text-green-800">{t('commission:success.title')}</h3>
             <p className="text-sm text-green-700">
               {result.sms_sent
-                ? 'Contract links sent to customer via SMS.'
-                : 'Contracts generated. SMS delivery was not configured.'}
+                ? t(benin ? 'commission:success.smsSentBn' : 'commission:success.smsSent')
+                : t(benin ? 'commission:success.smsSkippedBn' : 'commission:success.smsSkipped')}
             </p>
           </div>
 
@@ -822,14 +825,23 @@ export default function CommissionCustomerPage() {
           )}
 
           <div className="space-y-2">
-            <a href={result.contract_en_url} target="_blank" rel="noopener noreferrer"
-              className="block w-full py-3 bg-blue-600 text-white rounded-xl font-medium text-center hover:bg-blue-700 transition">
-              {t('commission:success.viewContractEn')}
-            </a>
-            <a href={result.contract_so_url} target="_blank" rel="noopener noreferrer"
-              className="block w-full py-3 bg-blue-600 text-white rounded-xl font-medium text-center hover:bg-blue-700 transition">
-              {t('commission:success.viewContractSo')}
-            </a>
+            {benin ? (
+              <a href={result.contract_fr_url} target="_blank" rel="noopener noreferrer"
+                className="block w-full py-3 bg-blue-600 text-white rounded-xl font-medium text-center hover:bg-blue-700 transition">
+                {t('commission:success.viewContractFr')}
+              </a>
+            ) : (
+              <>
+                <a href={result.contract_en_url} target="_blank" rel="noopener noreferrer"
+                  className="block w-full py-3 bg-blue-600 text-white rounded-xl font-medium text-center hover:bg-blue-700 transition">
+                  {t('commission:success.viewContractEn')}
+                </a>
+                <a href={result.contract_so_url} target="_blank" rel="noopener noreferrer"
+                  className="block w-full py-3 bg-blue-600 text-white rounded-xl font-medium text-center hover:bg-blue-700 transition">
+                  {t('commission:success.viewContractSo')}
+                </a>
+              </>
+            )}
           </div>
 
           {result.ugp_sync && (
@@ -934,7 +946,7 @@ export default function CommissionCustomerPage() {
 
     return (
       <div className="space-y-4">
-        <p className="text-gray-500 text-sm">Review the information below. This will update the customer record and generate bilingual contracts.</p>
+        <p className="text-gray-500 text-sm">{t(benin ? 'commission:reviewIntroBn' : 'commission:reviewIntro')}</p>
         {!surveyId && (
           <div className="p-3 bg-amber-50 border border-amber-300 rounded-xl text-amber-800 text-sm">
             {t('commission:errors.ugpRequired')}

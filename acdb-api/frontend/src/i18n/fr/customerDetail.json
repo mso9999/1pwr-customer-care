@@ -13,6 +13,7 @@
   "signatureCapturedAt": "Capturée le {{date}} par {{by}}",
   "english": "Anglais",
   "sesotho": "Sesotho",
+  "french": "Français",
   "notSet": "Non défini",
   "confirmDelete": "Confirmer la suppression",
   "confirmDecommission": "Résilier le client {{name}} ?",

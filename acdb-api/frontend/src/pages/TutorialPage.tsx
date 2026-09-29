@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { useCountry } from '../contexts/CountryContext';
 import { TUTORIAL_WORKFLOWS } from './tutorialWorkflows';
 
 function helpHref(sectionId: string | null): string | null {
@@ -38,6 +39,7 @@ function KnowledgeCheck() {
 
 export default function TutorialPage() {
   const { t } = useTranslation('tutorial');
+  const { country } = useCountry();
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -52,7 +54,10 @@ export default function TutorialPage() {
           const title = t(`${wf.i18nKey}.title`);
           const description = t(`${wf.i18nKey}.description`);
           const roleLabel = t(`roles.${wf.rolesKey}`);
-          const steps = t(`${wf.i18nKey}.steps`, { returnObjects: true }) as string[];
+          const loaded = t(`${wf.i18nKey}.steps`, { returnObjects: true }) as string[];
+          const steps = wf.id === 'lifecycle' && country === 'BN'
+            ? loaded.map((step, i) => (i === 2 ? t('workflows.lifecycle.commissionStepBn') : step))
+            : loaded;
 
           return (
             <section
