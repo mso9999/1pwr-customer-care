@@ -102,6 +102,7 @@ class TestCanarySelfService(unittest.TestCase):
                 },
             ),
             patch.object(mp, "_approved_test_things", return_value=set()),
+            patch.object(mp, "_shipping_release", side_effect=lambda release: release),
         ):
             result = mp.ota_readiness("GBO", MagicMock())
         self.assertTrue(result["candidate_ready"])
@@ -144,6 +145,13 @@ class TestCanarySelfService(unittest.TestCase):
 
 
 class TestFactoryPromotion(unittest.TestCase):
+    def setUp(self):
+        self._pin = patch.object(mp, "_shipping_release", side_effect=lambda release: release)
+        self._pin.start()
+
+    def tearDown(self):
+        self._pin.stop()
+
     def test_create_ota_uses_site_release_and_tracks_target(self):
         iot = MagicMock()
         iot.create_ota_update.return_value = {
@@ -314,6 +322,68 @@ class TestFactoryPromotion(unittest.TestCase):
                     MagicMock(user_id="comfort"),
                 )
         self.assertEqual(ctx.exception.status_code, 403)
+
+    def test_stale_site_row_ships_the_newest_library_image(self):
+        self._pin.stop()
+        iot = MagicMock()
+        iot.create_ota_update.return_value = {
+            "otaUpdateId": "ota-76",
+            "awsIotJobId": "AFR_OTA-ota-76",
+            "otaUpdateStatus": "CREATE_PENDING",
+        }
+        s3 = MagicMock()
+        conn = MagicMock()
+        cm = MagicMock()
+        cm.__enter__.return_value = conn
+        cm.__exit__.return_value = False
+        stale = approved_release()
+        stale["target_firmware_version"] = "1.1.71"
+        stale["artifact_key"] = "firmware-releases/v1.1.71/Fleet1171/FeaturedFreeRTOSIoTIntegration.bin"
+        stale["artifact_version_id"] = "old-version"
+        images = [
+            {
+                "version": "1.1.71",
+                "artifact_key": stale["artifact_key"],
+                "artifact_version_id": "old-version",
+                "selectable": True,
+            },
+            {
+                "version": "1.1.76",
+                "artifact_key": "firmware-releases/v1.1.76/Fleet1176/FeaturedFreeRTOSIoTIntegration.bin",
+                "artifact_version_id": "latest-version",
+                "selectable": True,
+            },
+        ]
+        clients = {"iot": iot, "s3": s3}
+        fake_customer_api = types.SimpleNamespace(get_connection=MagicMock(return_value=cm))
+        with (
+            patch.object(mp, "_ota_release", return_value=stale),
+            patch.object(mp, "_registry_get_by_thing", return_value=[{"site": {"S": "GBO"}}]),
+            patch.object(
+                mp,
+                "_ota_release_checks",
+                return_value={
+                    "anti_rollback": {"ok": True},
+                    "artifact": {"ok": True},
+                    "signing_profile": {"ok": True},
+                },
+            ),
+            patch.object(mp, "_client", side_effect=lambda name: clients[name]),
+            patch("ota_target.library_from_s3", return_value=images),
+            patch.dict("sys.modules", {"customer_api": fake_customer_api}),
+            patch.object(mp, "try_log_mutation"),
+        ):
+            result = mp.promote_factory_gateways(
+                mp.OtaPromotionRequest(site_code="GBO", thing_names=["GBO-GW-0001"]),
+                MagicMock(user_id="comfort"),
+            )
+        self.assertEqual(result["target_version"], "1.1.76")
+        file_entry = iot.create_ota_update.call_args.kwargs["files"][0]
+        self.assertEqual(file_entry["fileVersion"], "1.1.76")
+        self.assertEqual(
+            file_entry["fileLocation"]["s3Location"]["version"],
+            "latest-version",
+        )
 
 
 class TestReleaseApproval(unittest.TestCase):

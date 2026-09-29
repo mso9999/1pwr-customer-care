@@ -1566,6 +1566,30 @@ def _ota_release_checks(release: dict) -> dict:
     return checks
 
 
+def _shipping_release(release: dict) -> dict:
+    """Provisioning and its readiness check ship the newest fleet image.
+
+    The site-release row is the fallback identity (bucket, signer, baseline).
+    Its version is replaced by the newest selectable image under
+    ``firmware-releases/``. A lower version is sent only when the map queue
+    names it.
+    """
+    import ota_target
+
+    try:
+        images = ota_target.library_from_s3(_client("s3"))
+        return ota_target.pin_release_to_latest(release, images)
+    except ota_target.TargetRefused as exc:
+        raise HTTPException(status_code=503, detail=exc.detail) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=503,
+            detail=f"Could not resolve the latest firmware: {exc}",
+        ) from exc
+
+
 @router.get("/ota/readiness")
 def ota_readiness(
     site_code: Optional[str] = None,
@@ -1573,6 +1597,21 @@ def ota_readiness(
 ):
     """Fail-closed preflight for the factory-boot -> full-firmware OTA stage."""
     release = _ota_release(site_code)
+    if site_code:
+        try:
+            release = _shipping_release(release)
+        except HTTPException as exc:
+            return {
+                "configured": False,
+                "ready": False,
+                "candidate_ready": False,
+                "canary_ready": False,
+                "canary_things": [],
+                "site_required": False,
+                "missing": [str(exc.detail)],
+                "release": _ota_public_config(_ota_release(site_code)),
+                "checks": {},
+            }
     missing = _ota_missing_config(release)
     result = {
         "configured": not missing,
@@ -1609,14 +1648,15 @@ def promote_factory_gateways(
     """Create a signed AWS IoT OTA update for newly provisioned factory units.
 
     The local station first gives each unit its durable Thing identity, TLS
-    certificate, and operational Wi-Fi. This endpoint then queues the approved
-    full application for those Things. The IoT Job remains queued while a unit
-    reboots/joins the site LAN and starts as soon as it connects to AWS IoT.
+    certificate, and operational Wi-Fi. This endpoint then queues the newest
+    fleet image for those Things, ignoring an older site-release row. The IoT
+    Job remains queued while a unit reboots/joins the site LAN and starts as
+    soon as it connects to AWS IoT.
     """
     site = payload.site_code.strip().upper()
     if site not in _active_site_map():
         raise HTTPException(status_code=400, detail=f"Unknown canonical site code '{site}'.")
-    release = _ota_release(site)
+    release = _shipping_release(_ota_release(site))
     missing = _ota_missing_config(release)
     if missing:
         raise HTTPException(

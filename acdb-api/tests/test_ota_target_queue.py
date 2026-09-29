@@ -37,6 +37,40 @@ def test_library_keeps_fleet_images_and_blocks_baseline():
     assert images[0]["version"] == "1.1.77"
 
 
+def test_pin_ignores_an_older_site_row():
+    pinned = ot.pin_release_to_latest(
+        {
+            "target_firmware_version": "1.1.71",
+            "artifact_key": "firmware-releases/v1.1.71/Fleet1171/FeaturedFreeRTOSIoTIntegration.bin",
+            "artifact_version_id": "old",
+            "bucket": "1pwr-ota-firmware",
+        },
+        [
+            {
+                "version": "1.1.56",
+                "artifact_key": "firmware-releases/v1.1.56/Fleet1156/FeaturedFreeRTOSIoTIntegration.bin",
+                "artifact_version_id": "base",
+                "selectable": False,
+            },
+            {
+                "version": "1.1.71",
+                "artifact_key": "firmware-releases/v1.1.71/Fleet1171/FeaturedFreeRTOSIoTIntegration.bin",
+                "artifact_version_id": "old",
+                "selectable": True,
+            },
+            {
+                "version": "1.1.76",
+                "artifact_key": "firmware-releases/v1.1.76/Fleet1176/FeaturedFreeRTOSIoTIntegration.bin",
+                "artifact_version_id": "latest",
+                "selectable": True,
+            },
+        ],
+    )
+    assert pinned["target_firmware_version"] == "1.1.76"
+    assert pinned["artifact_version_id"] == "latest"
+    assert pinned["bucket"] == "1pwr-ota-firmware"
+
+
 def test_preview_dedupes_meters_on_one_gateway():
     preview = ot.build_preview([
         {"meter_id": "23022613", "thing_name": "MAK-GW-0196", "fw_version": "1.1.74", "site": "MAK"},

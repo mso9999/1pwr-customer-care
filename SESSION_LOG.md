@@ -1,3 +1,24 @@
+## 2026-09-29 — Cursor — Automatic OTA ships only the newest fleet image
+- Factory promote and its readiness check now replace the site-release version with the newest selectable image under `firmware-releases/`. A 1.1.71 row cannot be sent by the station. The map queue is unchanged: an operator can still name an older library version and confirm the rollback.
+- Side effects: push of this commit to `main` deploys https://cc.1pwrafrica.com and restarts `1pdb-api` and `1pdb-api-bn`. Running behavior changes from “promote sends `onemeter_ota_site_releases.target_firmware_version`” to “promote sends the newest selectable fleet image”. No OTA job created by this change. No DB write.
+- Key files: `acdb-api/ota_target.py` (`pin_release_to_latest`), `acdb-api/meter_provisioning.py` (`_shipping_release` on `POST /ota/promote` and `GET /ota/readiness`).
+- Tests: `tests/test_ota_target_queue.py`, `tests/test_meter_provisioning_ota.py` (stale 1.1.71 row creates a 1.1.76 job).
+
+## 2026-09-29 — Cursor — Provisioning OTA target moved from 1.1.71 to 1.1.76
+- Station promote was still shipping 1.1.71. At 14:20:50 UTC, `onemeter_ota_site_releases` in `onepower_bj` and `onepower_cc` (AGL, GBO, KOT, MAK, SAM, SIN) changed from artifact `zZGlAPhqyejrYbPgeK8vGvnvntlXzL23` / target 1.1.71 to `firmware-releases/v1.1.76/Fleet1176/FeaturedFreeRTOSIoTIntegration.bin` version `U7tUZYEwSd0VAu7FEshfow4SUaWxnTrG` / target 1.1.76. `canary_only` unchanged.
+- Side effects: those database rows only. No deploy. The job that had just downgraded KOT-GW-0008 was already SUCCEEDED and was left as-is.
+- Key files: table `onemeter_ota_site_releases`. The promote path is `POST /api/provisioning/ota/promote`.
+
+## 2026-09-29 — Cursor — Benin commissioning writes a French Mionwa contract
+- The Benin commissioning wizard now generates one French subscription PDF for Mionwa Generation S.A. and texts that link in French on the Benin SMS gateway. Lesotho still generates the English and Sesotho pair and the Sesotho SMS. The customer signs on the same canvas. There is no operator signature image. The tariff line is the Benin site rate (default 160 XOF/kWh). Connection fees stay the January 2025 annex. When the header country is Benin, the tutorial and help describe that French contract instead of the English/Sesotho pair.
+- Side effects: none live until this is committed and pushed. No DB writes. Sample PDF: `Work/contracts/20260929T1407-contrat-abonnement-bj-mionwa-sample.pdf` (example customer, not a real account).
+- Key files: `acdb-api/templates/template_bj.html`, `acdb-api/contract_gen.py`, `acdb-api/commission.py`, `acdb-api/frontend/src/pages/CommissionCustomerPage.tsx`, `CustomerDetailPage.tsx`, `TutorialPage.tsx`, `helpSections.tsx`.
+
+## 2026-09-29 — Cursor — Benin type contract names Mionwa Generation
+- The January 2025 subscription contract was formatted with the 1PWR mark. The source file named Inclusive Grids. The contracting party is Mionwa Generation S.A. (RCCM RB/COT/20 B 27888, IFU 3202011866450, siège 01 BP 1112 Cotonou, Ilot 1053, Gbedjromedé). Inclusive Grids’ registration and representative were not carried over. Customer particulars stay blank. Not wired into commission.
+- Side effects: none. No deploy, no DB writes.
+- Key files: `acdb-api/scripts/build_bj_contract.py`, `acdb-api/media/1pwr-logo.png`. Saved copy: `Work/contracts/20260929T1324-contrat-abonnement-bj-mionwa.docx`.
+
 ## 2026-09-29 — Cursor — Map status refreshes while the page stays open
 - The meters map loaded last-seen once. A later re-render aged that snapshot, so a meter still reporting turned orange after 20 minutes on screen, and two people looking at the same fleet could disagree. The map now reloads meter status every minute without replacing the map. A finished download drops the violet dot on the 20-second download check, then the next status reload paints it from the new report.
 - Side effects: this push to `main` deploys to https://cc.1pwrafrica.com. No DB writes.

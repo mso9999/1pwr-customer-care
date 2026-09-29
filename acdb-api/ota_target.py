@@ -1,8 +1,10 @@
 """Operator firmware targets from the meters map and list.
 
-Factory promote keeps shipping ``onemeter_ota_site_releases``. This module
-never writes that table. It queues one gateway at a time per site and creates
-a single-Thing AWS IoT job only when that gateway is online and the site has
+Factory promote ships the newest fleet image in S3, even when the site-release
+row is older. This module never writes that table. The map queue is the
+exception: an operator can name an older library version and that version is
+what gets sent. It queues one gateway at a time per site and creates a
+single-Thing AWS IoT job only when that gateway is online and the site has
 no other download in progress.
 """
 
@@ -210,6 +212,33 @@ def fleet_images_from_versions(versions: list[dict]) -> list[dict]:
         })
     images.sort(key=lambda item: version_tuple(item["version"]) or (0, 0, 0), reverse=True)
     return images
+
+
+def pin_release_to_latest(release: dict, images: list[dict]) -> dict:
+    """Copy a site release onto the newest selectable fleet image.
+
+    Automatic promotion uses this so a stale ``onemeter_ota_site_releases``
+    row cannot ship an older build. The map queue does not call it: there
+    the operator's chosen version is the one that is sent.
+    """
+    latest = None
+    latest_tuple = None
+    for image in images or []:
+        if not image.get("selectable"):
+            continue
+        parsed = version_tuple(image.get("version"))
+        if parsed is None:
+            continue
+        if latest_tuple is None or parsed > latest_tuple:
+            latest = image
+            latest_tuple = parsed
+    if latest is None:
+        raise TargetRefused("No selectable fleet image is published.")
+    pinned = dict(release)
+    pinned["target_firmware_version"] = latest["version"]
+    pinned["artifact_key"] = latest["artifact_key"]
+    pinned["artifact_version_id"] = latest["artifact_version_id"]
+    return pinned
 
 
 def library_from_s3(s3, bucket: str = OTA_BUCKET, *, use_cache: bool = True) -> list[dict]:
