@@ -5028,6 +5028,7 @@ export interface MeterValidationCommand {
   action: 'open' | 'close';
   status: string;
   relay_after?: string | null;
+  published_at?: string | null;
   acked_at?: string | null;
   error?: string | null;
 }

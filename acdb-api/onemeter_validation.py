@@ -218,6 +218,39 @@ def _session_telemetry(session: dict[str, Any]) -> dict[str, Any]:
     return _read_meter_state(session["meter_id"], require_fresh=require_fresh)
 
 
+# The open is queued and the session is marked disconnected in the same
+# request. Wait until that open has been on the gateway long enough to trip
+# before a close is allowed without a relay read-back.
+RECONNECT_AFTER_OPEN_SECONDS = 20
+
+
+def _command_age_seconds(command: Optional[dict[str, Any]]) -> Optional[float]:
+    if not command:
+        return None
+    stamp = command.get("published_at") or command.get("acked_at") or command.get("requested_at")
+    if isinstance(stamp, datetime):
+        when = stamp if stamp.tzinfo else stamp.replace(tzinfo=timezone.utc)
+    else:
+        text = str(stamp or "").strip()
+        if not text:
+            return None
+        try:
+            when = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - when).total_seconds()
+
+
+def _open_has_settled(disconnect: Optional[dict[str, Any]]) -> bool:
+    """The open reached the gateway and has had time to trip the relay."""
+    if not disconnect or disconnect.get("status") not in ("published", "acked", "completed"):
+        return False
+    age = _command_age_seconds(disconnect)
+    return age is not None and age >= RECONNECT_AFTER_OPEN_SECONDS
+
+
 def _payment_block(
     session: dict[str, Any],
     disconnect: Optional[dict[str, Any]],
@@ -231,7 +264,10 @@ def _payment_block(
         return None
     if _relay_is_open(telemetry.get("relay")):
         return None
-    if str(session.get("status") or "") == "disconnected":
+    # Dummy-load meters often go silent, so the open ack never arrives.
+    # Session status flips to disconnected the moment the open is queued;
+    # that alone is not evidence the relay has moved.
+    if str(session.get("status") or "") == "disconnected" and _open_has_settled(disconnect):
         return None
     return "Confirm the zero-balance disconnect (relay open) first."
 

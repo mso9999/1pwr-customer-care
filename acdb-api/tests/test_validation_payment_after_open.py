@@ -58,9 +58,16 @@ class PaymentAfterOpenTests(unittest.TestCase):
         session = {"disconnect_cmd_id": "d1", "reconnect_cmd_id": None, "status": "disconnected"}
         self.assertIsNone(ov._payment_block(session, {"status": "published"}, {"relay": "0"}))
 
-    def test_payment_ready_when_session_is_disconnected(self):
+    def test_payment_ready_after_open_has_settled_without_ack(self):
         session = {"disconnect_cmd_id": "d1", "reconnect_cmd_id": None, "status": "disconnected"}
-        self.assertIsNone(ov._payment_block(session, None, {"relay": None}))
+        published = datetime.now(timezone.utc) - timedelta(seconds=30)
+        disconnect = {"status": "published", "relay_after": None, "published_at": published}
+        self.assertIsNone(ov._payment_block(session, disconnect, {"relay": "1", "stale": False}))
+
+    def test_payment_waits_while_the_open_was_just_queued(self):
+        session = {"disconnect_cmd_id": "d1", "reconnect_cmd_id": None, "status": "disconnected"}
+        disconnect = {"status": "queued", "relay_after": None, "published_at": None}
+        self.assertIsNotNone(ov._payment_block(session, disconnect, {"relay": "1"}))
 
     def test_payment_blocked_before_disconnect(self):
         session = {"disconnect_cmd_id": None, "reconnect_cmd_id": None, "status": "load_seen"}

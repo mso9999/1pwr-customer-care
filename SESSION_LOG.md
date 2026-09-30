@@ -6,6 +6,7 @@
 
 ### What Next Session Should Know
 - Bench path: consume credit → relay opens → apply 0.05 kWh synthetic payment even if the meter is silent. Complete still needs a reconnect read-back of 1.
+- Payment is not enabled the instant the open is queued. It waits for a relay read-back of 0, or for the open to have been published for 20 seconds, so the close does not race the open. The 10-minute debounce still blocks a close while that open is only queued.
 
 ## Session 2026-09-30 202609301518 (Provision blocked: ListBucketVersions)
 

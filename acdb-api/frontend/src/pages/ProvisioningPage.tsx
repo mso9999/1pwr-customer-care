@@ -36,6 +36,7 @@ import {
   type ProvisioningRegistryRow,
   type ProvisionedMeter,
   type FleetLiveResult,
+  type MeterValidationCommand,
   type MeterValidationStatus,
   type ValidationGatewayMeter,
   type MeterValidationOpenSession,
@@ -71,12 +72,20 @@ function relayIsOpen(value?: string | number | null) {
   return String(value ?? '').trim() === '0';
 }
 
+function openHasSettled(command?: MeterValidationCommand | null) {
+  if (!command || !['published', 'acked', 'completed'].includes(command.status)) return false;
+  const stamp = command.published_at || command.acked_at;
+  if (!stamp) return false;
+  const ageMs = Date.now() - Date.parse(stamp);
+  return Number.isFinite(ageMs) && ageMs >= 20_000;
+}
+
 function canApplyValidationPayment(run: MeterValidationStatus) {
   if (run.session.reconnect_cmd_id || run.reconnect_command) return false;
   if (!run.session.disconnect_cmd_id && !run.disconnect_command) return false;
   return relayIsOpen(run.disconnect_command?.relay_after)
     || relayIsOpen(run.telemetry.relay)
-    || run.session.status === 'disconnected';
+    || (run.session.status === 'disconnected' && openHasSettled(run.disconnect_command));
 }
 
 function SiteAdditionGuide({
