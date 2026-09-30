@@ -1,9 +1,12 @@
 """Unit tests for CC-managed factory-boot -> full-firmware OTA promotion."""
 
 import json
+import os
 import types
 import unittest
 from unittest.mock import MagicMock, patch
+
+os.environ.setdefault("CC_JWT_SECRET", "unit-test-secret")
 
 import meter_provisioning as mp
 
@@ -384,6 +387,39 @@ class TestFactoryPromotion(unittest.TestCase):
             file_entry["fileLocation"]["s3Location"]["version"],
             "latest-version",
         )
+
+
+class TestShippingReleaseFallback(unittest.TestCase):
+    def test_site_release_is_kept_when_library_is_denied(self):
+        site = approved_release("KOT")
+        site["target_firmware_version"] = "1.1.76"
+        site["artifact_key"] = "firmware-releases/v1.1.76/Fleet1176/FeaturedFreeRTOSIoTIntegration.bin"
+        site["artifact_version_id"] = "U7tUZYEwSd0VAu7FEshfow4SUaWxnTrG"
+        denied = Exception(
+            "An error occurred (AccessDenied) when calling the ListObjectVersions "
+            "operation: not authorized to perform s3:ListBucketVersions"
+        )
+        with (
+            patch.object(mp, "_client", return_value=MagicMock()),
+            patch("ota_target.library_from_s3", side_effect=denied),
+        ):
+            pinned = mp._shipping_release(site)
+        self.assertEqual(pinned["target_firmware_version"], "1.1.76")
+        self.assertEqual(pinned["artifact_version_id"], "U7tUZYEwSd0VAu7FEshfow4SUaWxnTrG")
+
+    def test_empty_site_release_still_fails_when_library_is_denied(self):
+        site = approved_release("AGL")
+        site["artifact_key"] = ""
+        site["artifact_version_id"] = ""
+        site["target_firmware_version"] = ""
+        with (
+            patch.object(mp, "_client", return_value=MagicMock()),
+            patch("ota_target.library_from_s3", side_effect=Exception("AccessDenied")),
+        ):
+            with self.assertRaises(mp.HTTPException) as ctx:
+                mp._shipping_release(site)
+        self.assertEqual(ctx.exception.status_code, 503)
+        self.assertIn("Could not resolve the latest firmware", str(ctx.exception.detail))
 
 
 class TestReleaseApproval(unittest.TestCase):
