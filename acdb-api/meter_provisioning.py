@@ -1572,7 +1572,8 @@ def _shipping_release(release: dict) -> dict:
     The site-release row is the fallback identity (bucket, signer, baseline).
     Its version is replaced by the newest selectable image under
     ``firmware-releases/``. A lower version is sent only when the map queue
-    names it.
+    names it. If the fleet library cannot be listed, keep the approved
+    site-release rather than blocking a site that already has a valid row.
     """
     import ota_target
 
@@ -1580,14 +1581,27 @@ def _shipping_release(release: dict) -> dict:
         images = ota_target.library_from_s3(_client("s3"))
         return ota_target.pin_release_to_latest(release, images)
     except ota_target.TargetRefused as exc:
-        raise HTTPException(status_code=503, detail=exc.detail) from exc
+        if _ota_missing_config(release):
+            raise HTTPException(status_code=503, detail=exc.detail) from exc
+        logger.warning(
+            "No selectable fleet image; using site release %s",
+            release.get("target_firmware_version"),
+        )
+        return release
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=503,
-            detail=f"Could not resolve the latest firmware: {exc}",
-        ) from exc
+        if _ota_missing_config(release):
+            raise HTTPException(
+                status_code=503,
+                detail=f"Could not resolve the latest firmware: {exc}",
+            ) from exc
+        logger.warning(
+            "Could not resolve the latest firmware (%s); using site release %s",
+            exc,
+            release.get("target_firmware_version"),
+        )
+        return release
 
 
 @router.get("/ota/readiness")

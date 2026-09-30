@@ -197,3 +197,33 @@ def test_already_on_target_is_skipped():
         {"meter_id": "1", "thing_name": "MAK-GW-0196", "fw_version": "1.1.76", "site": "MAK"},
     ], "1.1.76")
     assert preview["gateways"][0]["action"] == "already"
+
+
+def test_library_falls_back_to_current_objects_when_versions_denied():
+    ot._library_cache.clear()
+    denied = Exception(
+        "An error occurred (AccessDenied) when calling the ListObjectVersions "
+        "operation: User is not authorized to perform s3:ListBucketVersions"
+    )
+    denied.response = {"Error": {"Code": "AccessDenied"}}
+    newer = datetime(2026, 9, 29, tzinfo=timezone.utc)
+    s3 = type("S3", (), {})()
+    s3.list_object_versions = lambda **_kwargs: (_ for _ in ()).throw(denied)
+    s3.list_objects_v2 = lambda **_kwargs: {
+        "Contents": [
+            {
+                "Key": "firmware-releases/v1.1.76/Fleet1176/FeaturedFreeRTOSIoTIntegration.bin",
+                "LastModified": newer,
+            },
+            {
+                "Key": "firmware-releases/v1.1.71/SIN-GW-0001/FeaturedFreeRTOSIoTIntegration.bin",
+                "LastModified": newer,
+            },
+        ],
+        "IsTruncated": False,
+    }
+    s3.head_object = lambda **_kwargs: {"VersionId": "current-76"}
+    images = ot.library_from_s3(s3, bucket="1pwr-ota-firmware", use_cache=False)
+    assert images[0]["version"] == "1.1.76"
+    assert images[0]["artifact_version_id"] == "current-76"
+    assert images[0]["selectable"] is True

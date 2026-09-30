@@ -1,3 +1,18 @@
+## Session 2026-09-30 202609301518 (Provision blocked: ListBucketVersions)
+
+### What Was Done
+- Pulled `main` (`f02df3c` → `984e688`). KOT and AGL both failed at "Start provision" with "Could not resolve the latest firmware" / `s3:ListBucketVersions` denied on `1pwr-ota-firmware` for assumed-role `cc-postgres-backup-role`.
+- RCA: `cfbf120` made `GET /ota/readiness` and factory promote call `library_from_s3` → `ListObjectVersions`. The 2026-09-28 IAM add granted `s3:ListBucket` only. Benin uses the instance role; Lesotho often uses env-file IAM user creds, which is why MAK targeting still worked.
+- Code: if version listing is denied, list current `firmware-releases/` objects and `head_object` for VersionId. If the library still cannot be resolved, keep the approved site-release row instead of failing the readiness gate.
+- IAM: at 15:12 UTC `s3:ListBucketVersions` was added to inline policy `cc-1meter-provisioning` on role `cc-postgres-backup-role`, beside the existing `s3:ListBucket` (prefix `firmware-releases/*`). Prior policy saved as `/tmp/cc-1meter-provisioning-before-20260930.json` on the laptop that applied it. The CC host can now list `firmware-releases/v1.1.77/Fleet1177/…` version `Aah6JH8tQDRhhQvLXUaqpJE9FXnocBHH`. Readiness can resolve the newest image without this code; the code still falls back if listing is denied again.
+
+### Key Decisions
+- Do not block a site that already has a valid `onemeter_ota_site_releases` row (KOT/AGL are on 1.1.76) because the instance role is missing a list-versions action.
+
+### What Next Session Should Know
+- Apply `s3:ListBucketVersions` on `arn:aws:s3:::1pwr-ota-firmware` (prefix `firmware-releases/`) to `cc-postgres-backup-role` / `cc-1meter-provisioning`. Backup the prior policy first.
+- This code change must be pushed to `main` before the portal unlocks; IAM is live immediately if applied.
+
 ## 2026-09-29 — Cursor — Site commissioning is the first energy sale
 - A site’s commissioning date is the local day of the first transaction with kWh greater than zero. Connection fees, readyboard fees, and electricity held before inspection do not count. Known sites with no sale stay blank. The hand-entered `site_metadata.commissioning_date` is returned as the recorded date and is not overwritten. The per-customer date already sent to uGridPlan is unchanged.
 - Employees: Investor Analytics → Asset Register, plus `GET /api/site-commissioning` and `/export` (CSV), on the sidebar country lane. Nexus apps: `GET /api/integration/sites/commissioning` and `…/commissioning.csv` with `X-CC-Integration-Key`, once per lane (`/api`, `/api/bn`, `/api/zm`).

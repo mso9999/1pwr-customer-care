@@ -192,6 +192,11 @@ us-east-1:
   `iot:ListJobExecutionsForJob`, S3 immutable object-version read, Signer
   profile/read/start permissions, and `iam:PassRole` restricted to
   `1pwr-ota-service-role`.
+- Fleet-library listing on `1pwr-ota-firmware` / `firmware-releases/*`:
+  `s3:ListBucket` (current objects) **and** `s3:ListBucketVersions`
+  (`ListObjectVersions`). The Benin API uses instance role
+  `cc-postgres-backup-role`; without `s3:ListBucketVersions` the library
+  falls back to current objects, then to the approved site-release row.
 
 Policy source of record: applied via `aws iam put-role-policy`. If the role is
 ever recreated, re-apply the same three statements.

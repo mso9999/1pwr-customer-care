@@ -241,11 +241,16 @@ def pin_release_to_latest(release: dict, images: list[dict]) -> dict:
     return pinned
 
 
-def library_from_s3(s3, bucket: str = OTA_BUCKET, *, use_cache: bool = True) -> list[dict]:
-    now = time.time()
-    cached = _library_cache.get(bucket)
-    if use_cache and cached and now - cached[0] < 300:
-        return cached[1]
+def _is_s3_access_denied(exc: BaseException) -> bool:
+    code = ""
+    response = getattr(exc, "response", None)
+    if isinstance(response, dict):
+        code = str((response.get("Error") or {}).get("Code") or "")
+    text = f"{code} {exc}".lower()
+    return "accessdenied" in text or "not authorized" in text or "access denied" in text
+
+
+def _list_version_rows(s3, bucket: str) -> list[dict]:
     rows: list[dict] = []
     key_marker = None
     version_marker = None
@@ -262,6 +267,56 @@ def library_from_s3(s3, bucket: str = OTA_BUCKET, *, use_cache: bool = True) -> 
         version_marker = resp.get("NextVersionIdMarker")
         if not key_marker:
             break
+    return rows
+
+
+def _list_current_fleet_rows(s3, bucket: str) -> list[dict]:
+    """Current Fleet* objects when ``s3:ListBucketVersions`` is denied.
+
+    Uses ``s3:ListBucket`` plus ``head_object`` so the current VersionId is
+    still available for an OTA job.
+    """
+    rows: list[dict] = []
+    token = None
+    while True:
+        kwargs = {"Bucket": bucket, "Prefix": "firmware-releases/"}
+        if token:
+            kwargs["ContinuationToken"] = token
+        resp = s3.list_objects_v2(**kwargs)
+        for obj in resp.get("Contents") or []:
+            key = str(obj.get("Key") or "")
+            if not FLEET_KEY.match(key):
+                continue
+            head = s3.head_object(Bucket=bucket, Key=key)
+            rows.append({
+                "Key": key,
+                "VersionId": head.get("VersionId"),
+                "LastModified": obj.get("LastModified") or head.get("LastModified"),
+                "IsDeleteMarker": False,
+            })
+        if not resp.get("IsTruncated"):
+            break
+        token = resp.get("NextContinuationToken")
+        if not token:
+            break
+    return rows
+
+
+def library_from_s3(s3, bucket: str = OTA_BUCKET, *, use_cache: bool = True) -> list[dict]:
+    now = time.time()
+    cached = _library_cache.get(bucket)
+    if use_cache and cached and now - cached[0] < 300:
+        return cached[1]
+    try:
+        rows = _list_version_rows(s3, bucket)
+    except Exception as exc:
+        if not _is_s3_access_denied(exc):
+            raise
+        logger.warning(
+            "ListObjectVersions denied on %s; listing current fleet objects: %s",
+            bucket, exc,
+        )
+        rows = _list_current_fleet_rows(s3, bucket)
     images = fleet_images_from_versions(rows)
     _library_cache[bucket] = (now, images)
     return images

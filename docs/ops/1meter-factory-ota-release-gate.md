@@ -174,6 +174,21 @@ extended on 2026-07-29 with:
 - Signer actions limited to `1PWR_OTA_ESP32_v2`;
 - `iam:PassRole` limited to `1pwr-ota-service-role` for the IoT service.
 
+The fleet library later started calling `ListObjectVersions`. That needs
+`s3:ListBucketVersions` on `arn:aws:s3:::1pwr-ota-firmware` (bucket resource,
+prefix `firmware-releases/`). `s3:ListBucket` is a different action and is not
+enough. The Benin API assumes this role; Lesotho often uses env-file IAM user
+credentials that already allow version listing. Add the missing action with:
+
+```text
+aws iam get-role-policy --role-name cc-postgres-backup-role \
+  --policy-name cc-1meter-provisioning
+# merge s3:ListBucketVersions onto the existing firmware-releases ListBucket
+# statement, then:
+aws iam put-role-policy --role-name cc-postgres-backup-role \
+  --policy-name cc-1meter-provisioning --policy-document file://policy.json
+```
+
 CC readiness still checks the selected artifact and signing profile at runtime.
 Permission alone does not make a release approved.
 
