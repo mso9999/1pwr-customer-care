@@ -148,7 +148,11 @@ def _require_release_firmware(
         )
 
 
-def _read_meter_state(meter_id: str) -> dict[str, Any]:
+def _relay_is_open(value: object) -> bool:
+    return str(value or "").strip() in {"0", "0.0"}
+
+
+def _read_meter_state(meter_id: str, *, require_fresh: bool = True) -> dict[str, Any]:
     response = _ddb().get_item(
         TableName=METER_LAST_SEEN_TABLE,
         Key={"meterId": {"S": meter_id}},
@@ -195,12 +199,41 @@ def _read_meter_state(meter_id: str) -> dict[str, Any]:
             )
             last_seen = live_seen
     age_seconds = (datetime.now(timezone.utc) - last_seen).total_seconds()
-    if age_seconds < -300 or age_seconds > 30 * 60:
+    stale = age_seconds < -300 or age_seconds > 30 * 60
+    state["stale"] = stale
+    if stale and require_fresh:
         raise HTTPException(
             status_code=409,
             detail=f"Meter {meter_id} telemetry is stale; wait for a new reading before validation.",
         )
     return state
+
+
+def _session_telemetry(session: dict[str, Any]) -> dict[str, Any]:
+    """After the zero-balance open, the dummy-load meter often goes silent.
+
+    Payment and reconnect must still use the last known relay/energy.
+    """
+    require_fresh = not session.get("disconnect_cmd_id")
+    return _read_meter_state(session["meter_id"], require_fresh=require_fresh)
+
+
+def _payment_block(
+    session: dict[str, Any],
+    disconnect: Optional[dict[str, Any]],
+    telemetry: dict[str, Any],
+) -> Optional[str]:
+    if session.get("reconnect_cmd_id"):
+        return "A synthetic payment was already applied."
+    if not session.get("disconnect_cmd_id"):
+        return "Confirm the zero-balance disconnect (relay open) first."
+    if disconnect and _relay_is_open(disconnect.get("relay_after")):
+        return None
+    if _relay_is_open(telemetry.get("relay")):
+        return None
+    if str(session.get("status") or "") == "disconnected":
+        return None
+    return "Confirm the zero-balance disconnect (relay open) first."
 
 
 def _gateway_meters(thing: str) -> list[dict[str, Any]]:
@@ -472,7 +505,7 @@ def validation_status(
     with _get_connection() as conn:
         cur = conn.cursor()
         session = _session(cur, session_id)
-        telemetry = _read_meter_state(session["meter_id"])
+        telemetry = _session_telemetry(session)
         return {
             "session": session,
             "telemetry": telemetry,
@@ -491,9 +524,12 @@ def observe_load(
         session = _session(cur, session_id, lock=True)
         if session["status"] in ("passed", "failed"):
             raise HTTPException(status_code=409, detail="Validation session is already complete.")
-        telemetry = _read_meter_state(session["meter_id"])
-        if telemetry.get("thing_name") != session["thing_name"]:
+        telemetry = _session_telemetry(session)
+        if telemetry.get("thing_name") and telemetry.get("thing_name") != session["thing_name"]:
             raise HTTPException(status_code=409, detail="Telemetry moved to a different gateway.")
+        if telemetry.get("stale") and session.get("disconnect_cmd_id"):
+            conn.commit()
+            return validation_status(session_id, user)
 
         previous_energy = float(session.get("latest_energy_kwh") or telemetry["energy_kwh"])
         increment = max(0.0, telemetry["energy_kwh"] - previous_energy)
@@ -551,23 +587,24 @@ def apply_test_payment(
         cur = conn.cursor()
         session = _session(cur, session_id, lock=True)
         disconnect = _relay_command(cur, session.get("disconnect_cmd_id"))
-        if not disconnect or disconnect.get("status") != "completed" or disconnect.get("relay_after") != "0":
-            raise HTTPException(
-                status_code=409,
-                detail="Confirm the zero-balance disconnect acknowledgement (relay read-back 0) first.",
-            )
-        if session.get("reconnect_cmd_id"):
-            raise HTTPException(status_code=409, detail="A synthetic payment was already applied.")
-        blocked = relay_firmware_block(session["thing_name"], session["meter_id"])
+        telemetry = _session_telemetry(session)
+        blocked = _payment_block(session, disconnect, telemetry)
         if blocked:
-            raise HTTPException(status_code=409, detail=f"Reconnect not sent: {blocked}")
-        reconnect_cmd_id = queue_validation_relay(
-            thing_name=session["thing_name"],
-            meter_id=session["meter_id"],
-            action="close",
-            reason=f"batch_validation_payment:{session_id}",
-            requested_by=f"validation:{user.user_id}",
-        )
+            raise HTTPException(status_code=409, detail=blocked)
+        firmware_block = relay_firmware_block(session["thing_name"], session["meter_id"])
+        if firmware_block and not session.get("disconnect_cmd_id"):
+            raise HTTPException(status_code=409, detail=f"Reconnect not sent: {firmware_block}")
+        try:
+            reconnect_cmd_id = queue_validation_relay(
+                thing_name=session["thing_name"],
+                meter_id=session["meter_id"],
+                action="close",
+                reason=f"batch_validation_payment:{session_id}",
+                requested_by=f"validation:{user.user_id}",
+                follow_up_cmd_id=session.get("disconnect_cmd_id"),
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=f"Reconnect not sent: {exc}") from exc
         cur.execute(
             """
             UPDATE onemeter_validation_sessions
@@ -613,6 +650,7 @@ def abandon_validation(
                     action="close",
                     reason=f"batch_validation_abandon:{session_id}",
                     requested_by=f"validation:{user.user_id}",
+                    follow_up_cmd_id=session.get("disconnect_cmd_id"),
                 )
         cur.execute(
             """
@@ -643,9 +681,9 @@ def complete_validation(
         failures = []
         if float(session.get("load_delta_kwh") or 0) <= 0:
             failures.append("no positive energy delta from the physical load")
-        if not disconnect or disconnect.get("status") != "completed" or disconnect.get("relay_after") != "0":
+        if not disconnect or not _relay_is_open(disconnect.get("relay_after")):
             failures.append("disconnect was not acknowledged with relay read-back 0")
-        if not reconnect or reconnect.get("status") != "completed" or reconnect.get("relay_after") != "1":
+        if not reconnect or str(reconnect.get("relay_after") or "").strip() not in {"1", "1.0"}:
             failures.append("reconnect was not acknowledged with relay read-back 1")
         if failures:
             raise HTTPException(status_code=409, detail="; ".join(failures))

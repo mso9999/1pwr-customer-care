@@ -5054,6 +5054,7 @@ export interface MeterValidationStatus {
     energy_kwh: number;
     relay?: string | null;
     last_seen?: string | null;
+    stale?: boolean;
   };
   disconnect_command?: MeterValidationCommand | null;
   reconnect_command?: MeterValidationCommand | null;

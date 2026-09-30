@@ -694,6 +694,7 @@ def queue_validation_relay(
     action: str,
     reason: str,
     requested_by: str,
+    follow_up_cmd_id: Optional[str] = None,
 ) -> str:
     """Queue a relay command for an isolated batch-validation session.
 
@@ -723,7 +724,13 @@ def queue_validation_relay(
         cur = conn.cursor()
         recent = _recent_command_for_thing(cur, thing_name, DEBOUNCE_WINDOW_SECONDS)
         if recent and recent.get("status") in ("queued", "published", "acked"):
-            raise RuntimeError("another relay command for this test gateway is still within the debounce window")
+            same_open = (
+                follow_up_cmd_id
+                and str(recent.get("cmd_id")) == str(follow_up_cmd_id)
+                and action == "close"
+            )
+            if not same_open:
+                raise RuntimeError("another relay command for this test gateway is still within the debounce window")
         cur.execute(
             """
             INSERT INTO relay_commands

@@ -1,3 +1,12 @@
+## Session 2026-09-30 202609301727 (Validation payment blocked after relay open)
+
+### What Was Done
+- After the synthetic starting credit is consumed and the dummy-load relay opens, the meter often stops reporting. Session GET/observe then 409'd as stale, so the UI never saw the disconnect ack and "Apply synthetic payment and reconnect" stayed disabled. A 10-minute relay debounce also blocked the close while the open was still published/acked.
+- Session status after disconnect now keeps the last known telemetry. Payment is allowed when the disconnect was sent and the relay is open (ack, live relay 0, or session `disconnected`). Validation close is a follow-up of that open, so debounce does not block it. Firmware lookup is not re-checked for that close.
+
+### What Next Session Should Know
+- Bench path: consume credit → relay opens → apply 0.05 kWh synthetic payment even if the meter is silent. Complete still needs a reconnect read-back of 1.
+
 ## Session 2026-09-30 202609301518 (Provision blocked: ListBucketVersions)
 
 ### What Was Done

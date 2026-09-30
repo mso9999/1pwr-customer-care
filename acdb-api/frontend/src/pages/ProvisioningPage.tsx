@@ -67,6 +67,18 @@ const inputCls =
   'w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none';
 const labelCls = 'block text-xs font-medium text-gray-500 mb-1';
 
+function relayIsOpen(value?: string | number | null) {
+  return String(value ?? '').trim() === '0';
+}
+
+function canApplyValidationPayment(run: MeterValidationStatus) {
+  if (run.session.reconnect_cmd_id || run.reconnect_command) return false;
+  if (!run.session.disconnect_cmd_id && !run.disconnect_command) return false;
+  return relayIsOpen(run.disconnect_command?.relay_after)
+    || relayIsOpen(run.telemetry.relay)
+    || run.session.status === 'disconnected';
+}
+
 function SiteAdditionGuide({
   countryCode,
   countryName,
@@ -1388,7 +1400,7 @@ export default function ProvisioningPage() {
                   <div className="p-3 rounded bg-gray-50"><b>Meter</b><br /><span className="font-mono">{validationRun.session.meter_id}</span></div>
                   <div className="p-3 rounded bg-gray-50"><b>Load delta</b><br />{validationRun.session.load_delta_kwh.toFixed(4)} kWh</div>
                   <div className="p-3 rounded bg-gray-50"><b>Synthetic balance</b><br />{validationRun.session.simulated_balance_kwh.toFixed(4)} kWh</div>
-                  <div className="p-3 rounded bg-gray-50"><b>Relay telemetry</b><br />{validationRun.telemetry.relay ?? '—'}</div>
+                  <div className="p-3 rounded bg-gray-50"><b>Relay telemetry</b><br />{validationRun.telemetry.relay ?? '—'}{validationRun.telemetry.stale ? ' · last report (meter silent after open)' : ''}</div>
                   <div className="p-3 rounded bg-gray-50"><b>Status</b><br />{validationRun.session.status}</div>
                 </div>
                 <button
@@ -1405,10 +1417,7 @@ export default function ProvisioningPage() {
                     : 'waiting for positive load and zero balance'}
                 </div>
                 <button
-                  disabled={validationBusy
-                    || validationRun.disconnect_command?.status !== 'completed'
-                    || validationRun.disconnect_command?.relay_after !== '0'
-                    || Boolean(validationRun.reconnect_command)}
+                  disabled={validationBusy || !canApplyValidationPayment(validationRun)}
                   onClick={() => runValidationAction(() => applyMeterValidationPayment(validationRun.session.id, 0.05))}
                   className="w-full px-4 py-3 rounded-lg bg-green-600 text-white text-sm font-semibold disabled:opacity-40"
                 >
