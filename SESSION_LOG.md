@@ -1,3 +1,12 @@
+## Session 2026-10-01 202610011720 (Assign Meter serial stays typed)
+
+### What Was Done
+- Motlatsi enters the meter serial from RET's sheet, then picks the gateway. Selecting the gateway cleared the serial and locked the box, and save refused a meter the gateway had not reported, including an offline gateway. The serial stays what he typed. A serial with no telemetry is linked to the gateway he picks. A serial already reporting through a different gateway is still refused.
+- MAK-GW-0162 has no meter row and last connected 7 Aug 2026. That unit can now be linked from the sheet.
+
+### What Next Session Should Know
+- This is temporary while mesh comms are not reliable enough for every new meter to report before data entry.
+
 ## Session 2026-10-01 202610011430 (Map download names the firmware version)
 
 ### What Was Done

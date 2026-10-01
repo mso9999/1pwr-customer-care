@@ -230,10 +230,12 @@ def _lock_provisioned_gateway_for_assignment(
     community: str,
     account_number: str,
 ) -> tuple[str, dict[str, Any]]:
-    """Validate that this meter is reporting through the selected gateway.
+    """Bind the typed serial to this gateway.
 
     Accounts bind to meter serials, not to Things. One PCB may carry several
-    meters for several customers. The gateway row is only identity + site.
+    meters for several customers. A serial the gateway has not reported yet is
+    accepted: field staff enter it from the install sheet before the mesh is
+    reliable. A serial already reporting through a different gateway is refused.
     """
     cursor.execute(
         """
@@ -251,7 +253,6 @@ def _lock_provisioned_gateway_for_assignment(
 
     columns = [d[0] for d in cursor.description]
     gateway = dict(zip(columns, row))
-    primary_serial = str(gateway.get("meter_serial") or "").strip()
     requested = str(requested_meter_id or "").strip()
     if not requested:
         raise HTTPException(status_code=400, detail="meter_id is required")
@@ -263,41 +264,10 @@ def _lock_provisioned_gateway_for_assignment(
         )
 
     reporting_thing = last_seen_thing_for_meter(requested)
-    on_primary = (
-        bool(primary_serial)
-        and _normalise_meter_serial(requested) == _normalise_meter_serial(primary_serial)
-    )
     if reporting_thing and reporting_thing != thing_name:
         raise HTTPException(
             status_code=409,
             detail=f"Meter {requested} is reporting through {reporting_thing}, not {thing_name}.",
-        )
-    if not reporting_thing and not on_primary:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Gateway {thing_name} has not reported meter {requested}. "
-                "Power the meter on this RS-485 bus, wait for telemetry, then retry."
-            ),
-        )
-
-    # Live connectivity check: the gateway must actually be reaching the cloud
-    # (connected now or within 72h), not merely "observed online at some point".
-    try:
-        from sync_ugridplan import gateway_function_state
-        gw_state = gateway_function_state(community, thing_name)
-    except Exception as exc:
-        gw_state = None
-        logger.warning("gateway live-state check failed for %s (non-blocking): %s", thing_name, exc)
-    if gw_state is not None and gw_state.get("state") not in ("online", "recent"):
-        age = gw_state.get("age_h")
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Gateway {thing_name} is not reaching the cloud "
-                + (f"(last contact {age:.0f}h ago)" if age is not None else "(never connected)")
-                + ". Power it and confirm it connects before assigning a meter to it."
-            ),
         )
 
     lookup_keys = _meter_id_lookup_keys(requested)

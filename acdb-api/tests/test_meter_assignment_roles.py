@@ -225,6 +225,38 @@ class TestLockGatewayForAssignment(unittest.TestCase):
             )
         self.assertEqual(meter_id, "000023021718")
 
+    def test_sheet_serial_is_accepted_before_the_meter_reports(self):
+        cursor = self._gateway_cursor([
+            ("MAK-GW-0162", None, "MAK", None, "provisioned", None, None, None, None),
+            None,
+            None,
+        ])
+        with patch.object(lifecycle, "last_seen_thing_for_meter", return_value=None):
+            meter_id, _gw = lifecycle._lock_provisioned_gateway_for_assignment(
+                cursor,
+                thing_name="MAK-GW-0162",
+                requested_meter_id="23024485",
+                community="MAK",
+                account_number="0192MAK",
+            )
+        self.assertEqual(meter_id, "23024485")
+
+    def test_serial_reporting_through_another_gateway_is_refused(self):
+        cursor = self._gateway_cursor([
+            ("MAK-GW-0162", None, "MAK", None, "provisioned", None, None, None, None),
+        ])
+        with patch.object(lifecycle, "last_seen_thing_for_meter", return_value="MAK-GW-0183"):
+            with self.assertRaises(HTTPException) as ctx:
+                lifecycle._lock_provisioned_gateway_for_assignment(
+                    cursor,
+                    thing_name="MAK-GW-0162",
+                    requested_meter_id="23024485",
+                    community="MAK",
+                    account_number="0192MAK",
+                )
+        self.assertEqual(ctx.exception.status_code, 409)
+        self.assertIn("MAK-GW-0183", ctx.exception.detail)
+
 
 if __name__ == "__main__":
     unittest.main()

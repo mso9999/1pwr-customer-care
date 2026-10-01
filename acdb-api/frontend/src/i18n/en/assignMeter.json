@@ -68,7 +68,9 @@
     "offline": "{{count}} gateway(s) on {{site}} are offline. Their already-known serials still appear; live extras will show once the unit reconnects. Check power and the site Starlink (Provisioning → Fleet live).",
     "awaitingSerial": "{{count}} gateway(s) on {{site}} have not reported a meter serial yet. Check the RS-485 wiring (A, B and GND), then long-press the gateway's PRG button for 3 seconds to re-scan meters.",
     "allAssignedOnGateway": "{{count}} meter(s) on this gateway are already assigned. Wire and scan another serial on the same RS-485 bus, or pick a different gateway.",
-    "awaitingSerialOnGateway": "This gateway has not reported a meter serial yet. Check the RS-485 wiring (A, B and GND), then long-press PRG for 3 seconds to re-scan.",
+    "awaitingSerialOnGateway": "This gateway has not reported a meter yet. Type the serial from the install sheet in the box above.",
+    "serialFromSheet": "Type the serial from the install sheet. It is linked to the gateway you pick, even when that meter has not reported yet.",
+    "serialReported": "This serial is reporting through {{thing}}.",
     "billingTitle": "Use this 1Meter for billing and relay control.",
     "billingBody": "This makes it the account’s primary meter and enables zero-balance control once the server safety flag is approved."
   },

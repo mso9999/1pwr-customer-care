@@ -494,11 +494,15 @@ export default function AssignMeterPage() {
             type="text"
             value={meterid}
             onChange={e => setMeterid(e.target.value)}
-            readOnly={Boolean(thingName)}
             placeholder="e.g. SMRSD-26-00000000"
-            className={`w-full px-4 py-3.5 border border-gray-300 rounded-xl text-base focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none ${thingName ? 'bg-gray-100' : ''}`}
+            className="w-full px-4 py-3.5 border border-gray-300 rounded-xl text-base focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none"
           />
-          {thingName && <p className="text-xs text-green-700 mt-1">Read from {thingName} telemetry; manual editing is disabled.</p>}
+          {thingName && meterid && metersOnSelected.some((meter) => meter.serial.replace(/^0+/, '') === meterid.trim().replace(/^0+/, '')) && (
+            <p className="text-xs text-green-700 mt-1">{t('assignMeter:gateway.serialReported', { thing: thingName })}</p>
+          )}
+          {thingName && (!meterid || !metersOnSelected.some((meter) => meter.serial.replace(/^0+/, '') === meterid.trim().replace(/^0+/, ''))) && (
+            <p className="text-xs text-amber-800 mt-1">{t('assignMeter:gateway.serialFromSheet')}</p>
+          )}
         </div>
 
         {/* Site / Community */}
@@ -523,7 +527,7 @@ export default function AssignMeterPage() {
           </select>
         </div>
 
-        {/* Provisioned 1Meter gateway — telemetry-derived, no manual serial entry */}
+        {/* Provisioned 1Meter gateway. The serial above stays typed from the install sheet. */}
         {platform === 'prototype' && <div className="p-4 rounded-xl border border-blue-200 bg-blue-50 space-y-3">
           <div>
             <label className="block text-sm font-medium text-blue-900 mb-2">
@@ -536,15 +540,15 @@ export default function AssignMeterPage() {
                 const selectedThing = e.target.value;
                 setThingName(selectedThing);
                 if (!selectedThing) {
-                  setMeterid('');
                   setActivate1MeterBilling(false);
                   return;
                 }
+                if (meterid.trim()) return;
                 const gw = siteGateways.find((row) => String(row.thing_name) === selectedThing);
                 const unassigned = gw
                   ? metersOnGateway(gw, liveFor(gw.thing_name)).filter((meter) => !meter.account)
                   : [];
-                setMeterid(unassigned.length === 1 ? unassigned[0].serial : '');
+                if (unassigned.length === 1) setMeterid(unassigned[0].serial);
               }}
               className="w-full px-4 py-3 border border-blue-200 rounded-xl text-base bg-white focus:ring-2 focus:ring-blue-400 outline-none"
             >

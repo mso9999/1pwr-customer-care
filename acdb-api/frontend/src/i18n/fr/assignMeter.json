@@ -68,7 +68,9 @@
     "offline": "{{count}} passerelle(s) de {{site}} sont hors ligne. Les numéros déjà connus restent listés ; les compteurs supplémentaires apparaîtront à la reconnexion. Vérifiez l’alimentation et le Starlink du site (Provisionnement → Parc en direct).",
     "awaitingSerial": "{{count}} passerelle(s) de {{site}} n’ont pas encore remonté de numéro de compteur. Vérifiez le câblage RS-485 (A, B et GND), puis appuyez 3 secondes sur le bouton PRG de la passerelle pour relancer la détection.",
     "allAssignedOnGateway": "{{count}} compteur(s) de cette passerelle sont déjà attribués. Câblez et scannez un autre numéro sur le même bus RS-485, ou choisissez une autre passerelle.",
-    "awaitingSerialOnGateway": "Cette passerelle n’a pas encore remonté de numéro de compteur. Vérifiez le câblage RS-485 (A, B et GND), puis appuyez 3 secondes sur PRG pour relancer la détection.",
+    "awaitingSerialOnGateway": "Cette passerelle n’a pas encore remonté de compteur. Saisissez le numéro de la fiche d’installation dans le champ ci-dessus.",
+    "serialFromSheet": "Saisissez le numéro de la fiche d’installation. Il est lié à la passerelle choisie, même si ce compteur n’a pas encore remonté de données.",
+    "serialReported": "Ce numéro est remonté par {{thing}}.",
     "billingTitle": "Utiliser ce 1Meter pour la facturation et la commande du relais.",
     "billingBody": "Il devient le compteur principal du compte et active la coupure à solde nul dès que l’indicateur de sécurité serveur est approuvé."
   },
