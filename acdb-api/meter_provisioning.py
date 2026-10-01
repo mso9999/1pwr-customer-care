@@ -2288,7 +2288,7 @@ def ota_promotion_status(
         except Exception as exc:  # noqa: BLE001
             logger.warning("Unable to list OTA job executions for %s: %s", job_id, exc)
 
-    target_version = (info.get("files") or [{}])[0].get("fileVersion")
+    target_version = _ota_file_version(info)
     if executions:
         try:
             from customer_api import get_connection
@@ -2878,11 +2878,30 @@ def _iso_stamp(value):
 
 
 def _version_from_ota_id(ota_id: str) -> Optional[str]:
-    """``1m1176-MAK-GW-…`` → ``1.1.76``. Used when the OTA record cannot be read."""
-    match = re.match(r"1m(\d)(\d)(\d+)", ota_id or "")
-    if not match:
+    """Recover a version from the update id when the OTA record cannot be read.
+
+    Rollout jobs are ``1m1176-MAK-GW-…``. Operator jobs are
+    ``1m-target-1-1-77-MAK-GW-…``.
+    """
+    text = ota_id or ""
+    match = re.match(r"1m(\d)(\d)(\d+)", text)
+    if match:
+        return f"{match.group(1)}.{match.group(2)}.{match.group(3)}"
+    target = re.match(r"1m-target-(\d+)-(\d+)-(\d+)-", text)
+    if target:
+        return f"{target.group(1)}.{target.group(2)}.{target.group(3)}"
+    return None
+
+
+def _ota_file_version(info: dict) -> Optional[str]:
+    """Version from GetOTAUpdate. The response field is ``otaUpdateFiles``."""
+    files = info.get("otaUpdateFiles") or info.get("files") or []
+    if not files:
         return None
-    return f"{match.group(1)}.{match.group(2)}.{match.group(3)}"
+    first = files[0] or {}
+    version = first.get("fileVersion") or (first.get("attributes") or {}).get("target_version")
+    text = str(version or "").strip()
+    return text or None
 
 
 def fleet_map_ota_for_thing(iot, thing_name: str) -> dict:
@@ -2929,7 +2948,7 @@ def fleet_map_ota_for_thing(iot, thing_name: str) -> dict:
     if ota_id:
         try:
             info = iot.get_ota_update(otaUpdateId=ota_id).get("otaUpdateInfo") or {}
-            target_version = ((info.get("files") or [{}])[0] or {}).get("fileVersion")
+            target_version = _ota_file_version(info)
         except Exception:  # noqa: BLE001
             target_version = None
         if not target_version:

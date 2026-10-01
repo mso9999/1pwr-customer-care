@@ -164,18 +164,21 @@ function MeterOta({ thingName }: { thingName: string }) {
   if (error) return <div className="text-xs text-gray-400 mt-1">OTA status unavailable</div>;
   if (!ota?.in_flight) return null;
   const pct = Math.max(0, Math.min(100, ota.percent ?? 0));
-  const version = ota.target_version ? ` ${ota.target_version}` : '';
+  const version = ota.target_version || '';
   const phase = ota.phase || (ota.status === 'QUEUED' ? 'starting' : 'downloading');
   const blocks = ota.blocks_total
     ? `${ota.blocks_received ?? 0}/${ota.blocks_total} blocks`
     : '';
+  const named = version ? ` ${version}` : '';
   const line = phase === 'waiting_online'
-    ? `Queued for${version}. Starts when the gateway is online.`
+    ? `Queued for${named}. Starts when the gateway is online.`
     : phase === 'held'
-      ? `Queued for${version}. Held until this site is resumed.`
+      ? `Queued for${named}. Held until this site is resumed.`
       : phase === 'starting'
-        ? `Queued for${version}. Starting it on the gateway now.`
-        : `OTA →${version} · downloading`;
+        ? `Queued for${named}. Starting it on the gateway now.`
+        : version
+          ? `Downloading ${version}`
+          : 'Downloading firmware';
   return (
     <div className="mt-1.5">
       <div className="text-xs text-gray-700">{line}</div>

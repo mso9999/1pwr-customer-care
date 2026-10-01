@@ -32,7 +32,7 @@ class _Iot:
         return {"execution": {"statusDetails": {"detailsMap": self.details}}}
 
     def get_ota_update(self, otaUpdateId):
-        return {"otaUpdateInfo": {"files": [{"fileVersion": self.version}]}}
+        return {"otaUpdateInfo": {"otaUpdateFiles": [{"fileVersion": self.version}]}}
 
 
 def test_downloading_things_are_in_progress_executions_only():
@@ -90,3 +90,19 @@ def test_queued_is_zero_and_version_falls_back_to_the_job_id():
     assert out["status"] == "QUEUED"
     assert out["percent"] == 0
     assert out["target_version"] == "1.1.76"
+
+
+def test_operator_job_id_names_the_version_when_the_record_is_missing():
+    class NoRecord(_Iot):
+        def get_ota_update(self, otaUpdateId):
+            raise RuntimeError("missing")
+
+    iot = NoRecord([
+        _summary(
+            "AFR_OTA-1m-target-1-1-77-MAK-GW-0183-20261001114231",
+            "IN_PROGRESS",
+            datetime(2026, 10, 1, tzinfo=timezone.utc),
+        ),
+    ])
+    out = mp.fleet_map_ota_for_thing(iot, "MAK-GW-0183")
+    assert out["target_version"] == "1.1.77"

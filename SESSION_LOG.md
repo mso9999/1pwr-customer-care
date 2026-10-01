@@ -1,3 +1,11 @@
+## Session 2026-10-01 202610011430 (Map download names the firmware version)
+
+### What Was Done
+- The meter popup said "OTA → · downloading" for an operator job. GetOTAUpdate returns the version on `otaUpdateFiles`, and the popup was reading `files`. Operator job ids (`1m-target-1-1-77-…`) also did not match the `1m1177` fallback. MAK-GW-0183 is downloading 1.1.77. The line now says "Downloading 1.1.77".
+
+### What Next Session Should Know
+- Installed firmware stays on the "FW" line. The download line is the version in progress.
+
 ## Session 2026-09-30 202609301727 (Validation payment blocked after relay open)
 
 ### What Was Done
