@@ -9238,3 +9238,20 @@ KET `meters` table: 172 of 173 rows have `ACCT-`placeholder meter_ids (no physic
 - Follow-up (same session): uGP branch policy — `dev` is never behind `main`. `origin/dev` was 87 behind; verified every dev-only change is on main, tagged the old tip `archive/dev-before-sync-20260925` (b176c054), moved `origin/dev` to main with `--force-with-lease`. Wrote the rule into uGP `AGENTS.md` → Branches (commit to dev, release by `git push origin dev:main`, never behind at session end) and `CONTEXT.md`.
 - uGP 1.63.0.0 (`15bd35d4`): Load Project → ★ "Make canonical design for a site" on sandbox/unclassified designs — pick a Nexus site or a new code; binds directly, or hands the site over (design → variant, then recorded make-canonical, approver-level). `site-association` 409 is now structured (`conflict: canonical`); `/api/canonical-sites` filters by operating org (the BN picker was empty because PR BN sites lack countryCode). 1.63.0.1 (`c171a7d8`) = branch-rule docs. Both released dev → main by fast-forward; prod deploys green; dev == main.
 - Open: the primary uGP checkout (`uGridPlan map_v3`, branch `dev`) is in use by another session with 98 modified files and 11 local commits on the OLD dev tip. Only the 5 `feat(smp)` commits (256afd2a..87bfa545) are new; the rest are already on main (9f1971cb = main f2d07201). Its next push will be rejected. Fix when that session is idle: stash, `git rebase --onto origin/dev 9f1971cb dev`, pop, bump version, push dev, then fast-forward main.
+
+## Session 2026-10-01 [202610011136] — Assign Meter hid most site gateways
+
+### What Was Done
+- RCA: after site selection, Assign Meter built one dropdown of *unassigned meters currently reporting through a gateway*. A gateway disappeared once its live serials had accounts, even though one PCB can serve several customers. Gateways with a blank `meter_provisioning.site` also missed the client filter.
+- Fix: the post-site dropdown now lists every provisioned gateway for that site (`mp.site` or `<SITE>-GW-*` thing name). A second dropdown lists unassigned meters on the chosen gateway.
+- i18n EN/FR, Help, What's New `assign-meter-all-site-gateways`.
+
+### Key Decisions
+- Keep already-assigned serials out of the meter list (backend 409s them). The *gateway* still appears.
+- Did not change Field install or Commission gateway pickers.
+
+### What Next Session Should Know
+- Shipped as its own branch off `main` (not mixed into `fix/validation-payment-after-disconnect`). Pushing `main` deploys to cc.1pwrafrica.com.
+
+### Protocol Feedback
+- CONTEXT.md + SESSION_LOG pointed at Assign Meter and the multi-meter-per-gateway rule immediately.

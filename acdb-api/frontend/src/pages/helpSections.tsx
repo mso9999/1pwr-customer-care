@@ -1844,9 +1844,10 @@ function ProvisioningContent() {
       <SubHead>Customer association (commissioning)</SubHead>
       <P>
         Gateway Things are associated with customer accounts after provisioning. Use
-        <PageLink to="/assign-meter">Assign Meter</PageLink>: select the site, then choose a provisioned
-        gateway that completed OTA and reported its meter serial. This locks the assignment to device
-        telemetry. Enable 1Meter billing/relay control only when intended, then continue to the normal
+        <PageLink to="/assign-meter">Assign Meter</PageLink>: select the site, then every provisioned
+        gateway for that site. After the gateway, pick the unassigned meter serial reported on its
+        RS-485 bus. This locks the assignment to device telemetry. Enable 1Meter billing/relay control
+        only when intended, then continue to the normal
         <PageLink to="/commission">customer commissioning</PageLink> wizard. The Thing is linked in
         <Code>meter_provisioning</Code> without being renamed.
       </P>
