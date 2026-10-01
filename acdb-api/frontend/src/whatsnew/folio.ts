@@ -37,6 +37,22 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW_FOLIO: WhatsNewEntry[] = [
   {
+    id: 'assign-meter-all-site-gateways',
+    date: '2026-10-01T10:40:00Z',
+    title: 'All site gateways on Assign Meter',
+    blurb: 'After you pick a site, Assign Meter lists every provisioned gateway — not only those with an unassigned reporting meter.',
+    pages: [
+      {
+        heading: 'Assign Meter',
+        body:
+          'Choose the site, then pick any provisioned gateway for that site. A second list shows unassigned meters on that gateway.\n\n' +
+          '- Gateways stay listed after their first meter is assigned. One PCB can serve several customers.\n' +
+          '- A gateway whose name starts with the site code still appears even if its site field is blank.\n' +
+          '- Already-assigned serials stay out of the meter list so you cannot bind them twice.',
+      },
+    ],
+  },
+  {
     id: 'sparkmeter-credit-and-country-tariff',
     date: '2026-09-28T23:00:00Z',
     title: 'SparkMeter credit and country tariff',

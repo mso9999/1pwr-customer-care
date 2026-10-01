@@ -26,6 +26,40 @@ interface SiteOption {
   label: string;
 }
 
+interface GatewayMeterOption {
+  serial: string;
+  account: string;
+  fw: string;
+}
+
+function gatewayMatchesSite(row: ProvisionedMeter, site: string): boolean {
+  const siteCode = site.trim().toUpperCase();
+  if (!siteCode) return false;
+  const rowSite = String(row.site || '').toUpperCase();
+  const thing = String(row.thing_name || '').toUpperCase();
+  return rowSite === siteCode || thing.startsWith(`${siteCode}-GW-`);
+}
+
+function metersOnGateway(gw: ProvisionedMeter, live?: FleetLiveUnit): GatewayMeterOption[] {
+  const seen = new Map<string, GatewayMeterOption>();
+  const add = (serial: string, account: string, fw: string) => {
+    const trimmed = String(serial || '').trim();
+    if (!trimmed) return;
+    const key = trimmed.replace(/^0+/, '') || trimmed;
+    if (seen.has(key)) return;
+    seen.set(key, { serial: trimmed, account: String(account || ''), fw: String(fw || '') });
+  };
+  for (const meter of live?.meters || []) {
+    add(String(meter.meter_id || ''), String(meter.account_number || ''), String(meter.fw || live?.fw || ''));
+  }
+  // Provisioned primary serial is a fallback only. Extra meters come from
+  // live telemetry (added first); this does not hide them.
+  if (gw.meter_serial) {
+    add(String(gw.meter_serial), String(gw.account_number || ''), String(gw.fw_version || gw.ota_target_version || ''));
+  }
+  return [...seen.values()];
+}
+
 // ---------------------------------------------------------------------------
 // GPS capture (reused from NewCustomerWizard)
 // ---------------------------------------------------------------------------
@@ -259,48 +293,29 @@ export default function AssignMeterPage() {
 
   const assignedRole = activate1MeterBilling || !existingPrimaryMeter ? 'primary' : 'secondary';
 
-  // One option per meter reporting through a gateway on this site.
-  // Accounts bind to meter serials, not to the Thing — a PCB can serve several customers.
-  const siteGateways = provisionedGateways.filter(
-    (row) => community && String(row.site || '').toUpperCase() === community.toUpperCase(),
+  // Every provisioned gateway for the site. Accounts bind to meter serials,
+  // not to the Thing — a PCB can serve several customers, so a gateway stays
+  // listed after its first meter is assigned.
+  const siteGateways = provisionedGateways
+    .filter((row) => gatewayMatchesSite(row, community))
+    .slice()
+    .sort((a, b) => String(a.thing_name || '').localeCompare(String(b.thing_name || '')));
+  const fleetByThing = new Map(
+    fleetUnits.map((unit) => [String(unit.thing_name || '').toUpperCase(), unit]),
   );
-  const fleetByThing = new Map(fleetUnits.map((unit) => [unit.thing_name, unit]));
-  const eligibleMeters = siteGateways.flatMap((gw) => {
-    const live = fleetByThing.get(String(gw.thing_name));
-    const reported = (live?.meters || [])
-      .map((meter) => ({
-        serial: String(meter.meter_id || ''),
-        account: String(meter.account_number || ''),
-        fw: meter.fw || live?.fw,
-      }))
-      .filter((meter) => meter.serial);
-    const serials = reported.length
-      ? reported
-      : gw.meter_serial
-        ? [{ serial: String(gw.meter_serial), account: '', fw: gw.fw_version || gw.ota_target_version }]
-        : [];
-    return serials
-      .filter((meter) => !meter.account)
-      .map((meter) => ({
-        thing_name: String(gw.thing_name),
-        meter_serial: meter.serial,
-        fw: meter.fw || gw.fw_version || gw.ota_target_version || 'reported',
-      }));
-  });
-  const assignedOnSite = siteGateways.reduce((count, gw) => {
-    const live = fleetByThing.get(String(gw.thing_name));
-    const bound = (live?.meters || []).filter((meter) => meter.account_number).length;
-    return count + bound;
-  }, 0);
-  const awaitingSerial = siteGateways.filter((row) => {
-    const live = fleetByThing.get(String(row.thing_name));
-    return !row.meter_serial && !(live?.meters || []).length;
-  }).length;
-  const offlineOnSite = siteGateways.filter((row) => !fleetByThing.get(String(row.thing_name))?.connected).length;
+  const liveFor = (thing: string | undefined) => fleetByThing.get(String(thing || '').toUpperCase());
+  const selectedGateway = siteGateways.find((row) => String(row.thing_name) === thingName);
+  const metersOnSelected = selectedGateway
+    ? metersOnGateway(selectedGateway, liveFor(selectedGateway.thing_name))
+    : [];
+  const unassignedOnSelected = metersOnSelected.filter((meter) => !meter.account);
+  const assignedOnSelected = metersOnSelected.filter((meter) => meter.account).length;
+  const awaitingSerial = siteGateways.filter((row) => metersOnGateway(row, liveFor(row.thing_name)).length === 0).length;
+  const offlineOnSite = siteGateways.filter((row) => !liveFor(row.thing_name)?.connected).length;
 
   // Submit
   const meterIsOnline = (thing: string, serial: string) => {
-    const unit = fleetByThing.get(thing);
+    const unit = liveFor(thing);
     const norm = (v: string) => String(v || '').replace(/^0+/, '');
     const meter = (unit?.meters || []).find((m) => norm(String(m.meter_id)) === norm(serial));
     if (!unit || !meter) return false;
@@ -493,7 +508,14 @@ export default function AssignMeterPage() {
           </label>
           <select
             value={community}
-            onChange={e => setCommunity(e.target.value)}
+            onChange={e => {
+              setCommunity(e.target.value);
+              if (platform === 'prototype') {
+                setThingName('');
+                setMeterid('');
+                setActivate1MeterBilling(false);
+              }
+            }}
             className="w-full px-4 py-3.5 border border-gray-300 rounded-xl text-base bg-white focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none appearance-none"
           >
             <option value="">{t('assignMeter:fields.selectSite')}</option>
@@ -508,13 +530,21 @@ export default function AssignMeterPage() {
               {t('assignMeter:gateway.label')} <span className="font-normal text-blue-600">{t('assignMeter:gateway.recommended')}</span>
             </label>
             <select
-              value={thingName && meterid ? `${thingName}\t${meterid}` : ''}
+              value={thingName}
               disabled={!community || gatewaysLoading}
               onChange={(e) => {
-                const [selectedThing, selectedSerial] = e.target.value.split('\t');
-                setThingName(selectedThing || '');
-                if (selectedSerial) setMeterid(selectedSerial);
-                if (!selectedThing) setActivate1MeterBilling(false);
+                const selectedThing = e.target.value;
+                setThingName(selectedThing);
+                if (!selectedThing) {
+                  setMeterid('');
+                  setActivate1MeterBilling(false);
+                  return;
+                }
+                const gw = siteGateways.find((row) => String(row.thing_name) === selectedThing);
+                const unassigned = gw
+                  ? metersOnGateway(gw, liveFor(gw.thing_name)).filter((meter) => !meter.account)
+                  : [];
+                setMeterid(unassigned.length === 1 ? unassigned[0].serial : '');
               }}
               className="w-full px-4 py-3 border border-blue-200 rounded-xl text-base bg-white focus:ring-2 focus:ring-blue-400 outline-none"
             >
@@ -523,33 +553,71 @@ export default function AssignMeterPage() {
                   ? t('assignMeter:gateway.selectSiteFirst')
                   : gatewaysLoading
                     ? t('assignMeter:gateway.loading')
-                    : eligibleMeters.length
-                      ? t('assignMeter:gateway.selectMeter')
+                    : siteGateways.length
+                      ? t('assignMeter:gateway.selectGateway')
                       : t('assignMeter:gateway.noneOption')}
               </option>
-              {eligibleMeters.map((row) => (
-                <option key={`${row.thing_name}-${row.meter_serial}`} value={`${row.thing_name}\t${row.meter_serial}`}>
-                  {t('assignMeter:gateway.optionLabel', { thing: row.thing_name, serial: row.meter_serial, fw: row.fw })}
-                </option>
-              ))}
+              {siteGateways.map((row) => {
+                const meters = metersOnGateway(row, liveFor(row.thing_name));
+                const unassigned = meters.filter((meter) => !meter.account).length;
+                const status = unassigned > 0
+                  ? t('assignMeter:gateway.statusUnassigned', { count: unassigned })
+                  : meters.length > 0
+                    ? t('assignMeter:gateway.statusAssigned')
+                    : t('assignMeter:gateway.statusAwaiting');
+                return (
+                  <option key={String(row.thing_name)} value={String(row.thing_name)}>
+                    {t('assignMeter:gateway.optionLabel', { thing: row.thing_name, status })}
+                  </option>
+                );
+              })}
             </select>
             <p className="text-xs text-blue-700 mt-2">
               {t('assignMeter:gateway.explainer')}
             </p>
-            {community && !gatewaysLoading && eligibleMeters.length === 0 && (
+            {community && !gatewaysLoading && siteGateways.length === 0 && (
               <p className="text-xs text-amber-800 mt-2">
-                {siteGateways.length === 0
-                  ? t('assignMeter:gateway.noGateways', { site: community })
-                  : offlineOnSite > 0 && awaitingSerial > 0
-                    ? t('assignMeter:gateway.offline', { count: offlineOnSite, site: community })
-                    : awaitingSerial > 0
-                      ? t('assignMeter:gateway.awaitingSerial', { count: awaitingSerial, site: community })
-                      : assignedOnSite > 0
-                        ? t('assignMeter:gateway.allAssigned', { count: assignedOnSite, site: community })
-                        : t('assignMeter:gateway.noneOnSite', { site: community })}
+                {t('assignMeter:gateway.noGateways', { site: community })}
+              </p>
+            )}
+            {community && !gatewaysLoading && siteGateways.length > 0 && (offlineOnSite > 0 || awaitingSerial > 0) && (
+              <p className="text-xs text-amber-800 mt-2">
+                {offlineOnSite > 0
+                  ? t('assignMeter:gateway.offline', { count: offlineOnSite, site: community })
+                  : t('assignMeter:gateway.awaitingSerial', { count: awaitingSerial, site: community })}
               </p>
             )}
           </div>
+          {thingName && (
+            <div>
+              <label className="block text-sm font-medium text-blue-900 mb-2">
+                {t('assignMeter:gateway.meterLabel')}
+              </label>
+              <select
+                value={meterid}
+                onChange={(e) => setMeterid(e.target.value)}
+                className="w-full px-4 py-3 border border-blue-200 rounded-xl text-base bg-white focus:ring-2 focus:ring-blue-400 outline-none"
+              >
+                <option value="">
+                  {unassignedOnSelected.length
+                    ? t('assignMeter:gateway.selectMeter')
+                    : t('assignMeter:gateway.noUnassignedOnGateway')}
+                </option>
+                {unassignedOnSelected.map((meter) => (
+                  <option key={meter.serial} value={meter.serial}>
+                    {t('assignMeter:gateway.meterOption', { serial: meter.serial, fw: meter.fw || 'reported' })}
+                  </option>
+                ))}
+              </select>
+              {unassignedOnSelected.length === 0 && (
+                <p className="text-xs text-amber-800 mt-2">
+                  {assignedOnSelected > 0
+                    ? t('assignMeter:gateway.allAssignedOnGateway', { count: assignedOnSelected })
+                    : t('assignMeter:gateway.awaitingSerialOnGateway')}
+                </p>
+              )}
+            </div>
+          )}
           {thingName && (
             <label className="flex gap-3 items-start p-3 rounded-lg border border-blue-200 bg-white cursor-pointer">
               <input
