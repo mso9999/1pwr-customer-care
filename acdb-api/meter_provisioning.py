@@ -4220,17 +4220,16 @@ def _classify_firmware_spans(
     return out
 
 
-def _ota_file_version(iot, ota_update_id: str) -> Optional[str]:
+def _cached_ota_file_version(iot, ota_update_id: str) -> Optional[str]:
+    """Version of a completed job, cached. Does not replace ``_ota_file_version``."""
     if ota_update_id in _ota_file_version_cache:
         return _ota_file_version_cache[ota_update_id]
-    version = None
     try:
         info = iot.get_ota_update(otaUpdateId=ota_update_id).get("otaUpdateInfo", {})
-        files = info.get("otaUpdateFiles") or []
-        version = (files[0].get("fileVersion") if files else None) or None
     except Exception as exc:  # noqa: BLE001
         logger.info("get_ota_update %s failed: %s", ota_update_id, exc)
         return None
+    version = _ota_file_version(info)
     _ota_file_version_cache[ota_update_id] = version
     return version
 
@@ -4256,7 +4255,7 @@ def _succeeded_ota_jobs(iot, thing_name: str) -> Optional[list[dict]]:
                     "thing_name": thing_name,
                     "ota_update_id": ota_id,
                     "completed_epoch": done.timestamp() if isinstance(done, datetime) else None,
-                    "file_version": _ota_file_version(iot, ota_id),
+                    "file_version": _cached_ota_file_version(iot, ota_id),
                 })
             token = resp.get("nextToken")
             if not token:

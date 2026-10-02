@@ -106,3 +106,21 @@ def test_operator_job_id_names_the_version_when_the_record_is_missing():
     ])
     out = mp.fleet_map_ota_for_thing(iot, "MAK-GW-0183")
     assert out["target_version"] == "1.1.77"
+
+
+def test_factory_canary_version_comes_from_the_ota_record():
+    """A factory job id does not encode the version the way 1m1176 does."""
+    iot = _Iot(
+        [_summary(
+            "AFR_OTA-1m-factory-1-1-77-20261001140550-15c6391f",
+            "IN_PROGRESS",
+            datetime(2026, 10, 1, tzinfo=timezone.utc),
+        )],
+        version="1.1.77",
+    )
+    out = mp.fleet_map_ota_for_thing(iot, "AGL-GW-0014")
+    assert out["target_version"] == "1.1.77"
+
+
+def test_ota_record_reader_is_not_shadowed_by_the_history_lookup():
+    assert mp._ota_file_version({"otaUpdateFiles": [{"fileVersion": "1.1.77"}]}) == "1.1.77"

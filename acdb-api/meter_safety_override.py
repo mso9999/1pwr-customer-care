@@ -66,11 +66,24 @@ def _get_connection():
     return get_connection()
 
 
-def _thing_name_for_meter(meter_id: str) -> str:
-    """Convert a meter_id to an IoT Thing name following the 1Meter convention."""
-    if meter_id.isdigit():
-        return f"OneMeter{int(meter_id):d}"
-    return meter_id
+def _gateway_thing_for_meter(meter_id: str) -> str:
+    """Gateway that is actually publishing this serial.
+
+    A numeric meter id is not an IoT Thing. Publishing to ``OneMeter<serial>``
+    is accepted by AWS and never reaches a gateway.
+    """
+    from meter_lifecycle import last_seen_thing_for_meter
+
+    thing = (last_seen_thing_for_meter(meter_id) or "").strip()
+    if not thing:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Meter {meter_id} is not reporting through a gateway, "
+                "so the relay open has nowhere to go."
+            ),
+        )
+    return thing
 
 
 def _iot_publish(thing_name: str, payload: dict) -> bool:
@@ -141,8 +154,13 @@ def set_meter_override(
         current_override = str(row[3] or "").strip() if row[3] else None
         community = str(row[4] or "").strip()
 
+        is_prototype = (platform == "prototype")
+        # A 1Meter open is sent again when the flag is already off. The first
+        # publish can miss the gateway, and a silent no-op leaves the relay shut.
+        resend_open = is_prototype and payload.state == "off" and current_override == desired_override
+
         # No-op if already in desired state
-        if current_override == desired_override:
+        if current_override == desired_override and not resend_open:
             state_label = "off" if desired_override else "auto"
             return {
                 "status": "noop",
@@ -160,17 +178,14 @@ def set_meter_override(
             "community": community,
         }
 
-        # Determine if this is a prototype/1Meter (platform is 'prototype')
-        is_prototype = (platform == "prototype")
-
         relay_result = None
 
         # Execute relay action:
         # - prototype: only when toggling to 'off' (open relay command queue)
         # - SparkMeter: both directions ('off' disconnect, 'auto' reconnect)
         if is_prototype and payload.state == "off":
-            # 1Meter: queue relay-open via existing IoT MQTT
-            thing_name = _thing_name_for_meter(mid)
+            # 1Meter: queue relay-open on the gateway that is publishing this serial.
+            thing_name = _gateway_thing_for_meter(mid)
             cmd_id = str(uuid.uuid4())
             now = _now_utc()
 
@@ -216,6 +231,7 @@ def set_meter_override(
                 "success": True,
                 "cmd_id": cmd_id,
                 "relay_row_id": relay_row_id,
+                "thing_name": thing_name,
             }
 
         elif not is_prototype:
@@ -300,7 +316,7 @@ def set_meter_override(
                 "requested_at_unix": int(_now_utc().timestamp()),
                 "ttl_seconds": DEFAULT_TTL_SECONDS,
             }
-            published = _iot_publish(relay_result.get("thing_name", _thing_name_for_meter(mid)), mqtt_payload)
+            published = _iot_publish(relay_result["thing_name"], mqtt_payload)
             if published:
                 with _get_connection() as conn2:
                     cur2 = conn2.cursor()
@@ -311,6 +327,14 @@ def set_meter_override(
                     )
                     conn2.commit()
             relay_result["published"] = published
+            if not published:
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        f"Safety override is set, but the relay open was not published "
+                        f"to {relay_result['thing_name']}. Try again to resend."
+                    ),
+                )
 
         return {
             "status": "ok",

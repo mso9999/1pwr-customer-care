@@ -1,3 +1,13 @@
+## Session 2026-10-02 202610021310 (Safety override topic and AGL canary status)
+
+### What Was Done
+- Nils opened the safety override on meter 000023021799 (account 0003AGL, not a commissioned customer). The command was published to thing `OneMeter23021799`. That name is not a gateway. The meter is reporting through AGL-GW-0002. The override now sends the relay open to the gateway in `meter_last_seen`. If the meter is not reporting, the request is refused instead of publishing into nowhere. Trying again while the override is already on resends the open.
+- OTA canary status for AGL-GW-0014 (`1m-factory-1-1-77-20261001140550-15c6391f`) returned HTTP 500. Promote itself returned 200, and the AWS job SUCCEEDED. A second `_ota_file_version` later in the same file replaced the reader the status page uses, so `GET /api/provisioning/ota/{id}` crashed. The history lookup is now a separate function.
+
+### What Next Session Should Know
+- Do not start another AGL OTA for that canary. AGL-GW-0014's 1.1.77 job already succeeded. The status page was the failure.
+- Meter 000023021799's override flag is clear again. The next safety override will publish to AGL-GW-0002.
+
 ## Session 2026-10-02 202610021210 (Assign Meter guides a gateway mismatch)
 
 ### What Was Done
