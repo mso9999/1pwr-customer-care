@@ -71,6 +71,13 @@
     "awaitingSerialOnGateway": "Cette passerelle n’a pas encore remonté de compteur. Saisissez le numéro de la fiche d’installation dans le champ ci-dessus.",
     "serialFromSheet": "Saisissez le numéro de la fiche d’installation. Il est lié à la passerelle choisie, même si ce compteur n’a pas encore remonté de données.",
     "serialReported": "Ce numéro est remonté par {{thing}}.",
+    "mismatchTitle": "Ce compteur est sur une autre passerelle",
+    "mismatchBody": "Le numéro {{meter}} est remonté par {{reporting}}. Vous avez choisi {{selected}}.",
+    "mismatchUse": "Utiliser {{thing}}",
+    "mismatchWiring": "Utilisez la passerelle qui le remonte. Si la fiche est juste, déplacez le compteur sur {{selected}} et attribuez-le de nouveau après qu’il y a remonté.",
+    "mismatchKnown": "Le numéro {{meter}} est déjà remonté par {{reporting}}.",
+    "mismatchSelect": "Choisir {{thing}}",
+    "mismatchNotOnSite": "{{thing}} n’est pas dans la liste des passerelles de ce site.",
     "billingTitle": "Utiliser ce 1Meter pour la facturation et la commande du relais.",
     "billingBody": "Il devient le compteur principal du compte et active la coupure à solde nul dès que l’indicateur de sécurité serveur est approuvé."
   },

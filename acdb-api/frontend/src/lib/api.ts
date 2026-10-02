@@ -55,6 +55,9 @@ function formatApiErrorDetail(detail: unknown): string {
         .join(' ');
       return [denial.message, owners, denial.resolution].filter(Boolean).join(' ');
     }
+    if (denial.code === 'meter_gateway_mismatch' && denial.message) {
+      return denial.message;
+    }
     try {
       return JSON.stringify(detail);
     } catch {
@@ -552,6 +555,10 @@ export async function assignMeter(data: AssignMeterRequest): Promise<AssignMeter
     method: 'POST',
     body: JSON.stringify(data),
   });
+}
+
+export async function getMeterReportingThing(meterId: string): Promise<{ meter_id: string; thing_name: string | null }> {
+  return request(`/meters/reporting-thing?meter_id=${encodeURIComponent(meterId)}`);
 }
 
 export interface AccountMeterRole {

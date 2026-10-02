@@ -6,6 +6,7 @@ import {
   assignPtb,
   getCommissionData,
   getFleetLive,
+  getMeterReportingThing,
   getMetersForAccount,
   getProvisionedMeters,
   getRecord,
@@ -133,6 +134,7 @@ export default function AssignMeterPage() {
   const [customerId, setCustomerId] = useState(prefilledCustomerId);
   const [meterid, setMeterid] = useState('');
   const [thingName, setThingName] = useState('');
+  const [reportingThing, setReportingThing] = useState<string | null>(null);
   const [platform, setPlatform] = useState<'sparkmeter' | 'prototype'>(
     () => (searchParams.get('platform') === 'prototype' ? 'prototype' : 'sparkmeter'),
   );
@@ -291,6 +293,27 @@ export default function AssignMeterPage() {
     return () => { cancelled = true; clearTimeout(timer); };
   }, [accountNumber, meterid]);
 
+  // Which gateway last published this serial. Shown before submit so a sheet
+  // that names a different gateway can be reconciled instead of only failing.
+  useEffect(() => {
+    if (platform !== 'prototype') {
+      setReportingThing(null);
+      return;
+    }
+    const serial = meterid.trim();
+    if (serial.length < 6) {
+      setReportingThing(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      getMeterReportingThing(serial)
+        .then((row) => { if (!cancelled) setReportingThing(row.thing_name || null); })
+        .catch(() => { if (!cancelled) setReportingThing(null); });
+    }, 400);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [meterid, platform]);
+
   const assignedRole = activate1MeterBilling || !existingPrimaryMeter ? 'primary' : 'secondary';
 
   // Every provisioned gateway for the site. Accounts bind to meter serials,
@@ -312,6 +335,21 @@ export default function AssignMeterPage() {
   const assignedOnSelected = metersOnSelected.filter((meter) => meter.account).length;
   const awaitingSerial = siteGateways.filter((row) => metersOnGateway(row, liveFor(row.thing_name)).length === 0).length;
   const offlineOnSite = siteGateways.filter((row) => !liveFor(row.thing_name)?.connected).length;
+  const thingKey = (value: string) => value.trim().toUpperCase();
+  const mismatchThing = (
+    platform === 'prototype'
+    && reportingThing
+    && meterid.trim().length >= 6
+    && thingKey(reportingThing) !== thingKey(thingName)
+  ) ? reportingThing : null;
+  const reportingListed = mismatchThing
+    ? siteGateways.find((row) => thingKey(String(row.thing_name)) === thingKey(mismatchThing))
+    : undefined;
+  const useReportingGateway = () => {
+    if (!reportingListed) return;
+    setError('');
+    setThingName(String(reportingListed.thing_name));
+  };
 
   // Submit
   const meterIsOnline = (thing: string, serial: string) => {
@@ -382,7 +420,13 @@ export default function AssignMeterPage() {
       }
 
     } catch (e: any) {
-      setError(e.message || t('assignMeter:assignFailed'));
+      const detail = e?.body?.detail;
+      if (detail && typeof detail === 'object' && detail.code === 'meter_gateway_mismatch' && detail.reporting_thing) {
+        setReportingThing(String(detail.reporting_thing));
+        setError('');
+      } else {
+        setError(e.message || t('assignMeter:assignFailed'));
+      }
     } finally {
       setSaving(false);
     }
@@ -497,10 +541,10 @@ export default function AssignMeterPage() {
             placeholder="e.g. SMRSD-26-00000000"
             className="w-full px-4 py-3.5 border border-gray-300 rounded-xl text-base focus:ring-2 focus:ring-blue-400 focus:border-transparent outline-none"
           />
-          {thingName && meterid && metersOnSelected.some((meter) => meter.serial.replace(/^0+/, '') === meterid.trim().replace(/^0+/, '')) && (
+          {thingName && !mismatchThing && meterid && metersOnSelected.some((meter) => meter.serial.replace(/^0+/, '') === meterid.trim().replace(/^0+/, '')) && (
             <p className="text-xs text-green-700 mt-1">{t('assignMeter:gateway.serialReported', { thing: thingName })}</p>
           )}
-          {thingName && (!meterid || !metersOnSelected.some((meter) => meter.serial.replace(/^0+/, '') === meterid.trim().replace(/^0+/, ''))) && (
+          {thingName && !mismatchThing && (!meterid || !metersOnSelected.some((meter) => meter.serial.replace(/^0+/, '') === meterid.trim().replace(/^0+/, ''))) && (
             <p className="text-xs text-amber-800 mt-1">{t('assignMeter:gateway.serialFromSheet')}</p>
           )}
         </div>
@@ -590,6 +634,30 @@ export default function AssignMeterPage() {
                   ? t('assignMeter:gateway.offline', { count: offlineOnSite, site: community })
                   : t('assignMeter:gateway.awaitingSerial', { count: awaitingSerial, site: community })}
               </p>
+            )}
+            {mismatchThing && (
+              <div className="mt-3 p-3 bg-amber-50 border border-amber-300 rounded-xl text-sm text-amber-950 space-y-2">
+                <p className="font-semibold">{t('assignMeter:gateway.mismatchTitle')}</p>
+                <p>
+                  {thingName
+                    ? t('assignMeter:gateway.mismatchBody', { meter: meterid.trim(), reporting: mismatchThing, selected: thingName })
+                    : t('assignMeter:gateway.mismatchKnown', { meter: meterid.trim(), reporting: mismatchThing })}
+                </p>
+                {reportingListed ? (
+                  <button
+                    type="button"
+                    onClick={useReportingGateway}
+                    className="px-3 py-2 bg-amber-800 text-white rounded-lg text-sm font-semibold hover:bg-amber-900"
+                  >
+                    {t(thingName ? 'assignMeter:gateway.mismatchUse' : 'assignMeter:gateway.mismatchSelect', { thing: reportingListed.thing_name })}
+                  </button>
+                ) : (
+                  <p className="text-xs">{t('assignMeter:gateway.mismatchNotOnSite', { thing: mismatchThing })}</p>
+                )}
+                {thingName && (
+                  <p className="text-xs text-amber-900">{t('assignMeter:gateway.mismatchWiring', { selected: thingName })}</p>
+                )}
+              </div>
             )}
           </div>
           {thingName && (

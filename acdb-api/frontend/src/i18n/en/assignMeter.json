@@ -71,6 +71,13 @@
     "awaitingSerialOnGateway": "This gateway has not reported a meter yet. Type the serial from the install sheet in the box above.",
     "serialFromSheet": "Type the serial from the install sheet. It is linked to the gateway you pick, even when that meter has not reported yet.",
     "serialReported": "This serial is reporting through {{thing}}.",
+    "mismatchTitle": "This meter is on a different gateway",
+    "mismatchBody": "Serial {{meter}} is reporting through {{reporting}}. You selected {{selected}}.",
+    "mismatchUse": "Use {{thing}}",
+    "mismatchWiring": "Use the gateway it is reporting through. If the sheet is right, move the meter onto {{selected}} and assign again after it reports there.",
+    "mismatchKnown": "Serial {{meter}} is already reporting through {{reporting}}.",
+    "mismatchSelect": "Select {{thing}}",
+    "mismatchNotOnSite": "{{thing}} is not in this site's gateway list.",
     "billingTitle": "Use this 1Meter for billing and relay control.",
     "billingBody": "This makes it the account’s primary meter and enables zero-balance control once the server safety flag is approved."
   },

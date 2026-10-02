@@ -267,7 +267,16 @@ def _lock_provisioned_gateway_for_assignment(
     if reporting_thing and reporting_thing != thing_name:
         raise HTTPException(
             status_code=409,
-            detail=f"Meter {requested} is reporting through {reporting_thing}, not {thing_name}.",
+            detail={
+                "code": "meter_gateway_mismatch",
+                "message": (
+                    f"Meter {requested} is reporting through {reporting_thing}, "
+                    f"not {thing_name}."
+                ),
+                "meter_id": requested,
+                "selected_thing": thing_name,
+                "reporting_thing": reporting_thing,
+            },
         )
 
     lookup_keys = _meter_id_lookup_keys(requested)
@@ -429,6 +438,16 @@ def _parse_account_sequence(account_number: str) -> int:
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+@router.get("/reporting-thing")
+def meter_reporting_thing(
+    meter_id: str = Query(..., min_length=1, max_length=64),
+    _user: CurrentUser = Depends(CC_METER_OPERATE_GATE),
+):
+    """Gateway that last published this serial, if any."""
+    serial = meter_id.strip()
+    return {"meter_id": serial, "thing_name": last_seen_thing_for_meter(serial)}
 
 
 @router.post("/assign")

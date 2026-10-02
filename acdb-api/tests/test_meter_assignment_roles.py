@@ -255,7 +255,10 @@ class TestLockGatewayForAssignment(unittest.TestCase):
                     account_number="0192MAK",
                 )
         self.assertEqual(ctx.exception.status_code, 409)
-        self.assertIn("MAK-GW-0183", ctx.exception.detail)
+        detail = ctx.exception.detail
+        self.assertEqual(detail["code"], "meter_gateway_mismatch")
+        self.assertEqual(detail["reporting_thing"], "MAK-GW-0183")
+        self.assertEqual(detail["selected_thing"], "MAK-GW-0162")
 
 
 if __name__ == "__main__":

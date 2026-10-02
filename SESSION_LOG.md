@@ -1,3 +1,12 @@
+## Session 2026-10-02 202610021210 (Assign Meter guides a gateway mismatch)
+
+### What Was Done
+- Motlatsi typed meter 23021845 against MAK-GW-0162 and got only the refusal that it is reporting through MAK-GW-0167. Assign Meter now looks up the gateway that last published the serial. When that gateway is not the one selected, the form names both and offers to switch the selection to the reporting gateway. If the sheet gateway is the one that should have the meter, the note says to move it onto that RS-485 bus and assign again after it reports there. Saving onto the wrong gateway is still refused.
+- English and French.
+
+### What Next Session Should Know
+- The switch only works when the reporting gateway is in this site's provisioned list. A gateway on another site is named but cannot be selected from here.
+
 ## Session 2026-10-01 202610011720 (Assign Meter serial stays typed)
 
 ### What Was Done
