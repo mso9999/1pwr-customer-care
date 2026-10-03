@@ -88,6 +88,72 @@ function heatColor(t: number): string {
   return `rgb(${ch(lower.r, upper.r)}, ${ch(lower.g, upper.g)}, ${ch(lower.b, upper.b)})`;
 }
 
+/** Metres between two map points. */
+function metresApart(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const rad = Math.PI / 180;
+  const p1 = aLat * rad;
+  const p2 = bLat * rad;
+  const dPhi = (bLat - aLat) * rad;
+  const dLng = (bLng - aLng) * rad;
+  const h = Math.sin(dPhi / 2) ** 2 + Math.cos(p1) * Math.cos(p2) * Math.sin(dLng / 2) ** 2;
+  return 2 * 6371000 * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+interface GatewayPin {
+  key: string;
+  thingName: string | null;
+  lat: number;
+  lng: number;
+  meters: FleetMapMeter[];
+  /** How far the furthest recorded coordinate is from the pin. */
+  spreadM: number;
+}
+
+/**
+ * A gateway is one device, so it is one pin. Meters that report through it
+ * keep their own coordinates in the popup. A meter with no gateway stays
+ * its own pin.
+ */
+function pinsForMeters(meters: FleetMapMeter[]): GatewayPin[] {
+  const groups = new Map<string, FleetMapMeter[]>();
+  for (const meter of meters) {
+    const thing = (meter.thing_name || '').trim();
+    const key = thing || `meter:${meter.meter_id}`;
+    const list = groups.get(key);
+    if (list) list.push(meter);
+    else groups.set(key, [meter]);
+  }
+  const pins: GatewayPin[] = [];
+  for (const [key, list] of groups) {
+    const lat = median(list.map((meter) => meter.lat));
+    const lng = median(list.map((meter) => meter.lng));
+    const spreadM = Math.max(...list.map((meter) => metresApart(lat, lng, meter.lat, meter.lng)));
+    pins.push({
+      key,
+      thingName: (list[0].thing_name || '').trim() || null,
+      lat,
+      lng,
+      meters: list,
+      spreadM,
+    });
+  }
+  return pins;
+}
+
+function newestMeter(meters: FleetMapMeter[]): FleetMapMeter {
+  return meters.reduce((best, meter) => {
+    const bestAt = parseTelemetryTs(best.last_seen)?.getTime() || 0;
+    const at = parseTelemetryTs(meter.last_seen)?.getTime() || 0;
+    return at > bestAt ? meter : best;
+  });
+}
+
 function formatInstalled(raw: string | null | undefined): string {
   if (!raw) return '—';
   const dateOnly = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw.trim());
@@ -122,7 +188,9 @@ function FocusController({
   const map = useMap();
   useEffect(() => {
     if (!target) return;
-    map.setView([target.lat, target.lng], 17);
+    const marker = markerRefs.current[target.meter_id];
+    const at = marker?.getLatLng();
+    map.setView(at ? [at.lat, at.lng] : [target.lat, target.lng], 17);
     const t = setTimeout(() => {
       markerRefs.current[target.meter_id]?.openPopup();
     }, 400);
@@ -323,9 +391,10 @@ export default function FleetMap({
     };
   }, [visibleMeters]);
 
+  const pins = useMemo(() => pinsForMeters(visibleMeters), [visibleMeters]);
   const points = useMemo(
-    () => visibleMeters.map((m) => [m.lat, m.lng] as [number, number]),
-    [visibleMeters]
+    () => pins.map((pin) => [pin.lat, pin.lng] as [number, number]),
+    [pins]
   );
   const center: [number, number] = points.length ? points[0] : [-29.179, 27.592];
   const freshnessCounts = useMemo(() => {
@@ -506,10 +575,11 @@ export default function FleetMap({
               attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
               url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
             />
-            {visibleMeters.map((m) => {
-              const isFocus = focus?.meter_id === m.meter_id;
+            {pins.map((pin) => {
+              const m = newestMeter(pin.meters);
+              const isFocus = pin.meters.some((meter) => meter.meter_id === focus?.meter_id);
               const freshness = reportFreshness(m.last_seen);
-              const downloadingNow = Boolean(m.thing_name && downloading.has(m.thing_name));
+              const downloadingNow = Boolean(pin.thingName && downloading.has(pin.thingName));
               const statusFill = downloadingNow ? STATUS_DOWNLOADING : statusColor(freshness);
               const heat = installScale.color(m.installed_at);
               const fill = colorMode === 'firmware'
@@ -524,15 +594,16 @@ export default function FleetMap({
                   : colorMode === 'firmware'
                     ? fill
                     : statusFill;
-              const picked = Boolean(selectedIds?.has(m.meter_id));
+              const picked = pin.meters.some((meter) => selectedIds?.has(meter.meter_id));
               const weight = picked ? 5 : colorMode === 'hybrid'
                 ? (isFocus ? 6 : 4)
                 : (isFocus ? 4 : (m.linked ? 3.5 : 1.5));
+              const pole = pin.meters.map((meter) => meter.pole_id).find(Boolean);
               return (
                 <CircleMarker
-                  key={`${m.meter_id}-${colorMode}-${fill}-${stroke}-${picked ? 1 : 0}`}
-                  ref={(r) => { markerRefs.current[m.meter_id] = r; }}
-                  center={[m.lat, m.lng]}
+                  key={`${pin.key}-${colorMode}-${fill}-${stroke}-${picked ? 1 : 0}`}
+                  ref={(r) => { for (const meter of pin.meters) markerRefs.current[meter.meter_id] = r; }}
+                  center={[pin.lat, pin.lng]}
                   radius={isFocus || picked ? 11 : 7}
                   pathOptions={{
                     color: picked || (isFocus && colorMode !== 'hybrid' && colorMode !== 'installed') ? '#2563eb' : stroke,
@@ -541,9 +612,9 @@ export default function FleetMap({
                     weight,
                   }}
                   eventHandlers={{
-                    click: () => { if (selectMode) onToggleMeter?.(m.meter_id); },
-                    popupopen: () => setOpenMeterId(m.meter_id),
-                    popupclose: () => setOpenMeterId((cur) => (cur === m.meter_id ? null : cur)),
+                    click: () => { if (selectMode && pin.meters.length === 1) onToggleMeter?.(pin.meters[0].meter_id); },
+                    popupopen: () => setOpenMeterId(pin.key),
+                    popupclose: () => setOpenMeterId((cur) => (cur === pin.key ? null : cur)),
                   }}
                 >
                   <Popup
@@ -554,26 +625,42 @@ export default function FleetMap({
                     autoPanPaddingBottomRight={L.point(24, 24)}
                   >
                     <div className="text-sm">
-                      <div className="font-semibold">{m.thing_name || m.meter_id}</div>
-                      <div className="text-xs text-gray-600">
-                        meter{' '}
-                        <Link to={`/meters/${encodeURIComponent(m.meter_id)}`} className="text-blue-600 hover:underline" title="Open meter detail">
-                          {m.meter_id}
-                        </Link>
-                        {m.account_number && (
-                          <>
-                            {' · '}
-                            <Link to={`/customers/${encodeURIComponent(m.account_number)}`} className="text-blue-600 hover:underline" title="Open this customer">
-                              {m.account_number}
-                            </Link>
-                          </>
-                        )}
-                      </div>
+                      <div className="font-semibold">{pin.thingName || m.meter_id}</div>
+                      {pin.meters.length > 1 && pin.spreadM > 50 && (
+                        <div className="text-xs text-amber-800 mt-1">
+                          One gateway. These meters are recorded {Math.round(pin.spreadM)} m apart, so it is shown once.
+                        </div>
+                      )}
+                      {pin.meters.map((meter) => (
+                        <div key={meter.meter_id} className="text-xs text-gray-600 mt-1">
+                          meter{' '}
+                          <Link to={`/meters/${encodeURIComponent(meter.meter_id)}`} className="text-blue-600 hover:underline" title="Open meter detail">
+                            {meter.meter_id}
+                          </Link>
+                          {meter.account_number && (
+                            <>
+                              {' · '}
+                              <Link to={`/customers/${encodeURIComponent(meter.account_number)}`} className="text-blue-600 hover:underline" title="Open this customer">
+                                {meter.account_number}
+                              </Link>
+                            </>
+                          )}
+                          {selectMode && (
+                            <button
+                              type="button"
+                              className="ml-2 text-blue-600 hover:underline"
+                              onClick={() => onToggleMeter?.(meter.meter_id)}
+                            >
+                              {selectedIds?.has(meter.meter_id) ? 'selected' : 'select'}
+                            </button>
+                          )}
+                        </div>
+                      ))}
                       {m.village && <div className="text-xs text-gray-500">{m.village}</div>}
                       {m.linked && (
                         <div className="text-xs text-blue-600 font-medium">
-                          1Meter linked{m.thing_name ? ` · ${m.thing_name}` : ''}
-                          {m.pole_id ? ` · pole ${m.pole_id}` : ''}
+                          1Meter linked{pin.thingName ? ` · ${pin.thingName}` : ''}
+                          {pole ? ` · pole ${pole}` : ''}
                           {m.gateway_pending ? ' · gateway pending' : ''}
                         </div>
                       )}
@@ -589,16 +676,17 @@ export default function FleetMap({
                         </div>
                       )}
                       <div className="text-xs text-gray-600">FW {m.fw_version || '—'}</div>
-                      {canTargetFirmware && (
+                      {canTargetFirmware && pin.meters.map((meter) => (
                         <button
+                          key={`fw-${meter.meter_id}`}
                           type="button"
-                          className="mt-1 text-xs text-blue-600 hover:underline"
-                          onClick={() => onTargetMeter?.(m.meter_id)}
+                          className="mt-1 block text-xs text-blue-600 hover:underline"
+                          onClick={() => onTargetMeter?.(meter.meter_id)}
                         >
-                          {t('updateFirmware')}
+                          {t('updateFirmware')}{pin.meters.length > 1 ? ` · ${meter.meter_id}` : ''}
                         </button>
-                      )}
-                      {openMeterId === m.meter_id && m.thing_name && <MeterOta thingName={m.thing_name} />}
+                      ))}
+                      {openMeterId === pin.key && pin.thingName && <MeterOta thingName={pin.thingName} />}
                       {m.last_seen && <div className="text-xs text-gray-400">last seen {formatLastSeen(m.last_seen)}</div>}
                       {m.linked && <FirmwareHistory meterId={m.meter_id} />}
                     </div>

@@ -1,3 +1,12 @@
+## Session 2026-10-03 202610031930 (KOT map shows each gateway once)
+
+### What Was Done
+- The September fix stopped a join from drawing the same meter twice. KOT-GW-0004 is one gateway and is still reading 23021727 (0005KOT), 23021758 (0004KOT), 23021769 (0001KOT), and unassigned 23021744. Those meters have coordinates hundreds of metres apart, and the pin title is the gateway, so the map showed KOT-GW-0004 in several places. 23021744 also sits on the same coordinates as KOT-GW-0005's meter.
+- A gateway is now one pin, at the middle of its meters' coordinates. The popup lists the meters and says when those coordinates are far apart.
+
+### What Next Session Should Know
+- The coordinates themselves were not changed. KOT-GW-0004's meters are still recorded in different places; only the map stops pretending the gateway is in all of them.
+
 ## Session 2026-10-02 202610021310 (Safety override topic and AGL canary status)
 
 ### What Was Done
